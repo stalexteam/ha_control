@@ -592,7 +592,8 @@ function U(n) {
   return Xt({ ...n, state: !0, attribute: !1 });
 }
 function V() {
-  return crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+  const n = new Uint8Array(6);
+  return crypto.getRandomValues(n), Array.from(n, (t) => t.toString(16).padStart(2, "0")).join("");
 }
 const Ot = {
   bearing: 400,
