@@ -12,13 +12,14 @@ export function paletteVars(p: PlanPalette): string {
 export const panelStyles = css`
   :host { display: block; height: 100%; outline: none; }
   .ed {
-    display: grid; grid-template-columns: 64px 1fr 240px; grid-template-rows: 44px 1fr 30px;
+    display: grid; grid-template-columns: 64px 1fr 240px; grid-template-rows: auto 1fr 30px;
     height: 100vh; overflow: hidden; position: relative;
     background: var(--ps-background); color: var(--ps-text); font: 13px system-ui, sans-serif;
   }
   .center { display: flex; align-items: center; justify-content: center; gap: 12px; height: 100vh;
     font: 14px system-ui, sans-serif; }
-  .top { grid-column: 1 / 4; display: flex; align-items: center; gap: 6px; padding: 0 10px; min-width: 0;
+  .top { grid-column: 1 / 4; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 10px;
+    min-width: 0; min-height: 44px; box-sizing: border-box;
     background: var(--ps-panel); border-bottom: 1px solid var(--ps-border); }
   .sp { flex: 1; }
   .muted { color: var(--ps-muted); font-size: 12px; }

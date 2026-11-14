@@ -115,6 +115,7 @@ export function createWallTool(ctx: ToolContext): Tool {
         snap: t.snap,
         tracker: { length: lengthBuf, angle: angleBuf, field, at: t.pt },
         orthoFrom: shift ? lastPt : undefined,
+        anchor: lastPt,
       };
     },
     cancel() { reset(); },

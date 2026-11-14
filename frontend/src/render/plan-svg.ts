@@ -205,7 +205,6 @@ function renderPreview(level: Level, o: RenderOpts): SVGTemplateResult {
   const ortho = pv.orthoFrom;
   const po = pv.opening;
   const pf = po ? frameOf(level, po.wallId) : null;
-  const snapPt = pv.snap && pv.snap.kind !== 'none' ? pv.snap.pt : null;
   return svg`
     ${ortho ? svg`<path d=${`M${ortho.x - big} ${ortho.y}H${ortho.x + big}M${ortho.x} ${ortho.y - big}V${ortho.y + big}`}
       stroke=${p.snap} stroke-width="0.75" stroke-dasharray="6 4" stroke-opacity="0.6" vector-effect=${NS}></path>` : nothing}
@@ -219,8 +218,67 @@ function renderPreview(level: Level, o: RenderOpts): SVGTemplateResult {
     ${po && pf ? svg`<path class=${`preview-opening${po.invalid ? ' invalid' : ''}`}
       d=${ringD(spanQuad(pf, po.offset, po.offset + po.width))}
       fill=${po.invalid ? p.invalid : po.kind === 'window' ? p.window : p.selection} fill-opacity="0.55"></path>` : nothing}
-    ${snapPt ? svg`<circle class="snap" cx=${snapPt.x} cy=${snapPt.y} r=${5 / o.scale}
-      fill=${pv.snap!.kind === 'node' ? p.snap : 'none'} stroke=${p.snap} stroke-width="1.5" vector-effect=${NS}></circle>` : nothing}`;
+    ${renderSnap(level, o)}`;
+}
+
+/** Hollow square at the fixed start of the segment / box being drawn. */
+function renderAnchor(at: Pt, o: RenderOpts): SVGTemplateResult {
+  const p = o.palette;
+  const h = 5 / o.scale;
+  return svg`<g class="snap-start">
+    <rect x=${at.x - h} y=${at.y - h} width=${2 * h} height=${2 * h} fill="none" stroke=${p.background}
+      stroke-width="4" vector-effect=${NS}></rect>
+    <rect x=${at.x - h} y=${at.y - h} width=${2 * h} height=${2 * h} fill="none" stroke=${p.snap}
+      stroke-width="1.5" vector-effect=${NS}></rect></g>`;
+}
+
+/**
+ * Snap feedback: a marker per snap kind in screen pixels (independent of zoom), drawn in the snap colour over
+ * a background-coloured halo, a short label, and for a wall hit the target wall outline.
+ */
+function renderSnap(level: Level, o: RenderOpts): SVGTemplateResult | typeof nothing {
+  const pv = o.preview;
+  const p = o.palette;
+  const anchor = pv.anchor ? renderAnchor(pv.anchor, o) : nothing;
+  const s = pv.snap;
+  if (!s || s.kind === 'none') return anchor;
+  const px = (v: number) => v / o.scale;
+  const { x, y } = s.pt;
+  const halo = { stroke: p.background, width: '3' };
+  let marker: SVGTemplateResult;
+  let hl: SVGTemplateResult | typeof nothing = nothing;
+  if (s.kind === 'node') {
+    const h = px(5);
+    marker = svg`<g class="snap-node"><rect x=${x - h} y=${y - h} width=${2 * h} height=${2 * h} fill=${p.snap}
+      stroke=${halo.stroke} stroke-width=${halo.width} paint-order="stroke" vector-effect=${NS}></rect></g>`;
+  } else if (s.kind === 'mid') {
+    const r = px(11) / Math.sqrt(3); // circumradius of an 11 px equilateral triangle
+    const d = `M${x} ${y - r}L${x + r * 0.866} ${y + r / 2}L${x - r * 0.866} ${y + r / 2}Z`;
+    marker = svg`<g class="snap-mid"><path d=${d} fill=${p.snap} stroke=${halo.stroke} stroke-width=${halo.width}
+      paint-order="stroke" stroke-linejoin="round" vector-effect=${NS}></path></g>`;
+  } else if (s.kind === 'wall') {
+    const h = px(5);
+    const d = `M${x - h} ${y - h}L${x + h} ${y + h}M${x - h} ${y + h}L${x + h} ${y - h}`;
+    marker = svg`<g class="snap-wall">
+      <path d=${d} fill="none" stroke=${halo.stroke} stroke-width="5" stroke-linecap="round" vector-effect=${NS}></path>
+      <path d=${d} fill="none" stroke=${p.snap} stroke-width="2" stroke-linecap="round" vector-effect=${NS}></path></g>`;
+    const ring = s.endpoint.kind === 'wall' ? cached(outlineCache, level, wallOutlines).get(s.endpoint.wallId) : undefined;
+    if (ring) {
+      hl = svg`<path class="snap-wall-hl" d=${ringD(ring)} fill="none" stroke=${p.snap} stroke-width="2.5"
+        stroke-opacity="0.9" vector-effect=${NS}></path>`;
+    }
+  } else {
+    const h = px(4);
+    const d = `M${x - h} ${y}H${x + h}M${x} ${y - h}V${y + h}`;
+    marker = svg`<g class="snap-grid">
+      <path d=${d} fill="none" stroke=${halo.stroke} stroke-width="4" stroke-linecap="round" vector-effect=${NS}></path>
+      <path d=${d} fill="none" stroke=${p.snap} stroke-width="1.5" stroke-linecap="round" vector-effect=${NS}></path></g>`;
+  }
+  const label = t(`snapmark.${s.kind}`, o.lang);
+  return svg`
+    ${hl}${anchor}${marker}
+    <text class="snap-label" x=${x + px(9)} y=${y - px(9)} font-size=${px(11)} fill=${p.snap} stroke=${p.background}
+      stroke-width="3" paint-order="stroke" vector-effect=${NS} font-family="system-ui, sans-serif">${label}</text>`;
 }
 
 /**

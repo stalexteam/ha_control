@@ -114,4 +114,19 @@ describe('wall tool', () => {
     t.key('Shift', { shift: true, ctrl: false });
     expect(t.preview().walls![0].b).toEqual({ x: 2000, y: 0 });
   });
+
+  it('preview carries snap on every move and the chain anchor once started', () => {
+    const ctx = fakeContext();
+    const t = createWallTool(ctx);
+    t.move(ev(110, 190));
+    expect(t.preview().snap?.kind).toBe('grid');
+    expect(t.preview().anchor).toBeUndefined();
+    t.down(ev(0, 0)); t.move(ev(1000, 0));
+    expect(t.preview().snap).toBeDefined();
+    expect(t.preview().anchor).toEqual({ x: 0, y: 0 });
+    t.down(ev(1000, 0)); t.move(ev(1000, 700));
+    expect(t.preview().anchor).toEqual({ x: 1000, y: 0 });
+    t.key('Escape', k);
+    expect(t.preview().anchor).toBeUndefined();
+  });
 });

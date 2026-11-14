@@ -1,4 +1,5 @@
 import { html, nothing, type TemplateResult } from 'lit';
+import { live } from 'lit/directives/live.js';
 import type { Baseline, Level, Opening, OpeningKind, Side, Wall, WallType } from '../model/types';
 import { WALL_PRESETS } from '../model/types';
 import { deleteWall, setWallProps } from '../model/ops';
@@ -18,6 +19,9 @@ export interface PropsOpts {
   selection: Selection | null;
   tool: ToolId;
   boxMeasure: BoxMeasure;
+  /** Settings for the next wall drawn (shared with the top bar). */
+  wallType: WallType;
+  thickness: number;
   lang: string;
   /** Validation message from the last rejected edit, shown under the fields. */
   notice: string | null;
@@ -25,6 +29,8 @@ export interface PropsOpts {
   /** Commits a level in which the selected element was deleted. */
   remove(next: Level): void;
   setBoxMeasure(m: BoxMeasure): void;
+  setWallType(type: WallType): void;
+  setThickness(mm: number): void;
   setNotice(msg: string | null): void;
 }
 
@@ -144,16 +150,32 @@ function zoneProps(z: Level['zones'][number], o: PropsOpts): TemplateResult {
       ${t('action.delete', lang)}</button>`;
 }
 
-function boxProps(o: PropsOpts): TemplateResult {
+/** Settings of the next wall drawn by the Wall / Box tool (the same panel state as the top bar). */
+function newWallProps(o: PropsOpts): TemplateResult {
   const lang = o.lang;
+  const types: WallType[] = ['bearing', 'partition', 'railing'];
   return html`
-    <h4>${t('props.box', lang)}</h4>
-    <div class="muted">${t('props.measure', lang)}</div>
-    <div class="seg">
-      ${(['inner', 'axis', 'outer'] as BoxMeasure[]).map(m => html`
-        <button class="tab ${o.boxMeasure === m ? 'on' : ''}" data-measure=${m} @click=${() => o.setBoxMeasure(m)}>
-          ${t(`measure.${m}`, lang)}</button>`)}
-    </div>`;
+    <h4>${t('props.newWall', lang)}</h4>
+    ${row(t('props.type', lang), html`<select class="val" data-field="new-wall-type"
+      @change=${(e: Event) => o.setWallType((e.target as HTMLSelectElement).value as WallType)}>
+      ${types.map(v => html`<option value=${v} ?selected=${v === o.wallType}>${t(`walltype.${v}`, lang)}</option>`)}
+    </select>`)}
+    ${row(`${t('props.thickness', lang)}, ${t('unit.mm', lang)}`, html`<input class="val" type="text" inputmode="numeric"
+      data-field="new-wall-thickness" .value=${live(String(o.thickness))}
+      @change=${(e: Event) => {
+        const el = e.target as HTMLInputElement;
+        const v = parseMm(el.value);
+        if (v === null) { el.value = String(o.thickness); o.setNotice(t('props.badWidth', lang)); return; }
+        o.setNotice(null);
+        o.setThickness(v);
+      }} />`)}
+    ${o.tool === 'box' ? html`
+      <div class="muted">${t('props.measure', lang)}</div>
+      <div class="seg">
+        ${(['inner', 'axis', 'outer'] as BoxMeasure[]).map(m => html`
+          <button class="tab ${o.boxMeasure === m ? 'on' : ''}" data-measure=${m} @click=${() => o.setBoxMeasure(m)}>
+            ${t(`measure.${m}`, lang)}</button>`)}
+      </div>` : nothing}`;
 }
 
 export function renderProps(o: PropsOpts): TemplateResult {
@@ -175,8 +197,8 @@ export function renderProps(o: PropsOpts): TemplateResult {
   }
   return html`
     <div class="props">
-      ${o.tool === 'box' ? boxProps(o) : nothing}
-      ${body === nothing && o.tool !== 'box' ? html`<p class="muted">${t('props.none', o.lang)}</p>` : body}
+      ${body === nothing && (o.tool === 'wall' || o.tool === 'box') ? newWallProps(o)
+        : body === nothing ? html`<p class="muted">${t('props.none', o.lang)}</p>` : body}
       ${o.notice ? html`<p class="warn">${o.notice}</p>` : nothing}
     </div>`;
 }

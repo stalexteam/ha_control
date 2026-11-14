@@ -74,7 +74,7 @@ const en: Dict = {
   'props.area': 'Area',
   'props.broken': 'The outline is no longer closed: the room is broken. Fix the walls or delete the room.',
   'props.node': 'Node',
-  'props.box': 'Box',
+  'props.newWall': 'New wall',
   'props.measure': 'Size measured to',
 
   'baseline.center': 'Axis',
@@ -103,6 +103,10 @@ const en: Dict = {
   'snap.mid': 'snap: midpoint',
   'snap.wall': 'snap: wall',
   'snap.grid': 'snap: grid',
+  'snapmark.node': 'endpoint',
+  'snapmark.mid': 'midpoint',
+  'snapmark.wall': 'on wall',
+  'snapmark.grid': 'grid',
 
   'tracker.length': 'L',
   'tracker.angle': '∠',

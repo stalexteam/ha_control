@@ -72,7 +72,12 @@ export function createBoxTool(ctx: ToolContext): Tool {
     preview(): Preview {
       if (!c1) return { snap: snapPt(cursor) };
       const c2 = corner2();
-      const out: Preview = { tracker: { length: wBuf, angle: dBuf, field, at: cursor } };
+      const typing = wBuf !== '' || dBuf !== '';
+      const out: Preview = {
+        tracker: { length: wBuf, angle: dBuf, field, at: cursor },
+        anchor: c1,
+        snap: typing ? undefined : snapPt(cursor),
+      };
       if (!c2 || degenerate(c1, c2)) return out;
       const props = ctx.wallProps();
       const m = ctx.boxMeasure();

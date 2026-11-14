@@ -33,6 +33,8 @@ export interface Preview {
   snap?: SnapResult;
   tracker?: { length: string; angle: string; field: "length" | "angle"; at: Pt };
   orthoFrom?: Pt;
+  /** Fixed start of the segment / box being drawn (chain start or last fixed point). */
+  anchor?: Pt;
   /** Working copy of the level during a drag; the renderer draws it instead of the committed level. */
   level?: Level;
 }

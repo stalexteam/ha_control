@@ -43,4 +43,15 @@ describe('box tool', () => {
     t.down(ev(0, 0));
     expect(ctx.commits).toHaveLength(0);
   });
+
+  it('preview carries snap before and after the first corner, and the first corner as anchor', () => {
+    const ctx = fakeContext();
+    const t = createBoxTool(ctx);
+    t.move(ev(110, 190));
+    expect(t.preview().snap?.kind).toBe('grid');
+    t.down(ev(0, 0)); t.move(ev(2010, 990));
+    expect(t.preview().snap?.kind).toBe('grid');
+    expect(t.preview().snap?.pt).toEqual({ x: 2000, y: 1000 });
+    expect(t.preview().anchor).toEqual({ x: 0, y: 0 });
+  });
 });

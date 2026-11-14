@@ -70,4 +70,52 @@ describe('renderLevel', () => {
     const root = draw(sample(), null, { opening: { wallId: 'w2', offset: 100, width: 900, kind: 'door', invalid: true } });
     expect(root.querySelector('.preview-opening.invalid')).not.toBeNull();
   });
+
+  const snapOf = (kind: 'node' | 'mid' | 'wall' | 'grid', pt = { x: 1000, y: 0 }): Preview => ({
+    snap: {
+      pt, kind,
+      endpoint: kind === 'node' ? { kind: 'node', nodeId: 'n0' }
+        : kind === 'grid' ? { kind: 'free', pt } : { kind: 'wall', wallId: 'w0', offset: pt.x },
+    },
+  });
+
+  it('draws a distinct snap marker and label per snap kind', () => {
+    const cases = [['node', '.snap-node', 'endpoint'], ['mid', '.snap-mid', 'midpoint'],
+      ['wall', '.snap-wall', 'on wall'], ['grid', '.snap-grid', 'grid']] as const;
+    for (const [kind, cls, label] of cases) {
+      document.body.innerHTML = '';
+      const root = draw(sample(), null, snapOf(kind));
+      expect(root.querySelector(cls), kind).not.toBeNull();
+      for (const other of cases) if (other[0] !== kind) expect(root.querySelector(other[1])).toBeNull();
+      expect(root.querySelector('.snap-label')?.textContent?.trim()).toBe(label);
+    }
+  });
+
+  it('sizes snap markers in screen pixels', () => {
+    const at = (scale: number) => {
+      document.body.innerHTML = '';
+      const content = renderLevel(sample(), { palette: paletteFor(true), selection: null, preview: snapOf('node'), scale, lang: 'en' });
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      render(html`<svg xmlns="http://www.w3.org/2000/svg">${content}</svg>`, host);
+      return Number(host.querySelector('.snap-node rect')!.getAttribute('width'));
+    };
+    expect(at(0.1) * 0.1).toBeCloseTo(at(0.5) * 0.5, 6);
+    expect(at(0.1) * 0.1).toBeGreaterThanOrEqual(9);
+  });
+
+  it('highlights the target wall for a wall snap only', () => {
+    const root = draw(sample(), null, snapOf('wall'));
+    const hl = root.querySelector('.snap-wall-hl');
+    expect(hl).not.toBeNull();
+    expect(hl!.getAttribute('stroke')).toBe(paletteFor(true).snap);
+    document.body.innerHTML = '';
+    expect(draw(sample(), null, snapOf('grid')).querySelector('.snap-wall-hl')).toBeNull();
+  });
+
+  it('marks the start of the active chain', () => {
+    expect(draw(sample(), null, { anchor: { x: 0, y: 0 } }).querySelector('.snap-start')).not.toBeNull();
+    document.body.innerHTML = '';
+    expect(draw(sample(), null, {}).querySelector('.snap-start')).toBeNull();
+  });
 });

@@ -49,16 +49,26 @@ function hostPoint(level: Level, wallId: Id, offset: number): { pt: Pt; offset: 
   return { pt: l === 0 ? a : lerp(a, b, o / l), offset: o };
 }
 
-/** Mutating: recompute T-node positions from their hosts. */
+/**
+ * Mutating: keep every T-node at its current world position projected onto its host's (possibly new) axis,
+ * clamped to the host, and recompute its offset. Moving or stretching a host therefore only stretches the
+ * hosted walls; their hosted ends never slide along the host. Explicit sliding goes through placeNode,
+ * which writes the new position before this step runs.
+ */
 function settleNodes(out: Level): void {
-  // Hosts can themselves be T-nodes' walls; iterate so chains settle regardless of node order.
+  // Hosts can themselves end in T-nodes; iterate so chains settle regardless of node order.
   for (let pass = 0; pass <= out.nodes.length; pass++) {
     let changed = false;
     for (const n of out.nodes) {
       if (!n.host) continue;
-      if (!out.walls.some(w => w.id === n.host!.wallId)) continue;
-      const { pt, offset } = hostPoint(out, n.host.wallId, n.host.offset);
-      if (n.x !== pt.x || n.y !== pt.y || n.host.offset !== offset) changed = true;
+      const w = out.walls.find(x => x.id === n.host!.wallId);
+      if (!w) continue;
+      const a = nodePos(out, w.a);
+      const b = nodePos(out, w.b);
+      const l = dist(a, b);
+      const offset = clamp(projectT(n, a, b) * l, 0, l);
+      const pt = l === 0 ? a : lerp(a, b, offset / l);
+      if (Math.abs(n.x - pt.x) > 1e-9 || Math.abs(n.y - pt.y) > 1e-9) changed = true;
       n.x = pt.x;
       n.y = pt.y;
       n.host.offset = offset;
@@ -89,7 +99,11 @@ function placeNode(level: Level, nodeId: Id, to: Pt): void {
     const w = findWall(level, n.host.wallId);
     const a = nodePos(level, w.a);
     const b = nodePos(level, w.b);
-    n.host.offset = clamp(projectT(to, a, b) * dist(a, b), 0, dist(a, b));
+    const l = dist(a, b);
+    n.host.offset = clamp(projectT(to, a, b) * l, 0, l);
+    const pt = l === 0 ? a : lerp(a, b, n.host.offset / l);
+    n.x = pt.x;
+    n.y = pt.y;
   } else {
     n.x = to.x;
     n.y = to.y;

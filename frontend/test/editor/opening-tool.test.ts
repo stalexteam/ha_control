@@ -33,4 +33,18 @@ describe('opening tool', () => {
     t.move(ev(1500, 2000));
     expect(t.preview().opening).toBeUndefined();
   });
+
+  it('preview carries a wall snap on the hosting wall axis', () => {
+    for (const kind of ['door', 'window', 'opening'] as const) {
+      const ctx = fakeContext(box());
+      const t = createOpeningTool(ctx, kind);
+      t.move(ev(1500, 30));
+      const s = t.preview().snap!;
+      expect(s.kind).toBe('wall');
+      expect(s.pt).toEqual({ x: 1500, y: 0 });
+      expect(s.endpoint).toMatchObject({ kind: 'wall', wallId: ctx.level().walls[0].id });
+      t.move(ev(1500, 2000));
+      expect(t.preview().snap).toBeUndefined();
+    }
+  });
 });

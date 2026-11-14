@@ -196,3 +196,54 @@ describe('mergeNodes', () => {
     expect(out.nodes.some(n => n.id === top.a)).toBe(false);
   });
 });
+
+describe('T-node keeps its world position when the host moves (variant A)', () => {
+  const setup = () => {
+    const room = rectRoomLevel(3000, 4000, 400); // w0: n0 (0,0) -> n1 (3000,0)
+    const r = addWallSegment(room, { kind: 'wall', wallId: 'w0', offset: 1500 }, { kind: 'free', pt: { x: 1500, y: 2000 } }, part100);
+    const tid = r.level.nodes.find(n => n.host)!.id;
+    return { level: r.level, tid };
+  };
+  it('host moved along its own axis by +500: T-node stays put, offset shrinks by 500', () => {
+    const { level, tid } = setup();
+    const m = moveWall(level, 'w0', { x: 500, y: 0 });
+    const t = m.nodes.find(n => n.id === tid)!;
+    expect(t.x).toBeCloseTo(1500, 6);
+    expect(t.y).toBeCloseTo(0, 6);
+    expect(t.host!.offset).toBeCloseTo(1000, 6);
+  });
+  it("host's node A dragged outward by 1000: T-node stays put in world space", () => {
+    const { level, tid } = setup();
+    const m = moveNode(level, 'n0', { x: -1000, y: 0 });
+    const t = m.nodes.find(n => n.id === tid)!;
+    expect(t.x).toBeCloseTo(1500, 6);
+    expect(t.y).toBeCloseTo(0, 6);
+    expect(t.host!.offset).toBeCloseTo(2500, 6);
+  });
+  it('host moved perpendicular by 300: T-node moves perpendicular by 300 only', () => {
+    const { level, tid } = setup();
+    const m = moveWall(level, 'w0', { x: 0, y: 300 });
+    const t = m.nodes.find(n => n.id === tid)!;
+    expect(t.x).toBeCloseTo(1500, 6);
+    expect(t.y).toBeCloseTo(300, 6);
+    expect(t.host!.offset).toBeCloseTo(1500, 6);
+  });
+  it('host shortened past the T-node: T-node clamps to the host end', () => {
+    const { level, tid } = setup();
+    const m = moveNode(level, 'n1', { x: 1000, y: 0 });
+    const t = m.nodes.find(n => n.id === tid)!;
+    expect(t.x).toBeCloseTo(1000, 6);
+    expect(t.host!.offset).toBeCloseTo(1000, 6);
+  });
+  it('chained T-nodes converge and keep their along-host positions', () => {
+    const { level, tid } = setup();
+    const part = level.walls.find(w => w.a === tid || w.b === tid)!; // (1500,0) -> (1500,2000)
+    const r2 = addWallSegment(level, { kind: 'wall', wallId: part.id, offset: 1000 }, { kind: 'free', pt: { x: 2500, y: 1000 } }, part100);
+    const t2 = r2.level.nodes.find(n => n.host?.wallId === part.id)!.id;
+    const m = moveWall(r2.level, 'w0', { x: 0, y: 300 });
+    const p2 = m.nodes.find(n => n.id === t2)!;
+    expect(p2.x).toBeCloseTo(1500, 6);
+    expect(p2.y).toBeCloseTo(1000, 6);
+    expect(nodePos(m, tid).y).toBeCloseTo(300, 6);
+  });
+});

@@ -354,6 +354,12 @@ export class PlanStudioPanel extends LitElement {
     this.requestUpdate();
   }
 
+  /** Wall type for the next wall; the thickness follows the type preset. */
+  setWallType(wt: WallType): void {
+    this.wallType = wt;
+    this.thickness = WALL_PRESETS[wt];
+  }
+
   pickTool(id: ToolId): void {
     this.activeTool.cancel();
     this.selection = null;
@@ -457,7 +463,7 @@ export class PlanStudioPanel extends LitElement {
           lead: this.narrow ? html`<ha-menu-button .hass=${this.hass} .narrow=${this.narrow}></ha-menu-button>` : nothing,
           onRename: name => { this.plan = { ...this.plan!, name }; s.markDirty(); },
           onPickPlan: id => this.pickPlan(id),
-          onWallType: wt => { this.wallType = wt; this.thickness = WALL_PRESETS[wt]; },
+          onWallType: wt => this.setWallType(wt),
           onThickness: mm => { this.thickness = mm; },
           onUndo: () => this.undo(), onRedo: () => this.redo(), onSave: () => this.doSave(),
         })}
@@ -482,6 +488,8 @@ export class PlanStudioPanel extends LitElement {
         </div>
         ${renderProps({
           level, selection: this.selection, tool: this.toolId, boxMeasure: this.boxMeasure, lang, notice: this.notice,
+          wallType: this.wallType, thickness: this.thickness,
+          setWallType: wt => this.setWallType(wt), setThickness: mm => { this.thickness = mm; },
           commit: next => this.commit(next), remove: next => this.commitRemoval(next),
           setBoxMeasure: m => { this.boxMeasure = m; }, setNotice: msg => { this.notice = msg; },
         })}
