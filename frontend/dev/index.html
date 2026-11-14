@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Plan Studio dev</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0b1220; }
+    #bar { position: fixed; right: 8px; bottom: 36px; z-index: 100; display: flex; gap: 6px;
+      font: 12px system-ui, sans-serif; background: rgba(15, 23, 42, .9); color: #cbd5e1;
+      padding: 6px 8px; border-radius: 6px; border: 1px solid #334155; }
+    #bar button, #bar select { font: inherit; }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <select id="lang"><option value="en">en</option></select>
+    <label><input type="checkbox" id="dark" checked /> dark</label>
+    <button id="foreign" title="Bump stored revision as if another tab saved">foreign save</button>
+    <button id="wipe" title="Delete stored plans">delete stored</button>
+  </div>
+  <plan-studio-panel id="panel"></plan-studio-panel>
+  <script type="module">
+    import '../src/panel/plan-studio-panel.ts';
+    import { createMockHass, simulateForeignSave, clearPlans } from './mock-hass.ts';
+
+    const params = new URLSearchParams(location.search);
+    const lang = params.get('lang') ?? 'en';
+    const dark = params.get('dark') !== '0';
+    document.getElementById('lang').value = lang;
+    document.getElementById('dark').checked = dark;
+    document.body.style.background = dark ? '#0b1220' : '#f3efe8';
+
+    const panel = document.getElementById('panel');
+    panel.hass = createMockHass({ language: lang, darkMode: dark });
+
+    const reload = () => {
+      params.set('lang', document.getElementById('lang').value);
+      params.set('dark', document.getElementById('dark').checked ? '1' : '0');
+      location.search = params.toString();
+    };
+    document.getElementById('lang').addEventListener('change', reload);
+    document.getElementById('dark').addEventListener('change', reload);
+    document.getElementById('foreign').addEventListener('click', () => simulateForeignSave());
+    document.getElementById('wipe').addEventListener('click', () => clearPlans());
+  </script>
+</body>
+</html>

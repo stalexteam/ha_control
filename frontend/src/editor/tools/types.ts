@@ -1,0 +1,49 @@
+import type { Pt, Id, Level, OpeningKind } from "../../model/types";
+import type { WallProps } from "../../model/ops";
+import type { SnapResult } from "../../geometry/snap";
+
+/** Pointer event in plan coordinates (mm). `pt` is not snapped. */
+export interface ToolEvent {
+  pt: Pt;
+  shift: boolean;
+  alt: boolean;
+  ctrl: boolean;
+}
+
+/** Services the editor provides to a tool. */
+export interface ToolContext {
+  /** Current level. */
+  level(): Level;
+  /** Pushes `next` to History and marks the document dirty. */
+  commit(next: Level): void;
+  tolMm(): number;
+  grid(): number | null;
+  wallProps(): WallProps;
+  boxMeasure(): "inner" | "axis" | "outer";
+  select(sel: Selection | null): void;
+  lang(): string;
+}
+
+export type Selection = { kind: "wall" | "node" | "opening" | "zone"; id: Id };
+
+/** Transient overlay a tool asks the renderer to draw. */
+export interface Preview {
+  walls?: { a: Pt; b: Pt; props: WallProps }[];
+  opening?: { wallId: Id; offset: number; width: number; kind: OpeningKind; invalid?: boolean };
+  snap?: SnapResult;
+  tracker?: { length: string; angle: string; field: "length" | "angle"; at: Pt };
+  orthoFrom?: Pt;
+  /** Working copy of the level during a drag; the renderer draws it instead of the committed level. */
+  level?: Level;
+}
+
+export interface Tool {
+  readonly id: "select" | "box" | "wall" | "door" | "window" | "opening" | "zone";
+  down(e: ToolEvent): void;
+  move(e: ToolEvent): void;
+  up(e: ToolEvent): void;
+  /** Returns true when the tool consumed the key. */
+  key(key: string, e: { shift: boolean; ctrl: boolean }): boolean;
+  preview(): Preview;
+  cancel(): void;
+}

@@ -1,0 +1,18 @@
+{
+  "domain": "plan_studio",
+  "name": "Plan Studio",
+  "version": "0.1.2",
+  "config_flow": true,
+  "dependencies": [
+    "http",
+    "frontend",
+    "panel_custom",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/stalexteam/ha_control",
+  "issue_tracker": "https://github.com/stalexteam/ha_control/issues",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "single_config_entry": true,
+  "codeowners": []
+}
