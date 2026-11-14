@@ -101,7 +101,9 @@ export class EditorInput {
     }
     if (inField(e) || !this.h.ready()) return;
     const ctrl = e.ctrlKey || e.metaKey;
-    const k = e.key.toLowerCase();
+    // Shortcuts use the physical key (e.code) so they work with any keyboard layout
+    // (with a non-Latin layout e.key is a different letter).
+    const k = e.code === 'KeyZ' ? 'z' : e.code === 'KeyY' ? 'y' : e.code === 'KeyS' ? 's' : e.key.toLowerCase();
     if (ctrl && (k === 'z' || k === 'y')) {
       e.preventDefault();
       if (k === 'z' && !e.shiftKey) this.h.undo(); else this.h.redo();

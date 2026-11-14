@@ -417,6 +417,18 @@ export class PlanStudioPanel extends LitElement {
     if (el instanceof Element && el.closest('button')) this.focus();
   };
 
+  /**
+   * After a props-panel field commits (change event), hand focus back to the panel so editor
+   * shortcuts (Ctrl+Z, Delete, typed lengths) work again without an extra click on the canvas.
+   */
+  private refocusAfterChange = (e: Event) => {
+    const el = e.composedPath()[0];
+    if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement) {
+      el.blur();
+      this.focus();
+    }
+  };
+
   // ---- render ----
 
   private renderDialog(): TemplateResult | typeof nothing {
@@ -455,7 +467,7 @@ export class PlanStudioPanel extends LitElement {
     const w = Math.max(1, this.size.w) / scale, h = Math.max(1, this.size.h) / scale;
     const s = this.save;
     return html`
-      <div class="ed" style=${paletteVars(pal)} @click=${this.refocus}>
+      <div class="ed" style=${paletteVars(pal)} @click=${this.refocus} @change=${this.refocusAfterChange}>
         ${renderTopBar({
           lang, planName: this.plan.name, planId: this.plan.id, plans: this.planOptions(), wallType: this.wallType, thickness: this.thickness,
           canUndo: this.history.canUndo, canRedo: this.history.canRedo,

@@ -73,6 +73,18 @@ describe('<plan-studio-panel>', () => {
     expect(el.history!.current.walls.length).toBe(4);
   });
 
+  it('undo/redo use the physical key, so they work with a non-Latin keyboard layout', async () => {
+    const el = await mount();
+    await drawBox(el);
+    // e.key is a Cyrillic letter on that layout (U+044F on the Z key, U+043D on the Y key).
+    const z = String.fromCharCode(0x44f);
+    const y = String.fromCharCode(0x43d);
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: z, code: 'KeyZ', ctrlKey: true, bubbles: true }));
+    expect(el.history!.current.walls.length).toBe(0);
+    el.dispatchEvent(new KeyboardEvent('keydown', { key: y, code: 'KeyY', ctrlKey: true, bubbles: true }));
+    expect(el.history!.current.walls.length).toBe(4);
+  });
+
   it('offers overwrite on conflict and only save-as-new after a second conflict', async () => {
     const el = await mount();
     await drawBox(el);
