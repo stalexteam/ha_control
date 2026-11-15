@@ -50,3 +50,26 @@ describe('opening width field', () => {
     expect(notice).toBeNull();
   });
 });
+
+describe('aim field', () => {
+  it('entering 0 over aim 30 stores no aim key', async () => {
+    const { render } = await import('lit');
+    const { renderDeviceProps } = await import('../../src/panel/device-props');
+    const { addBox } = await import('../../src/model/ops');
+    const { addDevice } = await import('../../src/model/devices');
+    const { deviceDefaults } = await import('../../src/model/types');
+    const base = addBox(rectRoomLevel(4000, 3000, 400), { x: 0, y: 0 }, { x: 3000, y: 4000 }, { type: 'partition', thickness: 100, baseline: 'center' }, 'axis');
+    const pl = { mode: 'wall' as const, wallId: base.walls[0].id, side: 'right' as const, offset: 1500, aim: 30 };
+    const dev = addDevice(base, deviceDefaults('motion_sensor', 'wall'), pl, 'D').level.devices[0];
+    const got: Record<string, unknown>[] = [];
+    const host = document.createElement('div');
+    render(renderDeviceProps({
+      device: dev, nextKind: null, nextProps: null, lang: 'en', onDevice: () => true,
+      onPlacement: p => { got.push(p as never); return true; }, onNext: () => {}, onDelete: () => {},
+    }), host);
+    const el = host.querySelector('input[data-field="aim"]') as HTMLInputElement;
+    el.value = '0'; el.dispatchEvent(new Event('change'));
+    expect(got).toHaveLength(1);
+    expect('aim' in got[0]).toBe(false);
+  });
+});

@@ -1,9 +1,10 @@
 import type { DevicePlacement, Id, Level, Pt } from '../../model/types';
 import { deleteDevice, moveDevice } from '../../model/devices';
-import { angleFromHandle, angleOf, deviceAt, devicePose, directionHandle } from '../../geometry/devices';
+import { angleOf, deviceAt, devicePose } from '../../geometry/devices';
 import { orthoConstrain } from '../../geometry/snap';
 import { wallFrame } from '../../geometry/walls';
 import { add, dist, dot, perpLeft, sub } from '../../geometry/vec';
+import { createAimDrag } from './aim-drag';
 import { deviceCandidate } from './device-tool';
 import type { Preview, Selection, Tool, ToolContext, ToolEvent } from './types';
 
@@ -13,7 +14,8 @@ const placementChanged = (a: Level, b: Level, id: Id | undefined) => id === unde
 /** Device select tool: pick, drag (slide / re-host / leave the wall; one commit on `up`), delete. */
 export function createDeviceSelectTool(ctx: ToolContext): Tool {
   let sel: Selection | null = null;
-  let drag: { id: Id; grab: Pt; knob: boolean } | null = null; // grab: device centre minus the pointer at `down`; knob: dragging the direction handle
+  let drag: { id: Id; grab: Pt } | null = null; // grab: device centre minus the pointer at `down`
+  const aim = createAimDrag(ctx); // direction handle (knob) drag
   let original: Level | null = null;
   let working: Level | null = null;
   let moved = false;
@@ -30,7 +32,6 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
     if (e.pt.x === downPt.x && e.pt.y === downPt.y) { working = original; return; } // back at the grab point: nothing moved
     const d = original.devices.find(x => x.id === drag!.id);
     if (!d) return;
-    if (drag.knob) { working = moveDevice(original, d.id, angleFromHandle(original, d, e.pt, e.shift)); return; }
     const p = e.shift ? orthoConstrain(downPt, e.pt) : e.pt;
     // A free device keeps the grab offset so it does not jump to the pointer; a wall device follows the pointer.
     const pl = d.placement;
@@ -65,13 +66,7 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
       const level = ctx.level();
       const tol = ctx.tolMm();
       // The direction handle of the selected device wins over devices and walls.
-      const cur = sel?.kind === 'device' ? level.devices.find(x => x.id === sel!.id) : undefined;
-      const h = cur ? directionHandle(level, cur, 10 / tol) : null; // tolMm is 10 screen px
-      if (cur && h && dist(e.pt, h.to) <= tol) {
-        original = working = level;
-        drag = { id: cur.id, grab: { x: 0, y: 0 }, knob: true };
-        return;
-      }
+      if (aim.start(sel?.kind === 'device' ? sel.id : undefined, e)) return;
       const id = deviceAt(level, e.pt, tol);
       if (!id) { setSel(null); return; }
       setSel({ kind: 'device', id });
@@ -79,16 +74,18 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
       const pose = devicePose(level, d);
       original = working = level;
       // Only a free device keeps the grab offset; a wall device follows the pointer.
-      drag = { id, grab: pose && d.placement.mode === 'free' ? sub(pose.pt, e.pt) : { x: 0, y: 0 }, knob: false };
+      drag = { id, grab: pose && d.placement.mode === 'free' ? sub(pose.pt, e.pt) : { x: 0, y: 0 } };
     },
-    move(e: ToolEvent) { update(e); },
+    move(e: ToolEvent) { if (aim.active()) aim.move(e); else update(e); },
     up(e: ToolEvent) {
+      if (aim.end(e)) return;
       if (drag) update(e);
       const next = working, orig = original, wasMoved = moved, id = drag?.id;
       reset();
       if (wasMoved && next && orig && next !== orig && placementChanged(orig, next, id)) ctx.commit(next);
     },
     key(key) {
+      if (key === 'Escape' && aim.cancel()) return true;
       if (key === 'Escape' && drag) { reset(); return true; }
       if (key !== 'Delete' && key !== 'Backspace') return false;
       if (!sel || sel.kind !== 'device') return false;
@@ -99,8 +96,10 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
       return true;
     },
     preview(): Preview {
+      const w = aim.working();
+      if (w) return { level: w };
       return drag && working ? { level: working } : {};
     },
-    cancel() { reset(); setSel(null); },
+    cancel() { aim.cancel(); reset(); setSel(null); },
   };
 }

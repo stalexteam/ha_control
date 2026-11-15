@@ -141,6 +141,13 @@ export function directionHandle(level: Level, d: Device, scaleFactor: number): {
   return { from: pose.pt, to: add(pose.pt, scale(pose.dir, HANDLE_PX / scaleFactor)) };
 }
 
+/** Wall placement with `aim` set; 0 is stored as a missing key (one representation). */
+export function withAim(pl: Extract<DevicePlacement, { mode: 'wall' }>, aim: number): DevicePlacement {
+  const next: typeof pl = { ...pl, aim };
+  if (aim === 0) delete next.aim;
+  return next;
+}
+
 /**
  * Placement with its direction set from a pointer at p: wall device aim = signed angle from the face normal
  * (clamped to -90..90, 0 stored as no aim); free device rotation 0..359. Whole degrees; snap15 rounds to 15-degree steps.
@@ -155,6 +162,5 @@ export function angleFromHandle(level: Level, d: Device, p: Pt, snap15: boolean)
   if (pl.mode === 'free') return { ...pl, rotation: ((round(a) % 360) + 360) % 360 };
   const rel = ((((a - angleOf(pose.normal!)) % 360) + 540) % 360) - 180; // -180..180
   const aim = Math.max(-90, Math.min(90, round(rel)));
-  const { aim: _old, ...rest } = pl;
-  return aim === 0 ? rest : { ...rest, aim };
+  return withAim(pl, aim);
 }

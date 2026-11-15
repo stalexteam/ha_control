@@ -4,6 +4,7 @@ import type { Device, DeviceKind, DevicePlacement, DeviceProps, Level, Side } fr
 import { DEVICE_PLACEMENTS, deviceDefaults } from '../model/types';
 import { AIM_MAX, deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
 import type { Selection } from '../editor/tools/types';
+import { withAim } from '../geometry/devices';
 import { t } from '../i18n';
 import { parseMm } from './toolbar';
 import type { ToolId } from './tool-factory';
@@ -155,7 +156,7 @@ function placementFields(o: DevicePropsOpts, d: Device): TemplateResult {
     ${row(`${t('props.offset', lang)}, ${t('unit.mm', lang)}`, numField(o, 'offset', pl.offset, 'offset',
       v => o.onPlacement({ ...pl, offset: v })))}
     ${aims ? row(`${t('props.aim', lang)}, ${t('unit.deg', lang)}`,
-      numField(o, 'aim', pl.aim ?? 0, 'aim', v => o.onPlacement({ ...pl, aim: v }))) : nothing}`;
+      numField(o, 'aim', pl.aim ?? 0, 'aim', v => o.onPlacement(withAim(pl, v)))) : nothing}`;
 }
 
 function deviceProps(o: DevicePropsOpts, d: Device): TemplateResult {

@@ -5,6 +5,7 @@ import { snap } from '../../geometry/snap';
 import { wallFrame } from '../../geometry/walls';
 import { dot, perpLeft, sub } from '../../geometry/vec';
 import { t } from '../../i18n';
+import { createAimDrag } from './aim-drag';
 import type { Preview, Tool, ToolContext, ToolEvent } from './types';
 
 /** Side of the wall the cursor is on: left when it lies on the perpLeft side of the axis, else right. */
@@ -67,6 +68,8 @@ export function propsFor(ctx: ToolContext, kind: DeviceKind, placement: DevicePl
 /** Device placement tool: one click places one device of `kind`. */
 export function createDeviceTool(ctx: ToolContext, kind: DeviceKind): Tool {
   let cursor: Pt | null = null;
+  let placedId: string | undefined; // the device this tool just placed (selected): its knob can be dragged
+  const aim = createAimDrag(ctx);
 
   function probe(): { placement: DevicePlacement; props: DeviceProps; invalid: boolean } | null {
     if (!cursor) return null;
@@ -85,6 +88,7 @@ export function createDeviceTool(ctx: ToolContext, kind: DeviceKind): Tool {
     id: kind,
     down(e: ToolEvent) {
       cursor = e.pt;
+      if (aim.start(placedId, e)) return;
       const pr = probe();
       if (!pr || pr.invalid) return;
       const level = ctx.level();
@@ -95,15 +99,18 @@ export function createDeviceTool(ctx: ToolContext, kind: DeviceKind): Tool {
       const res = addDevice(level, pr.props, pr.placement, `${base} ${n}`);
       if (res.deviceId === null) return;
       ctx.commit(res.level);
+      placedId = res.deviceId;
       ctx.select({ kind: 'device', id: res.deviceId });
     },
-    move(e: ToolEvent) { cursor = e.pt; },
-    up() {},
-    key() { return false; },
+    move(e: ToolEvent) { cursor = e.pt; if (aim.active()) aim.move(e); },
+    up(e: ToolEvent) { aim.end(e); },
+    key(key: string) { return key === 'Escape' && aim.cancel(); },
     preview(): Preview {
+      const w = aim.working();
+      if (aim.active()) return w ? { level: w } : {};
       const pr = probe();
       return pr ? { device: pr } : {};
     },
-    cancel() { cursor = null; },
+    cancel() { aim.cancel(); cursor = null; placedId = undefined; },
   };
 }

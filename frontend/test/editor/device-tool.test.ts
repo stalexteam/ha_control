@@ -92,3 +92,48 @@ describe('device place tool', () => {
     expect(ctx.level().devices.map(d => d.name)).toEqual(['Switch 1', 'Switch 3', 'Switch 2']);
   });
 });
+
+describe('aim knob from the placement tool', () => {
+  // tolMm 20 => handle 120 mm. Top wall right-side device at (1500, 50) faces (0,1); knob at (1500, 170).
+  const aimOf = (ctx: ReturnType<typeof fakeContext>) => { const p = ctx.level().devices[0].placement; return p.mode === 'wall' ? p.aim : NaN; };
+  const k = { shift: false, ctrl: false };
+  function placed() {
+    const ctx = fakeContext(box());
+    const t = createDeviceTool(ctx, 'motion_sensor');
+    ctx.select = () => {};
+    t.down(ev(1500, 10)); t.up(ev(1500, 10));
+    return { ctx, t };
+  }
+
+  it('press on the knob and drag to 45: aim 45, no extra device, one drag commit', () => {
+    const { ctx, t } = placed();
+    expect(ctx.commits).toHaveLength(1);
+    t.down(ev(1500, 170)); t.move(ev(1500 + 300 * Math.SQRT1_2, 50 + 300 * Math.SQRT1_2)); t.up(ev(1500 + 300 * Math.SQRT1_2, 50 + 300 * Math.SQRT1_2));
+    expect(ctx.level().devices).toHaveLength(1);
+    expect(ctx.commits).toHaveLength(2);
+    expect(aimOf(ctx)).toBe(45);
+  });
+
+  it('press 5 px off the knob centre, release without movement: no change', () => {
+    const { ctx, t } = placed();
+    t.down(ev(1500 + 10, 170)); t.up(ev(1500 + 11, 170));
+    expect(ctx.level().devices).toHaveLength(1);
+    expect(ctx.commits).toHaveLength(1);
+  });
+
+  it('grab offset: pressing off-centre then moving a little does not jump', () => {
+    const { ctx, t } = placed();
+    t.down(ev(1500 + 15, 170)); t.move(ev(1516.5, 182)); t.up(ev(1516.5, 182));
+    expect(aimOf(ctx)).toBeUndefined();
+    expect(ctx.commits).toHaveLength(1);
+  });
+
+  it('Escape mid-drag: unchanged', () => {
+    const { ctx, t } = placed();
+    t.down(ev(1500, 170)); t.move(ev(1000, 300));
+    expect(t.key('Escape', k)).toBe(true);
+    t.up(ev(1000, 300));
+    expect(ctx.commits).toHaveLength(1);
+    expect(aimOf(ctx)).toBeUndefined();
+  });
+});
