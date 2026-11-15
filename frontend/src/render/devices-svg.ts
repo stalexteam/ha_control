@@ -66,7 +66,7 @@ export interface EquipmentLabelLayout {
 /**
  * Lays out the equipment icon and label as one group at the current zoom. Stacked (icon above label) when it fits
  * the rotated body's bounding box (circle: inscribed square), else one line (icon left, label right) when that fits,
- * else stacked. An empty label leaves the icon alone at the centre. Label width is estimated, not measured.
+ * else the one that overflows less. An empty label leaves the icon alone at the centre. Label width is estimated, not measured.
  */
 export function equipmentLabelLayout(
   body: { shape: 'rect' | 'circle'; width: number; depth: number; diameter: number },
@@ -85,8 +85,12 @@ export function equipmentLabelLayout(
   const textW = label.length * EQ_CHAR_W * EQ_LABEL_FONT_PX;
   const stackH = icon + EQ_GAP_PX + EQ_LABEL_FONT_PX;
   const lineW = icon + EQ_GAP_PX + textW;
-  const stackFits = Math.max(icon, textW) <= availW && stackH <= availH;
-  if (!stackFits && lineW <= availW && icon <= availH) {
+  const stackW = Math.max(icon, textW);
+  const over = (needW: number, needH: number) => Math.max(0, needW - availW) + Math.max(0, needH - availH);
+  const stackOver = over(stackW, stackH);
+  const lineOver = over(lineW, icon);
+  // Stacked when it fits, else one line when it fits, else whichever overflows less (a tie keeps stacked).
+  if (stackOver > 0 && lineOver < stackOver) {
     const left = -lineW / 2;
     return { mode: 'line', iconX: (left + icon / 2) / scale, iconY: 0,
       labelX: (left + icon + EQ_GAP_PX) / scale, labelY: 0, labelAnchor: 'start' };

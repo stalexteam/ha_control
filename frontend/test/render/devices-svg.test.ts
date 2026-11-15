@@ -526,10 +526,16 @@ describe('equipmentLabelLayout', () => {
     expect(l.iconY).toBe(0);
   });
 
-  it('neither fits gives stacked and centred', () => {
+  it('neither fits: stacked when it overflows less', () => {
     const l = rect(40, 20);
     expect(l.mode).toBe('stacked');
     expect(l.iconY).toBeCloseTo(-HALF);
+  });
+
+  it('flat body (900x200 mm at 0.101): one line overflows less than stacked', () => {
+    const l = rect(900, 200, 'Invertor', 0, 0.101);
+    expect(l.mode).toBe('line');
+    expect(l.labelY).toBe(l.iconY);
   });
 
   it('empty label: icon alone at the centre', () => {
