@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import type { Level } from '../../src/model/types';
 import {
-  addBox, addWallSegment, deleteWall, detachWallEnd, finalize, mergeNodes, moveNode, moveWall, nodePos, setWallProps,
+  addBox, addWallSegment, deleteWall, detachWallEnd, finalize, mergeNodes, moveNode, moveWall, setWallProps,
   type WallProps,
 } from '../../src/model/ops';
+import { nodePos } from '../../src/geometry/walls';
 import { addOpening } from '../../src/model/openings';
+import { addDevice } from '../../src/model/devices';
+import { deviceDefaults } from '../../src/model/types';
 import { rectRoomLevel } from '../fixtures';
 
 const bearing400: WallProps = { type: 'bearing', thickness: 400, baseline: 'center' };
@@ -170,6 +173,24 @@ describe('opening re-anchor via shared post-edit step', () => {
     const moved = moveWall(o.level, top, { x: 0, y: 500 });
     expect(moved.openings[0].offset).toBeCloseTo(500, 6);
     expect(moved.openings[0].invalid).toBe(false);
+  });
+});
+
+describe('re-anchoring of hosted openings and wall devices', () => {
+  it('node A moved: opening and wall device on that wall keep their world positions in one step; free device untouched', () => {
+    const base = rectRoomLevel(3000, 4000, 400);
+    let l = addOpening(base, 'w0', 'door', 1500, 900).level;
+    l = addDevice(l, deviceDefaults('switch', 'wall'), { mode: 'wall', wallId: 'w0', side: 'left', offset: 2500 }, 'S').level;
+    l = addDevice(l, deviceDefaults('switch', 'wall'), { mode: 'wall', wallId: 'w1', side: 'left', offset: 1000 }, 'T').level;
+    l = addDevice(l, deviceDefaults('equipment', 'free'), { mode: 'free', x: 500, y: 500, rotation: 0 }, 'E').level;
+    // w0 runs (0,0) -> (3000,0); A moves 500 left, so every offset on w0 grows by 500.
+    const m = moveNode(l, 'n0', { x: -500, y: 0 });
+    expect(m.openings[0].offset).toBeCloseTo(1550, 6);
+    const [s, t, e] = m.devices.map(d => d.placement);
+    expect(s.mode === 'wall' && s.offset).toBeCloseTo(3000, 6);
+    // w1 starts at n1, which did not move; the free device has no offset.
+    expect(t).toEqual(l.devices[1].placement);
+    expect(e).toEqual(l.devices[2].placement);
   });
 });
 

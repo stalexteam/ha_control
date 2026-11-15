@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { Level, Pt, Wall } from '../../src/model/types';
-import { wallFrame, wallOutlines, wallPieces, wallsUnion } from '../../src/geometry/walls';
+import { findNode, nodePos, wallFrame, wallLen, wallLocal, wallOutlines, wallPieces, wallsUnion } from '../../src/geometry/walls';
 import { polygonArea } from '../../src/geometry/vec';
 import { rectRoomLevel } from '../fixtures';
 
@@ -24,6 +24,31 @@ describe('wallFrame', () => {
       [wall('w', 'a', 'b', 200), wall('v', 'a', 'b', 200, 'right')]);
     expect(wallFrame(l, l.walls[0])).toMatchObject({ leftOff: 100, rightOff: 100 });
     expect(wallFrame(l, l.walls[1])).toMatchObject({ leftOff: 200, rightOff: 0 });
+  });
+});
+
+describe('node and wall lookups', () => {
+  it('nodePos returns a copy of the node position; findNode the node itself; both throw when missing', () => {
+    const l = rectRoomLevel(3000, 4000, 400);
+    expect(findNode(l, 'n2')).toBe(l.nodes[2]);
+    const p = nodePos(l, 'n2');
+    expect(p).toEqual({ x: 3000, y: 4000 });
+    expect(p).not.toBe(l.nodes[2]);
+    expect(() => nodePos(l, 'x')).toThrow('node not found: x');
+    expect(() => findNode(l, 'x')).toThrow('node not found: x');
+  });
+  it('wallLen: axis length, null when the wall or one of its nodes is missing', () => {
+    const l = rectRoomLevel(3000, 4000, 400);
+    expect(wallLen(l, 'w1')).toBe(4000);
+    expect(wallLen(l, 'nope')).toBeNull();
+    expect(wallLen({ ...l, nodes: l.nodes.filter(n => n.id !== 'n1') }, 'w0')).toBeNull();
+  });
+  it('wallLocal: t along the axis from A, side > 0 on the left face (perpLeft), < 0 on the right', () => {
+    // A (0,0) -> B (0,1000): dir (0,1), perpLeft (1,0).
+    const l = lvl([{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 0, y: 1000 }], [wall('w', 'a', 'b', 200)]);
+    const f = wallFrame(l, l.walls[0]);
+    expect(wallLocal(f, { x: 30, y: 400 })).toEqual({ t: 400, side: 30 });
+    expect(wallLocal(f, { x: -50, y: -20 })).toEqual({ t: -20, side: -50 });
   });
 });
 

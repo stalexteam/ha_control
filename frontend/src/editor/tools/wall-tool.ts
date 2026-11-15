@@ -1,5 +1,6 @@
 import type { Id, Pt } from '../../model/types';
-import { addWallSegment, nodePos, type Endpoint } from '../../model/ops';
+import { addWallSegment, type Endpoint } from '../../model/ops';
+import { nodePos } from '../../geometry/walls';
 import { pointAlong, snap, type SnapResult } from '../../geometry/snap';
 import { dist } from '../../geometry/vec';
 import { parseWhole } from '../../geometry/parse';

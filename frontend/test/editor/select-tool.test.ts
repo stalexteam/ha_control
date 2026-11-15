@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createSelectTool } from '../../src/editor/tools/select-tool';
-import { addBox, addWallSegment, nodePos } from '../../src/model/ops';
+import { addBox, addWallSegment } from '../../src/model/ops';
+import { nodePos } from '../../src/geometry/walls';
 import { addOpening } from '../../src/model/openings';
 import type { Level } from '../../src/model/types';
 import { fakeContext } from './fake-context';

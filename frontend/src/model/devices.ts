@@ -1,20 +1,10 @@
 import { newId } from './ids';
 import { DEVICE_PLACEMENTS, deviceDefaults, type Device, type DevicePlacement, type DeviceProps, type Id, type Level } from './types';
-import { dist, norm, projectT, add, scale, sub } from '../geometry/vec';
+import { wallLen } from '../geometry/walls';
 
 const EPS = 1e-6; // mm
 /** Largest aim of a wall device, degrees either way. */
 export const AIM_MAX = 90;
-
-/** Axis length of a wall, or null when the wall (or a node) is missing. */
-function wallLen(level: Level, wallId: Id): number | null {
-  const w = level.walls.find(x => x.id === wallId);
-  if (!w) return null;
-  const a = level.nodes.find(n => n.id === w.a);
-  const b = level.nodes.find(n => n.id === w.b);
-  if (!a || !b) return null;
-  return dist(a, b);
-}
 
 function allowed(props: DeviceProps, placement: DevicePlacement): boolean {
   return DEVICE_PLACEMENTS[props.kind].includes(placement.mode);
@@ -90,23 +80,4 @@ export function refreshDevices(level: Level): Level {
     const invalid = l === null || d.placement.offset < -EPS || d.placement.offset > l + EPS;
     return { ...d, invalid };
   }));
-}
-
-/** Mutating on `out`: walls whose node A moved keep their devices at the same world position. */
-export function reanchorDevices(before: Level, out: Level): void {
-  for (const w of out.walls) {
-    const oldW = before.walls.find(x => x.id === w.id);
-    if (!oldW || oldW.a !== w.a) continue;
-    const oa = before.nodes.find(n => n.id === oldW.a), ob = before.nodes.find(n => n.id === oldW.b);
-    const na = out.nodes.find(n => n.id === w.a), nb = out.nodes.find(n => n.id === w.b);
-    if (!oa || !ob || !na || !nb) continue;
-    if (oa.x === na.x && oa.y === na.y) continue;
-    const nl = dist(na, nb);
-    if (nl === 0) continue;
-    const odir = norm(sub(ob, oa));
-    for (const d of out.devices) {
-      if (d.placement.mode !== 'wall' || d.placement.wallId !== w.id) continue;
-      d.placement.offset = projectT(add(oa, scale(odir, d.placement.offset)), na, nb) * nl;
-    }
-  }
 }

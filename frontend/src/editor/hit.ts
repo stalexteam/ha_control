@@ -1,5 +1,5 @@
 import type { Id, Level, Pt } from '../model/types';
-import { wallFrame, wallOutlines } from '../geometry/walls';
+import { wallFrame, wallLocal, wallOutlines } from '../geometry/walls';
 import { dist, dot, pointInPolygon, sub } from '../geometry/vec';
 import type { Selection } from './tools/types';
 
@@ -29,9 +29,7 @@ function openingAt(level: Level, p: Pt): Id | null {
     if (!w) continue;
     const f = wallFrame(level, w);
     if (f.len < 1e-9) continue;
-    const rel = sub(p, f.a);
-    const t = dot(rel, f.dir);
-    const side = rel.x * f.dir.y - rel.y * f.dir.x; // positive = left face (perpLeft = (d.y, -d.x))
+    const { t, side } = wallLocal(f, p); // side > 0: left face
     if (t >= o.offset && t <= o.offset + o.width && side >= -f.rightOff && side <= f.leftOff) return o.id;
   }
   return null;

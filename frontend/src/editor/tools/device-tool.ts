@@ -2,8 +2,7 @@ import type { DeviceKind, DevicePlacement, DeviceProps, Level, Pt } from '../../
 import { DEVICE_PLACEMENTS, deviceDefaults } from '../../model/types';
 import { addDevice } from '../../model/devices';
 import { snap } from '../../geometry/snap';
-import { wallFrame } from '../../geometry/walls';
-import { dot, perpLeft, sub } from '../../geometry/vec';
+import { wallFrame, wallLocal } from '../../geometry/walls';
 import { t } from '../../i18n';
 import { createAimDrag } from './aim-drag';
 import type { Preview, Tool, ToolContext, ToolEvent } from './types';
@@ -11,7 +10,7 @@ import type { Preview, Tool, ToolContext, ToolEvent } from './types';
 /** Side of the wall the cursor is on: left when it lies on the perpLeft side of the axis, else right. */
 function sideOf(level: Level, wallId: string, cursor: Pt): 'left' | 'right' {
   const f = wallFrame(level, level.walls.find(w => w.id === wallId)!);
-  return dot(sub(cursor, f.a), perpLeft(f.dir)) > 0 ? 'left' : 'right';
+  return wallLocal(f, cursor).side > 0 ? 'left' : 'right';
 }
 
 /** Grid-snapped (or whole-mm) free point. */
@@ -42,7 +41,7 @@ export function deviceCandidate(
       for (const w of level.walls) {
         if (w.a !== ep.nodeId && w.b !== ep.nodeId) continue;
         const f = wallFrame(level, w);
-        const tt = Math.max(0, Math.min(f.len, dot(sub(cursor, f.a), f.dir)));
+        const tt = Math.max(0, Math.min(f.len, wallLocal(f, cursor).t));
         const d = Math.hypot(cursor.x - (f.a.x + f.dir.x * tt), cursor.y - (f.a.y + f.dir.y * tt));
         if (!best || d < best.d) best = { id: w.id, offset: w.a === ep.nodeId ? 0 : f.len, d };
       }

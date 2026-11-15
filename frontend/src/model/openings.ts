@@ -1,18 +1,9 @@
 import { newId } from './ids';
 import { refreshZones } from './zones';
+import { wallLen } from '../geometry/walls';
 import { OPENING_DEFAULT_WIDTH, type Id, type Level, type Opening, type OpeningKind } from './types';
 
 const EPS = 1e-6; // mm
-
-/** Axis length of a wall, or null when the wall (or a node) is missing. */
-function wallLen(level: Level, wallId: Id): number | null {
-  const w = level.walls.find(x => x.id === wallId);
-  if (!w) return null;
-  const a = level.nodes.find(n => n.id === w.a);
-  const b = level.nodes.find(n => n.id === w.b);
-  if (!a || !b) return null;
-  return Math.hypot(b.x - a.x, b.y - a.y);
-}
 
 function overlaps(o: { offset: number; width: number }, p: { offset: number; width: number }): boolean {
   return o.offset < p.offset + p.width - EPS && p.offset < o.offset + o.width - EPS;

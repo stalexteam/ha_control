@@ -1,7 +1,7 @@
 import type { Id, Pt } from '../../model/types';
 import { addOpening } from '../../model/openings';
-import { wallFrame } from '../../geometry/walls';
-import { add, dot, scale, sub } from '../../geometry/vec';
+import { wallFrame, wallLocal } from '../../geometry/walls';
+import { add, scale } from '../../geometry/vec';
 import { wallAt } from '../hit';
 import type { Preview, Tool, ToolContext, ToolEvent } from './types';
 
@@ -16,7 +16,7 @@ export function createOpeningTool(ctx: ToolContext, kind: 'door' | 'window' | 'o
     const wallId = wallAt(level, cursor, ctx.tolMm());
     if (!wallId) return null;
     const f = wallFrame(level, level.walls.find(w => w.id === wallId)!);
-    const center = dot(sub(cursor, f.a), f.dir);
+    const center = wallLocal(f, cursor).t;
     return { wallId, center, pt: add(f.a, scale(f.dir, center)) };
   }
 

@@ -1,5 +1,5 @@
 import polygonClipping, { type Polygon } from 'polygon-clipping';
-import type { Id, Level, Pt, Wall } from '../model/types';
+import type { Id, Level, PlanNode, Pt, Wall } from '../model/types';
 import { add, cross, dist, dot, lineIntersect, norm, perpLeft, polygonArea, scale, sub } from './vec';
 
 export interface WallFrame { a: Pt; b: Pt; dir: Pt; len: number; leftOff: number; rightOff: number }
@@ -7,19 +7,42 @@ export interface WallFrame { a: Pt; b: Pt; dir: Pt; len: number; leftOff: number
 const MITER_LIMIT = 3; // x max thickness from the node
 const AREA_EPS = 1e-6;
 
-function pos(level: Level, id: Id): Pt {
+/** Node by id; throws when it is missing. */
+export function findNode(level: Level, id: Id): PlanNode {
   const n = level.nodes.find(x => x.id === id);
   if (!n) throw new Error(`node not found: ${id}`);
+  return n;
+}
+
+/** Position of a node (a copy); throws when it is missing. */
+export function nodePos(level: Level, id: Id): Pt {
+  const n = findNode(level, id);
   return { x: n.x, y: n.y };
+}
+
+/** Axis length of a wall, or null when the wall (or a node) is missing. */
+export function wallLen(level: Level, wallId: Id): number | null {
+  const w = level.walls.find(x => x.id === wallId);
+  if (!w) return null;
+  const a = level.nodes.find(n => n.id === w.a);
+  const b = level.nodes.find(n => n.id === w.b);
+  if (!a || !b) return null;
+  return dist(a, b);
 }
 
 /** leftOff/rightOff: distance from the A->B axis to the left/right face. */
 export function wallFrame(level: Level, wall: Wall): WallFrame {
-  const a = pos(level, wall.a);
-  const b = pos(level, wall.b);
+  const a = nodePos(level, wall.a);
+  const b = nodePos(level, wall.b);
   const t = wall.thickness;
   const [leftOff, rightOff] = wall.baseline === 'left' ? [0, t] : wall.baseline === 'right' ? [t, 0] : [t / 2, t / 2];
   return { a, b, dir: norm(sub(b, a)), len: dist(a, b), leftOff, rightOff };
+}
+
+/** p in the wall's frame: t along the axis from A, side across it (positive = left face, i.e. perpLeft(dir)). */
+export function wallLocal(f: WallFrame, p: Pt): { t: number; side: number } {
+  const rel = sub(p, f.a);
+  return { t: dot(rel, f.dir), side: dot(rel, perpLeft(f.dir)) };
 }
 
 type CornerKey = 'al' | 'ar' | 'bl' | 'br';

@@ -1,9 +1,9 @@
 import type { Id, Level, Pt } from '../../model/types';
-import { detachWallEnd, finalize, mergeNodes, moveNode, moveWall, nodePos } from '../../model/ops';
+import { detachWallEnd, finalize, mergeNodes, moveNode, moveWall } from '../../model/ops';
 import { moveOpening } from '../../model/openings';
 import { snap, type SnapResult } from '../../geometry/snap';
-import { wallFrame } from '../../geometry/walls';
-import { dot, sub } from '../../geometry/vec';
+import { nodePos, wallFrame, wallLocal } from '../../geometry/walls';
+import { sub } from '../../geometry/vec';
 import { hitTest } from '../hit';
 import type { Preview, Selection, Tool, ToolContext, ToolEvent } from './types';
 
@@ -28,10 +28,8 @@ export function createSelectTool(ctx: ToolContext): Tool {
   /** Free (unsnapped) points are kept on whole millimetres. */
   const whole = (s: SnapResult): Pt => (s.kind === 'none' ? { x: Math.round(s.pt.x), y: Math.round(s.pt.y) } : s.pt);
 
-  const along = (level: Level, wallId: Id, p: Pt): number => {
-    const f = wallFrame(level, level.walls.find(w => w.id === wallId)!);
-    return dot(sub(p, f.a), f.dir);
-  };
+  const along = (level: Level, wallId: Id, p: Pt): number =>
+    wallLocal(wallFrame(level, level.walls.find(w => w.id === wallId)!), p).t;
 
   function update(e: ToolEvent): void {
     const d = drag;

@@ -1,8 +1,9 @@
 import { newId } from './ids';
 import type { Baseline, Id, Level, PlanNode, Pt, Wall, WallType } from './types';
 import { add, dist, lerp, norm, projectT, scale, sub } from '../geometry/vec';
+import { findNode, nodePos } from '../geometry/walls';
 import { refreshOpenings } from './openings';
-import { reanchorDevices, refreshDevices } from './devices';
+import { refreshDevices } from './devices';
 import { refreshZones } from './zones';
 
 /** Result of snapping a cursor point. */
@@ -19,35 +20,26 @@ function clone(level: Level): Level {
   return structuredClone(level);
 }
 
-function findNode(level: Level, id: Id): PlanNode {
-  const n = level.nodes.find(x => x.id === id);
-  if (!n) throw new Error(`node not found: ${id}`);
-  return n;
-}
-
 function findWall(level: Level, id: Id): Wall {
   const w = level.walls.find(x => x.id === id);
   if (!w) throw new Error(`wall not found: ${id}`);
   return w;
 }
 
-export function nodePos(level: Level, nodeId: Id): Pt {
-  const n = findNode(level, nodeId);
-  return { x: n.x, y: n.y };
-}
-
 function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
-/** Point on host wall axis at offset from its node A (offset clamped to [0, len]). */
-function hostPoint(level: Level, wallId: Id, offset: number): { pt: Pt; offset: number } {
-  const w = findWall(level, wallId);
+/**
+ * Point on the host wall's axis at `at`: an offset from its node A, or a point projected onto the axis.
+ * The offset is clamped to [0, len].
+ */
+function hostPoint(level: Level, w: Wall, at: number | Pt): { pt: Pt; offset: number } {
   const a = nodePos(level, w.a);
   const b = nodePos(level, w.b);
   const l = dist(a, b);
-  const o = clamp(offset, 0, l);
-  return { pt: l === 0 ? a : lerp(a, b, o / l), offset: o };
+  const offset = clamp(typeof at === 'number' ? at : projectT(at, a, b) * l, 0, l);
+  return { pt: l === 0 ? a : lerp(a, b, offset / l), offset };
 }
 
 /**
@@ -64,11 +56,7 @@ function settleNodes(out: Level): void {
       if (!n.host) continue;
       const w = out.walls.find(x => x.id === n.host!.wallId);
       if (!w) continue;
-      const a = nodePos(out, w.a);
-      const b = nodePos(out, w.b);
-      const l = dist(a, b);
-      const offset = clamp(projectT(n, a, b) * l, 0, l);
-      const pt = l === 0 ? a : lerp(a, b, offset / l);
+      const { pt, offset } = hostPoint(out, w, n);
       if (Math.abs(n.x - pt.x) > 1e-9 || Math.abs(n.y - pt.y) > 1e-9) changed = true;
       n.x = pt.x;
       n.y = pt.y;
@@ -84,10 +72,7 @@ function settleNodes(out: Level): void {
  */
 function postEdit(out: Level, before?: Level): Level {
   settleNodes(out);
-  if (before) {
-    reanchorOpenings(before, out);
-    reanchorDevices(before, out);
-  }
+  if (before) reanchorHosted(before, out);
   return refreshZones(refreshDevices(refreshOpenings(out)));
 }
 
@@ -99,13 +84,10 @@ export function finalize(level: Level, before?: Level): Level {
 /** Mutating helper on a private clone: place node (T-nodes slide along their host axis). */
 function placeNode(level: Level, nodeId: Id, to: Pt): void {
   const n = findNode(level, nodeId);
-  if (n.host && level.walls.some(w => w.id === n.host!.wallId)) {
-    const w = findWall(level, n.host.wallId);
-    const a = nodePos(level, w.a);
-    const b = nodePos(level, w.b);
-    const l = dist(a, b);
-    n.host.offset = clamp(projectT(to, a, b) * l, 0, l);
-    const pt = l === 0 ? a : lerp(a, b, n.host.offset / l);
+  const w = n.host && level.walls.find(x => x.id === n.host!.wallId);
+  if (n.host && w) {
+    const { pt, offset } = hostPoint(level, w, to);
+    n.host.offset = offset;
     n.x = pt.x;
     n.y = pt.y;
   } else {
@@ -118,7 +100,7 @@ function resolve(level: Level, e: Endpoint): { pt: Pt; nodeId?: Id; host?: { wal
   if (e.kind === 'free') return { pt: e.pt };
   if (e.kind === 'node') return { pt: nodePos(level, e.nodeId), nodeId: e.nodeId };
   const w = findWall(level, e.wallId);
-  const { pt, offset } = hostPoint(level, e.wallId, e.offset);
+  const { pt, offset } = hostPoint(level, w, e.offset);
   const l = dist(nodePos(level, w.a), nodePos(level, w.b));
   if (offset <= EPS) return { pt: nodePos(level, w.a), nodeId: w.a };
   if (l - offset <= EPS) return { pt: nodePos(level, w.b), nodeId: w.b };
@@ -176,20 +158,24 @@ export function moveNode(level: Level, nodeId: Id, to: Pt): Level {
   return postEdit(out, level);
 }
 
-/** Mutating on `out`: walls whose node A moved keep their openings at the same world position. */
-function reanchorOpenings(before: Level, out: Level): void {
+/** Mutating on `out`: walls whose node A moved keep their openings and wall devices at the same world position. */
+function reanchorHosted(before: Level, out: Level): void {
+  const hosted: { wallId: Id; offset: number }[] = [
+    ...out.openings,
+    ...out.devices.flatMap(d => (d.placement.mode === 'wall' ? [d.placement] : [])),
+  ];
   for (const w of out.walls) {
     const oldW = before.walls.find(x => x.id === w.id);
     if (!oldW || oldW.a !== w.a) continue;
-    const oa = nodePos(before, oldW.a), ob = nodePos(before, oldW.b);
-    const na = nodePos(out, w.a), nb = nodePos(out, w.b);
+    const oa = before.nodes.find(n => n.id === oldW.a), ob = before.nodes.find(n => n.id === oldW.b);
+    const na = out.nodes.find(n => n.id === w.a), nb = out.nodes.find(n => n.id === w.b);
+    if (!oa || !ob || !na || !nb) continue;
     if (oa.x === na.x && oa.y === na.y) continue;
     const nl = dist(na, nb);
     if (nl === 0) continue;
     const odir = norm(sub(ob, oa));
-    for (const o of out.openings) {
-      if (o.wallId !== w.id) continue;
-      o.offset = projectT(add(oa, scale(odir, o.offset)), na, nb) * nl;
+    for (const h of hosted) {
+      if (h.wallId === w.id) h.offset = projectT(add(oa, scale(odir, h.offset)), na, nb) * nl;
     }
   }
 }
