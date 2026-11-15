@@ -1,5 +1,5 @@
 import type { Id, Pt } from '../../model/types';
-import { addOpening } from '../../model/openings';
+import { addOpening, fits } from '../../model/openings';
 import { wallFrame, wallLocal } from '../../geometry/walls';
 import { add, scale } from '../../geometry/vec';
 import { wallAt } from '../hit';
@@ -37,10 +37,11 @@ export function createOpeningTool(ctx: ToolContext, kind: 'door' | 'window' | 'o
     preview(): Preview {
       const tg = target();
       if (!tg) return {};
-      const { width, ...rest } = def();
-      const probe = addOpening(ctx.level(), tg.wallId, kind, tg.center, width, rest);
+      const { width } = def();
+      const offset = tg.center - width / 2;
       return {
-        opening: { wallId: tg.wallId, offset: tg.center - width / 2, width, kind, invalid: probe.openingId === null },
+        // The same test addOpening runs on a click, without building the level.
+        opening: { wallId: tg.wallId, offset, width, kind, invalid: !fits(ctx.level(), tg.wallId, offset, width) },
         snap: { pt: tg.pt, kind: 'wall', endpoint: { kind: 'wall', wallId: tg.wallId, offset: tg.center } },
       };
     },

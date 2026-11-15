@@ -2,7 +2,9 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
 import type { Baseline, Level, Opening, OpeningKind, Side, Wall, WallType } from '../model/types';
 import { deleteWall, setWallProps } from '../model/ops';
-import { deleteOpening, moveOpening, resizeOpening, setOpeningProps } from '../model/openings';
+import {
+  DOOR_KINDS, deleteOpening, kindPatch, moveOpening, resizeOpening, setOpeningProps, type OpeningPatch,
+} from '../model/openings';
 import { deleteZone, renameZone } from '../model/zones';
 import { wallFrame } from '../geometry/walls';
 import { roomAreaM2 } from '../geometry/rooms';
@@ -36,31 +38,6 @@ export interface PropsOpts {
   setNotice(msg: string | null): void;
 }
 
-const DOOR_KINDS: OpeningKind[] = ['door', 'gate', 'wicket'];
-
-/** Patch for a kind switch: doors get hinge+swing, windows get outside, irrelevant fields are dropped. */
-export function kindPatch(o: Opening, kind: OpeningKind): Partial<Opening> {
-  if (DOOR_KINDS.includes(kind)) return { kind, hinge: o.hinge ?? 'start', swing: o.swing ?? 'left', outside: undefined };
-  if (kind === 'window') return { kind, outside: o.outside ?? 'left', hinge: undefined, swing: undefined };
-  return { kind, hinge: undefined, swing: undefined, outside: undefined };
-}
-
-/** setOpeningProps, then strips fields the patch set to undefined so they disappear from the JSON. */
-export function applyOpeningPatch(level: Level, id: string, patch: Partial<Opening>): Level {
-  const next = setOpeningProps(level, id, patch);
-  const drop = Object.keys(patch).filter(k => patch[k as keyof Opening] === undefined) as (keyof Opening)[];
-  if (drop.length === 0) return next;
-  return {
-    ...next,
-    openings: next.openings.map(o => {
-      if (o.id !== id) return o;
-      const c = { ...o };
-      for (const k of drop) delete c[k];
-      return c;
-    }),
-  };
-}
-
 /** Width/thickness field: a malformed value reverts with the width message. */
 function mmField(o: PropsOpts, value: number, apply: (v: number) => boolean | void): TemplateResult {
   return numField({ value, rule: { min: 1 }, bad: 'props.badWidth', setNotice: o.setNotice, apply });
@@ -91,7 +68,7 @@ function wallProps(w: Wall, o: PropsOpts): TemplateResult {
 
 function openingProps(op: Opening, o: PropsOpts): TemplateResult {
   const kinds: OpeningKind[] = ['door', 'window', 'opening', ...(DOOR_KINDS.slice(1).includes(op.kind) ? [op.kind] : [])];
-  const patch = (p: Partial<Opening>) => o.commit(applyOpeningPatch(o.level, op.id, p));
+  const patch = (p: OpeningPatch) => o.commit(setOpeningProps(o.level, op.id, p));
   const sides = (['left', 'right'] as Side[]).map(v => ({ v, label: t(`side.${v}`) }));
   const isDoor = DOOR_KINDS.includes(op.kind);
   return html`

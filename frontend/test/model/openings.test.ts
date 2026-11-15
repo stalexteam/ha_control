@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Level } from '../../src/model/types';
-import { addOpening, deleteOpening, moveOpening, refreshOpenings, setOpeningProps } from '../../src/model/openings';
+import { addOpening, deleteOpening, fits, kindPatch, moveOpening, refreshOpenings, setOpeningProps } from '../../src/model/openings';
+import { rectRoomLevel } from '../fixtures';
 import { deleteWall, moveNode } from '../../src/model/ops';
 
 /** Single 3000 mm wall (0,0)-(3000,0). */
@@ -61,9 +62,54 @@ describe('moveOpening / setOpeningProps / deleteOpening', () => {
     const l = setOpeningProps(r.level, r.openingId!, { swing: 'right', hinge: 'end' });
     expect(l.openings[0]).toMatchObject({ swing: 'right', hinge: 'end' });
   });
+  it('setOpeningProps removes keys the patch sets to undefined; other openings untouched', () => {
+    const a = addOpening(oneWall(), 'w', 'door', 500);
+    const r = addOpening(a.level, 'w', 'door', 2000);
+    const l = setOpeningProps(r.level, r.openingId!, { swing: undefined, hinge: 'end' });
+    const o = l.openings[1];
+    expect(o.hinge).toBe('end');
+    expect('swing' in o).toBe(false);
+    expect(l.openings[0]).toEqual(r.level.openings[0]);
+    expect(setOpeningProps(r.level, 'nope', { hinge: 'end' })).toBe(r.level);
+  });
   it('deleteOpening removes it', () => {
     const r = addOpening(oneWall(), 'w', 'door', 500);
     expect(deleteOpening(r.level, r.openingId!).openings).toHaveLength(0);
+  });
+});
+
+describe('opening kind switch', () => {
+  it('door -> window drops hinge/swing and sets outside; window -> door restores hinge/swing', () => {
+    const r = addOpening(rectRoomLevel(4000, 3000, 400), 'w0', 'door', 2000);
+    const id = r.openingId!;
+    const win = setOpeningProps(r.level, id, kindPatch(r.level.openings[0], 'window'));
+    const w = win.openings[0];
+    expect(w.kind).toBe('window');
+    expect(w.outside).toBe('left');
+    expect('hinge' in w || 'swing' in w).toBe(false);
+    const door = setOpeningProps(win, id, kindPatch(w, 'door'));
+    const d = door.openings[0];
+    expect(d).toMatchObject({ kind: 'door', hinge: 'start', swing: 'left' });
+    expect('outside' in d).toBe(false);
+    const gap = setOpeningProps(door, id, kindPatch(d, 'opening')).openings[0];
+    expect(['hinge', 'swing', 'outside'].some(k => k in gap)).toBe(false);
+  });
+  it('a gate keeps its hinge and swing when switched to a wicket', () => {
+    const r = addOpening(oneWall(), 'w', 'gate', 1500, 2000, { hinge: 'end', swing: 'right' });
+    expect(kindPatch(r.level.openings[0], 'wicket')).toEqual({ kind: 'wicket', hinge: 'end', swing: 'right', outside: undefined });
+  });
+});
+
+describe('fits', () => {
+  it('inside the wall and clear of other openings (the opening itself can be ignored)', () => {
+    const r = addOpening(oneWall(), 'w', 'door', 1500); // [1050, 1950]
+    expect(fits(r.level, 'w', 0, 1000)).toBe(true);
+    expect(fits(r.level, 'w', 1950, 1050)).toBe(true);
+    expect(fits(r.level, 'w', 1000, 900)).toBe(false);
+    expect(fits(r.level, 'w', 1000, 900, r.openingId!)).toBe(true);
+    expect(fits(r.level, 'w', 2500, 600)).toBe(false);
+    expect(fits(r.level, 'w', -1, 500)).toBe(false);
+    expect(fits(r.level, 'nope', 0, 500)).toBe(false);
   });
 });
 

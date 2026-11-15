@@ -5,12 +5,18 @@ import { OPENING_DEFAULT_WIDTH, type Id, type Level, type Opening, type OpeningK
 
 const EPS = 1e-6; // mm
 
+/** Kinds drawn as a door leaf: they carry hinge and swing. */
+export const DOOR_KINDS: readonly OpeningKind[] = ['door', 'gate', 'wicket'];
+
+/** Fields setOpeningProps may change; a key set to undefined is removed from the opening. */
+export type OpeningPatch = Partial<Pick<Opening, 'width' | 'kind' | 'hinge' | 'swing' | 'outside'>>;
+
 function overlaps(o: { offset: number; width: number }, p: { offset: number; width: number }): boolean {
   return o.offset < p.offset + p.width - EPS && p.offset < o.offset + o.width - EPS;
 }
 
 /** True when [offset, offset+width] fits the wall and overlaps no other opening on it. */
-function fits(level: Level, wallId: Id, offset: number, width: number, ignore?: Id): boolean {
+export function fits(level: Level, wallId: Id, offset: number, width: number, ignore?: Id): boolean {
   const l = wallLen(level, wallId);
   if (l === null || width <= 0 || offset < -EPS || offset + width > l + EPS) return false;
   return !level.openings.some(o => o.wallId === wallId && o.id !== ignore && overlaps(o, { offset, width }));
@@ -28,7 +34,7 @@ export function addOpening(
   const offset = centerOffset - w / 2;
   if (!fits(level, wallId, offset, w)) return { level, openingId: null };
   const o: Opening = { id: newId(), wallId, kind, offset, width: w, invalid: false };
-  if (kind === 'door' || kind === 'gate' || kind === 'wicket') { o.hinge = extra.hinge ?? 'start'; o.swing = extra.swing ?? 'left'; }
+  if (DOOR_KINDS.includes(kind)) { o.hinge = extra.hinge ?? 'start'; o.swing = extra.swing ?? 'left'; }
   if (kind === 'window') o.outside = extra.outside ?? 'left';
   return { level: refreshZones(withOpenings(level, [...level.openings, o])), openingId: o.id };
 }
@@ -47,11 +53,22 @@ export function resizeOpening(level: Level, id: Id, width: number): Level {
   return refreshZones(refreshOpenings(withOpenings(level, level.openings.map(x => (x.id === id ? { ...x, width } : x)))));
 }
 
-export function setOpeningProps(
-  level: Level, id: Id, patch: Partial<Pick<Opening, 'width' | 'kind' | 'hinge' | 'swing' | 'outside'>>,
-): Level {
+/** Patch for a kind switch: doors get hinge+swing, windows get outside, irrelevant fields are dropped. */
+export function kindPatch(o: Opening, kind: OpeningKind): OpeningPatch {
+  if (DOOR_KINDS.includes(kind)) return { kind, hinge: o.hinge ?? 'start', swing: o.swing ?? 'left', outside: undefined };
+  if (kind === 'window') return { kind, outside: o.outside ?? 'left', hinge: undefined, swing: undefined };
+  return { kind, hinge: undefined, swing: undefined, outside: undefined };
+}
+
+/** Applies the patch; keys it sets to undefined are removed so they disappear from the JSON. */
+export function setOpeningProps(level: Level, id: Id, patch: OpeningPatch): Level {
   if (!level.openings.some(x => x.id === id)) return level;
-  return refreshZones(refreshOpenings(withOpenings(level, level.openings.map(x => (x.id === id ? { ...x, ...patch } : x)))));
+  const patched = (x: Opening): Opening => {
+    const c = { ...x, ...patch };
+    for (const k of Object.keys(patch) as (keyof OpeningPatch)[]) if (patch[k] === undefined) delete c[k];
+    return c;
+  };
+  return refreshZones(refreshOpenings(withOpenings(level, level.openings.map(x => (x.id === id ? patched(x) : x)))));
 }
 
 export function deleteOpening(level: Level, id: Id): Level {

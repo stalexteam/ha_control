@@ -1,25 +1,30 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest';
-import { applyOpeningPatch, kindPatch } from '../../src/panel/props-panel';
 import { addOpening } from '../../src/model/openings';
 import { initialNext } from '../../src/panel/next-object';
 import { rectRoomLevel } from '../fixtures';
+import type { Level } from '../../src/model/types';
 
-describe('opening kind switch', () => {
-  it('door -> window drops hinge/swing and sets outside; window -> door restores hinge/swing', () => {
+describe('opening kind field', () => {
+  it('switching a door to a window commits the model kind patch (hinge/swing dropped, outside set)', async () => {
+    const { render } = await import('lit');
+    const { renderProps } = await import('../../src/panel/props-panel');
+    const host = document.createElement('div');
     const r = addOpening(rectRoomLevel(4000, 3000, 400), 'w0', 'door', 2000);
-    const id = r.openingId!;
-    const win = applyOpeningPatch(r.level, id, kindPatch(r.level.openings[0], 'window'));
-    const w = win.openings[0];
-    expect(w.kind).toBe('window');
-    expect(w.outside).toBe('left');
+    const commits: Level[] = [];
+    render(renderProps({
+      level: r.level, selection: { kind: 'opening', id: r.openingId! }, tool: 'select',
+      boxMeasure: 'inner', wallType: 'bearing', thickness: 400, notice: null,
+      commit: n => commits.push(n), setBoxMeasure: () => {}, setWallType: () => {}, setThickness: () => {},
+      next: initialNext(), setNext: () => {}, setNotice: () => {},
+    }), host);
+    const kind = host.querySelector('select') as HTMLSelectElement;
+    kind.value = 'window';
+    kind.dispatchEvent(new Event('change'));
+    expect(commits).toHaveLength(1);
+    const w = commits[0].openings[0];
+    expect(w).toMatchObject({ kind: 'window', outside: 'left' });
     expect('hinge' in w || 'swing' in w).toBe(false);
-    const door = applyOpeningPatch(win, id, kindPatch(w, 'door'));
-    const d = door.openings[0];
-    expect(d).toMatchObject({ kind: 'door', hinge: 'start', swing: 'left' });
-    expect('outside' in d).toBe(false);
-    const gap = applyOpeningPatch(door, id, kindPatch(d, 'opening')).openings[0];
-    expect(['hinge', 'swing', 'outside'].some(k => k in gap)).toBe(false);
   });
 });
 
