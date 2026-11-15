@@ -43,10 +43,11 @@ function notConfiguredStates(plan: Plan | undefined): Record<string, ContainerSt
  * expected_revision is a conflict even with force.
  * `plan_studio/containers/subscribe` answers once with a full snapshot: every container of the stored plan as error,
  * not configured. Other subscriptions are unknown.
+ * `powerFrame` is reserved for the power subscription (not answered yet).
  * With `demo` it also has live states and answers the entity, device and area registry commands with a small
  * sample (dev harness); without it those commands are unknown, so tests bring their own HA data.
  */
-export function createMockHass(opts: { darkMode?: boolean; storage?: Storage; demo?: boolean } = {}): HassLike {
+export function createMockHass(opts: { darkMode?: boolean; storage?: Storage; demo?: boolean; powerFrame?: unknown } = {}): HassLike {
   const storage = opts.storage ?? localStorage;
   return {
     themes: { darkMode: opts.darkMode ?? true },

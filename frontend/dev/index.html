@@ -21,7 +21,9 @@
   <plan-studio-panel id="panel"></plan-studio-panel>
   <script type="module">
     import '../src/panel/plan-studio-panel.ts';
-    import { createMockHass, simulateForeignSave, clearPlans } from './mock-hass.ts';
+    import { createMockHass, simulateForeignSave, clearPlans, STORAGE_KEY } from './mock-hass.ts';
+    import { memoryStorage } from './memory-storage.ts';
+    import { SCENES } from './scenes.ts';
 
     const params = new URLSearchParams(location.search);
     const dark = params.get('dark') !== '0';
@@ -29,7 +31,27 @@
     document.body.style.background = dark ? '#0b1220' : '#f3efe8';
 
     const panel = document.getElementById('panel');
-    panel.hass = createMockHass({ darkMode: dark, demo: true });
+    // scene=<name>: seed an in-memory store from SCENES (localStorage stays untouched).
+    const scene = SCENES[params.get('scene') ?? ''];
+    const plans = scene ? Object.fromEntries(scene.plans.map(p => [p.id, p])) : null;
+    panel.hass = createMockHass({
+      darkMode: dark, demo: true,
+      ...(scene ? { storage: memoryStorage({ [STORAGE_KEY]: JSON.stringify({ plans }) }), powerFrame: scene.powerFrame } : {}),
+    });
+
+    // step=<EditorMode> and select=<kind>:<id>: applied once the panel has loaded its plan.
+    const step = params.get('step'), select = params.get('select');
+    if (step || select) {
+      const timer = setInterval(() => {
+        if (!panel.plan) return;
+        clearInterval(timer);
+        if (step) panel.setMode(step);
+        if (select) {
+          const i = select.indexOf(':');
+          panel.selection = { kind: select.slice(0, i), id: select.slice(i + 1) };
+        }
+      }, 50);
+    }
 
     const reload = () => {
       params.set('dark', document.getElementById('dark').checked ? '1' : '0');
