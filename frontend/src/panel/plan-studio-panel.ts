@@ -12,6 +12,7 @@ import { bindingStatus, type BindStatus } from '../model/bindings';
 import { presence } from '../binding/ha-meta';
 import { devicePose } from '../geometry/devices';
 import { History } from '../editor/history';
+import { defaultPower, type PlanDoc, type PowerSchema } from '../model/power';
 import { SaveController } from '../editor/save';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
 import type { HassLike, PlanSummary } from '../api';
@@ -86,7 +87,9 @@ export class PlanStudioPanel extends LitElement {
   /** A delete request is running. */
   @state() deleting = false;
 
-  history: History<Level> | null = null;
+  history: History<PlanDoc> | null = null;
+  /** Schematic shown while the plan has none; made once per adopt, never saved until edited. */
+  lazyPower: PowerSchema = defaultPower();
   readonly save: SaveController;
   activeTool: Tool;
   loading = false;
@@ -179,16 +182,32 @@ export class PlanStudioPanel extends LitElement {
 
   // ---- editing ----
 
+  get level(): Level | null { return this.history?.current.level ?? null; }
+
+  get power(): PowerSchema { return this.history?.current.power ?? this.lazyPower; }
+
   commit(next: Level): void {
     if (!this.history) return;
-    this.history.push(next);
+    this.history.push({ ...this.history.current, level: next });
     this.save.markDirty();
-    if (this.selection && !selectionExists(next, this.selection)) {
+    this.dropStaleSelection();
+    this.requestUpdate();
+  }
+
+  commitPower(next: PowerSchema): void {
+    if (!this.history) return;
+    this.history.push({ ...this.history.current, power: next });
+    this.save.markDirty();
+    this.dropStaleSelection();
+    this.requestUpdate();
+  }
+
+  private dropStaleSelection(): void {
+    if (this.history && this.selection && !selectionExists(this.history.current.level, this.selection, this.power)) {
       this.activeTool.cancel();
       this.selection = null;
       this.fieldNotice = null;
     }
-    this.requestUpdate();
   }
 
   /**
@@ -197,8 +216,8 @@ export class PlanStudioPanel extends LitElement {
    */
   deleteSelection(): boolean {
     const s = this.selection;
-    const level = this.history?.current;
-    if (this.mode === 'binding' || !s || !level || s.kind === 'node' || !selectionExists(level, s)) return false;
+    const level = this.level;
+    if (this.mode === 'binding' || !s || !level || s.kind === 'node' || !selectionExists(level, s, this.power)) return false;
     if ((this.mode === 'zones') !== (s.kind === 'automationZone')) return false;
     this.commit(s.kind === 'wall' ? deleteWall(level, s.id) : s.kind === 'opening' ? deleteOpening(level, s.id)
       : s.kind === 'device' ? deleteDevice(level, s.id) : s.kind === 'automationZone' ? deleteAutomationZone(level, s.id)
@@ -213,11 +232,11 @@ export class PlanStudioPanel extends LitElement {
    * Undo / redo drop the selection, except in the Binding step, which keeps the selected device while it exists;
    * the field notice goes with a dropped selection.
    */
-  private step(op: () => Level | null): void {
+  private step(op: () => PlanDoc | null): void {
     this.activeTool.cancel();
     if (op()) this.save.markDirty();
-    const s = this.selection, level = this.history?.current;
-    this.selection = this.mode === 'binding' && s && level && selectionExists(level, s) ? s : null;
+    const s = this.selection, level = this.level;
+    this.selection = this.mode === 'binding' && s && level && selectionExists(level, s, this.power) ? s : null;
     if (!this.selection) this.fieldNotice = null;
     this.requestUpdate();
   }
@@ -247,7 +266,7 @@ export class PlanStudioPanel extends LitElement {
 
   /** Selects a device (binding list, Next unbound device) and pans the plan to it when it is off-screen. */
   pickDevice(id: Id): void {
-    const level = this.history?.current;
+    const level = this.level;
     const d = level?.devices.find(x => x.id === id);
     if (!level || !d) return;
     this.ctx.select({ kind: 'device', id });
@@ -257,7 +276,7 @@ export class PlanStudioPanel extends LitElement {
 
   /** Selects an automation zone (zone list) and pans the plan to its label when it is off-screen. */
   pickZone(id: Id): void {
-    const level = this.history?.current;
+    const level = this.level;
     const z = level ? levelZones(level).find(x => x.id === id) : undefined;
     if (!level || !z) return;
     this.ctx.select({ kind: 'automationZone', id });
@@ -265,7 +284,7 @@ export class PlanStudioPanel extends LitElement {
   }
 
   nextUnboundDevice(): void {
-    const level = this.history?.current;
+    const level = this.level;
     const id = level ? nextUnbound(level, this.selection?.kind === 'device' ? this.selection.id : null, this.bindStatus) : null;
     if (id) this.pickDevice(id);
   }
@@ -276,7 +295,7 @@ export class PlanStudioPanel extends LitElement {
 
   toMm(e: { clientX: number; clientY: number }): Pt { return screenToMm(this.svgEl(), this.view, e); }
 
-  private fit(): void { this.view = fitView(this.history?.current.nodes ?? [], this.size.w, this.size.h); }
+  private fit(): void { this.view = fitView(this.level?.nodes ?? [], this.size.w, this.size.h); }
 
   /**
    * After a chrome button is clicked, give focus back to the panel: otherwise Enter / Space typed for the
@@ -320,7 +339,7 @@ export class PlanStudioPanel extends LitElement {
         : t('load.loading')}</div>`;
     }
     const pal = paletteFor(!!this.hass?.themes?.darkMode);
-    const level = this.history.current;
+    const level = this.history.current.level;
     const preview = this.activeTool.preview();
     const { x, y, scale } = this.view;
     const w = Math.max(1, this.size.w) / scale, h = Math.max(1, this.size.h) / scale;

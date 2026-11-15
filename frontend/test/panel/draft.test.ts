@@ -33,7 +33,7 @@ describe('local draft', () => {
     $<HTMLButtonElement>(el2, '[data-action="restore"]').click();
     await el2.updateComplete;
     expect(el2.plan!.id).toBe(id);
-    expect(el2.history!.current.walls.length).toBe(4);
+    expect(el2.history!.current.level.walls.length).toBe(4);
     expect(el2.save.dirty).toBe(true);
     expect(el2.save.baseRevision).toBeNull();
     await pressSave(el2);
@@ -47,15 +47,15 @@ describe('local draft', () => {
     await pressSave(el);
     expect(draftKeys()).toEqual([]);
     key(el, 'keydown', 'z', { ctrlKey: true });
-    expect(el.history!.current.walls.length).toBe(0);
+    expect(el.history!.current.level.walls.length).toBe(0);
     el.remove();
 
     const el2 = await mount();
-    expect(el2.history!.current.walls.length).toBe(4); // server copy until the user decides
+    expect(el2.history!.current.level.walls.length).toBe(4); // server copy until the user decides
     await prompt(el2);
     $<HTMLButtonElement>(el2, '[data-action="restore"]').click();
     await el2.updateComplete;
-    expect(el2.history!.current.walls.length).toBe(0);
+    expect(el2.history!.current.level.walls.length).toBe(0);
     expect(el2.save.dirty).toBe(true);
     expect(el2.save.baseRevision).toBe(1);
     await pressSave(el2);
@@ -83,7 +83,7 @@ describe('local draft', () => {
     $<HTMLButtonElement>(el3, '[data-action="discard"]').click();
     await el3.updateComplete;
     expect(draftKeys()).toEqual([]);
-    expect(el3.history!.current.walls.length).toBe(0);
+    expect(el3.history!.current.level.walls.length).toBe(0);
     expect(el3.save.dirty).toBe(false);
   });
 
@@ -134,7 +134,7 @@ describe('undecided draft', () => {
     pointer(el2, 'pointerdown', 300, -100);
     pointer(el2, 'pointerup', 300, -100);
     key(el2, 'keydown', 'Delete');
-    expect(el2.history!.current.walls.length).toBe(3);
+    expect(el2.history!.current.level.walls.length).toBe(3);
     await new Promise(r => setTimeout(r, 700)); // past the draft debounce
     expect(localStorage.getItem(`plan_studio.draft.${id}`)).toBe(before);
     el2.remove(); // disconnect must not overwrite it either
@@ -144,7 +144,7 @@ describe('undecided draft', () => {
 
     $<HTMLButtonElement>(el2, '.draft-banner [data-action="banner-restore"]').click();
     await el2.updateComplete;
-    expect(el2.history!.current.walls.length).toBe(0);
+    expect(el2.history!.current.level.walls.length).toBe(0);
     expect(el2.shadowRoot!.querySelector('.draft-banner')).toBeNull();
   });
 

@@ -127,11 +127,13 @@ describe('renderLevel zones layer', () => {
   });
 });
 
+const NO_POWER = { blocks: [], wires: [] };
+
 describe('selectionExists', () => {
   it('handles automationZone', () => {
     const { level, a } = twoZones();
-    expect(selectionExists(level, { kind: 'automationZone', id: a })).toBe(true);
-    expect(selectionExists(level, { kind: 'automationZone', id: 'nope' })).toBe(false);
-    expect(selectionExists(rectRoomLevel(1000, 1000, 100), { kind: 'automationZone', id: a })).toBe(false);
+    expect(selectionExists(level, { kind: 'automationZone', id: a }, NO_POWER)).toBe(true);
+    expect(selectionExists(level, { kind: 'automationZone', id: 'nope' }, NO_POWER)).toBe(false);
+    expect(selectionExists(rectRoomLevel(1000, 1000, 100), { kind: 'automationZone', id: a }, NO_POWER)).toBe(false);
   });
 });

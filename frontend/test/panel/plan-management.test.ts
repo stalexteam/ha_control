@@ -54,7 +54,7 @@ describe('plan management', () => {
     btn(el, 'delete-plan').click();
     await el.updateComplete;
     key(el, 'keydown', 'z', { ctrlKey: true });
-    expect(el.history!.current.walls.length).toBe(4);
+    expect(el.history!.current.level.walls.length).toBe(4);
     key(el, 'keydown', 'Escape');
     await el.updateComplete;
     expect(el.shadowRoot!.querySelector('.dialog')).toBeNull();
@@ -71,7 +71,7 @@ describe('plan management', () => {
     expect(stored()).toEqual([]);
     expect(el.save.baseRevision).toBeNull();
     expect(el.save.dirty).toBe(false);
-    expect(el.history!.current.walls.length).toBe(0);
+    expect(el.history!.current.level.walls.length).toBe(0);
   });
 
   it('shows a delete error and keeps the plan open', async () => {
@@ -131,14 +131,14 @@ describe('plan management', () => {
     btn(el, 'new-cancel').click();
     await el.updateComplete;
     expect(el.plan!.id).toBe(first.id);
-    expect(el.history!.current.walls.length).toBe(4);
+    expect(el.history!.current.level.walls.length).toBe(4);
     btn(el, 'new-plan').click();
     await el.updateComplete;
     btn(el, 'new-discard').click();
     await vi.waitFor(() => expect(el.plan!.id).not.toBe(first.id));
     expect(el.save.baseRevision).toBeNull();
     expect(el.save.dirty).toBe(false);
-    expect(el.history!.current.walls.length).toBe(0);
+    expect(el.history!.current.level.walls.length).toBe(0);
     expect(localStorage.getItem(`plan_studio.draft.${first.id}`)).toBeNull();
   });
 

@@ -1,4 +1,5 @@
 import type { Pt, Id, Level, OpeningKind, DeviceKind, DevicePlacement, DeviceProps } from "../../model/types";
+import type { PowerSchema } from "../../model/power";
 import type { WallProps } from "../../model/ops";
 import type { SnapResult } from "../../geometry/snap";
 
@@ -20,6 +21,10 @@ export interface ToolContext {
   level(): Level;
   /** Pushes `next` to History and marks the document dirty. */
   commit(next: Level): void;
+  /** The power schematic (a default one while the plan has none). */
+  power(): PowerSchema;
+  /** Pushes `next` to the shared History and marks the document dirty. */
+  commitPower(next: PowerSchema): void;
   /** Screen pixels per mm. */
   scale(): number;
   /** Pick tolerance in mm (10 screen px). */
@@ -47,7 +52,7 @@ export interface OpeningDefaults {
   outside?: "left" | "right";
 }
 
-export type Selection = { kind: "wall" | "node" | "opening" | "zone" | "automationZone" | "device"; id: Id };
+export type Selection = { kind: "wall" | "node" | "opening" | "zone" | "automationZone" | "device" | "powerBlock" | "powerWire"; id: Id };
 
 /** Transient overlay a tool asks the renderer to draw. */
 export interface Preview {

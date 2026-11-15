@@ -1,6 +1,7 @@
-import type { Id, Level, Plan } from '../model/types';
+import type { Id, Plan } from '../model/types';
 import { emptyPlan, normalizeLevel } from '../model/types';
 import { History } from '../editor/history';
+import { defaultPower, normalizePower, type PlanDoc } from '../model/power';
 import type { Draft } from '../editor/draft';
 import { deletePlan, getPlan, listPlans, type PlanSummary } from '../api';
 import { t } from '../i18n';
@@ -155,7 +156,9 @@ export class PlanSession {
 
   adopt(input: Plan): void {
     this.h.plan = { ...input, levels: input.levels.map(normalizeLevel) };
-    this.h.history = new History<Level>(this.h.plan.levels[0]);
+    const power = normalizePower(this.h.plan.power);
+    this.h.history = new History<PlanDoc>({ level: this.h.plan.levels[0], ...(power ? { power } : {}) });
+    this.h.lazyPower = defaultPower();
     this.h.activeTool.cancel();
     this.h.activeTool = createTool(this.h.toolId, this.h.ctx);
     this.h.selection = null;
@@ -201,8 +204,10 @@ export class PlanSession {
 
   currentPlan(): Plan {
     const plan = this.h.plan!;
-    const levels = plan.levels.map((l, i) => (i === 0 ? this.h.history!.current : l));
-    return { ...plan, levels, revision: this.h.save.baseRevision ?? 0 };
+    const { level, power } = this.h.history!.current;
+    const levels = plan.levels.map((l, i) => (i === 0 ? level : l));
+    const { power: _drop, ...rest } = plan;
+    return { ...rest, levels, ...(power ? { power } : {}), revision: this.h.save.baseRevision ?? 0 };
   }
 
   async doSave(): Promise<void> {

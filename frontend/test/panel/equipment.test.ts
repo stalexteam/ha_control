@@ -33,7 +33,7 @@ describe('Equipment tab', () => {
     await tool(el, 'ceiling_light');
     click(el, 1000, 1000);
     await el.updateComplete;
-    expect(el.history!.current.devices).toHaveLength(1);
+    expect(el.history!.current.level.devices).toHaveLength(1);
     await pressSave(el);
     expect(el.save.state).toBe('saved');
     const devices = stored()[0].levels[0].devices;
@@ -69,7 +69,7 @@ describe('Equipment tab', () => {
     await tool(el, 'wall_switch');
     click(el, 100, -100);
     await el.updateComplete;
-    const devices = el.history!.current.devices;
+    const devices = el.history!.current.level.devices;
     expect(devices).toHaveLength(1);
     expect(devices[0].placement.mode).toBe('wall');
     const wallId = devices[0].placement.mode === 'wall' ? devices[0].placement.wallId : '';
@@ -79,12 +79,12 @@ describe('Equipment tab', () => {
     expect(el.selection).toEqual({ kind: 'wall', id: wallId });
     key(el, 'keydown', 'Delete');
     await el.updateComplete;
-    expect(el.history!.current.walls.some(w => w.id === wallId)).toBe(false);
-    expect(el.history!.current.devices).toHaveLength(0);
+    expect(el.history!.current.level.walls.some(w => w.id === wallId)).toBe(false);
+    expect(el.history!.current.level.devices).toHaveLength(0);
     key(el, 'keydown', 'z', { ctrlKey: true, code: 'KeyZ' });
     await el.updateComplete;
-    expect(el.history!.current.walls.some(w => w.id === wallId)).toBe(true);
-    expect(el.history!.current.devices).toHaveLength(1);
+    expect(el.history!.current.level.walls.some(w => w.id === wallId)).toBe(true);
+    expect(el.history!.current.level.devices).toHaveLength(1);
   });
 
   it('Delete and Backspace both delete the selected device; Backspace in a text field does not', async () => {
@@ -100,7 +100,7 @@ describe('Equipment tab', () => {
       expect(el.selection?.kind).toBe('device');
       key(el, 'keydown', k);
       await el.updateComplete;
-      expect(el.history!.current.devices).toHaveLength(0);
+      expect(el.history!.current.level.devices).toHaveLength(0);
     }
     const el = await mount();
     await tab(el, 'equipment');
@@ -113,7 +113,7 @@ describe('Equipment tab', () => {
     const field = el.shadowRoot!.querySelector('input')!;
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, composed: true }));
     await el.updateComplete;
-    expect(el.history!.current.devices).toHaveLength(1);
+    expect(el.history!.current.level.devices).toHaveLength(1);
   });
 
   it('unchecking Cones & zones removes the cone elements', async () => {
@@ -143,7 +143,7 @@ describe('Equipment tab', () => {
     await el.updateComplete;
     click(el, 100, -100);
     await el.updateComplete;
-    const d = el.history!.current.devices;
+    const d = el.history!.current.level.devices;
     expect(d).toHaveLength(1);
     expect(d[0].props).toMatchObject({ kind: 'wall_light', coneAngle: 60 });
   });
@@ -167,7 +167,7 @@ describe('Equipment tab', () => {
     click(el, 100, -100);
     await el.updateComplete;
     const f = () => $<HTMLInputElement>(el, '.props input[data-field="aim"]');
-    const aim = () => { const p = el.history!.current.devices[0].placement; return p.mode === 'wall' ? p.aim : NaN; };
+    const aim = () => { const p = el.history!.current.level.devices[0].placement; return p.mode === 'wall' ? p.aim : NaN; };
     f().value = '-30'; f().dispatchEvent(new Event('change')); await el.updateComplete;
     expect(aim()).toBe(-30);
     f().value = '90'; f().dispatchEvent(new Event('change')); await el.updateComplete;
@@ -197,17 +197,17 @@ describe('Equipment tab', () => {
     await tool(el, 'ceiling_light');
     click(el, 1000, 1000);
     await el.updateComplete;
-    const id = el.history!.current.devices[0].id;
+    const id = el.history!.current.level.devices[0].id;
     expect(el.selection).toEqual({ kind: 'device', id });
     const rot = $<HTMLInputElement>(el, '.props input[data-field="rotation"]');
     rot.value = '45';
     rot.dispatchEvent(new Event('change'));
     await el.updateComplete;
-    const pl = el.history!.current.devices[0].placement;
+    const pl = el.history!.current.level.devices[0].placement;
     expect(pl.mode === 'free' && pl.rotation).toBe(45);
     $<HTMLButtonElement>(el, '.props button[data-action="delete-device"]').click();
     await el.updateComplete;
-    expect(el.history!.current.devices).toHaveLength(0);
+    expect(el.history!.current.level.devices).toHaveLength(0);
     expect(el.selection).toBeNull();
   });
 });
@@ -225,9 +225,9 @@ describe('Equipment tab: container type', () => {
     await tool(el, 'wall_switch');
     click(el, 100, -100);
     await el.updateComplete;
-    const lvl = el.history!.current;
+    const lvl = el.history!.current.level;
     const d0 = lvl.devices[0];
-    el.history!.push({ ...lvl, devices: [{ ...d0, bindings: { state: 'switch.lamp' } }] });
+    el.commit({ ...lvl, devices: [{ ...d0, bindings: { state: 'switch.lamp' } }] });
     el.requestUpdate();
     await el.updateComplete;
     const sel = $<HTMLSelectElement>(el, '.props select[data-field="kind"]');
@@ -235,14 +235,14 @@ describe('Equipment tab: container type', () => {
     sel.value = 'smart_button';
     sel.dispatchEvent(new Event('change'));
     await el.updateComplete;
-    const d = el.history!.current.devices[0];
+    const d = el.history!.current.level.devices[0];
     expect(d.props.kind).toBe('smart_button');
     expect(d.name).toBe(d0.name);
     expect(d.placement).toEqual(d0.placement);
     expect(d.bindings?.state).toBeUndefined();
     key(el, 'keydown', 'z', { ctrlKey: true, code: 'KeyZ' });
     await el.updateComplete;
-    const back = el.history!.current.devices[0];
+    const back = el.history!.current.level.devices[0];
     expect(back.props.kind).toBe('wall_switch');
     expect(back.bindings).toEqual({ state: 'switch.lamp' });
   });
@@ -253,7 +253,7 @@ describe('Equipment tab: container type', () => {
     await tool(el, 'smart_button');
     click(el, 1000, 1000);
     await el.updateComplete;
-    const d = el.history!.current.devices[0];
+    const d = el.history!.current.level.devices[0];
     expect(d.props.kind).toBe('smart_button');
     expect(d.placement.mode).toBe('free');
     expect(el.shadowRoot!.querySelector('.props select[data-field="kind"]')).toBeNull();
@@ -268,8 +268,8 @@ describe('Equipment tab: container type', () => {
     await tool(el, 'smart_button');
     click(el, 1000, 1000);
     await el.updateComplete;
-    expect(el.history!.current.devices[0].props.kind).toBe('smart_button');
-    expect(el.history!.current.devices[0].placement.mode).toBe('free');
+    expect(el.history!.current.level.devices[0].props.kind).toBe('smart_button');
+    expect(el.history!.current.level.devices[0].placement.mode).toBe('free');
   });
 });
 
@@ -285,26 +285,26 @@ describe('Equipment tab: rejected edits', () => {
     click(el, 3000, 0);
     key(el, 'keydown', 'Escape');
     await el.updateComplete;
-    expect(el.history!.current.walls).toHaveLength(1);
+    expect(el.history!.current.level.walls).toHaveLength(1);
     await tab(el, 'equipment');
     await tool(el, 'wall_switch');
     click(el, 1000, 0);
     await el.updateComplete;
-    expect(el.history!.current.devices).toHaveLength(1);
+    expect(el.history!.current.level.devices).toHaveLength(1);
     expect(el.selection?.kind).toBe('device');
   }
 
   it('an offset outside the wall is rejected: notice shown, offset and field unchanged', async () => {
     const el = await mount();
     await wallSwitch(el);
-    const before = el.history!.current.devices[0].placement;
+    const before = el.history!.current.level.devices[0].placement;
     expect($<HTMLSelectElement>(el, '.props select[data-field="side"]').value).toBe(before.mode === 'wall' ? before.side : '');
     const f = $<HTMLInputElement>(el, '.props input[data-field="offset"]');
     const shown = f.value;
     f.value = '5000';
     f.dispatchEvent(new Event('change'));
     await el.updateComplete;
-    expect(el.history!.current.devices[0].placement).toEqual(before);
+    expect(el.history!.current.level.devices[0].placement).toEqual(before);
     expect($<HTMLInputElement>(el, '.props input[data-field="offset"]').value).toBe(shown);
     expect($(el, '.props .warn').textContent).toContain('Does not fit');
   });
@@ -326,7 +326,7 @@ describe('Equipment tab: rejected edits', () => {
     click(el, 1000, 1000);
     await el.updateComplete;
     const rot = () => $<HTMLInputElement>(el, '.props input[data-field="rotation"]');
-    const rotation = () => { const p = el.history!.current.devices[0].placement; return p.mode === 'free' ? p.rotation : NaN; };
+    const rotation = () => { const p = el.history!.current.level.devices[0].placement; return p.mode === 'free' ? p.rotation : NaN; };
     rot().value = '30'; rot().dispatchEvent(new Event('change')); await el.updateComplete;
     rot().value = '0'; rot().dispatchEvent(new Event('change')); await el.updateComplete;
     expect(rotation()).toBe(0);
@@ -344,7 +344,7 @@ describe('Equipment tab: rejected edits', () => {
     await el.updateComplete;
     await pressSave(el);
     expect(el.save.state).toBe('saved');
-    const before = el.history!.current;
+    const before = el.history!.current.level;
     const field = (n: string) => $<HTMLInputElement>(el, `.props input[data-field="${n}"]`);
     for (const n of ['diameter', 'rotation', 'name']) {
       const f = field(n);
@@ -352,7 +352,7 @@ describe('Equipment tab: rejected edits', () => {
       f.dispatchEvent(new Event('change'));
       await el.updateComplete;
     }
-    expect(el.history!.current).toBe(before);
+    expect(el.history!.current.level).toBe(before);
     expect(el.save.state).toBe('saved');
   });
 
@@ -366,7 +366,7 @@ describe('Equipment tab: rejected edits', () => {
     key(el, 'keydown', 'z', { ctrlKey: true, code: 'KeyZ' });
     await el.updateComplete;
     expect(el.selection).toBeNull();
-    expect(el.history!.current.devices).toHaveLength(0);
+    expect(el.history!.current.level.devices).toHaveLength(0);
     expect($(el, '.props').textContent).toContain('Next device');
   });
 });
@@ -441,7 +441,7 @@ describe('Equipment tab: typing survives re-renders', () => {
       { kind: 'free' as const, x: x1, y: 1000 }, { kind: 'free' as const, x: x0, y: 1000 }];
     async function setup(kind: DeviceKind, x = 500): Promise<{ el: PlanStudioPanel; zoneIds: string[] }> {
       const el = await mount();
-      const a = addPolygonZone(el.history!.current, sq(0, 1000), 'Hall');
+      const a = addPolygonZone(el.history!.current.level, sq(0, 1000), 'Hall');
       const b = addPolygonZone(a.level, sq(0, 2000), 'House');
       const dev: Device = { id: 'D1', name: 'Dev', placement: { mode: 'free', x, y: 500, rotation: 0 },
         props: deviceDefaults(kind, 'free'), invalid: false };
@@ -469,10 +469,10 @@ describe('Equipment tab: typing survives re-renders', () => {
       b.checked = false;
       b.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
       await el.updateComplete;
-      expect(el.history!.current.devices[0].zoneBlacklist).toEqual([zoneIds[0]]);
+      expect(el.history!.current.level.devices[0].zoneBlacklist).toEqual([zoneIds[0]]);
       expect(boxes(el)[0].checked).toBe(false);
       await undo(el);
-      expect(el.history!.current.devices[0].zoneBlacklist).toBeUndefined();
+      expect(el.history!.current.level.devices[0].zoneBlacklist).toBeUndefined();
       el.selection = { kind: 'device', id: 'D1' };
       await el.updateComplete;
       expect(boxes(el)[0].checked).toBe(true);

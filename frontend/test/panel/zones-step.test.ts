@@ -41,7 +41,7 @@ async function mountZones(): Promise<{ el: PlanStudioPanel; kitchen: Id }> {
   return { el, kitchen };
 }
 
-const zones = (el: PlanStudioPanel) => levelZones(el.history!.current);
+const zones = (el: PlanStudioPanel) => levelZones(el.history!.current.level);
 const rowIds = (el: PlanStudioPanel) => [...el.shadowRoot!.querySelectorAll('.zlist .zrow')].map(r => r.getAttribute('data-id'));
 const text = (el: PlanStudioPanel, sel: string) => $(el, sel).textContent!.replace(/\s+/g, ' ').trim();
 const az = (id: Id) => ({ kind: 'automationZone', id });
@@ -128,12 +128,12 @@ describe('the Zones step', () => {
   it('a zone picked in the list drags its vertex with the first press', async () => {
     const { el } = await mountZones();
     await press(el, '.zrow[data-id="door"]');
-    const before = el.history!.current;
+    const before = el.history!.current.level;
     pointer(el, 'pointerdown', 2000, 1000);
     pointer(el, 'pointermove', 2500, 700);
     pointer(el, 'pointerup', 2500, 700);
     await el.updateComplete;
-    expect(el.history!.current).not.toBe(before);
+    expect(el.history!.current.level).not.toBe(before);
     const door = zones(el).find(z => z.id === 'door')!;
     expect(door.shape.kind === 'polygon' && door.shape.vertices[1]).toEqual(free(2500, 700));
     expect(el.selection).toEqual(az('door'));
@@ -144,7 +144,7 @@ describe('the Zones step', () => {
     click(el, 1500, 1500); // the smallest zone under the point: Door
     await el.updateComplete;
     expect(el.selection).toEqual(az('door'));
-    const before = el.history!.current;
+    const before = el.history!.current.level;
     pointer(el, 'pointerdown', 2000, 1000);
     pointer(el, 'pointermove', 2500, 700);
     expect(el.activeTool.preview().level).toBeDefined();
@@ -152,7 +152,7 @@ describe('the Zones step', () => {
     pointer(el, 'pointerup', 2500, 700);
     await el.updateComplete;
     expect(el.activeTool.preview().level).toBeUndefined();
-    expect(el.history!.current).toBe(before);
+    expect(el.history!.current.level).toBe(before);
     expect(el.selection).toEqual(az('door'));
   });
 
@@ -205,12 +205,12 @@ describe('the Zones step', () => {
     await type(el, '.zprops input[data-field="zone-name"]', '  Hall ', 'change');
     expect(zones(el).find(z => z.id === 'door')!.name).toBe('Hall');
     expect(text(el, '.zrow[data-id="door"] .name')).toBe('Hall');
-    const before = el.history!.current;
+    const before = el.history!.current.level;
     await type(el, '.zprops input[data-field="zone-name"]', '   ', 'change');
-    expect(el.history!.current).toBe(before);
+    expect(el.history!.current.level).toBe(before);
     expect($<HTMLInputElement>(el, '.zprops input[data-field="zone-name"]').value).toBe('Hall');
     await type(el, '.zprops input[data-field="zone-name"]', 'Hall', 'change'); // unchanged: no commit
-    expect(el.history!.current).toBe(before);
+    expect(el.history!.current.level).toBe(before);
   });
 
   it('unchecking Participates blacklists the device; rechecking clears it; undo restores', async () => {
@@ -233,19 +233,19 @@ describe('the Zones step', () => {
 
   it('Delete removes only the zone; undo restores it', async () => {
     const { el, kitchen } = await mountZones();
-    const start = el.history!.current;
+    const start = el.history!.current.level;
     await press(el, '.zrow[data-id="door"]');
     expect(el.selection).toEqual(az('door'));
     key(el, 'keydown', 'Delete');
     await el.updateComplete;
     expect(zones(el).map(z => z.id)).toEqual([kitchen, 'lost']);
-    expect(el.history!.current.walls).toBe(start.walls);
-    expect(el.history!.current.zones).toBe(start.zones);
-    expect(el.history!.current.devices.map(d => d.id)).toEqual(['lamp', 'fan']);
+    expect(el.history!.current.level.walls).toBe(start.walls);
+    expect(el.history!.current.level.zones).toBe(start.zones);
+    expect(el.history!.current.level.devices.map(d => d.id)).toEqual(['lamp', 'fan']);
     expect(el.selection).toBeNull();
     await undo(el);
     expect(zones(el).map(z => z.id)).toEqual([kitchen, 'door', 'lost']);
-    expect(el.history!.current).toBe(start);
+    expect(el.history!.current.level).toBe(start);
     // The selection never points at a missing zone.
     expect(el.selection === null || zones(el).some(z => z.id === el.selection!.id)).toBe(true);
 
@@ -261,7 +261,7 @@ describe('the Zones step', () => {
     // The deleted zone leaves the Fan's blacklist.
     expect('zoneBlacklist' in device(el, 'fan')).toBe(false);
     await undo(el);
-    expect(el.history!.current).toBe(start);
+    expect(el.history!.current.level).toBe(start);
 
     // A device or wall selection is never deleted in this step.
     el.selection = { kind: 'device', id: 'lamp' };
@@ -269,7 +269,7 @@ describe('the Zones step', () => {
     el.selection = { kind: 'wall', id: 'w0' };
     key(el, 'keydown', 'Delete');
     await el.updateComplete;
-    expect(el.history!.current).toBe(start);
+    expect(el.history!.current.level).toBe(start);
   });
 
   it('Delete and Backspace during a draft remove vertices only; a held key never deletes the selected zone', async () => {
@@ -278,7 +278,7 @@ describe('the Zones step', () => {
     click(el, 3000, 3000);
     click(el, 3500, 3000);
     await press(el, '.zrow[data-id="door"]');
-    const before = el.history!.current;
+    const before = el.history!.current.level;
     key(el, 'keydown', 'Delete');
     await el.updateComplete;
     expect(el.activeTool.preview().zoneDraft?.points).toEqual([{ x: 3000, y: 3000 }]);
@@ -290,7 +290,7 @@ describe('the Zones step', () => {
     key(el, 'keydown', 'Delete', { repeat: true });
     await el.updateComplete;
     expect(el.activeTool.preview().zoneDraft).toBeUndefined();
-    expect(el.history!.current).toBe(before);
+    expect(el.history!.current.level).toBe(before);
     expect(el.selection).toEqual(az('door'));
     // A fresh press with no draft deletes the selected zone.
     key(el, 'keydown', 'Backspace');

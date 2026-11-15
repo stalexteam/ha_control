@@ -57,6 +57,6 @@ describe('equipment icon with ha-icon-picker', () => {
     expect(el.selection?.kind).toBe('device');
     emit(pickerOf(el, 'icon'), 'mdi:water-boiler');
     await el.updateComplete;
-    expect(el.history!.current.devices[0].props).toMatchObject({ icon: 'mdi:water-boiler' });
+    expect(el.history!.current.level.devices[0].props).toMatchObject({ icon: 'mdi:water-boiler' });
   });
 });

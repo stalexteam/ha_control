@@ -103,7 +103,7 @@ describe('wizard steps in the panel', () => {
     await el.updateComplete;
     key(el, 'keydown', 'Backspace');
     await el.updateComplete;
-    expect(el.history!.current.devices.map(d => d.id)).toEqual(['k', 'l', 'd']);
+    expect(el.history!.current.level.devices.map(d => d.id)).toEqual(['k', 'l', 'd']);
     expect(el.history!.canUndo).toBe(false);
     expect(el.selection).toEqual({ kind: 'device', id: 'k' });
     // Control: the same key deletes in the Equipment step.
@@ -112,7 +112,7 @@ describe('wizard steps in the panel', () => {
     await el.updateComplete;
     key(el, 'keydown', 'Delete');
     await el.updateComplete;
-    expect(el.history!.current.devices.map(d => d.id)).toEqual(['l', 'd']);
+    expect(el.history!.current.level.devices.map(d => d.id)).toEqual(['l', 'd']);
   });
 
   it('list rows select, Next unbound device walks the not-bound devices, Esc clears', async () => {

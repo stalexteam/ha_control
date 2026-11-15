@@ -87,7 +87,7 @@ describe('opening Passes light field', () => {
     const { mount, undo, $ } = await import('./helpers');
     const el = await mount();
     const r = addOpening(rectRoomLevel(4000, 3000, 400), 'w0', 'door', 2000);
-    el.history!.push(r.level);
+    el.commit(r.level);
     el.selection = { kind: 'opening', id: r.openingId! };
     await el.updateComplete;
     const box = () => $<HTMLInputElement>(el, '.props input[data-field="passesLight"]');
@@ -97,17 +97,17 @@ describe('opening Passes light field', () => {
     box().checked = true;
     box().dispatchEvent(new Event('change'));
     await el.updateComplete;
-    expect(el.history!.current.openings[0].passesLight).toBe(true);
+    expect(el.history!.current.level.openings[0].passesLight).toBe(true);
     expect(box().checked).toBe(true);
     await undo(el);
-    expect('passesLight' in el.history!.current.openings[0]).toBe(false);
+    expect('passesLight' in el.history!.current.level.openings[0]).toBe(false);
   });
 
   it('an opening is checked by default; unchecking stores false, re-checking drops the key (the default)', async () => {
     const { mount, $ } = await import('./helpers');
     const el = await mount();
     const r = addOpening(rectRoomLevel(4000, 3000, 400), 'w0', 'opening', 2000);
-    el.history!.push(r.level);
+    el.commit(r.level);
     el.selection = { kind: 'opening', id: r.openingId! };
     await el.updateComplete;
     const box = () => $<HTMLInputElement>(el, '.props input[data-field="passesLight"]');
@@ -115,11 +115,11 @@ describe('opening Passes light field', () => {
     box().checked = false;
     box().dispatchEvent(new Event('change'));
     await el.updateComplete;
-    expect(el.history!.current.openings[0].passesLight).toBe(false);
+    expect(el.history!.current.level.openings[0].passesLight).toBe(false);
     box().checked = true;
     box().dispatchEvent(new Event('change'));
     await el.updateComplete;
-    expect('passesLight' in el.history!.current.openings[0]).toBe(false);
+    expect('passesLight' in el.history!.current.level.openings[0]).toBe(false);
   });
 });
 
@@ -130,7 +130,7 @@ describe('opening Passes PIR field', () => {
     const { mount, undo, $ } = await import('./helpers');
     const el = await mount();
     const r = addOpening(rectRoomLevel(4000, 3000, 400), 'w0', 'window', 2000);
-    el.history!.push(r.level);
+    el.commit(r.level);
     el.selection = { kind: 'opening', id: r.openingId! };
     await el.updateComplete;
     const box = () => $<HTMLInputElement>(el, '.props input[data-field="passesPir"]');
@@ -142,17 +142,17 @@ describe('opening Passes PIR field', () => {
     box().checked = true;
     box().dispatchEvent(new Event('change'));
     await el.updateComplete;
-    expect(el.history!.current.openings[0].passesPir).toBe(true);
+    expect(el.history!.current.level.openings[0].passesPir).toBe(true);
     expect(box().checked).toBe(true);
     await undo(el);
-    expect('passesPir' in el.history!.current.openings[0]).toBe(false);
+    expect('passesPir' in el.history!.current.level.openings[0]).toBe(false);
   });
 
   it('a plain opening is checked by default; unchecking stores false, re-checking drops the key', async () => {
     const { mount, $ } = await import('./helpers');
     const el = await mount();
     const r = addOpening(rectRoomLevel(4000, 3000, 400), 'w0', 'opening', 2000);
-    el.history!.push(r.level);
+    el.commit(r.level);
     el.selection = { kind: 'opening', id: r.openingId! };
     await el.updateComplete;
     const box = () => $<HTMLInputElement>(el, '.props input[data-field="passesPir"]');
@@ -160,10 +160,10 @@ describe('opening Passes PIR field', () => {
     box().checked = false;
     box().dispatchEvent(new Event('change'));
     await el.updateComplete;
-    expect(el.history!.current.openings[0].passesPir).toBe(false);
+    expect(el.history!.current.level.openings[0].passesPir).toBe(false);
     box().checked = true;
     box().dispatchEvent(new Event('change'));
     await el.updateComplete;
-    expect('passesPir' in el.history!.current.openings[0]).toBe(false);
+    expect('passesPir' in el.history!.current.level.openings[0]).toBe(false);
   });
 });

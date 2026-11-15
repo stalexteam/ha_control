@@ -14,14 +14,14 @@ describe('panel input edge cases', () => {
     await drawBox(el);
     $<HTMLButtonElement>(el, 'button[data-tool="select"]').click();
     await el.updateComplete;
-    const before = el.history!.current;
+    const before = el.history!.current.level;
     pointer(el, 'pointerdown', 300, -100); // top wall axis
     pointer(el, 'pointermove', 300, -600);
     expect(el.activeTool.preview().level).toBeDefined();
     pointer(el, 'pointercancel', 300, -600);
     pointer(el, 'pointerup', 300, -600);
     expect(el.activeTool.preview().level).toBeUndefined();
-    expect(el.history!.current).toBe(before);
+    expect(el.history!.current.level).toBe(before);
   });
 
   it('lostpointercapture also aborts the drag', async () => {
@@ -29,12 +29,12 @@ describe('panel input edge cases', () => {
     await drawBox(el);
     $<HTMLButtonElement>(el, 'button[data-tool="select"]').click();
     await el.updateComplete;
-    const before = el.history!.current;
+    const before = el.history!.current.level;
     pointer(el, 'pointerdown', 300, -100);
     pointer(el, 'pointermove', 300, -600);
     pointer(el, 'lostpointercapture', 300, -600);
     pointer(el, 'pointerup', 300, -600);
-    expect(el.history!.current).toBe(before);
+    expect(el.history!.current.level).toBe(before);
   });
 
   it('Ctrl+click (or Cmd+click) on a wall trims it in one Undo step', async () => {
@@ -42,16 +42,16 @@ describe('panel input edge cases', () => {
     await drawBox(el);
     $<HTMLButtonElement>(el, 'button[data-tool="select"]').click();
     await el.updateComplete;
-    const before = el.history!.current;
+    const before = el.history!.current.level;
     // The box's top wall has no intersections inside it: the trim deletes it.
     pointer(el, 'pointerdown', 300, -100, 0, { ctrlKey: true });
     pointer(el, 'pointerup', 300, -100, 0, { ctrlKey: true });
-    expect(el.history!.current.walls).toHaveLength(3);
+    expect(el.history!.current.level.walls).toHaveLength(3);
     await undo(el);
-    expect(el.history!.current).toBe(before);
+    expect(el.history!.current.level).toBe(before);
     pointer(el, 'pointerdown', 300, -100, 0, { metaKey: true });
     pointer(el, 'pointerup', 300, -100, 0, { metaKey: true });
-    expect(el.history!.current.walls).toHaveLength(3);
+    expect(el.history!.current.level.walls).toHaveLength(3);
   });
 
   it('space used for panning never reaches the tool buffer', async () => {
@@ -71,7 +71,7 @@ describe('panel input edge cases', () => {
     key(el, 'keydown', ' ');
     key(el, 'keyup', ' ');
     expect(el.activeTool.preview().tracker?.first).toBe('3 ');
-    expect(el.history!.current.walls.length).toBe(0); // the pan did not add a segment
+    expect(el.history!.current.level.walls.length).toBe(0); // the pan did not add a segment
   });
 
   it('Escape closes the conflict dialog and keys do not reach History while it is open', async () => {
@@ -82,7 +82,7 @@ describe('panel input edge cases', () => {
     await pressSave(el);
     expect(el.shadowRoot!.querySelector('.dialog')).not.toBeNull();
     key(el, 'keydown', 'z', { ctrlKey: true });
-    expect(el.history!.current.walls.length).toBe(4);
+    expect(el.history!.current.level.walls.length).toBe(4);
     key(el, 'keydown', 'Escape');
     await el.updateComplete;
     expect(el.shadowRoot!.querySelector('.dialog')).toBeNull();

@@ -1,3 +1,4 @@
+import type { PowerSchema } from './power';
 import { newId } from './ids';
 import { sanitizeBindings } from './bindings';
 
@@ -133,6 +134,8 @@ export interface Plan {
   schemaVersion: 1;
   revision: number;
   levels: Level[];
+  /** Power-flow schematic; absent until the schematic is edited. */
+  power?: PowerSchema;
 }
 
 export const WALL_PRESETS: Record<WallType, number> = {

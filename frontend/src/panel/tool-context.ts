@@ -2,6 +2,7 @@ import { emptyLevel, type Level } from '../model/types';
 import type { Selection, ToolContext } from '../editor/tools/types';
 import type { DeviceKind, DeviceProps, WallType, OpeningKind } from '../model/types';
 import type { History } from '../editor/history';
+import type { PlanDoc, PowerSchema } from '../model/power';
 import { defaultZoneName, openingDefaults, type NextObjects } from './next-object';
 import type { BoxMeasure } from './props-panel';
 import type { View } from './viewport';
@@ -10,7 +11,7 @@ const EMPTY_LEVEL: Level = emptyLevel('', '');
 
 /** The panel state the tools read (the panel itself satisfies this). */
 export interface ToolHost {
-  history: History<Level> | null;
+  history: History<PlanDoc> | null;
   view: View;
   grid: boolean;
   wallType: WallType;
@@ -23,12 +24,16 @@ export interface ToolHost {
   fieldNotice: string | null;
   mode: string;
   commit(next: Level): void;
+  readonly power: PowerSchema;
+  commitPower(next: PowerSchema): void;
 }
 
 export function createToolContext(h: ToolHost): ToolContext {
   return {
-    level: () => h.history?.current ?? EMPTY_LEVEL,
+    level: () => h.history?.current.level ?? EMPTY_LEVEL,
     commit: next => h.commit(next),
+    power: () => h.power,
+    commitPower: next => h.commitPower(next),
     scale: () => h.view.scale,
     tolMm: () => 10 / h.view.scale,
     grid: () => (h.grid ? 100 : null),
@@ -39,7 +44,7 @@ export function createToolContext(h: ToolHost): ToolContext {
     selection: () => h.selection,
     deviceDefaults: k => h.nextProps[k],
     openingDefaults: (k: OpeningKind) => openingDefaults(h.nextObj, k),
-    zoneName: () => h.nextObj.zoneName ?? defaultZoneName(h.history?.current ?? EMPTY_LEVEL),
+    zoneName: () => h.nextObj.zoneName ?? defaultZoneName(h.history?.current.level ?? EMPTY_LEVEL),
     /** A custom zone name is single-use: the next default is "Room N" again. */
     zonePlaced: () => { h.nextObj = { ...h.nextObj, zoneName: null }; },
   };

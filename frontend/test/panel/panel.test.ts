@@ -13,7 +13,7 @@ describe('<plan-studio-panel>', () => {
     const el = await mount();
     expect(el.save.baseRevision).toBeNull();
     await drawBox(el);
-    expect(el.history!.current.walls.length).toBe(4);
+    expect(el.history!.current.level.walls.length).toBe(4);
     expect(el.save.dirty).toBe(true);
     await pressSave(el);
     expect(el.save.state).toBe('saved');
@@ -38,7 +38,7 @@ describe('<plan-studio-panel>', () => {
     click(el, 0, 0);
     click(el, 2000, 0);
     await el.updateComplete;
-    const walls = el.history!.current.walls;
+    const walls = el.history!.current.level.walls;
     expect(walls).toHaveLength(1);
     expect(walls[0]).toMatchObject({ type: 'partition', thickness: 400 });
   });
@@ -57,19 +57,19 @@ describe('<plan-studio-panel>', () => {
     click(el, 0, 0);
     click(el, 1000, 1000);
     await el.updateComplete;
-    const walls = el.history!.current.walls;
+    const walls = el.history!.current.level.walls;
     expect(walls).toHaveLength(4);
     expect(walls.every(w => w.thickness === 250)).toBe(true);
-    expect(el.history!.current.nodes.map(n => n.x).sort((a, b) => a - b)).toEqual([0, 0, 1000, 1000]);
+    expect(el.history!.current.level.nodes.map(n => n.x).sort((a, b) => a - b)).toEqual([0, 0, 1000, 1000]);
   });
 
   it('undoes with Ctrl+Z and redoes with Ctrl+Y', async () => {
     const el = await mount();
     await drawBox(el);
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true }));
-    expect(el.history!.current.walls.length).toBe(0);
+    expect(el.history!.current.level.walls.length).toBe(0);
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'y', ctrlKey: true, bubbles: true }));
-    expect(el.history!.current.walls.length).toBe(4);
+    expect(el.history!.current.level.walls.length).toBe(4);
   });
 
   it('undo/redo use the physical key, so they work with a non-Latin keyboard layout', async () => {
@@ -79,9 +79,9 @@ describe('<plan-studio-panel>', () => {
     const z = String.fromCharCode(0x44f);
     const y = String.fromCharCode(0x43d);
     el.dispatchEvent(new KeyboardEvent('keydown', { key: z, code: 'KeyZ', ctrlKey: true, bubbles: true }));
-    expect(el.history!.current.walls.length).toBe(0);
+    expect(el.history!.current.level.walls.length).toBe(0);
     el.dispatchEvent(new KeyboardEvent('keydown', { key: y, code: 'KeyY', ctrlKey: true, bubbles: true }));
-    expect(el.history!.current.walls.length).toBe(4);
+    expect(el.history!.current.level.walls.length).toBe(4);
   });
 
   it('offers overwrite on conflict and only save-as-new after a second conflict', async () => {

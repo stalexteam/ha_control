@@ -10,6 +10,7 @@ import { createZoneRoomTool } from '../editor/tools/zone-room-tool';
 import { createZoneDrawTool } from '../editor/tools/zone-draw-tool';
 import { createZonesSelectTool } from '../editor/tools/zones-select-tool';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
+import type { PowerSchema } from '../model/power';
 import { levelZones, type Level } from '../model/types';
 
 export type ToolId = Tool['id'];
@@ -48,7 +49,9 @@ export function createTool(id: ToolId, ctx: ToolContext): Tool {
 }
 
 /** The selected element still exists in the level. */
-export function selectionExists(level: Level, s: Selection): boolean {
+export function selectionExists(level: Level, s: Selection, power: PowerSchema): boolean {
+  if (s.kind === 'powerBlock') return power.blocks.some(x => x.id === s.id);
+  if (s.kind === 'powerWire') return power.wires.some(x => x.id === s.id);
   if (s.kind === 'automationZone') return levelZones(level).some(x => x.id === s.id);
   const list = s.kind === 'wall' ? level.walls : s.kind === 'node' ? level.nodes
     : s.kind === 'opening' ? level.openings : s.kind === 'device' ? level.devices : level.zones;

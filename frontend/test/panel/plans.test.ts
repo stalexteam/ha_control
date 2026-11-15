@@ -54,7 +54,7 @@ describe('plan selection', () => {
     $<HTMLButtonElement>(el, '[data-action="switch-cancel"]').click();
     await el.updateComplete;
     expect(el.plan!.id).toBe(first.id);
-    expect(el.history!.current.walls.length).toBe(4);
+    expect(el.history!.current.level.walls.length).toBe(4);
     expect($<HTMLSelectElement>(el, 'select.plan-pick').value).toBe(first.id);
 
     sel.value = second.id;

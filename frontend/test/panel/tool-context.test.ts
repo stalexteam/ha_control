@@ -6,7 +6,7 @@ function host(): ToolHost {
   return {
     history: null, view: { x: 0, y: 0, scale: 0.1 }, grid: true, wallType: 'partition', thickness: 250, boxMeasure: 'axis',
     nextProps: {} as ToolHost['nextProps'], nextObj: initialNext(), selection: null, notice: 'x', fieldNotice: 'f', mode: 'plan',
-    commit: () => {},
+    commit: () => {}, power: { blocks: [], wires: [] }, commitPower: () => {},
   };
 }
 

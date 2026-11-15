@@ -20,8 +20,8 @@ async function setField(el: PlanStudioPanel, field: string, value: string): Prom
   await el.updateComplete;
 }
 async function withBox(el: PlanStudioPanel): Promise<void> {
-  const l = addBox(el.history!.current, { x: 0, y: 0 }, { x: 4000, y: 3000 }, { type: 'partition', thickness: 100, baseline: 'center' }, 'axis');
-  el.history!.push(l);
+  const l = addBox(el.history!.current.level, { x: 0, y: 0 }, { x: 4000, y: 3000 }, { type: 'partition', thickness: 100, baseline: 'center' }, 'axis');
+  el.commit(l);
   el.requestUpdate();
   await el.updateComplete;
 }
@@ -47,14 +47,14 @@ describe('wall type vs thickness', () => {
   it('changing an existing wall type keeps its thickness', async () => {
     const el = await mount();
     await withBox(el);
-    const w = el.history!.current.walls[0];
+    const w = el.history!.current.level.walls[0];
     el.selection = { kind: 'wall', id: w.id };
     await el.updateComplete;
     const sel = $<HTMLSelectElement>(el, '.props select[data-field="wall-type"]');
     sel.value = 'bearing';
     sel.dispatchEvent(new Event('change'));
     await el.updateComplete;
-    expect(el.history!.current.walls[0]).toMatchObject({ type: 'bearing', thickness: 100 });
+    expect(el.history!.current.level.walls[0]).toMatchObject({ type: 'bearing', thickness: 100 });
   });
 });
 
@@ -78,8 +78,8 @@ describe('zone names', () => {
 
   it('two default zones are Room 1, Room 2; deleting Room 1 frees the name', async () => {
     const el = await mount();
-    const l = addBox(el.history!.current, { x: 0, y: 0 }, { x: 4000, y: 3000 }, { type: 'partition', thickness: 100, baseline: 'center' }, 'axis');
-    el.history!.push(addBox(l, { x: 5000, y: 0 }, { x: 8000, y: 3000 }, { type: 'partition', thickness: 100, baseline: 'center' }, 'axis'));
+    const l = addBox(el.history!.current.level, { x: 0, y: 0 }, { x: 4000, y: 3000 }, { type: 'partition', thickness: 100, baseline: 'center' }, 'axis');
+    el.commit(addBox(l, { x: 5000, y: 0 }, { x: 8000, y: 3000 }, { type: 'partition', thickness: 100, baseline: 'center' }, 'axis'));
     el.requestUpdate();
     await tool(el, 'zone');
     click(el, 2000, 1500);
@@ -89,10 +89,10 @@ describe('zone names', () => {
     await el.updateComplete;
     el.selection = null;
     await el.updateComplete;
-    expect(el.history!.current.zones.map(z => z.name)).toEqual(['Room 1', 'Room 2']);
+    expect(el.history!.current.level.zones.map(z => z.name)).toEqual(['Room 1', 'Room 2']);
     expect(nameField(el)).toBe('Room 3');
-    const first = el.history!.current.zones[0];
-    el.history!.push(deleteZone(el.history!.current, first.id));
+    const first = el.history!.current.level.zones[0];
+    el.commit(deleteZone(el.history!.current.level, first.id));
     el.requestUpdate();
     await el.updateComplete;
     expect(nameField(el)).toBe('Room 1');
@@ -132,7 +132,7 @@ describe('next object panel', () => {
     await el.updateComplete;
     click(el, 3000, 0);
     await el.updateComplete;
-    const ops = el.history!.current.openings;
+    const ops = el.history!.current.level.openings;
     expect(ops).toHaveLength(2);
     expect(ops.map(o => o.width)).toEqual([800, 800]);
     expect(ops[0]).toMatchObject({ hinge: 'end', swing: 'right' });
@@ -146,7 +146,7 @@ describe('next object panel', () => {
     await setField(el, 'next-outside', 'right');
     click(el, 2000, 0);
     await el.updateComplete;
-    expect(el.history!.current.openings[0]).toMatchObject({ kind: 'window', width: 1500, outside: 'right' });
+    expect(el.history!.current.level.openings[0]).toMatchObject({ kind: 'window', width: 1500, outside: 'right' });
   });
 
   it('opening: width', async () => {
@@ -156,7 +156,7 @@ describe('next object panel', () => {
     await setField(el, 'next-width', '1100');
     click(el, 2000, 0);
     await el.updateComplete;
-    expect(el.history!.current.openings[0]).toMatchObject({ kind: 'opening', width: 1100 });
+    expect(el.history!.current.level.openings[0]).toMatchObject({ kind: 'opening', width: 1100 });
   });
 
   it('invalid width is rejected with a notice', async () => {
@@ -177,7 +177,7 @@ describe('next object panel', () => {
     await setField(el, 'next-zone-name', 'Kitchen');
     click(el, 2000, 1500);
     await el.updateComplete;
-    expect(el.history!.current.zones.map(z => z.name)).toEqual(['Kitchen']);
+    expect(el.history!.current.level.zones.map(z => z.name)).toEqual(['Kitchen']);
     el.selection = null;
     await el.updateComplete;
     expect($<HTMLInputElement>(el, '.props [data-field="next-zone-name"]').value).toBe('Room 1');

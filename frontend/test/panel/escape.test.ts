@@ -92,7 +92,7 @@ describe('the Binding field notice goes with the selection', () => {
 
   it('Esc in Binding clears the selection and the field notice', async () => {
     const el = await mount();
-    el.commit({ ...el.history!.current, devices: [lamp] });
+    el.commit({ ...el.history!.current.level, devices: [lamp] });
     el.setMode('binding');
     await el.updateComplete;
     el.selection = { kind: 'device', id: 'lamp' };
@@ -104,7 +104,7 @@ describe('the Binding field notice goes with the selection', () => {
 
   it('undo that removes the selected device clears the field notice', async () => {
     const el = await mount();
-    el.commit({ ...el.history!.current, devices: [lamp] });
+    el.commit({ ...el.history!.current.level, devices: [lamp] });
     el.setMode('binding');
     await el.updateComplete;
     el.selection = { kind: 'device', id: 'lamp' };
@@ -116,24 +116,24 @@ describe('the Binding field notice goes with the selection', () => {
 
   it('a commit that removes the selected device clears the field notice', async () => {
     const el = await mount();
-    el.commit({ ...el.history!.current, devices: [lamp] });
+    el.commit({ ...el.history!.current.level, devices: [lamp] });
     el.setMode('binding');
     await el.updateComplete;
     el.selection = { kind: 'device', id: 'lamp' };
     el.fieldNotice = NOTICE;
-    el.commit({ ...el.history!.current, devices: [] });
+    el.commit({ ...el.history!.current.level, devices: [] });
     expect(el.selection).toBeNull();
     expect(el.fieldNotice).toBeNull();
   });
 
   it('a commit that keeps the selected device keeps the field notice', async () => {
     const el = await mount();
-    el.commit({ ...el.history!.current, devices: [lamp] });
+    el.commit({ ...el.history!.current.level, devices: [lamp] });
     el.setMode('binding');
     await el.updateComplete;
     el.selection = { kind: 'device', id: 'lamp' };
     el.fieldNotice = NOTICE;
-    el.commit({ ...el.history!.current, devices: [{ ...lamp, name: 'Lamp 2' }] });
+    el.commit({ ...el.history!.current.level, devices: [{ ...lamp, name: 'Lamp 2' }] });
     expect(el.selection).toEqual({ kind: 'device', id: 'lamp' });
     expect(el.fieldNotice).toBe(NOTICE);
   });

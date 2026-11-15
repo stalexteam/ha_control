@@ -88,7 +88,7 @@ export async function press(el: PlanStudioPanel, sel: string): Promise<void> {
 }
 
 /** The current model of device `id`. */
-export const device = (el: PlanStudioPanel, id: string): Device => el.history!.current.devices.find(d => d.id === id)!;
+export const device = (el: PlanStudioPanel, id: string): Device => el.history!.current.level.devices.find(d => d.id === id)!;
 export const combo = (el: PlanStudioPanel, role: string) => $<EntityCombo>(el, `.props ps-entity-combo[data-role="${role}"]`);
 
 /** Binding step: selects a device through the list (All filter). */
