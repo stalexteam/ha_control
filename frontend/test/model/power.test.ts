@@ -84,6 +84,23 @@ describe('block ops', () => {
     expect(changed.wires).toEqual([]);
     expect(updateBlock(s, 't', { name: 'T' }).wires).toHaveLength(2);
   });
+
+  it('dropping the inverter flag removes PV and BAT wires and keeps IN and OUT', () => {
+    let s = schema([
+      { id: 'g', kind: 'grid' }, { id: 'inv', kind: 'device', deviceId: 'i', inverter: true }, { id: 'pv', kind: 'pv' },
+      { id: 'bus', kind: 'bus', w: 1, h: 1 }, { id: 'm', kind: 'meter' },
+    ]);
+    s = ok(connect(s, P('g', 'OUT'), P('inv', 'IN'))).schema;
+    s = ok(connect(s, P('inv', 'OUT'), P('m', 'IN'))).schema;
+    s = ok(connect(s, P('pv', 'OUT'), P('inv', 'PV'))).schema;
+    s = ok(connect(s, P('inv', 'BAT'), B('bus'))).schema;
+    expect(s.wires).toHaveLength(4);
+    const plain = updateBlock(s, 'inv', { inverter: false } as Partial<PowerBlock>);
+    expect(plain.wires).toHaveLength(2);
+    const invPorts = plain.wires.flatMap((w) => [w.from, w.to]).filter((e) => 'block' in e && e.block === 'inv');
+    expect(invPorts.map((e) => ('block' in e ? e.port : '')).sort()).toEqual(['IN', 'OUT']);
+    expect(updateBlock(s, 'inv', { inverter: true } as Partial<PowerBlock>).wires).toHaveLength(4);
+  });
 });
 
 describe('connect', () => {
@@ -173,10 +190,41 @@ describe('connect', () => {
     expect(err(connect(s, P('inv', 'OUT'), B('main')))).toBe('port-taken');
   });
 
-  it('both transfer inputs fed from one source are not a loop', () => {
-    const s = schema([{ id: 'g', kind: 'grid' }, { id: 'tr', kind: 'transfer', form: '2in1out' }]);
-    const a = ok(connect(s, P('g', 'OUT'), P('tr', 'A'))).schema;
-    expect(a.wires).toHaveLength(1);
+  it('one bus feeding both inputs of a transfer is not a loop', () => {
+    const s0 = schema([{ id: 'bus', kind: 'bus', w: 1, h: 1 }, { id: 'tr', kind: 'transfer', form: '2in1out' }]);
+    const s1 = ok(connect(s0, B('bus'), P('tr', 'A'))).schema;
+    expect(ok(connect(s1, B('bus'), P('tr', 'B'))).schema.wires).toHaveLength(2);
+  });
+
+  it('a loop that exists for one transfer position only is rejected', () => {
+    let s = schema([
+      { id: 'main', kind: 'bus', w: 1, h: 1 }, { id: 'tr', kind: 'transfer', form: '2in1out' },
+      { id: 'd', kind: 'device', deviceId: 'x' },
+    ]);
+    s = ok(connect(s, B('main'), P('tr', 'A'))).schema;
+    s = ok(connect(s, P('tr', 'OUT'), P('d', 'IN'))).schema;
+    // closed with the switch on A, open on B
+    expect(connect(s, P('d', 'OUT'), B('main'))).toEqual({ error: 'loop' });
+  });
+
+  describe('transfer cap', () => {
+    // n transfers t1..tn; the last one carries the loop path through its B input
+    const build = (n: number) => {
+      const blocks: Record<string, unknown>[] = [
+        { id: 'main', kind: 'bus', w: 1, h: 1 }, { id: 'd', kind: 'device', deviceId: 'x' },
+      ];
+      for (let i = 1; i <= n; i++) blocks.push({ id: `t${i}`, kind: 'transfer', form: '2in1out' });
+      let s = schema(blocks);
+      s = ok(connect(s, B('main'), P(`t${n}`, 'B'))).schema;
+      s = ok(connect(s, P(`t${n}`, 'OUT'), P('d', 'IN'))).schema;
+      return s;
+    };
+    it('checks every position of up to 10 transfers', () => {
+      expect(connect(build(10), P('d', 'OUT'), B('main'))).toEqual({ error: 'loop' });
+    });
+    it('does not check transfers beyond the 10th', () => {
+      expect('schema' in connect(build(11), P('d', 'OUT'), B('main'))).toBe(true);
+    });
   });
 
   it('a battery fed straight from a plain device OUT is dc-mismatch', () => {

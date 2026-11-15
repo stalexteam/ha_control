@@ -106,6 +106,7 @@ export function moveBlock(s: PowerSchema, id: Id, x: number, y: number): PowerSc
 const endId = (e: WireEnd) => ('block' in e ? e.block : e.bus);
 const touches = (w: PowerWire, id: Id) => endId(w.from) === id || endId(w.to) === id;
 
+/** A transfer form change drops all its wires; any other patch drops wires on ports the block no longer has. */
 export function updateBlock(s: PowerSchema, id: Id, patch: Partial<PowerBlock>): PowerSchema {
   const old = s.blocks.find((b) => b.id === id);
   if (!old) return s;
@@ -113,7 +114,11 @@ export function updateBlock(s: PowerSchema, id: Id, patch: Partial<PowerBlock>):
   if (old.kind === 'transfer' && 'form' in patch && patch.form !== old.form) {
     return { ...next, wires: next.wires.filter((w) => !touches(w, id)) };
   }
-  return next;
+  const updated = next.blocks.find((b) => b.id === id)!;
+  const ports = new Set<PortName>(blockPorts(updated).map((p) => p.name));
+  const stale = (e: WireEnd) => 'block' in e && e.block === id && !ports.has(e.port);
+  if (!next.wires.some((w) => stale(w.from) || stale(w.to))) return next;
+  return { ...next, wires: next.wires.filter((w) => !stale(w.from) && !stale(w.to)) };
 }
 
 /** The grid block cannot be deleted (the schema is returned as is). */
