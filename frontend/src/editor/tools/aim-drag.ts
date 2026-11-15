@@ -1,6 +1,6 @@
 import type { Id, Level, Pt } from '../../model/types';
 import { moveDevice } from '../../model/devices';
-import { angleFromHandle, angleOf, devicePose, directionHandle } from '../../geometry/devices';
+import { angleFromHandle, angleOf, devicePose, directionHandle, wrap180 } from '../../geometry/devices';
 import { dist, sub } from '../../geometry/vec';
 import type { ToolContext, ToolEvent } from './types';
 
@@ -29,8 +29,7 @@ export function createAimDrag(ctx: ToolContext): AimDrag {
     const pose = d ? devicePose(level, d) : null;
     const h = d ? directionHandle(level, d, 10 / ctx.tolMm()) : null;
     if (!pose || !h) return 0;
-    const diff = (a: number, b: number) => ((((a - b) % 360) + 540) % 360) - 180;
-    return diff(angleOf(sub(p, pose.pt)), angleOf(sub(h.to, pose.pt)));
+    return wrap180(angleOf(sub(p, pose.pt)) - angleOf(sub(h.to, pose.pt)));
   };
 
   function update(e: ToolEvent): void {

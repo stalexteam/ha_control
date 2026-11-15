@@ -127,8 +127,7 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
 }
 
 function renderCone(level: Level, d: Device, o: DeviceRenderOpts, preview: boolean): SVGTemplateResult | typeof nothing {
-  if (d.props.kind !== 'wall_light' && d.props.kind !== 'motion_sensor' && d.props.kind !== 'ceiling_light') return nothing;
-  const rings = clippedCone(level, d, holesOf(level));
+  const rings = clippedCone(level, d, holesOf); // [] for kinds without a cone
   if (rings.length === 0) return nothing;
   const p = o.palette;
   const color = d.invalid ? p.invalid : p.cone;

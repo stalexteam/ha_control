@@ -1,6 +1,6 @@
 import type { DevicePlacement, Id, Level, Pt } from '../../model/types';
 import { moveDevice } from '../../model/devices';
-import { angleOf, deviceAt, devicePose } from '../../geometry/devices';
+import { angleOf, deviceAt, devicePose, wrap360 } from '../../geometry/devices';
 import { orthoConstrain } from '../../geometry/snap';
 import { wallFrame, wallLocal } from '../../geometry/walls';
 import { add, dist, dot, sub } from '../../geometry/vec';
@@ -38,7 +38,7 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
     const free = pl.mode === 'free';
     // Leaving the wall keeps the world direction (as the free rotation) so the cone does not jump.
     const pose = free ? null : devicePose(original, d);
-    const rot = pl.mode === 'free' ? pl.rotation : pose ? ((Math.round(angleOf(pose.dir)) % 360) + 360) % 360 : 0;
+    const rot = pl.mode === 'free' ? pl.rotation : pose ? wrap360(Math.round(angleOf(pose.dir))) : 0;
     const cand = deviceCandidate(ctx, original, d.props.kind, free ? add(p, drag.grab) : p, rot);
     // A wall candidate keeps the aim of a wall device; a free device landing on a wall starts at aim 0.
     const keep = cand && cand.mode === 'wall' && pl.mode === 'wall' && pl.aim !== undefined ? { ...cand, aim: pl.aim } : cand;

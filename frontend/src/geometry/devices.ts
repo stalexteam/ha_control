@@ -1,5 +1,6 @@
 import polygonClipping, { type Polygon } from 'polygon-clipping';
-import type { Device, DevicePlacement, Id, Level, Pt } from '../model/types';
+import { AIM_KINDS, type Device, type DevicePlacement, type Id, type Level, type Pt } from '../model/types';
+import { AIM_MAX } from '../model/devices';
 import { add, dist, dot, perpLeft, pointInPolygon, polygonArea, scale, sub } from './vec';
 import { wallFrame } from './walls';
 import { outlineFromHoles, roomHoles } from './rooms';
@@ -19,6 +20,16 @@ function dirAt(a: number): Pt {
 /** Screen angle (degrees, counter-clockwise, Y down) of a direction. */
 export function angleOf(d: Pt): number {
   return (Math.atan2(-d.y, d.x) * 180) / Math.PI;
+}
+
+/** Angle in degrees wrapped to [0, 360). */
+export function wrap360(a: number): number {
+  return ((a % 360) + 360) % 360;
+}
+
+/** Angle in degrees wrapped to [-180, 180). */
+export function wrap180(a: number): number {
+  return (((a % 360) + 540) % 360) - 180;
 }
 
 /**
@@ -95,15 +106,15 @@ const toPoly = (ring: Pt[]): Polygon => [ring.map(p => [p.x, p.y] as [number, nu
 /**
  * Cone clipped to the room the device is in (smallest room hole containing the probe point:
  * pt + face normal for wall devices, pt for free ones). Unclipped when outside every room.
- * `holes` may be passed pre-computed (roomHoles(level)) to avoid recomputing per device.
- * Returns rings (outer rings and any holes, unclosed): render with fill-rule evenodd. [] when none.
+ * `holesOf` may be a per-level cache of roomHoles to avoid recomputing per device; it runs only for a device
+ * with a cone. Returns rings (outer rings and any holes, unclosed): render with fill-rule evenodd. [] when none.
  */
-export function clippedCone(level: Level, d: Device, holes: Pt[][] = roomHoles(level)): Pt[][] {
+export function clippedCone(level: Level, d: Device, holesOf: (level: Level) => Pt[][] = roomHoles): Pt[][] {
   const shape = coneShape(level, d);
   if (!shape) return [];
   const pose = devicePose(level, d)!;
   const probe = probeOf(pose); // the face normal, not the aim, so the room does not change with aim
-  const room = outlineFromHoles(holes, probe);
+  const room = outlineFromHoles(holesOf(level), probe);
   if (!room) return [shape];
   let mp: ReturnType<typeof polygonClipping.intersection>;
   try {
@@ -151,11 +162,9 @@ export function deviceAt(level: Level, p: Pt, tolMm: number): Id | null {
 /** Handle length in screen pixels. */
 export const HANDLE_PX = 60;
 
-const HAS_DIRECTION = new Set(['wall_light', 'motion_sensor', 'illuminance_sensor']);
-
 /** Direction handle of a wall light or sensor: from the pose point along its direction, 60 screen px long; null for other kinds. */
 export function directionHandle(level: Level, d: Device, scaleFactor: number): { from: Pt; to: Pt } | null {
-  if (!HAS_DIRECTION.has(d.props.kind)) return null;
+  if (!AIM_KINDS.has(d.props.kind)) return null;
   const pose = devicePose(level, d);
   if (!pose) return null;
   return { from: pose.pt, to: add(pose.pt, scale(pose.dir, HANDLE_PX / scaleFactor)) };
@@ -170,7 +179,7 @@ export function withAim(pl: Extract<DevicePlacement, { mode: 'wall' }>, aim: num
 
 /**
  * Placement with its direction set from a pointer at p: wall device aim = signed angle from the face normal
- * (clamped to -90..90, 0 stored as no aim); free device rotation 0..359. Whole degrees; snap15 rounds to 15-degree steps.
+ * (clamped to -AIM_MAX..AIM_MAX, 0 stored as no aim); free device rotation 0..359. Whole degrees; snap15 rounds to 15-degree steps.
  * Unchanged when the pointer is on the device or the pose is missing.
  */
 export function angleFromHandle(level: Level, d: Device, p: Pt, snap15: boolean): DevicePlacement {
@@ -179,8 +188,8 @@ export function angleFromHandle(level: Level, d: Device, p: Pt, snap15: boolean)
   if (!pose || (p.x === pose.pt.x && p.y === pose.pt.y)) return pl;
   const a = angleOf(sub(p, pose.pt));
   const round = (v: number) => (snap15 ? Math.round(v / 15) * 15 : Math.round(v));
-  if (pl.mode === 'free') return { ...pl, rotation: ((round(a) % 360) + 360) % 360 };
-  const rel = ((((a - angleOf(pose.normal!)) % 360) + 540) % 360) - 180; // -180..180
-  const aim = Math.max(-90, Math.min(90, round(rel)));
+  if (pl.mode === 'free') return { ...pl, rotation: wrap360(round(a)) };
+  const rel = wrap180(a - angleOf(pose.normal!));
+  const aim = Math.max(-AIM_MAX, Math.min(AIM_MAX, round(rel)));
   return withAim(pl, aim);
 }

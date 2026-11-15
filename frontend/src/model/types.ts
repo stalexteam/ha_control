@@ -126,6 +126,9 @@ export const DEVICE_PLACEMENTS: Record<DeviceKind, ('wall' | 'free')[]> = {
   exhaust_fan: ['wall'],
 };
 
+/** Kinds with a direction handle; on a wall their direction is the aim off the face normal. */
+export const AIM_KINDS: ReadonlySet<DeviceKind> = new Set<DeviceKind>(['wall_light', 'motion_sensor', 'illuminance_sensor']);
+
 export function deviceDefaults(kind: DeviceKind, mode: 'wall' | 'free'): DeviceProps {
   switch (kind) {
     case 'ceiling_light':

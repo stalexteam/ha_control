@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { deviceDefaults, type Device, type DevicePlacement, type DeviceProps, type Level } from '../../src/model/types';
 import { addZone } from '../../src/model/zones';
-import { deviceRoomId, angleFromHandle, clippedCone, coneShape, deviceAt, devicePose, directionHandle } from '../../src/geometry/devices';
+import {
+  deviceRoomId, angleFromHandle, clippedCone, coneShape, deviceAt, devicePose, directionHandle, wrap180, wrap360,
+} from '../../src/geometry/devices';
 import { polygonArea } from '../../src/geometry/vec';
 import { rectRoomLevel } from '../fixtures';
 
@@ -135,6 +137,29 @@ describe('coneShape / clippedCone', () => {
     const sw = dev('s', { kind: 'switch' }, { mode: 'wall', wallId: 'w0', side: 'right', offset: 100 });
     expect(coneShape(box, sw)).toBeNull();
     expect(clippedCone(box, sw)).toEqual([]);
+  });
+
+  it('room holes are asked for only when the device has a cone, through the given getter', () => {
+    const box = rectRoomLevel(3000, 4000, 400);
+    const calls: Level[] = [];
+    const holesOf = (l: Level) => { calls.push(l); return []; };
+    const sw = dev('s', { kind: 'switch' }, { mode: 'wall', wallId: 'w0', side: 'right', offset: 100 });
+    expect(clippedCone(box, sw, holesOf)).toEqual([]);
+    expect(calls).toEqual([]);
+    const m = dev('m', { kind: 'motion_sensor', zoneAngle: 360, zoneRange: 5000 }, { mode: 'free', x: 1500, y: 2000, rotation: 0 });
+    expect(clippedCone(box, m, holesOf)).toEqual([coneShape(box, m)]);
+    expect(calls).toEqual([box]);
+  });
+});
+
+describe('wrap360 / wrap180', () => {
+  it('wrap360 maps any angle to [0, 360)', () => {
+    for (const [a, w] of [[0, 0], [359, 359], [360, 0], [-1, 359], [-360, 0], [725, 5], [-725, 355]]) expect(wrap360(a)).toBe(w);
+  });
+  it('wrap180 maps any angle to [-180, 180)', () => {
+    for (const [a, w] of [[0, 0], [179, 179], [180, -180], [-180, -180], [190, -170], [-190, 170], [540, -180], [-45, -45]]) {
+      expect(wrap180(a)).toBe(w);
+    }
   });
 });
 

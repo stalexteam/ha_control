@@ -1,7 +1,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
 import type { Device, DeviceKind, DevicePlacement, DeviceProps, Level, Side } from '../model/types';
-import { DEVICE_PLACEMENTS, FAN_DIAMETERS, deviceDefaults, type FanDiameter } from '../model/types';
+import { AIM_KINDS, DEVICE_PLACEMENTS, FAN_DIAMETERS, deviceDefaults, type FanDiameter } from '../model/types';
 import { AIM_MAX, deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
 import type { Selection } from '../editor/tools/types';
 import { deviceRoomId, withAim } from '../geometry/devices';
@@ -126,7 +126,7 @@ function placementFields(o: DevicePropsOpts, d: Device): TemplateResult {
     return row(`${t('props.rotation')}, ${t('unit.deg')}`,
       numProp(o, 'rotation', pl.rotation, 'rotation', v => o.onPlacement({ ...pl, rotation: v })));
   }
-  const aims = d.props.kind === 'wall_light' || d.props.kind === 'motion_sensor' || d.props.kind === 'illuminance_sensor';
+  const aims = AIM_KINDS.has(d.props.kind);
   return html`
     ${row(t('props.side'), select<Side>(pl.side, labelled<Side>(['left', 'right'], 'side'), v => o.onPlacement({ ...pl, side: v }), 'side'))}
     ${row(`${t('props.offset')}, ${t('unit.mm')}`, numProp(o, 'offset', pl.offset, 'offset',
