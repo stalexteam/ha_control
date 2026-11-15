@@ -64,7 +64,7 @@ export async function loadRegistries(hass: HassLike): Promise<Registries> {
   };
 }
 
-/** Per field: state, name (friendly_name), deviceClass, unit come from the live state when present; hidden, disabled, category, deviceId, areaId, icon come from the registry. */
+/** Per field: state, deviceClass, unit from the live state when present; name = live friendly_name, else registry name, else original_name, else entity id; hidden, disabled, category, deviceId, areaId from the registry; icon = registry icon, falling back to the live icon. */
 export function mergeMeta(states: HaMeta, regs: Registries): HaMeta {
   const entities = new Map(regs.entities);
   for (const [eid, live] of states.entities) {

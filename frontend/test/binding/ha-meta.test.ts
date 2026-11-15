@@ -34,6 +34,7 @@ describe('loadRegistries / mergeMeta', () => {
   const answers: Record<string, unknown> = {
     'config/entity_registry/list': [
       { entity_id: 'sensor.t', device_id: 'd1', area_id: null, name: null, original_name: 'T reg', hidden_by: null, disabled_by: null, entity_category: 'diagnostic', icon: null, original_icon: 'mdi:thermometer' },
+      { entity_id: 'sensor.orig', device_id: null, area_id: null, name: null, original_name: 'X', hidden_by: null, disabled_by: null, entity_category: null, icon: null, original_icon: null },
       { entity_id: 'light.off', device_id: null, area_id: 'a1', name: 'Off light', hidden_by: 'user', disabled_by: 'integration', entity_category: null, icon: 'mdi:x', original_icon: 'mdi:y' },
     ],
     'config/device_registry/list': [{ id: 'd1', name: 'Dev', name_by_user: 'My dev', model: 'M1', area_id: 'a2' }],
@@ -68,7 +69,8 @@ describe('loadRegistries / mergeMeta', () => {
     const base = metaFromStates({ 'sensor.t': { state: '99', attributes: { device_class: 'temperature', unit_of_measurement: '°C' } }, 'sensor.only': { state: '1', attributes: {} } });
     const m = mergeMeta(base, regs);
     expect(m.registryLoaded).toBe(true);
-    expect(m.entities.get('sensor.t')).toMatchObject({ state: '99', category: 'diagnostic', deviceId: 'd1' });
+    expect(m.entities.get('sensor.orig')!.name).toBe('X');
+    expect(m.entities.get('sensor.t')).toMatchObject({ name: 'T reg', state: '99', category: 'diagnostic', deviceId: 'd1' });
     expect(m.entities.has('sensor.only')).toBe(true);
     expect(m.entities.has('light.off')).toBe(true);
     expect(presence(m, 'light.off')).toBe('unavailable');
