@@ -157,8 +157,6 @@ export const panelStyles = css`
   .warn { color: var(--ch-error); font-size: 12px; }
 
   /* Binding properties: stacked fields like HA forms. */
-  .bprops h4 { margin-bottom: 2px; font-size: 16px; }
-  .bprops .kind { margin: 0 0 12px; }
   .bfield { display: flex; flex-direction: column; gap: 4px; margin: 0 0 6px; }
   .bfield > span, .role-label { color: var(--ch-muted); font-size: 12px; }
   .role { margin-top: 14px; }

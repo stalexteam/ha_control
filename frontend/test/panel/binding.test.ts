@@ -292,12 +292,34 @@ describe('binding step', () => {
   it('a socket shows its name, kind, and the Control and Power fields', async () => {
     const { el } = await open();
     await pick(el, 's');
-    expect($(el, '.props h4').textContent!.trim()).toBe('Hall socket');
-    expect($(el, '.props').textContent).toContain('Socket');
+    expect($<HTMLInputElement>(el, '.props input[data-field="name"]').value).toBe('Hall socket');
+    expect($(el, '.props h4').textContent!.trim()).toBe('Socket');
     const roles = [...el.shadowRoot!.querySelectorAll('.props .role')];
     expect(roles.map(r => r.querySelector('.role-label')!.textContent!.trim())).toEqual(['Control', 'Power']);
     expect(roles.map(r => r.getAttribute('data-role'))).toEqual(['control', 'power']);
     expect(combo(el, 'control').label).toBe('Control');
+  });
+
+  it('the name field renames the device: trimmed, shown in the list, undoable; a blank name reverts', async () => {
+    const { el } = await open();
+    await pick(el, 's');
+    const field = () => $<HTMLInputElement>(el, '.props input[data-field="name"]');
+    const change = async (v: string) => {
+      field().value = v;
+      field().dispatchEvent(new Event('change', { bubbles: true }));
+      await el.updateComplete;
+    };
+    expect(field().value).toBe('Hall socket');
+    await change('  Desk socket ');
+    expect(device(el, 's').name).toBe('Desk socket');
+    expect($(el, '.blist .brow[data-id="s"]').textContent).toContain('Desk socket');
+    expect(el.save.dirty).toBe(true);
+    await change('   ');
+    expect(device(el, 's').name).toBe('Desk socket');
+    expect(field().value).toBe('Desk socket');
+    await undo(el);
+    expect(device(el, 's').name).toBe('Hall socket');
+    expect(field().value).toBe('Hall socket');
   });
 
   it('Show all widens one field to its whole domain', async () => {
@@ -335,7 +357,7 @@ describe('binding step', () => {
     await choose(el, 'control', 'switch.plug');
     await undo(el);
     expect(el.selection).toEqual({ kind: 'device', id: 's' });
-    expect($(el, '.props h4').textContent!.trim()).toBe('Hall socket');
+    expect($<HTMLInputElement>(el, '.props input[data-field="name"]').value).toBe('Hall socket');
     expect(combo(el, 'control').value).toBeNull();
     await redo(el);
     expect(device(el, 's').bindings).toEqual({ control: 'switch.plug' });

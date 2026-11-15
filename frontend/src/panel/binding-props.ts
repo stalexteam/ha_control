@@ -5,6 +5,8 @@ import { autoFill, candidates, haDevicesFor } from '../binding/candidates';
 import { presence, type HaMeta, type States } from '../binding/ha-meta';
 import '../binding/entity-combo';
 import '../binding/device-combo';
+import { setDeviceProps } from '../model/devices';
+import { deviceNameRow } from './device-props';
 import { t } from '../i18n';
 
 export interface BindingPropsOpts {
@@ -124,8 +126,8 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
       <button class="btn" data-action="retry-registry" ?disabled=${o.registryLoading}
         @click=${() => o.onRetry()}>${t(o.registryLoading ? 'load.loading' : 'action.retry')}</button></div>` : nothing}
     ${d ? html`
-      <h4>${d.name}</h4>
-      <p class="muted kind">${t(`device.${d.props.kind}`)}</p>
+      <h4>${t(`device.${d.props.kind}`)}</h4>
+      ${deviceNameRow(d, name => o.commit(setDeviceProps(o.level, d.id, {}, name)))}
       ${haDevicePicker(o, d)}
       ${o.fillNotice ? html`<p class="note" data-notice="fill">${o.fillNotice}</p>` : nothing}
       ${ROLE_SPECS[d.props.kind].map(spec => roleField(o, d, spec))}`

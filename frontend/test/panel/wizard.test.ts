@@ -78,8 +78,8 @@ describe('wizard steps in the panel', () => {
     click(el, 1000, 1000);
     await el.updateComplete;
     expect(el.selection).toEqual({ kind: 'device', id: 'k' });
-    expect($(el, '.props h4').textContent!.trim()).toBe('Kitchen climate');
-    expect($(el, '.props').textContent).toContain('Climate sensor');
+    expect($<HTMLInputElement>(el, '.props input[data-field="name"]').value).toBe('Kitchen climate');
+    expect($(el, '.props h4').textContent!.trim()).toBe('Climate sensor');
   });
 
   it('Delete and Backspace do nothing in binding mode', async () => {

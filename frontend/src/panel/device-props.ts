@@ -160,16 +160,21 @@ function placementFields(o: DevicePropsOpts, d: Device): TemplateResult {
       numProp(o, 'aim', pl.aim ?? 0, 'aim', v => o.onPlacement(withAim(pl, v)))) : nothing}`;
 }
 
+/** The device's name field (Equipment and Binding steps): trimmed; a blank name reverts; calls onName only on a change. */
+export function deviceNameRow(d: Device, onName: (name: string) => void): TemplateResult {
+  return row(t('props.name'), html`<input class="val wide" type="text" data-field="name" .value=${fieldValue(d.name)}
+    @change=${(e: Event) => {
+      const el = e.target as HTMLInputElement;
+      const name = el.value.trim();
+      if (!name) { el.value = d.name; return; }
+      if (name !== d.name) onName(name);
+    }} />`);
+}
+
 function deviceProps(o: DevicePropsOpts, d: Device): TemplateResult {
   return html`
     <h4>${t(`device.${d.props.kind}`)}</h4>
-    ${row(t('props.name'), html`<input class="val wide" type="text" data-field="name" .value=${fieldValue(d.name)}
-      @change=${(e: Event) => {
-        const el = e.target as HTMLInputElement;
-        const name = el.value.trim();
-        if (!name) { el.value = d.name; return; }
-        if (name !== d.name) o.onDevice({}, name);
-      }} />`)}
+    ${deviceNameRow(d, name => o.onDevice({}, name))}
     ${kindFields(o, d.props, '', patch => o.onDevice(patch))}
     ${placementFields(o, d)}
     ${d.invalid ? html`<p class="warn">${t('props.invalidDevice')}</p>` : nothing}
