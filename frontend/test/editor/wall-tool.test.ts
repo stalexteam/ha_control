@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { createWallTool } from '../../src/editor/tools/wall-tool';
 import { fakeContext } from './fake-context';
 
-const ev = (x: number, y: number, shift = false) => ({ pt: { x, y }, shift, alt: false, ctrl: false });
+const ev = (x: number, y: number, shift = false) => ({ pt: { x, y }, shift, alt: false });
 const typeKeys = (t: ReturnType<typeof createWallTool>, s: string) => {
-  for (const ch of s) t.key(ch, { shift: false, ctrl: false });
+  for (const ch of s) t.key(ch, { shift: false });
 };
-const k = { shift: false, ctrl: false };
+const k = { shift: false };
 
 describe('wall tool', () => {
   it('two clicks + Esc make one wall and one commit', () => {
@@ -111,7 +111,7 @@ describe('wall tool', () => {
     const ctx = fakeContext();
     const t = createWallTool(ctx);
     t.down(ev(0, 0)); t.move(ev(2000, 130));
-    t.key('Shift', { shift: true, ctrl: false });
+    t.key('Shift', { shift: true });
     expect(t.preview().walls![0].b).toEqual({ x: 2000, y: 0 });
   });
 

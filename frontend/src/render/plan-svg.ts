@@ -9,8 +9,6 @@ import { t } from '../i18n';
 import type { PlanPalette } from './theme';
 import { renderDevices } from './devices-svg';
 
-export { paletteFor, type PlanPalette } from './theme';
-
 export interface RenderOpts {
   palette: PlanPalette;
   selection: Selection | null;

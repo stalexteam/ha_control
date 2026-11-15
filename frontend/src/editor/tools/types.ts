@@ -7,7 +7,6 @@ export interface ToolEvent {
   pt: Pt;
   shift: boolean;
   alt: boolean;
-  ctrl: boolean;
 }
 
 /** Services the editor provides to a tool. */
@@ -61,7 +60,7 @@ export interface Tool {
   move(e: ToolEvent): void;
   up(e: ToolEvent): void;
   /** Returns true when the tool consumed the key. */
-  key(key: string, e: { shift: boolean; ctrl: boolean }): boolean;
+  key(key: string, e: { shift: boolean }): boolean;
   preview(): Preview;
   cancel(): void;
 }

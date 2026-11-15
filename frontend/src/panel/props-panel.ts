@@ -9,7 +9,8 @@ import { roomAreaM2 } from '../geometry/rooms';
 import type { Selection } from '../editor/tools/types';
 import { formatArea, formatMm } from '../render/plan-svg';
 import { t } from '../i18n';
-import { parseMm, type ToolId } from './toolbar';
+import { parseMm } from './toolbar';
+import type { ToolId } from './tool-factory';
 import { isNextObjectTool, renderNextObject, type NextObjects } from './next-object';
 
 export type BoxMeasure = 'inner' | 'axis' | 'outer';

@@ -5,7 +5,7 @@ import { refreshOpenings } from './openings';
 import { reanchorDevices, refreshDevices } from './devices';
 import { refreshZones } from './zones';
 
-/** Result of snapping a cursor point (see Task 7 SnapResult). */
+/** Result of snapping a cursor point. */
 export type Endpoint =
   | { kind: 'node'; nodeId: Id }
   | { kind: 'wall'; wallId: Id; offset: number } // point on a wall axis -> T-node

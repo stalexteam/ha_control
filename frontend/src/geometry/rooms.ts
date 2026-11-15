@@ -20,11 +20,6 @@ export function outlineFromHoles(holes: Pt[][], seed: Pt): Pt[] | null {
   return best;
 }
 
-/** Smallest-area hole of the wall union containing seed. */
-export function findRoomOutline(level: Level, seed: Pt): Pt[] | null {
-  return outlineFromHoles(roomHoles(level), seed);
-}
-
 export function roomAreaM2(outline: Pt[]): number {
   return Math.round(Math.abs(polygonArea(outline)) / 1e6 * 100) / 100;
 }

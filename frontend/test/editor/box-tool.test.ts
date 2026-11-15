@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createBoxTool } from '../../src/editor/tools/box-tool';
 import { fakeContext } from './fake-context';
 
-const ev = (x: number, y: number) => ({ pt: { x, y }, shift: false, alt: false, ctrl: false });
-const k = { shift: false, ctrl: false };
+const ev = (x: number, y: number) => ({ pt: { x, y }, shift: false, alt: false });
+const k = { shift: false };
 const typeKeys = (t: ReturnType<typeof createBoxTool>, s: string) => { for (const ch of s) t.key(ch, k); };
 
 describe('box tool', () => {

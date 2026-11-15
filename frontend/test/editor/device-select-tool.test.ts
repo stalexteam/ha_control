@@ -5,10 +5,10 @@ import { addDevice } from '../../src/model/devices';
 import { deviceDefaults, type DeviceKind, type DevicePlacement, type Level } from '../../src/model/types';
 import { fakeContext } from './fake-context';
 
-const ev = (x: number, y: number, shift = false) => ({ pt: { x, y }, shift, alt: false, ctrl: false });
+const ev = (x: number, y: number, shift = false) => ({ pt: { x, y }, shift, alt: false });
 const props = { type: 'partition', thickness: 100, baseline: 'center' } as const;
 const empty = (): Level => ({ id: 'l0', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] });
-const k = { shift: false, ctrl: false };
+const k = { shift: false };
 
 /** Box 3000x4000 with one device; wallIndex picks the host wall for wall placements (0 = top, 3 = left). */
 function withDevice(kind: DeviceKind, placement: (walls: Level['walls']) => DevicePlacement) {

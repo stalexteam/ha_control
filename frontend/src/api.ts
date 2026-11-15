@@ -32,7 +32,7 @@ export async function getPlan(hass: HassLike, id: Id): Promise<Plan> {
 
 /** Saves a plan; returns the new revision. Throws RevisionConflictError on conflict. */
 export async function savePlan(
-  hass: HassLike,
+  hass: Pick<HassLike, 'connection'>,
   plan: Plan,
   expectedRevision: number | null,
   force = false,

@@ -1,8 +1,7 @@
 import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from 'lit';
 import { property, state } from 'lit/decorators.js';
 import type { Id, Level, Plan, Pt, WallType } from '../model/types';
-import { WALL_PRESETS, emptyPlan, normalizeLevel } from '../model/types';
-import { newId } from '../model/ids';
+import { WALL_PRESETS } from '../model/types';
 import { deleteWall } from '../model/ops';
 import { deleteOpening } from '../model/openings';
 import { deleteDevice } from '../model/devices';
@@ -10,8 +9,9 @@ import { deleteZone } from '../model/zones';
 import { History } from '../editor/history';
 import { SaveController } from '../editor/save';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
-import { deletePlan, errorText, getPlan, listPlans, type HassLike, type PlanSummary } from '../api';
-import { paletteFor, renderLevel } from '../render/plan-svg';
+import type { HassLike, PlanSummary } from '../api';
+import { renderLevel } from '../render/plan-svg';
+import { paletteFor } from '../render/theme';
 import { t } from '../i18n';
 import { renderToolRail, renderTopBar } from './toolbar';
 import { createTool, selectionExists, toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
@@ -29,8 +29,6 @@ import { EditorInput } from './input';
 import { createInputHost } from './input-host';
 import { renderActiveDialog, renderDraftBanner } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
-
-const EMPTY_LEVEL: Level = { id: '', name: '', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] };
 
 export class PlanStudioPanel extends LitElement {
   static styles = panelStyles;
@@ -88,17 +86,14 @@ export class PlanStudioPanel extends LitElement {
   readonly ctx: ToolContext;
   readonly session = new PlanSession(this);
 
-  load(): Promise<void> { return this.session.load(); }
   doSave(): Promise<void> { return this.session.doSave(); }
 
   constructor() {
     super();
     const self = this;
     // HA hands the panel a new hass object on every state change; always read the latest one.
-    const hassProxy: HassLike = {
+    const hassProxy = {
       get connection() { return self.hass!.connection; },
-      get language() { return self.uiLang; },
-      get themes() { return self.hass?.themes; },
     };
     this.save = new SaveController(hassProxy, () => {
       if (this.save.dirty && this.plan && !this.session.draftBlocked()) this.drafts.schedule(() => this.session.makeDraft());
@@ -163,10 +158,6 @@ export class PlanStudioPanel extends LitElement {
     }
   }
 
-  // ---- new / delete ----
-
-  // ---- local draft ----
-
   // ---- editing ----
 
   commit(next: Level): void {
@@ -223,8 +214,6 @@ export class PlanStudioPanel extends LitElement {
     this.mode = mode;
     this.pickTool(toolIdsFor(mode)[0]);
   }
-
-  // ---- saving ----
 
   // ---- view / pointer ----
 

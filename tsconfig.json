@@ -8,7 +8,9 @@
     "experimentalDecorators": true,
     "useDefineForClassFields": false,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
   },
-  "include": ["frontend/src", "frontend/dev", "vite.config.ts", "vitest.config.ts"]
+  "include": ["frontend/src", "frontend/test", "frontend/dev", "vite.config.ts", "vitest.config.ts"]
 }

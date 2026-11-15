@@ -1,13 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
 import polygonClipping from 'polygon-clipping';
 import type { Level, Wall } from '../../src/model/types';
-import { findRoomOutline, roomAreaM2 } from '../../src/geometry/rooms';
+import { outlineFromHoles, roomAreaM2, roomHoles } from '../../src/geometry/rooms';
 import { wallsUnion } from '../../src/geometry/walls';
 import { addZone, deleteZone, refreshZones, renameZone } from '../../src/model/zones';
 import { addBox, addWallSegment, deleteWall, moveNode, moveWall, type WallProps } from '../../src/model/ops';
 import { addOpening } from '../../src/model/openings';
 import { polygonArea } from '../../src/geometry/vec';
 import { rectRoomLevel } from '../fixtures';
+
+const findRoomOutline = (level: Level, seed: { x: number; y: number }) => outlineFromHoles(roomHoles(level), seed);
 
 const part: WallProps = { type: 'partition', thickness: 100, baseline: 'center' };
 const bearing: WallProps = { type: 'bearing', thickness: 400, baseline: 'center' };

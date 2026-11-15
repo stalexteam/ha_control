@@ -67,7 +67,7 @@ describe("SaveController", () => {
     const c = new SaveController(hass, () => {});
     c.baseRevision = 7;
     const old = emptyPlan("Old");
-    const np = await c.saveAsNew(old, "New");
+    const np = (await c.saveAsNew(old, "New"))!;
     const sentPlan = sent[0].plan as { id: string; name: string };
     expect(sent[0].expected_revision).toBeNull();
     expect(sentPlan.id).not.toBe(old.id);

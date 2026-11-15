@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest';
 import { html, render } from 'lit';
-import { renderLevel, paletteFor } from '../../src/render/plan-svg';
+import { renderLevel } from '../../src/render/plan-svg';
+import { paletteFor } from '../../src/render/theme';
 import { renderDevices, ICON_PX } from '../../src/render/devices-svg';
 import { deviceDefaults, type Device, type DeviceKind, type Level } from '../../src/model/types';
 import { rectRoomLevel } from '../fixtures';

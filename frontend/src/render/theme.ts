@@ -1,6 +1,5 @@
 /** Colours for the plan drawing and the editor chrome. */
 export interface PlanPalette {
-  dark: boolean;
   // Drawing
   background: string;
   grid: string;
@@ -35,7 +34,6 @@ export interface PlanPalette {
 
 /** Dark: the "blueprint" (mockup A of look.html). */
 const DARK: PlanPalette = {
-  dark: true,
   background: '#0b1220',
   grid: '#1c2840',
   gridMajor: '#26355a',
@@ -67,7 +65,6 @@ const DARK: PlanPalette = {
 
 /** Light: the "interior" look (mockup C of look.html). */
 const LIGHT: PlanPalette = {
-  dark: false,
   background: '#f3efe8',
   grid: '#e6dfd4',
   gridMajor: '#d8cfc1',

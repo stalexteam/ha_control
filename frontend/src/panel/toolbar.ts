@@ -4,8 +4,6 @@ import type { SaveState } from '../editor/save';
 import { t } from '../i18n';
 import { toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
 
-export type { ToolId } from './tool-factory';
-
 export interface TopBarOpts {
   lang: string;
   /** Plan or Equipment tab; the wall type settings show only in the Plan tab. */

@@ -90,7 +90,6 @@ const en: Dict = {
   'props.thickness': 'Thickness',
   'props.baseline': 'Baseline',
   'props.length': 'Length',
-  'props.opening': 'Opening',
   'props.kind': 'Kind',
   'props.width': 'Width',
   'props.offset': 'From wall start',

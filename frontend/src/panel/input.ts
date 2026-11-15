@@ -42,7 +42,7 @@ export class EditorInput {
   constructor(private readonly h: InputHost) {}
 
   private toolEvent(e: PointerEvent): ToolEvent {
-    return { pt: this.h.toMm(e), shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey };
+    return { pt: this.h.toMm(e), shift: e.shiftKey, alt: e.altKey };
   }
 
   readonly pointerDown = (e: PointerEvent) => {
@@ -116,7 +116,7 @@ export class EditorInput {
       if (!e.repeat && !this.spaceDown) { this.spaceDown = true; this.spacePending = true; }
       return;
     }
-    let consumed = this.h.tool().key(e.key, { shift: e.shiftKey, ctrl });
+    let consumed = this.h.tool().key(e.key, { shift: e.shiftKey });
     if (!consumed && e.key === 'Delete') consumed = this.h.deleteSelection();
     if (!consumed && e.key === 'Escape') { this.h.clearSelection(); consumed = true; }
     if (consumed) e.preventDefault();
@@ -129,7 +129,7 @@ export class EditorInput {
    */
   readonly keyUp = (e: KeyboardEvent) => {
     const blocked = this.h.modal() || inField(e);
-    const mods = { shift: e.shiftKey, ctrl: e.ctrlKey || e.metaKey };
+    const mods = { shift: e.shiftKey };
     if (e.key === ' ') {
       this.spaceDown = false;
       const tap = this.spacePending;

@@ -4,7 +4,7 @@ import { addBox } from '../../src/model/ops';
 import { deviceDefaults, type DeviceProps, type Level } from '../../src/model/types';
 import { fakeContext } from './fake-context';
 
-const ev = (x: number, y: number) => ({ pt: { x, y }, shift: false, alt: false, ctrl: false });
+const ev = (x: number, y: number) => ({ pt: { x, y }, shift: false, alt: false });
 const props = { type: 'partition', thickness: 100, baseline: 'center' } as const;
 const empty = (): Level => ({ id: 'l0', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] });
 const box = () => addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 4000 }, props, 'axis');
@@ -96,7 +96,7 @@ describe('device place tool', () => {
 describe('aim knob from the placement tool', () => {
   // tolMm 20 => handle 120 mm. Top wall right-side device at (1500, 50) faces (0,1); knob at (1500, 170).
   const aimOf = (ctx: ReturnType<typeof fakeContext>) => { const p = ctx.level().devices[0].placement; return p.mode === 'wall' ? p.aim : NaN; };
-  const k = { shift: false, ctrl: false };
+  const k = { shift: false };
   function placed() {
     const ctx = fakeContext(box());
     const t = createDeviceTool(ctx, 'motion_sensor');

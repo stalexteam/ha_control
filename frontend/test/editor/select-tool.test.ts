@@ -6,12 +6,12 @@ import type { Level } from '../../src/model/types';
 import { fakeContext } from './fake-context';
 
 const ev = (x: number, y: number, o: { shift?: boolean; alt?: boolean } = {}) =>
-  ({ pt: { x, y }, shift: !!o.shift, alt: !!o.alt, ctrl: false });
+  ({ pt: { x, y }, shift: !!o.shift, alt: !!o.alt });
 const props = { type: 'partition', thickness: 100, baseline: 'center' } as const;
 const empty = (): Level => ({ id: 'l0', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] });
 const box = () => addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 4000 }, props, 'axis');
 const click = (t: ReturnType<typeof createSelectTool>, x: number, y: number) => { t.down(ev(x, y)); t.up(ev(x, y)); };
-const k = { shift: false, ctrl: false };
+const k = { shift: false };
 
 describe('select tool', () => {
   it('dragging a corner of the selected wall is one commit, both walls change', () => {

@@ -28,7 +28,7 @@ export class SaveController {
   private dirtyVersion = 0;
   private inflight: Promise<unknown> | null = null;
 
-  constructor(private hass: HassLike, private onChange: () => void) {}
+  constructor(private hass: Pick<HassLike, 'connection'>, private onChange: () => void) {}
 
   /** Starts over for a freshly opened plan (no pending edits, no error). */
   reset(baseRevision: number | null): void {
