@@ -206,6 +206,17 @@ const en: Dict = {
   'tracker.width': 'W',
   'tracker.depth': 'D',
 
+  'combo.search': 'Search entities',
+  'combo.empty': 'No matching entities',
+  'combo.none': 'Select an entity',
+  'combo.clear': 'Clear',
+  'combo.domain.sensor': 'Sensor',
+  'combo.domain.binary_sensor': 'Binary sensor',
+  'combo.domain.light': 'Light',
+  'combo.domain.switch': 'Switch',
+  'combo.domain.fan': 'Fan',
+  'combo.domain.event': 'Event',
+
   'unit.mm': 'mm',
   'unit.m2': 'm²',
   'unit.deg': '°',
