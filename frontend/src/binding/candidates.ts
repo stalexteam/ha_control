@@ -1,5 +1,5 @@
 import type { BindingRole, DeviceKind, Id, Level } from '../model/types';
-import { ROLE_SPECS, setBinding, type RoleSpec } from '../model/bindings';
+import { ROLE_SPECS, activeRoleSpecs, setBinding, type RoleSpec } from '../model/bindings';
 import type { DeviceMeta, EntityMeta, HaMeta } from './ha-meta';
 
 function matches(e: EntityMeta, spec: RoleSpec): boolean {
@@ -30,29 +30,35 @@ export function candidates(meta: HaMeta, spec: RoleSpec, showAll: boolean): read
 
 const deviceCache = new WeakMap<HaMeta, Map<DeviceKind, readonly DeviceMeta[]>>();
 
-/** HA devices with a strict candidate for any role of the kind, by name then id. Memoised per meta and kind. */
+/** HA devices with a strict candidate for any auto-filled role of the kind, by name then id. Memoised per meta and kind. */
 export function haDevicesFor(meta: HaMeta, kind: DeviceKind): readonly DeviceMeta[] {
   let byKind = deviceCache.get(meta);
   if (!byKind) deviceCache.set(meta, (byKind = new Map()));
   const hit = byKind.get(kind);
   if (hit) return hit;
   const ids = new Set<string>();
-  for (const spec of ROLE_SPECS[kind]) for (const e of candidates(meta, spec, false)) if (e.deviceId) ids.add(e.deviceId);
+  for (const spec of ROLE_SPECS[kind]) {
+    if (spec.autoFill === false) continue;
+    for (const e of candidates(meta, spec, false)) if (e.deviceId) ids.add(e.deviceId);
+  }
   const list = [...ids].map(id => meta.devices.get(id)).filter((d): d is DeviceMeta => !!d)
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
   byKind.set(kind, list);
   return list;
 }
 
-/** Fills empty roles from the HA device's strict candidates. One candidate fills; several are ambiguous. Filled roles are never touched. */
+/**
+ * Fills empty active roles from the HA device's strict candidates, except roles with `autoFill: false`.
+ * One candidate fills; several are ambiguous. Filled roles are never touched.
+ */
 export function autoFill(level: Level, deviceId: Id, haDeviceId: string, meta: HaMeta): { level: Level; filled: BindingRole[]; ambiguous: BindingRole[] } {
   const d = level.devices.find(x => x.id === deviceId);
   const filled: BindingRole[] = [];
   const ambiguous: BindingRole[] = [];
   if (!d) return { level, filled, ambiguous };
   let next = level;
-  for (const spec of ROLE_SPECS[d.props.kind]) {
-    if (d.bindings?.[spec.role]) continue;
+  for (const spec of activeRoleSpecs(d)) {
+    if (spec.autoFill === false || d.bindings?.[spec.role]) continue;
     const c = candidates(meta, spec, false).filter(e => e.deviceId === haDeviceId);
     if (c.length === 1) { next = setBinding(next, deviceId, spec.role, c[0].entityId); filled.push(spec.role); }
     else if (c.length > 1) ambiguous.push(spec.role);

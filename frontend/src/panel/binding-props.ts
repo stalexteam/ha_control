@@ -1,6 +1,6 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import type { BindingRole, Device, Level } from '../model/types';
-import { ROLE_SPECS, alsoBoundTo, countNotBound, setBinding, type BindStatus, type RoleSpec } from '../model/bindings';
+import { activeRoleSpecs, alsoBoundTo, countNotBound, setBinding, type BindStatus, type RoleSpec } from '../model/bindings';
 import { autoFill, candidates, haDevicesFor } from '../binding/candidates';
 import { presence, type HaMeta, type States } from '../binding/ha-meta';
 import '../binding/entity-combo';
@@ -62,7 +62,7 @@ function haDevicePicker(o: BindingPropsOpts, d: Device): TemplateResult {
   const devices = haDevicesFor(o.meta, d.props.kind);
   const fill = (haId: string): void => {
     const r = autoFill(o.level, d.id, haId, o.meta);
-    const specs = ROLE_SPECS[d.props.kind];
+    const specs = activeRoleSpecs(d);
     const several = r.ambiguous.map(role => ({
       role, n: candidates(o.meta, specs.find(s => s.role === role)!, false).filter(e => e.deviceId === haId).length,
     }));
@@ -78,10 +78,10 @@ function haDevicePicker(o: BindingPropsOpts, d: Device): TemplateResult {
       }}></ps-device-combo></div>`;
 }
 
-/** Notes under a bound field: missing or unavailable in HA, and the other devices bound to the same entity. */
-function notes(o: BindingPropsOpts, d: Device, eid: string): TemplateResult {
+/** Notes under a bound field: missing or unavailable in HA, and the other devices bound to the same entity (or trigger). */
+function notes(o: BindingPropsOpts, d: Device, role: BindingRole, eid: string): TemplateResult {
   const p = presence(o.meta, eid, o.states);
-  const others = alsoBoundTo(o.level, eid, d.id);
+  const others = alsoBoundTo(o.level, d, role);
   return html`
     ${p === 'missing' ? html`<p class="warn" data-note="missing">${t('binding.missing')}</p>` : nothing}
     ${p === 'unavailable' ? html`<p class="note" data-note="unavailable">${t('binding.unavailable')}</p>` : nothing}
@@ -108,7 +108,7 @@ function roleField(o: BindingPropsOpts, d: Device, spec: RoleSpec): TemplateResu
         o.setFillNotice(null);
         o.commit(next);
       }}></ps-entity-combo>
-    ${eid ? notes(o, d, eid) : nothing}
+    ${eid ? notes(o, d, role, eid) : nothing}
   </div>`;
 }
 
@@ -130,7 +130,7 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
       ${deviceNameRow(d, name => o.commit(setDeviceProps(o.level, d.id, {}, name)))}
       ${haDevicePicker(o, d)}
       ${o.fillNotice ? html`<p class="note" data-notice="fill">${o.fillNotice}</p>` : nothing}
-      ${ROLE_SPECS[d.props.kind].map(spec => roleField(o, d, spec))}`
+      ${activeRoleSpecs(d).map(spec => roleField(o, d, spec))}`
     : html`<p class="muted">${t('binding.pick')}</p>`}
     <div class="bfoot">
       <span>${t('binding.notBound').replace('{n}', String(open))}</span>

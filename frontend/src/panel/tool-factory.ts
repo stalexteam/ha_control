@@ -14,7 +14,7 @@ export type EditorMode = 'plan' | 'equipment' | 'binding';
 
 export const PLAN_TOOL_IDS: ToolId[] = ['select', 'box', 'wall', 'door', 'window', 'opening', 'zone'];
 export const EQUIPMENT_TOOL_IDS: ToolId[] = ['device-select', 'ceiling_light', 'wall_light', 'motion_sensor',
-  'illuminance_sensor', 'climate_sensor', 'switch', 'socket', 'exhaust_fan', 'equipment'];
+  'illuminance_sensor', 'climate_sensor', 'wall_switch', 'smart_button', 'socket', 'exhaust_fan', 'equipment'];
 /** The Binding step has a single selection-only tool; its rail is the device list. */
 export const BINDING_TOOL_IDS: ToolId[] = ['binding-select'];
 

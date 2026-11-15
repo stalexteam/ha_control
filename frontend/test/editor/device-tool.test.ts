@@ -10,26 +10,26 @@ const empty = (): Level => ({ id: 'l0', name: 'L', kind: 'floor', order: 0, node
 const box = () => addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 4000 }, props, 'axis');
 
 describe('device place tool', () => {
-  it('switch near the top wall: wall placement, side right; click adds and selects', () => {
+  it('wall switch near the top wall: wall placement, side right; click adds and selects', () => {
     const ctx = fakeContext(box());
     let selected: unknown = null;
     ctx.select = s => { selected = s; };
-    const t = createDeviceTool(ctx, 'switch');
-    expect(t.id).toBe('switch');
+    const t = createDeviceTool(ctx, 'wall_switch');
+    expect(t.id).toBe('wall_switch');
     t.move(ev(1500, 10));
     const pv = t.preview().device!;
     expect(pv.invalid).toBe(false);
     expect(pv.placement).toMatchObject({ mode: 'wall', side: 'right', offset: 1500 });
     t.down(ev(1500, 10)); t.up(ev(1500, 10));
     expect(ctx.level().devices).toHaveLength(1);
-    expect(ctx.level().devices[0].name).toBe('Switch 1');
+    expect(ctx.level().devices[0].name).toBe('Wall switch 1');
     expect(ctx.commits).toHaveLength(1);
     expect(selected).toEqual({ kind: 'device', id: ctx.level().devices[0].id });
   });
 
-  it('switch in the middle of the room: nothing placed, preview invalid', () => {
+  it('wall switch in the middle of the room: nothing placed, preview invalid', () => {
     const ctx = fakeContext(box());
-    const t = createDeviceTool(ctx, 'switch');
+    const t = createDeviceTool(ctx, 'wall_switch');
     t.move(ev(1500, 2000));
     expect(t.preview().device!.invalid).toBe(true);
     t.down(ev(1500, 2000));
@@ -64,7 +64,7 @@ describe('device place tool', () => {
 
   it('cursor above the top wall gives side left', () => {
     const ctx = fakeContext(box());
-    const t = createDeviceTool(ctx, 'switch');
+    const t = createDeviceTool(ctx, 'wall_switch');
     t.move(ev(1500, -10));
     expect(t.preview().device!.placement).toMatchObject({ mode: 'wall', side: 'left', offset: 1500 });
   });
@@ -83,13 +83,13 @@ describe('device place tool', () => {
 
   it('default name uses the smallest unused number of the kind', () => {
     const ctx = fakeContext(box());
-    const t = createDeviceTool(ctx, 'switch');
+    const t = createDeviceTool(ctx, 'wall_switch');
     for (const x of [500, 1000, 1500]) { t.down(ev(x, 10)); t.up(ev(x, 10)); }
-    expect(ctx.level().devices.map(d => d.name)).toEqual(['Switch 1', 'Switch 2', 'Switch 3']);
+    expect(ctx.level().devices.map(d => d.name)).toEqual(['Wall switch 1', 'Wall switch 2', 'Wall switch 3']);
     const gone = ctx.level().devices[1].id;
     ctx.commit({ ...ctx.level(), devices: ctx.level().devices.filter(d => d.id !== gone) });
     t.down(ev(2000, 10)); t.up(ev(2000, 10));
-    expect(ctx.level().devices.map(d => d.name)).toEqual(['Switch 1', 'Switch 3', 'Switch 2']);
+    expect(ctx.level().devices.map(d => d.name)).toEqual(['Wall switch 1', 'Wall switch 3', 'Wall switch 2']);
   });
 });
 

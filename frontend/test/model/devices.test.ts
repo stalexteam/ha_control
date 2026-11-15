@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { rectRoomLevel } from '../fixtures';
-import { addDevice, deleteDevice, moveDevice, refreshDevices, retargetZoneAngle, setDeviceProps } from '../../src/model/devices';
+import {
+  addDevice, changeDeviceKind, deleteDevice, moveDevice, refreshDevices, retargetZoneAngle, setDeviceProps,
+} from '../../src/model/devices';
+import { setBinding } from '../../src/model/bindings';
 import { addZone, deleteZone } from '../../src/model/zones';
 import { addBox, deleteWall, mergeNodes, moveNode } from '../../src/model/ops';
 import { deviceDefaults, normalizeLevel, type DevicePlacement, type Level } from '../../src/model/types';
@@ -10,15 +13,15 @@ const onWall = (wallId: string, offset: number): DevicePlacement => ({ mode: 'wa
 const free: DevicePlacement = { mode: 'free', x: 100, y: 200, rotation: 0 };
 
 describe('addDevice', () => {
-  it('switch on top wall', () => {
-    const { level, deviceId } = addDevice(room(), deviceDefaults('switch', 'wall'), onWall('w0', 1500), 'S');
+  it('wall switch on top wall', () => {
+    const { level, deviceId } = addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 1500), 'S');
     expect(deviceId).not.toBeNull();
     expect(level.devices).toHaveLength(1);
     expect(level.devices[0].invalid).toBe(false);
   });
-  it('switch free -> null, same level', () => {
+  it('wall switch free -> null, same level', () => {
     const l = room();
-    const r = addDevice(l, deviceDefaults('switch', 'wall'), free, 'S');
+    const r = addDevice(l, deviceDefaults('wall_switch', 'wall'), free, 'S');
     expect(r.deviceId).toBeNull();
     expect(r.level).toBe(l);
   });
@@ -26,10 +29,10 @@ describe('addDevice', () => {
     expect(addDevice(room(), deviceDefaults('equipment', 'free'), onWall('w0', 1000), 'E').deviceId).toBeNull();
   });
   it('offset 3500 on 3000 wall -> null', () => {
-    expect(addDevice(room(), deviceDefaults('switch', 'wall'), onWall('w0', 3500), 'S').deviceId).toBeNull();
+    expect(addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 3500), 'S').deviceId).toBeNull();
   });
   it('unknown wall -> null', () => {
-    expect(addDevice(room(), deviceDefaults('switch', 'wall'), onWall('nope', 10), 'S').deviceId).toBeNull();
+    expect(addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('nope', 10), 'S').deviceId).toBeNull();
   });
 });
 
@@ -58,12 +61,12 @@ describe('moveDevice', () => {
     const l = moveDevice(a.level, a.deviceId!, free);
     expect(l.devices[0].placement.mode).toBe('free');
   });
-  it('switch to free -> unchanged', () => {
-    const a = addDevice(room(), deviceDefaults('switch', 'wall'), onWall('w0', 1000), 'S');
+  it('wall switch to free -> unchanged', () => {
+    const a = addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 1000), 'S');
     expect(moveDevice(a.level, a.deviceId!, free)).toBe(a.level);
   });
   it('wall offset outside wall -> unchanged', () => {
-    const a = addDevice(room(), deviceDefaults('switch', 'wall'), onWall('w0', 1000), 'S');
+    const a = addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 1000), 'S');
     expect(moveDevice(a.level, a.deviceId!, onWall('w0', 3500))).toBe(a.level);
   });
   it('motion sensor free -> wall resets 360 to 110', () => {
@@ -101,33 +104,62 @@ describe('retargetZoneAngle', () => {
 describe('setDeviceProps / deleteDevice', () => {
   it('patches props and name, never kind', () => {
     const a = addDevice(room(), deviceDefaults('wall_light', 'wall'), onWall('w0', 1000), 'L');
-    const l = setDeviceProps(a.level, a.deviceId!, { coneAngle: 60, kind: 'switch' } as never, 'New');
+    const l = setDeviceProps(a.level, a.deviceId!, { coneAngle: 60, kind: 'wall_switch' } as never, 'New');
     expect(l.devices[0].props).toMatchObject({ kind: 'wall_light', coneAngle: 60 });
     expect(l.devices[0].name).toBe('New');
   });
   it('deleteDevice removes', () => {
-    const a = addDevice(room(), deviceDefaults('switch', 'wall'), onWall('w0', 1000), 'S');
+    const a = addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 1000), 'S');
     expect(deleteDevice(a.level, a.deviceId!).devices).toHaveLength(0);
+  });
+});
+
+describe('changeDeviceKind', () => {
+  it('keeps id, name and placement, resets props, and drops bindings', () => {
+    let l = addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 1000), 'S').level;
+    const id = l.devices[0].id;
+    l = setBinding(setDeviceProps(l, id, { autoByDoubleToggle: true, windowSec: 5 }), id, 'state', 'switch.x');
+    const r = changeDeviceKind(l, id, 'smart_button');
+    const d = r.devices[0];
+    expect(d.id).toBe(id);
+    expect(d.name).toBe('S');
+    expect(d.placement).toBe(l.devices[0].placement);
+    expect(d.props).toEqual(deviceDefaults('smart_button', 'wall'));
+    expect('bindings' in d).toBe(false);
+    const back = changeDeviceKind(setBinding(r, id, 'on', 'sensor.a'), id, 'wall_switch');
+    expect(back.devices[0].props).toEqual(deviceDefaults('wall_switch', 'wall'));
+    expect('bindings' in back.devices[0]).toBe(false);
+  });
+  it('a free smart button -> wall_switch returns the same level', () => {
+    const l = addDevice(room(), deviceDefaults('smart_button', 'free'), free, 'B').level;
+    expect(changeDeviceKind(l, l.devices[0].id, 'wall_switch')).toBe(l);
+  });
+  it('the same kind, an unknown id or a device that is not a container -> the same level', () => {
+    let l = addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 1000), 'S').level;
+    l = addDevice(l, deviceDefaults('socket', 'wall'), onWall('w1', 1000), 'K').level;
+    expect(changeDeviceKind(l, l.devices[0].id, 'wall_switch')).toBe(l);
+    expect(changeDeviceKind(l, 'nope', 'smart_button')).toBe(l);
+    expect(changeDeviceKind(l, l.devices[1].id, 'smart_button')).toBe(l);
   });
 });
 
 describe('ops integration', () => {
   it('deleteWall removes hosted devices only', () => {
-    let l = addDevice(room(), deviceDefaults('switch', 'wall'), onWall('w0', 1000), 'S').level;
+    let l = addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 1000), 'S').level;
     l = addDevice(l, deviceDefaults('socket', 'wall'), onWall('w1', 1000), 'K').level;
     l = addDevice(l, deviceDefaults('equipment', 'free'), free, 'E').level;
     const r = deleteWall(l, 'w0');
     expect(r.devices.map(d => d.name).sort()).toEqual(['E', 'K']);
   });
   it('node A moved outward keeps world position', () => {
-    const l = addDevice(room(), deviceDefaults('switch', 'wall'), onWall('w0', 1000), 'S').level;
+    const l = addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 1000), 'S').level;
     const r = moveNode(l, 'n0', { x: -500, y: 0 });
     const p = r.devices[0].placement;
     expect(p.mode === 'wall' && p.offset).toBeCloseTo(1500);
     expect(r.devices[0].invalid).toBe(false);
   });
   it('shortening wall below offset -> invalid, kept', () => {
-    const l = addDevice(room(), deviceDefaults('switch', 'wall'), onWall('w0', 2500), 'S').level;
+    const l = addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 2500), 'S').level;
     const r = moveNode(l, 'n1', { x: 1000, y: 0 });
     expect(r.devices).toHaveLength(1);
     expect(r.devices[0].invalid).toBe(true);
@@ -150,7 +182,7 @@ describe('moveDevice refresh and mergeNodes', () => {
     expect(moveDevice(r, r.devices[0].id, free).devices[0].invalid).toBe(false);
   });
   it('mergeNodes collapsing a wall removes its hosted devices', () => {
-    let l = addDevice(room(), deviceDefaults('switch', 'wall'), onWall('w0', 1000), 'S').level;
+    let l = addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 1000), 'S').level;
     l = addDevice(l, deviceDefaults('socket', 'wall'), onWall('w1', 1000), 'K').level;
     const r = mergeNodes(l, 'n0', 'n1');
     expect(r.walls.some(w => w.id === 'w0')).toBe(false);

@@ -1,5 +1,9 @@
 import { newId } from './ids';
-import { AIM_MAX, DEVICE_PLACEMENTS, deviceDefaults, type Device, type DevicePlacement, type DeviceProps, type Id, type Level } from './types';
+import {
+  AIM_MAX, DEVICE_PLACEMENTS, allowedOutputs, deviceDefaults,
+  type ContainerKind, type Device, type DeviceKind, type DevicePlacement, type DeviceProps, type Id, type Level,
+} from './types';
+import { sanitizeBindings } from './bindings';
 import { wallLen } from '../geometry/walls';
 
 const EPS = 1e-6; // mm
@@ -53,15 +57,40 @@ export function moveDevice(level: Level, id: Id, placement: DevicePlacement): Le
   return refreshDevices(withDevices(level, devices.map(x => (x.id === id ? { ...x, placement, props } : x))));
 }
 
-/** The patch never changes the kind. */
+const isContainer = (kind: DeviceKind): kind is ContainerKind => kind === 'wall_switch' || kind === 'smart_button';
+
+/** A container default output that is no longer allowed (`auto` with auto disabled) reads as `off`. */
+function normalizeDefaultOutput(p: DeviceProps): DeviceProps {
+  if (p.kind !== 'wall_switch' && p.kind !== 'smart_button') return p;
+  return allowedOutputs(p).includes(p.defaultOutput) ? p : { ...p, defaultOutput: 'off' };
+}
+
+/**
+ * The patch never changes the kind. Bindings of roles the new props disable (a smart button's off, auto, final)
+ * are dropped, and the default output is kept allowed.
+ */
 export function setDeviceProps(level: Level, id: Id, patch: Partial<DeviceProps>, name?: string): Level {
   const devices = level.devices;
   if (!devices.some(x => x.id === id)) return level;
   return withDevices(level, devices.map(x => {
     if (x.id !== id) return x;
-    const props = { ...x.props, ...patch, kind: x.props.kind } as DeviceProps;
-    return { ...x, props, name: name ?? x.name };
+    const props = normalizeDefaultOutput({ ...x.props, ...patch, kind: x.props.kind } as DeviceProps);
+    return sanitizeBindings({ ...x, props, name: name ?? x.name });
   }));
+}
+
+/**
+ * Turns an input container into the other container kind: id, name and placement stay, props reset to the
+ * new kind's defaults, and bindings the new kind does not have are dropped. Same level when refused: unknown
+ * id, not a container, the same kind, or a placement the new kind does not allow (a free smart button).
+ */
+export function changeDeviceKind(level: Level, id: Id, kind: ContainerKind): Level {
+  const d = level.devices.find(x => x.id === id);
+  if (!d || !isContainer(d.props.kind) || d.props.kind === kind) return level;
+  const props = deviceDefaults(kind, d.placement.mode);
+  if (!allowed(props, d.placement)) return level;
+  const next = sanitizeBindings({ ...d, props });
+  return withDevices(level, level.devices.map(x => (x === d ? next : x)));
 }
 
 export function deleteDevice(level: Level, id: Id): Level {

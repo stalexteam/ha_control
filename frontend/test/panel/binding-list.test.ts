@@ -18,7 +18,7 @@ function sample(): Level {
       dev('h', 'Hall motion', 'motion_sensor', { motion: 'binary_sensor.gone' }),
       dev('d', 'Desk lamp', 'ceiling_light', { control: 'light.desk' }),
       dev('b', 'Bath fan', 'exhaust_fan'),
-      dev('w', 'Window switch', 'switch', { action: 'event.w' }),
+      dev('w', 'Window switch', 'smart_button', { on: 'event.w' }),
     ],
   };
 }

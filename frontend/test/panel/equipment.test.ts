@@ -50,20 +50,20 @@ describe('Equipment tab', () => {
     expect(el.selection).toBeNull();
     expect(el.toolId).toBe('device-select');
     const tools = [...el.shadowRoot!.querySelectorAll<HTMLButtonElement>('.tools button.tool')];
-    expect(tools).toHaveLength(10);
+    expect(tools).toHaveLength(11);
     expect(tools.map(b => b.dataset.tool)).toEqual(['device-select', 'ceiling_light', 'wall_light', 'motion_sensor',
-      'illuminance_sensor', 'climate_sensor', 'switch', 'socket', 'exhaust_fan', 'equipment']);
+      'illuminance_sensor', 'climate_sensor', 'wall_switch', 'smart_button', 'socket', 'exhaust_fan', 'equipment']);
     expect(tools[1].textContent!.trim()).toBe('Ceiling light');
     await tab(el, 'plan');
     expect(el.toolId).toBe('select');
     expect(el.shadowRoot!.querySelectorAll('.tools button.tool')).toHaveLength(7);
   });
 
-  it('deleting a hosting wall in the Plan tab removes its switch; Ctrl+Z brings both back', async () => {
+  it('deleting a hosting wall in the Plan tab removes its wall switch; Ctrl+Z brings both back', async () => {
     const el = await mount();
     await drawBox(el);
     await tab(el, 'equipment');
-    await tool(el, 'switch');
+    await tool(el, 'wall_switch');
     click(el, 100, -100);
     await el.updateComplete;
     const devices = el.history!.current.devices;
@@ -178,11 +178,11 @@ describe('Equipment tab', () => {
     expect(el.shadowRoot!.querySelector('.props .warn')).not.toBeNull();
   });
 
-  it('aim field is hidden for a switch', async () => {
+  it('aim field is hidden for a wall switch', async () => {
     const el = await mount();
     await drawBox(el);
     await tab(el, 'equipment');
-    await tool(el, 'switch');
+    await tool(el, 'wall_switch');
     click(el, 100, -100);
     await el.updateComplete;
     expect(el.shadowRoot!.querySelector('.props input[data-field="aim"]')).toBeNull();
@@ -223,7 +223,7 @@ describe('Equipment tab: rejected edits', () => {
     await el.updateComplete;
     expect(el.history!.current.walls).toHaveLength(1);
     await tab(el, 'equipment');
-    await tool(el, 'switch');
+    await tool(el, 'wall_switch');
     click(el, 1000, 0);
     await el.updateComplete;
     expect(el.history!.current.devices).toHaveLength(1);

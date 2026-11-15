@@ -193,8 +193,8 @@ describe('re-anchoring of hosted openings and wall devices', () => {
   it('node A moved: opening and wall device on that wall keep their world positions in one step; free device untouched', () => {
     const base = rectRoomLevel(3000, 4000, 400);
     let l = addOpening(base, 'w0', 'door', 1500, 900).level;
-    l = addDevice(l, deviceDefaults('switch', 'wall'), { mode: 'wall', wallId: 'w0', side: 'left', offset: 2500 }, 'S').level;
-    l = addDevice(l, deviceDefaults('switch', 'wall'), { mode: 'wall', wallId: 'w1', side: 'left', offset: 1000 }, 'T').level;
+    l = addDevice(l, deviceDefaults('wall_switch', 'wall'), { mode: 'wall', wallId: 'w0', side: 'left', offset: 2500 }, 'S').level;
+    l = addDevice(l, deviceDefaults('wall_switch', 'wall'), { mode: 'wall', wallId: 'w1', side: 'left', offset: 1000 }, 'T').level;
     l = addDevice(l, deviceDefaults('equipment', 'free'), { mode: 'free', x: 500, y: 500, rotation: 0 }, 'E').level;
     // w0 runs (0,0) -> (3000,0); A moves 500 left, so every offset on w0 grows by 500.
     const m = moveNode(l, 'n0', { x: -500, y: 0 });

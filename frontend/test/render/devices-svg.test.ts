@@ -18,7 +18,7 @@ function levelWithAll(): Level {
       placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 3000 } },
     free('ms', 'motion_sensor', 3000, 2500),
     free('il', 'illuminance_sensor', 4000, 1000),
-    { id: 'sw', name: 'sw', invalid: false, props: deviceDefaults('switch', 'wall'),
+    { id: 'sw', name: 'sw', invalid: false, props: deviceDefaults('wall_switch', 'wall'),
       placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 500 } },
     { id: 'so', name: 'so', invalid: true, props: deviceDefaults('socket', 'wall'),
       placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 5000 } },
@@ -47,7 +47,7 @@ describe('renderDevices', () => {
   it('draws one group per device kind', () => {
     const root = drawDevs(levelWithAll());
     expect(root.querySelectorAll('g.device').length).toBe(7);
-    for (const k of ['ceiling_light', 'wall_light', 'motion_sensor', 'illuminance_sensor', 'switch', 'socket', 'equipment']) {
+    for (const k of ['ceiling_light', 'wall_light', 'motion_sensor', 'illuminance_sensor', 'wall_switch', 'socket', 'equipment']) {
       expect(root.querySelectorAll(`g.device-${k}`).length).toBe(1);
     }
   });
@@ -78,7 +78,7 @@ describe('renderDevices', () => {
     const root = drawDevs(levelWithAll(), { selection: { kind: 'device', id: 'ms' } });
     expect(root.querySelector('g.device-socket')!.classList.contains('invalid')).toBe(true);
     expect(root.querySelector('g.device-motion_sensor')!.classList.contains('selected')).toBe(true);
-    expect(root.querySelector('g.device-switch')!.classList.contains('selected')).toBe(false);
+    expect(root.querySelector('g.device-wall_switch')!.classList.contains('selected')).toBe(false);
   });
 
   it('dim sets opacity on device groups', () => {
@@ -147,7 +147,7 @@ describe('direction handle rendering', () => {
     expect(svg.querySelectorAll('.aim-handle')).toHaveLength(1);
     expect(svg.querySelectorAll('.aim-knob')).toHaveLength(1);
   });
-  it('selected switch and unselected devices draw none', () => {
+  it('selected wall switch and unselected devices draw none', () => {
     expect(drawDevs(levelWithAll(), { selection: sel('sw') }).querySelector('.aim-handle')).toBeNull();
     expect(drawDevs(levelWithAll()).querySelector('.aim-handle')).toBeNull();
     expect(drawDevs(levelWithAll()).querySelector('.aim-knob')).toBeNull();
@@ -168,5 +168,24 @@ describe('climate sensor and fan render', () => {
     expect(root.querySelectorAll('g.device-climate_sensor')).toHaveLength(1);
     expect(root.querySelectorAll('g.device-exhaust_fan')).toHaveLength(1);
     expect(root.querySelector('.aim-handle')).toBeNull();
+  });
+});
+
+describe('input container symbols', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+  it('a wall switch is a square; a smart button is a rounded square with a centre dot', () => {
+    const box = rectRoomLevel(6000, 5000, 200);
+    const devices: Device[] = [
+      { id: 'ws', name: 'ws', invalid: false, props: deviceDefaults('wall_switch', 'wall'),
+        placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 1000 } },
+      free('sb', 'smart_button', 2000, 2000),
+    ];
+    const root = drawDevs({ ...box, devices }, {}, 1); // R = ICON_PX
+    const ws = root.querySelector('g.device-wall_switch rect.icon')!;
+    expect(ws.hasAttribute('rx')).toBe(false);
+    expect(root.querySelector('g.device-wall_switch .dot')).toBeNull();
+    const sb = root.querySelector('g.device-smart_button rect.icon')!;
+    expect(Number(sb.getAttribute('rx'))).toBeCloseTo(ICON_PX * 0.35);
+    expect(Number(root.querySelector('g.device-smart_button circle.dot')!.getAttribute('r'))).toBeCloseTo(ICON_PX * 0.18);
   });
 });

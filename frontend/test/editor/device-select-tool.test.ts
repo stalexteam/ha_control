@@ -51,8 +51,8 @@ describe('device select tool', () => {
     expect(ctx.level().devices[0].placement).toMatchObject({ x: 1500, y: 1000 });
   });
 
-  it('drag a switch into the room centre: unchanged, no commit', () => {
-    const { lv } = withDevice('switch', onTop(1500));
+  it('drag a wall switch into the room centre: unchanged, no commit', () => {
+    const { lv } = withDevice('wall_switch', onTop(1500));
     const ctx = fakeContext(lv);
     const t = createDeviceSelectTool(ctx);
     t.down(ev(1500, 50)); t.move(ev(1500, 2000)); t.up(ev(1500, 2000));
@@ -139,7 +139,7 @@ describe('device select tool', () => {
   });
 
   it('a 1 mm jitter on a wall switch commits nothing', () => {
-    const { lv } = withDevice('switch', onTop(1500));
+    const { lv } = withDevice('wall_switch', onTop(1500));
     const ctx = fakeContext(lv);
     const t = createDeviceSelectTool(ctx);
     t.down(ev(1500, 50)); t.move(ev(1501, 50)); t.up(ev(1501, 50));

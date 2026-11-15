@@ -78,6 +78,7 @@ describe('i18n', () => {
       'binding.filter': LIST_FILTERS,
       bindstatus: ['bound', 'partial', 'unbound', 'missing'],
       role: [...new Set(Object.values(ROLE_SPECS).flat().map(s => s.role))],
+      output: ['on', 'off', 'auto', 'error'],
     };
     const missing = Object.entries(sets).flatMap(([pre, members]) => members.map(m => `${pre}.${m}`)).filter(k => !keys.has(k));
     expect(missing).toEqual([]);

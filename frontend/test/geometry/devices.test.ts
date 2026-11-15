@@ -17,7 +17,7 @@ describe('devicePose', () => {
   const box = rectRoomLevel(3000, 4000, 400);
 
   it('wall device on side right of the top wall sits on the inner face, facing in', () => {
-    const d = dev('s', { kind: 'switch' }, { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 });
+    const d = dev('s', deviceDefaults('wall_switch', 'wall'), { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 });
     const p = devicePose(box, d)!;
     expect(p.pt.x).toBeCloseTo(1500);
     expect(p.pt.y).toBeCloseTo(200);
@@ -26,7 +26,7 @@ describe('devicePose', () => {
   });
 
   it('wall device on side left of the top wall sits on the outer face, facing out', () => {
-    const d = dev('s', { kind: 'switch' }, { mode: 'wall', wallId: 'w0', side: 'left', offset: 1500 });
+    const d = dev('s', deviceDefaults('wall_switch', 'wall'), { mode: 'wall', wallId: 'w0', side: 'left', offset: 1500 });
     const p = devicePose(box, d)!;
     expect(p.pt.y).toBeCloseTo(-200);
     expect(p.dir.x).toBeCloseTo(0);
@@ -66,7 +66,7 @@ describe('devicePose', () => {
   });
 
   it('missing host wall gives null', () => {
-    const d = dev('s', { kind: 'switch' }, { mode: 'wall', wallId: 'nope', side: 'left', offset: 0 });
+    const d = dev('s', deviceDefaults('wall_switch', 'wall'), { mode: 'wall', wallId: 'nope', side: 'left', offset: 0 });
     expect(devicePose(box, d)).toBeNull();
   });
 
@@ -124,7 +124,7 @@ describe('coneShape / clippedCone', () => {
     expect(clippedCone(box, d)).toEqual([coneShape(box, d)]);
   });
 
-  it('ceiling_light pool: null without poolRadius, circle with it; switch has none', () => {
+  it('ceiling_light pool: null without poolRadius, circle with it; wall switch has none', () => {
     const box = rectRoomLevel(3000, 4000, 400);
     const cl = deviceDefaults('ceiling_light', 'free');
     const off = dev('c', cl, { mode: 'free', x: 1500, y: 2000, rotation: 0 });
@@ -134,7 +134,7 @@ describe('coneShape / clippedCone', () => {
     const c = coneShape(box, on)!;
     expect(c.length).toBe(128);
     expect(Math.abs(polygonArea(c)) / (Math.PI * 1e6)).toBeGreaterThan(0.99);
-    const sw = dev('s', { kind: 'switch' }, { mode: 'wall', wallId: 'w0', side: 'right', offset: 100 });
+    const sw = dev('s', deviceDefaults('wall_switch', 'wall'), { mode: 'wall', wallId: 'w0', side: 'right', offset: 100 });
     expect(coneShape(box, sw)).toBeNull();
     expect(clippedCone(box, sw)).toEqual([]);
   });
@@ -143,7 +143,7 @@ describe('coneShape / clippedCone', () => {
     const box = rectRoomLevel(3000, 4000, 400);
     const calls: Level[] = [];
     const holesOf = (l: Level) => { calls.push(l); return []; };
-    const sw = dev('s', { kind: 'switch' }, { mode: 'wall', wallId: 'w0', side: 'right', offset: 100 });
+    const sw = dev('s', deviceDefaults('wall_switch', 'wall'), { mode: 'wall', wallId: 'w0', side: 'right', offset: 100 });
     expect(clippedCone(box, sw, holesOf)).toEqual([]);
     expect(calls).toEqual([]);
     const m = dev('m', { kind: 'motion_sensor', zoneAngle: 360, zoneRange: 5000 }, { mode: 'free', x: 1500, y: 2000, rotation: 0 });
@@ -183,7 +183,7 @@ describe('deviceAt', () => {
   });
 
   it('icon device is hit within tol of its pose point; topmost wins', () => {
-    const a = dev('a', { kind: 'switch' }, { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 });
+    const a = dev('a', deviceDefaults('wall_switch', 'wall'), { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 });
     const b = dev('b', { kind: 'socket' }, { mode: 'wall', wallId: 'w0', side: 'right', offset: 1520 });
     const level = withDevs(rectRoomLevel(3000, 4000, 400), a, b);
     expect(deviceAt(level, { x: 1510, y: 200 }, 100)).toBe('b');
@@ -229,8 +229,8 @@ describe('direction handle', () => {
     expect(h.to.x - h.from.x).toBeCloseTo(0);
     expect(h.to.y - h.from.y).toBeCloseTo(-60);
   });
-  it('null for a switch', () => {
-    const d = dev('s', { kind: 'switch' }, { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 });
+  it('null for a wall switch', () => {
+    const d = dev('s', deviceDefaults('wall_switch', 'wall'), { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 });
     expect(directionHandle(box, d, 1)).toBeNull();
   });
   it('angleFromHandle clamps wall aim and normalises free rotation', () => {

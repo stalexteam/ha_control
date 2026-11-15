@@ -48,7 +48,13 @@ export interface Zone {
   broken: boolean;
 }
 
-export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | 'switch' | 'socket' | 'equipment' | 'climate_sensor' | 'exhaust_fan';
+/** Live output of an input container (computed by the integration). */
+export type ContainerOutput = 'on' | 'off' | 'auto' | 'error';
+/** A smart button trigger: slot 0..9 (0 = a one-button device) and a non-empty event (`single`, `double`, `hold` or free text). */
+export interface Trigger { slot: number; event: string }
+/** Input containers: kinds with a live output. */
+export type ContainerKind = 'wall_switch' | 'smart_button';
+export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | ContainerKind | 'socket' | 'equipment' | 'climate_sensor' | 'exhaust_fan';
 export type DevicePlacement =
   | { mode: 'wall'; wallId: Id; side: Side; offset: number; aim?: number } // offset: along axis from node A to device centre; aim: degrees off the face normal, counter-clockwise on screen, integer -90..90 (default 0)
   | { mode: 'free'; x: number; y: number; rotation: number }; // rotation in degrees
@@ -60,14 +66,30 @@ export type DeviceProps =
   | { kind: 'motion_sensor'; zoneAngle: number; zoneRange: number }
   | { kind: 'climate_sensor'; zoneIds: Id[] } // zoneIds: rooms the reading applies to; empty = the room containing the device (derived by geometry)
   | { kind: 'exhaust_fan'; diameter: FanDiameter }
-  | { kind: 'illuminance_sensor' } | { kind: 'switch' } | { kind: 'socket' }
+  | { kind: 'illuminance_sensor' } | { kind: 'socket' }
   | { kind: 'equipment'; shape: 'rect' | 'circle'; width: number; depth: number; diameter: number;
-      icon: string; label: string };
+      icon: string; label: string }
+  // windowSec: whole seconds 1..10, used only with autoByDoubleToggle.
+  | { kind: 'wall_switch'; autoByDoubleToggle: boolean; windowSec: number; defaultOutput: ContainerOutput }
+  // off is used only with separateOff (otherwise the on trigger toggles); auto only with autoEnabled.
+  | { kind: 'smart_button'; separateOff: boolean; autoEnabled: boolean; on: Trigger; off: Trigger; auto: Trigger;
+      defaultOutput: ContainerOutput };
 
 /** Equipment icon default (an MDI name). */
 export const DEFAULT_EQUIPMENT_ICON = 'mdi:cube-outline';
 
-export type BindingRole = 'control' | 'motion' | 'illuminance' | 'temperature' | 'humidity' | 'action' | 'state' | 'power';
+/** Events offered for a trigger; any other non-empty text is accepted too. */
+export const TRIGGER_EVENTS = ['single', 'double', 'hold'] as const;
+
+/** Default outputs a container may have: `auto` only with auto enabled. Empty for kinds that are not containers. */
+export function allowedOutputs(p: DeviceProps): ContainerOutput[] {
+  const auto = p.kind === 'wall_switch' ? p.autoByDoubleToggle : p.kind === 'smart_button' ? p.autoEnabled : null;
+  if (auto === null) return [];
+  return auto ? ['off', 'on', 'auto', 'error'] : ['off', 'on', 'error'];
+}
+
+export type BindingRole = 'control' | 'motion' | 'illuminance' | 'temperature' | 'humidity' | 'state' | 'power'
+  | 'on' | 'off' | 'auto' | 'final';
 
 export interface Device { id: Id; name: string; placement: DevicePlacement; props: DeviceProps; invalid: boolean; bindings?: Partial<Record<BindingRole, string>> }
 
@@ -125,7 +147,8 @@ export const DEVICE_PLACEMENTS: Record<DeviceKind, ('wall' | 'free')[]> = {
   wall_light: ['wall', 'free'],
   motion_sensor: ['free', 'wall'],
   illuminance_sensor: ['free', 'wall'],
-  switch: ['wall'],
+  wall_switch: ['wall'],
+  smart_button: ['wall', 'free'],
   socket: ['wall'],
   equipment: ['free'],
   climate_sensor: ['free', 'wall'],
@@ -151,6 +174,14 @@ export function deviceDefaults(kind: DeviceKind, mode: 'wall' | 'free'): DeviceP
       return { kind, diameter: 100 };
     case 'equipment':
       return { kind, shape: 'rect', width: 600, depth: 600, diameter: 600, icon: DEFAULT_EQUIPMENT_ICON, label: '' };
+    case 'wall_switch':
+      return { kind, autoByDoubleToggle: false, windowSec: 3, defaultOutput: 'off' };
+    case 'smart_button':
+      return {
+        kind, separateOff: false, autoEnabled: false,
+        on: { slot: 0, event: 'single' }, off: { slot: 0, event: 'hold' }, auto: { slot: 0, event: 'double' },
+        defaultOutput: 'off',
+      };
     default:
       return { kind };
   }
@@ -170,9 +201,25 @@ function migrateEquipment(d: Device): Device {
   return { ...d, props: { ...rest, icon } as DeviceProps };
 }
 
-/** Stage-1 plans have no `devices`; a missing field means []. Invalid bindings are dropped. Same object back when nothing changes. */
+/**
+ * Legacy `switch` (stage 3) -> an input container with default props: a smart button when it had an `action`
+ * binding (that entity moves to `on`; the `state` binding is dropped), otherwise a wall switch (its `state`
+ * binding stays). Id, name and placement are kept. Returns the same device for any other kind.
+ */
+function migrateSwitch(d: Device): Device {
+  if ((d.props as { kind: string }).kind !== 'switch') return d;
+  const action = (d.bindings as Record<string, string | undefined> | undefined)?.action;
+  if (action) return { ...d, props: deviceDefaults('smart_button', d.placement.mode), bindings: { on: action } };
+  // Roles a wall switch does not have (`action: ''` and the like) are dropped by sanitizeBindings.
+  return { ...d, props: deviceDefaults('wall_switch', d.placement.mode) };
+}
+
+/**
+ * Stage-1 plans have no `devices`; a missing field means []. Legacy kinds are migrated, then invalid bindings
+ * are dropped. Same object back when nothing changes.
+ */
 export function normalizeLevel(level: Level): Level {
   if (!level.devices) return { ...level, devices: [] };
-  const devices = level.devices.map(d => sanitizeBindings(migrateEquipment(d)));
+  const devices = level.devices.map(d => sanitizeBindings(migrateSwitch(migrateEquipment(d))));
   return devices.some((d, i) => d !== level.devices[i]) ? { ...level, devices } : level;
 }

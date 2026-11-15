@@ -81,9 +81,13 @@ function iconShape(d: Device, R: number, color: string, fill: string): SVGTempla
       return svg`<circle class="icon" r=${R * 0.7} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
         <path class="rays" d=${rays} fill="none" stroke=${color} stroke-width="1.5" vector-effect=${NS}></path>`;
     }
-    case 'switch':
+    case 'wall_switch':
       return svg`<rect class="icon" x=${-R * 0.6} y=${-R * 0.6} width=${R * 1.2} height=${R * 1.2} fill=${common.fill}
         stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></rect>`;
+    case 'smart_button':
+      return svg`<rect class="icon" x=${-R * 0.6} y=${-R * 0.6} width=${R * 1.2} height=${R * 1.2} rx=${R * 0.35}
+        fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></rect>
+        <circle class="dot" r=${R * 0.18} fill=${color}></circle>`;
     case 'socket':
       return svg`<circle class="icon" r=${R} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
         <circle class="dot" cx=${-R * 0.4} r=${R * 0.15} fill=${color}></circle>

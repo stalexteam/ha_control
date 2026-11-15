@@ -6,9 +6,20 @@ export interface RoleSpec {
   plainDomains?: string[];
   /** Entity categories the strict filter still offers (default: none). */
   categories?: string[];
+  /** false: the HA device picker neither fills this role nor lists devices for it. */
+  autoFill?: false;
 }
 
 const POWER: RoleSpec = { role: 'power', domains: ['sensor'], deviceClasses: ['power'], units: ['W', 'kW'], primary: false };
+/** Smart button roles whose binding is a trigger (entity, slot and event). */
+const TRIGGER_ROLES = ['on', 'off', 'auto'] as const;
+type TriggerRole = typeof TRIGGER_ROLES[number];
+const isTriggerRole = (r: BindingRole): r is TriggerRole => (TRIGGER_ROLES as readonly string[]).includes(r);
+/** A trigger role: events, or plain sensors. Zigbee2MQTT registers its action sensors as diagnostic, with no class and no unit. */
+const trigger = (role: TriggerRole, autoFill?: false): RoleSpec => ({
+  role, domains: ['event', 'sensor'], plainDomains: ['sensor'], categories: ['diagnostic'], primary: true,
+  ...(autoFill === false ? { autoFill } : {}),
+});
 
 export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
   ceiling_light: [{ role: 'control', domains: ['light', 'switch'], primary: true }],
@@ -19,10 +30,11 @@ export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
     { role: 'temperature', domains: ['sensor'], deviceClasses: ['temperature'], units: ['°C', '°F'], primary: true },
     { role: 'humidity', domains: ['sensor'], deviceClasses: ['humidity'], units: ['%'], primary: true },
   ],
-  switch: [
-    // Zigbee2MQTT registers its action sensors as diagnostic, with no class and no unit.
-    { role: 'action', domains: ['event', 'sensor'], plainDomains: ['sensor'], categories: ['diagnostic'], primary: true },
-    { role: 'state', domains: ['switch', 'light', 'binary_sensor'], primary: false },
+  wall_switch: [{ role: 'state', domains: ['switch', 'light', 'binary_sensor'], primary: true }],
+  // Active roles depend on the flags: see activeRoleSpecs.
+  smart_button: [
+    trigger('on'), trigger('off', false), trigger('auto', false),
+    { role: 'final', domains: ['light', 'switch'], primary: false, autoFill: false },
   ],
   socket: [{ role: 'control', domains: ['switch'], primary: true }, POWER],
   exhaust_fan: [{ role: 'control', domains: ['switch', 'fan'], primary: true }],
@@ -38,8 +50,20 @@ export const PRIMARY_MODE: Partial<Record<DeviceKind, 'any'>> = { climate_sensor
 export type Presence = 'present' | 'unavailable' | 'missing' | 'unknown';
 export type BindStatus = 'bound' | 'partial' | 'unbound' | 'missing';
 
+/**
+ * The roles the device uses now: all roles of its kind, except for a smart button, where `off` needs separateOff,
+ * `auto` needs autoEnabled, and `final` needs toggle mode with auto (only then does it decide anything).
+ */
+export function activeRoleSpecs(d: Device): RoleSpec[] {
+  const p = d.props;
+  const specs = ROLE_SPECS[p.kind];
+  if (p.kind !== 'smart_button') return specs;
+  return specs.filter(({ role: r }) =>
+    r === 'off' ? p.separateOff : r === 'auto' ? p.autoEnabled : r === 'final' ? !p.separateOff && p.autoEnabled : true);
+}
+
 function validRoles(d: Device): ReadonlySet<BindingRole> {
-  return new Set(ROLE_SPECS[d.props.kind].map(s => s.role));
+  return new Set(activeRoleSpecs(d).map(s => s.role));
 }
 
 export function setBinding(level: Level, deviceId: Id, role: BindingRole, entityId: string | null): Level {
@@ -64,22 +88,50 @@ export function bindingStatus(d: Device, presence: (eid: string) => Presence): B
   const ids = Object.values(b).filter((e): e is string => !!e);
   if (ids.length === 0) return 'unbound';
   if (ids.some(e => presence(e) === 'missing')) return 'missing';
-  const primaries = ROLE_SPECS[d.props.kind].filter(s => s.primary);
+  const primaries = activeRoleSpecs(d).filter(s => s.primary);
   const set = primaries.filter(s => !!b[s.role]);
   const ok = PRIMARY_MODE[d.props.kind] === 'any' ? set.length > 0 : set.length === primaries.length;
   return ok ? 'bound' : 'partial';
 }
 
 export function roleCount(d: Device): { filled: number; total: number } {
-  const specs = ROLE_SPECS[d.props.kind];
+  const specs = activeRoleSpecs(d);
   return { filled: specs.filter(s => !!d.bindings?.[s.role]).length, total: specs.length };
 }
 
-export function alsoBoundTo(level: Level, entityId: string, exceptDeviceId: Id): Device[] {
-  return level.devices.filter(d => d.id !== exceptDeviceId && Object.values(d.bindings ?? {}).includes(entityId));
+/** What a binding listens to: the entity id; for a smart button trigger, `${entity}|${slot}|${event}`. Null when unbound. */
+export function bindingKey(d: Device, role: BindingRole): string | null {
+  const eid = d.bindings?.[role];
+  if (!eid) return null;
+  const p = d.props;
+  if (p.kind !== 'smart_button' || !isTriggerRole(role)) return eid;
+  return `${eid}|${p[role].slot}|${p[role].event}`;
 }
 
-/** Drops roles invalid for the kind and empty strings; removes the field when empty. Same object when nothing changes. */
+/**
+ * The other devices with an active binding equal to this role's binding key. Trigger-aware: two buttons
+ * (slots) or two events of one physical switch are not shared.
+ */
+export function alsoBoundTo(level: Level, d: Device, role: BindingRole): Device[] {
+  const key = bindingKey(d, role);
+  if (key === null) return [];
+  return level.devices.filter(o => o.id !== d.id && activeRoleSpecs(o).some(s => bindingKey(o, s.role) === key));
+}
+
+/** Active trigger roles of a smart button whose trigger equals an earlier active one (on, off, auto: the first wins). */
+export function duplicateTriggers(d: Device): BindingRole[] {
+  const seen = new Set<string>();
+  const dup: BindingRole[] = [];
+  for (const { role } of activeRoleSpecs(d)) {
+    const key = isTriggerRole(role) ? bindingKey(d, role) : null;
+    if (key === null) continue;
+    if (seen.has(key)) dup.push(role);
+    else seen.add(key);
+  }
+  return dup;
+}
+
+/** Drops roles not active for the device (see activeRoleSpecs) and empty strings; removes the field when empty. Same object when nothing changes. */
 export function sanitizeBindings(d: Device): Device {
   if (!d.bindings) return d;
   const ok = validRoles(d);
