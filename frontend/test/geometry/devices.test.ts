@@ -2,15 +2,16 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import polygonClipping from 'polygon-clipping';
 import {
   DEVICE_PLACEMENTS, deviceDefaults, type Device, type DeviceKind, type DevicePlacement, type DeviceProps, type Level, type Pt,
+  type Wall,
 } from '../../src/model/types';
 import { addZone } from '../../src/model/zones';
 import {
   CONE_MEDIUM, coneMedium, deviceRoomId, angleFromHandle, clippedCone, coneShape, deviceAt, devicePose, directionHandle,
-  wrap180, wrap360,
+  sightOrigin, wrap180, wrap360,
 } from '../../src/geometry/devices';
 import { lineOfSightObstacles, type Medium, type Segment } from '../../src/geometry/visibility';
-import { pointInPolygon, polygonArea } from '../../src/geometry/vec';
-import { fromRing, toPoly } from '../../src/geometry/walls';
+import { dist, pointInPolygon, polygonArea } from '../../src/geometry/vec';
+import { fromRing, toPoly, wallsUnion } from '../../src/geometry/walls';
 import { midGap, rectRoomLevel, twoRoomsLevel } from '../fixtures';
 
 const dev = (id: string, props: DeviceProps, placement: DevicePlacement): Device =>
@@ -450,4 +451,129 @@ describe('clippedCone: robust clipping and corner devices', () => {
     }
     expect(bad).toEqual([]);
   });
+
+  /** A room as its min and max corners. */
+  type Rect = [Pt, Pt];
+  const inRect = (p: Pt, [a, b]: Rect, eps: number): boolean =>
+    p.x >= a.x - eps && p.x <= b.x + eps && p.y >= a.y - eps && p.y <= b.y + eps;
+  const rectRing = ([a, b]: Rect): Pt[] => [a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }];
+  const room = (x0: number, y0: number, x1: number, y1: number): Rect => [{ x: x0, y: y0 }, { x: x1, y: y1 }];
+  /** Offsets from..to in 0.5 mm steps. */
+  const halfSteps = (from: number, to: number): number[] => {
+    const out: number[] = [];
+    for (let o = from; o <= to + 1e-9; o += 0.5) out.push(o);
+    return out;
+  };
+  /** Both cone kinds at each offset of a wall face. */
+  const devicesAt = (wallId: string, side: 'left' | 'right', offsets: number[]): Device[] =>
+    offsets.flatMap(offset => (['motion_sensor', 'wall_light'] as const).map(kind =>
+      dev('d', deviceDefaults(kind, 'wall'), { mode: 'wall', wallId, side, offset })));
+
+  /**
+   * Failures among wall devices: the sight origin must stay on the device's side of its host face, within the
+   * thickest wall + 2 mm of the probe; the cone must be non-empty, lie in one room (its own when the probe is inside
+   * one or on its edge) and cover the cone shape's part of that room.
+   */
+  function roomSweep(level: Level, rooms: Rect[], devices: Device[]): string[] {
+    const bad: string[] = [];
+    const obstaclesOf = cached();
+    const limit = Math.max(...level.walls.map(w => w.thickness)) + 2;
+    for (const d of devices) {
+      const pl = d.placement as Extract<DevicePlacement, { mode: 'wall' }>;
+      const label = `${d.props.kind} ${pl.wallId}/${pl.side}/${pl.offset}`;
+      const pose = devicePose(level, d)!;
+      const n = pose.normal!;
+      const probe = { x: pose.pt.x + n.x, y: pose.pt.y + n.y };
+      const origin = sightOrigin(level, d, obstaclesOf(level, coneMedium(d.props.kind)!));
+      if (!origin) { bad.push(`${label}: no origin`); continue; }
+      const ahead = (origin.x - pose.pt.x) * n.x + (origin.y - pose.pt.y) * n.y;
+      if (dist(origin, probe) > limit || ahead <= 0.5) bad.push(`${label}: origin (${origin.x}, ${origin.y})`);
+      const rings = clippedCone(level, d, obstaclesOf);
+      const own = rooms.find(r => inRect(probe, r, 1e-6))
+        ?? rooms.find(r => rings.length > 0 && rings.every(ring => ring.every(p => inRect(p, r, 0.01))));
+      if (!own || rings.length === 0 || !rings.every(ring => ring.every(p => inRect(p, own, 0.01)))) {
+        bad.push(`${label}: not in its room`);
+        continue;
+      }
+      const exact = area(polygonClipping.intersection(toPoly(coneShape(level, d)!), toPoly(rectRing(own))).flatMap(p => p.map(fromRing)));
+      const a = area(rings);
+      if (Math.abs(a - exact) / exact > 0.02) bad.push(`${label}: ${(a / 1e6).toFixed(3)} m2, expected ${(exact / 1e6).toFixed(3)}`);
+    }
+    return bad;
+  }
+
+  it('near a room corner the sight origin stays in the room for any offset and wall thickness', () => {
+    const bad: string[] = [];
+    for (const t of [75, 125, 200, 201]) {
+      const lv = rectRoomLevel(4000, 3000, t);
+      const near = t / 2 + 5;
+      // 0.5 mm steps over the corner, plus the corner + 0.3 mm (on either end).
+      const offsets = [...halfSteps(0, near), t / 2 + 0.3, 4000 - t / 2 - 0.3, ...halfSteps(4000 - near, 4000)];
+      bad.push(...roomSweep(lv, [room(t / 2, t / 2, 4000 - t / 2, 3000 - t / 2)], devicesAt('w0', 'right', offsets)));
+    }
+    expect(bad).toEqual([]);
+  });
+
+  /** rectRoomLevel(6000, 3000, 200) split into three rooms by stems S1 (x = 2000) and S2 (x = 4000), hosted on w0 and w2. */
+  function stemsLevel(): Level {
+    const lv = rectRoomLevel(6000, 3000, 200);
+    const stem = (id: string, a: string, b: string): Wall => ({ id, a, b, thickness: 200, type: 'partition', baseline: 'center' });
+    return {
+      ...lv,
+      nodes: [
+        ...lv.nodes,
+        { id: 't1', x: 2000, y: 0, host: { wallId: 'w0', offset: 2000 } }, { id: 'b1', x: 2000, y: 3000, host: { wallId: 'w2', offset: 4000 } },
+        { id: 't2', x: 4000, y: 0, host: { wallId: 'w0', offset: 4000 } }, { id: 'b2', x: 4000, y: 3000, host: { wallId: 'w2', offset: 2000 } },
+      ],
+      walls: [...lv.walls, stem('S1', 't1', 'b1'), stem('S2', 't2', 'b2')],
+    };
+  }
+
+  it('next to a hosted T stem the sight origin never crosses into another room', () => {
+    const lv = stemsLevel();
+    const rooms = [room(100, 100, 1900, 2900), room(2100, 100, 3900, 2900), room(4100, 100, 5900, 2900)];
+    const onHost = [...halfSteps(1895, 2105), 1899.7, 2100.3, ...halfSteps(3895, 4105), 3899.7, 4100.3];
+    const onStem = [...halfSteps(0, 105), ...halfSteps(2895, 3000)];
+    const bad = [
+      ...roomSweep(lv, rooms, devicesAt('w0', 'right', onHost)),
+      ...roomSweep(lv, rooms, [...devicesAt('S1', 'left', onStem), ...devicesAt('S1', 'right', onStem)]),
+    ];
+    expect(bad).toEqual([]);
+  });
+
+  it('beside a shared wall the sight origin stays in its own room', () => {
+    const lv = twoRoomsLevel();
+    const rooms = [room(100, 100, 2900, 2900), room(3100, 100, 5900, 2900)];
+    const bad = [
+      ...roomSweep(lv, rooms, devicesAt('w1', 'right', [...halfSteps(0, 105), 100.3])),
+      ...roomSweep(lv, rooms, devicesAt('w0', 'right', [...halfSteps(2895, 3000), 2899.7])),
+    ];
+    expect(bad).toEqual([]);
+  });
+
+  it("at an acute corner the other wall's outer face is not taken for the host face", () => {
+    // Triangle room with 45 degrees at (0, 0), 200 mm walls: past the corner, outside the building, the other wall's
+    // oblique outer face lies 1 mm behind the face line too.
+    const pts = [[0, 0], [4000, 0], [3000, 3000]];
+    const lv: Level = {
+      ...rectRoomLevel(1, 1, 200),
+      nodes: pts.map(([x, y], i) => ({ id: `n${i}`, x, y })),
+      walls: pts.map((_, i) => ({
+        id: `w${i}`, a: `n${i}`, b: `n${(i + 1) % pts.length}`, thickness: 200, type: 'partition' as const, baseline: 'center' as const,
+      })),
+    };
+    const roomRing = wallsUnion(lv, false)[0][1];
+    const mpArea = (mp: ReturnType<typeof polygonClipping.difference>): number =>
+      mp.reduce((s, poly) => s + poly.reduce((t, r, i) => t + (i ? -1 : 1) * Math.abs(polygonArea(fromRing(r))), 0), 0);
+    const bad: string[] = [];
+    for (const d of devicesAt('w0', 'right', [0, 50, 100, 200])) {
+      const label = `${d.props.kind} ${(d.placement as { offset: number }).offset}`;
+      const rings = clippedCone(lv, d);
+      const outside = rings.length ? mpArea(polygonClipping.difference([rings.map(r => toPoly(r)[0])], toPoly(roomRing))) : 0;
+      if (outside > 10) bad.push(`${label}: ${(outside / 1e6).toFixed(3)} m2 outside the room`);
+      if (d.props.kind === 'motion_sensor' && area(rings) < 0.5e6) bad.push(`${label}: ${(area(rings) / 1e6).toFixed(3)} m2`);
+    }
+    expect(bad).toEqual([]);
+  });
 });
+

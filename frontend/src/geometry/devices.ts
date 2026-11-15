@@ -134,41 +134,62 @@ function insideSegments(p: Pt, segs: Segment[]): boolean {
   return inside;
 }
 
-/** Distances along the ray from p in unit direction u (from 0 on) at which it meets the segments, ascending. */
-function crossings(p: Pt, u: Pt, segs: Segment[]): number[] {
+/** Signed distances along the line through p in unit direction u at which it meets the segments. */
+function lineCrossings(p: Pt, u: Pt, segs: Segment[]): number[] {
   const ts: number[] = [];
   for (const [a, b] of segs) {
     const e = sub(b, a), w = sub(a, p);
     const den = cross(u, e);
     if (Math.abs(den) < 1e-12) continue; // parallel
-    const t = cross(w, e) / den, s = cross(w, u) / den;
-    if (t >= -1e-9 && s >= -1e-9 && s <= 1 + 1e-9) ts.push(Math.max(0, t));
+    const s = cross(w, u) / den;
+    if (s >= -1e-9 && s <= 1 + 1e-9) ts.push(cross(w, e) / den);
   }
-  return ts.sort((x, y) => x - y);
+  return ts;
 }
 
 /** A sight origin closer than this to a wall edge counts as on the wall (mm); the probe itself is 1 mm off its face. */
 const ORIGIN_CLEARANCE = 0.5;
+/** Joined wall corners lie within this many times the thickest wall of their node (MITER_LIMIT in walls.ts). */
+const ORIGIN_SLIDE_THICKNESSES = 3;
 
 /**
- * Where a device's sight starts: its probe point. A wall device whose probe lies inside the walls or on their edge
- * (snapped to a room corner, where its face point is inside the perpendicular wall or on that wall's face) slides
- * along its host face toward the host's middle to 1 mm past the first wall edge that leaves it clear.
+ * Where a device's sight starts: its probe point (pose + face normal for wall devices, pose for free ones), or null
+ * without a pose. A wall device whose probe lies inside the walls or within ORIGIN_CLEARANCE of a wall edge (snapped
+ * to a room corner or a T-junction) moves along its host face, 1 mm in front of it, to the nearest clear point: the
+ * candidates lie 1 mm either side of each wall edge the face line meets. In each direction the first clear candidate
+ * decides; it counts only with the host face 1 mm behind it (not past a corner, outside the building), so the origin
+ * never passes through a second wall into another room. The nearer direction wins, ties toward the host's middle.
+ * At right angles and T-junctions the move is at most the wall thickness + 1 mm; it never exceeds 3 times the
+ * thickest wall + 2 mm (an acute corner). Null when no direction gives a clear point.
  */
-function sightOrigin(level: Level, d: Device, pose: DevicePose, obstacles: Segment[]): Pt {
+export function sightOrigin(level: Level, d: Device, obstacles: Segment[]): Pt | null {
+  const pose = devicePose(level, d);
+  if (!pose) return null;
   const probe = probeOf(pose);
   const pl = d.placement;
   if (pl.mode !== 'wall') return probe;
   const blocked = (p: Pt) => insideSegments(p, obstacles) || obstaclesWithin(p, obstacles, ORIGIN_CLEARANCE).length > 0;
   if (!blocked(probe)) return probe;
   const f = wallFrame(level, level.walls.find(w => w.id === pl.wallId)!);
-  const u = pl.offset <= f.len / 2 ? f.dir : scale(f.dir, -1);
-  for (const t of crossings(probe, u, obstacles)) {
-    if (t > f.len) break;
-    const q = add(probe, scale(u, t + 1));
-    if (!blocked(q)) return q;
+  // The host face 1 mm behind q (an edge parallel to it): q is in front of the face, not past a corner. An oblique
+  // edge does not count: past an acute corner the other wall's outer face is that close too.
+  const back = scale(pose.normal!, -1);
+  const faces = obstacles.filter(([a, b]) => Math.abs(cross(f.dir, sub(b, a))) <= 1e-9 * dist(a, b));
+  const faceBehind = (q: Pt) => lineCrossings(q, back, faces).some(t => t > 0 && t <= 1 + ORIGIN_CLEARANCE);
+  const cap = ORIGIN_SLIDE_THICKNESSES * Math.max(...level.walls.map(w => w.thickness)) + 2;
+  const ts = lineCrossings(probe, f.dir, obstacles);
+  const toMiddle = pl.offset <= f.len / 2 ? 1 : -1;
+  let best: number | null = null; // signed distance along f.dir
+  for (const sign of [toMiddle, -toMiddle]) {
+    const ahead = ts.flatMap(t => [(t - 1) * sign, (t + 1) * sign]).filter(c => c > 0 && c <= cap).sort((a, b) => a - b);
+    for (const c of ahead) {
+      const q = add(probe, scale(f.dir, c * sign));
+      if (blocked(q)) continue;
+      if (faceBehind(q) && (best === null || c < Math.abs(best))) best = c * sign;
+      break;
+    }
   }
-  return probe;
+  return best === null ? null : add(probe, scale(f.dir, best));
 }
 
 /** The fan's chords lie inside its radius by up to cos(step / 2): this factor makes the visibility polygon cover the cone. */
@@ -185,8 +206,9 @@ const snapRing = (ring: Pt[]): Pt[] => ring.map(p => ({ x: Math.round(p.x * 1e3)
  * starts inside the host wall, moved off a wall it touches at a corner: see sightOrigin; pt for free ones): walls
  * block it, openings let its medium through (CONE_MEDIUM). Unclipped when no obstacle comes within reach.
  * `obstaclesOf` may be a per-level cache of lineOfSightObstacles; it runs only for a device with a cone. Returns rings
- * (outer rings and any holes, unclosed): render with fill-rule evenodd. [] when none. If clipping still fails, the
- * result is the visibility polygon itself: wider than the cone, but never through a wall.
+ * (outer rings and any holes, unclosed): render with fill-rule evenodd. [] when none, or when a wall device has no
+ * clear sight origin (sightOrigin gives null). If clipping still fails, the result is the visibility polygon itself:
+ * wider than the cone, but never through a wall.
  */
 export function clippedCone(
   level: Level, d: Device, obstaclesOf: (level: Level, medium: Medium) => Segment[] = lineOfSightObstacles,
@@ -195,7 +217,8 @@ export function clippedCone(
   const medium = coneMedium(d.props.kind);
   if (!shape || !medium) return [];
   const obstacles = obstaclesOf(level, medium);
-  const probe = sightOrigin(level, d, devicePose(level, d)!, obstacles);
+  const probe = sightOrigin(level, d, obstacles);
+  if (!probe) return [];
   const reach = Math.max(...shape.map(p => dist(p, probe))) * FAN_COVER;
   const near = obstaclesWithin(probe, obstacles, reach);
   if (near.length === 0) return [shape];
