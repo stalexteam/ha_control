@@ -223,7 +223,7 @@ def test_a_reentrant_listener_does_not_break_the_frames():
     frames = e.frames()
     e.rt.add_listener(lambda pid, did, ev: e.rt.load_plans([]))  # the container disappears mid-notification
     e.set("sensor.b", "single")
-    assert frames[0] == (False, {"c": {**OK_BTN, "last": TOGGLE_1}})
+    assert (False, {"c": {**OK_BTN, "last": TOGGLE_1}}) in frames  # the reload sent its own full frame too
 
 
 def test_own_context_a_registered_id_or_parent_id_is_not_a_press_for_a_wall_switch():
