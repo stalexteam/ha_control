@@ -31,7 +31,8 @@ const drag = (t: Tool, from: [number, number], to: [number, number], o: { shift?
 function setup(level: Level) {
   const ctx = fakeContext(level);
   const selected: (Selection | null)[] = [];
-  ctx.select = s => { selected.push(s); };
+  const keep = ctx.select;
+  ctx.select = s => { selected.push(s); keep(s); };
   return { ctx, selected, t: createZonesSelectTool(ctx) };
 }
 const az = (id: Id): Selection => ({ kind: 'automationZone', id });
@@ -156,5 +157,36 @@ describe('zones select tool: dragging a vertex', () => {
     const corner = room.level.zones[0].outline[0];
     drag(t, [corner.x, corner.y], [corner.x + 300, corner.y + 300]);
     expect(ctx.commits).toHaveLength(0);
+  });
+});
+
+describe('zones select tool: the panel selection', () => {
+  it('a zone selected elsewhere (the zone list) drags with the first press', () => {
+    const { ctx, t } = setup(plan([square('z', 500, 500, 1500, 1500)]));
+    ctx.select(az('z')); // as the list does: not through the tool
+    drag(t, [1500, 500], [2990, 5]);
+    expect(ctx.commits).toHaveLength(1);
+    expect(verts(ctx.level(), 'z')[1]).toEqual({ kind: 'node', nodeId: 'n1', x: 3000, y: 0 });
+  });
+
+  it('a selection cleared elsewhere (Esc) has no vertex handles', () => {
+    const { ctx, t } = setup(plan([square('z', 500, 500, 1500, 1500)]));
+    click(t, 1000, 1000);
+    ctx.select(null);
+    drag(t, [1500, 500], [2990, 5]);
+    expect(ctx.commits).toHaveLength(0);
+  });
+
+  it('cancel drops a vertex drag and keeps the selection', () => {
+    const level = plan([square('z', 500, 500, 1500, 1500)]);
+    const { ctx, selected, t } = setup(level);
+    click(t, 1000, 1000);
+    t.down(ev(1500, 500)); t.move(ev(2000, 800));
+    t.cancel();
+    expect(t.preview()).toEqual({});
+    t.up(ev(2000, 800));
+    expect(ctx.commits).toHaveLength(0);
+    expect(selected).toEqual([az('z')]);
+    expect(ctx.selection()).toEqual(az('z'));
   });
 });

@@ -1,11 +1,13 @@
 import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from 'lit';
 import { property, state } from 'lit/decorators.js';
 import type { BindingRole, Device, Id, Level, Plan, Pt, WallType } from '../model/types';
-import { WALL_PRESETS } from '../model/types';
+import { WALL_PRESETS, levelZones } from '../model/types';
 import { deleteWall } from '../model/ops';
 import { deleteOpening } from '../model/openings';
 import { deleteDevice } from '../model/devices';
 import { deleteZone } from '../model/zones';
+import { deleteAutomationZone } from '../model/automation-zones';
+import { zoneLabelPoint, zoneOutline } from '../geometry/zones';
 import { bindingStatus, type BindStatus } from '../model/bindings';
 import { presence } from '../binding/ha-meta';
 import { devicePose } from '../geometry/devices';
@@ -51,7 +53,7 @@ export class PlanStudioPanel extends LitElement {
   @state() thickness = WALL_PRESETS.bearing;
   @state() boxMeasure: BoxMeasure = 'inner';
   @state() grid = true;
-  /** Wizard step: Plan / Equipment / Binding (per session, not saved); cones: device cones and zones are drawn. */
+  /** Wizard step: Plan / Equipment / Binding / Zones (per session, not saved); cones: device cones and zones are drawn. */
   @state() mode: EditorMode = 'plan';
   /** Binding step device list: Not bound / Bound / All and the text filter. */
   @state() bindFilter: ListFilter = 'unbound';
@@ -59,6 +61,8 @@ export class PlanStudioPanel extends LitElement {
   /** Binding step: the device list rail is folded to a strip; "Show all" per role (both per session). */
   @state() railCollapsed = false;
   @state() showAll: Partial<Record<BindingRole, boolean>> = {};
+  /** Zones step zone list text filter (per session). */
+  @state() zoneQuery = '';
   @state() private cones = true;
   /** "Next device" props per kind; they drive ctx.deviceDefaults. */
   @state() nextProps = initialNextProps();
@@ -187,13 +191,18 @@ export class PlanStudioPanel extends LitElement {
     this.requestUpdate();
   }
 
-  /** Delete/Backspace: remove the selected element (commit() drops the tool state and the selection). Not in the Binding step. */
+  /**
+   * Delete/Backspace: remove the selected element (commit() drops the tool state and the selection). Not in the
+   * Binding step; the Zones step deletes an automation zone only, and no other step deletes one.
+   */
   deleteSelection(): boolean {
     const s = this.selection;
     const level = this.history?.current;
     if (this.mode === 'binding' || !s || !level || s.kind === 'node' || !selectionExists(level, s)) return false;
+    if ((this.mode === 'zones') !== (s.kind === 'automationZone')) return false;
     this.commit(s.kind === 'wall' ? deleteWall(level, s.id) : s.kind === 'opening' ? deleteOpening(level, s.id)
-      : s.kind === 'device' ? deleteDevice(level, s.id) : deleteZone(level, s.id));
+      : s.kind === 'device' ? deleteDevice(level, s.id) : s.kind === 'automationZone' ? deleteAutomationZone(level, s.id)
+      : deleteZone(level, s.id));
     return true;
   }
 
@@ -244,6 +253,15 @@ export class PlanStudioPanel extends LitElement {
     this.ctx.select({ kind: 'device', id });
     const pose = devicePose(level, d);
     if (pose) this.view = revealPt(this.view, pose.pt, this.size.w, this.size.h);
+  }
+
+  /** Selects an automation zone (zone list) and pans the plan to its label when it is off-screen. */
+  pickZone(id: Id): void {
+    const level = this.history?.current;
+    const z = level ? levelZones(level).find(x => x.id === id) : undefined;
+    if (!level || !z) return;
+    this.ctx.select({ kind: 'automationZone', id });
+    this.view = revealPt(this.view, zoneLabelPoint(zoneOutline(level, z)), this.size.w, this.size.h);
   }
 
   nextUnboundDevice(): void {
@@ -308,13 +326,14 @@ export class PlanStudioPanel extends LitElement {
     const w = Math.max(1, this.size.w) / scale, h = Math.max(1, this.size.h) / scale;
     const s = this.save;
     return html`
-      <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : ''}" style=${paletteVars(pal)}
+      <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : this.mode === 'zones' ? ' zones' : ''}"
+        style=${paletteVars(pal)}
         @click=${this.refocus} @change=${this.refocusAfterChange}>
         ${renderTopBar({
           steps: renderSteps({
             mode: this.mode, level, status: this.bindStatus, planName: this.plan.name,
             onRename: name => { this.plan = { ...this.plan!, name }; s.markDirty(); },
-            onMode: m => this.setMode(m), onNextUnbound: () => this.nextUnboundDevice(),
+            onMode: m => this.setMode(m),
           }),
           planId: this.plan.id, plans: this.session.planOptions(),
           canUndo: this.history.canUndo, canRedo: this.history.canRedo,

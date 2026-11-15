@@ -5,10 +5,18 @@ import { renderProps } from './props-panel';
 import { renderToolRail } from './toolbar';
 import { renderBindingList } from './binding-list';
 import { renderBindingProps } from './binding-props';
+import { renderZonesList } from './zones-list';
+import { renderZonesProps } from './zones-props';
 import type { PlanStudioPanel } from './plan-studio-panel';
 
-/** The left rail: the step's tool buttons, or the device list in the Binding step. */
+/** The left rail: the step's tool buttons, the tools and the zone list in the Zones step, or the device list in the Binding step. */
 export function renderRail(h: PlanStudioPanel, level: Level): TemplateResult {
+  if (h.mode === 'zones') {
+    return renderZonesList({
+      level, selection: h.selection, toolId: h.toolId, query: h.zoneQuery,
+      onTool: id => h.pickTool(id), onQuery: q => { h.zoneQuery = q; }, onPick: id => h.pickZone(id),
+    });
+  }
   if (h.mode !== 'binding') return renderToolRail(h.mode, h.toolId, id => h.pickTool(id));
   return renderBindingList({
     level, selection: h.selection, status: h.bindStatus, filter: h.bindFilter, query: h.bindQuery,
@@ -34,6 +42,7 @@ function bindingSide(h: PlanStudioPanel, level: Level): TemplateResult {
 /** The properties panel of the active step. */
 export function renderSide(h: PlanStudioPanel, level: Level): TemplateResult {
   if (h.mode === 'binding') return bindingSide(h, level);
+  if (h.mode === 'zones') return renderZonesProps({ level, selection: h.selection, notice: h.notice, commit: next => h.commit(next) });
   const common = {
     level, selection: h.selection, notice: h.notice,
     commit: (next: Level) => h.commit(next),

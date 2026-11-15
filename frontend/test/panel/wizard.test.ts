@@ -37,7 +37,7 @@ describe('wizard steps in the panel', () => {
     localStorage.clear();
   });
 
-  it('Next cycles plan -> equipment -> binding, Back returns; each step activates its first tool', async () => {
+  it('Next cycles plan -> equipment -> binding -> zones, Back returns; each step activates its first tool', async () => {
     const el = await mount();
     expect(el.mode).toBe('plan');
     await press(el, '.steps [data-nav="next"]');
@@ -46,6 +46,12 @@ describe('wizard steps in the panel', () => {
     await press(el, '.steps [data-nav="next"]');
     expect(el.mode).toBe('binding');
     expect(el.toolId).toBe('binding-select');
+    await press(el, '.steps [data-nav="next"]');
+    expect(el.mode).toBe('zones');
+    expect(el.toolId).toBe('zones-select');
+    expect(el.shadowRoot!.querySelector('.steps [data-nav="next"]')).toBeNull();
+    await press(el, '.steps [data-nav="back"]');
+    expect(el.mode).toBe('binding');
     await press(el, '.steps [data-nav="back"]');
     expect(el.mode).toBe('equipment');
     await press(el, '.steps [data-nav="back"]');
@@ -63,12 +69,16 @@ describe('wizard steps in the panel', () => {
 
   it('layout order is rail | props | canvas in every step, with the device list as the rail in binding', async () => {
     const el = await mount();
-    const order = (cols: string[]) => ['tools', 'blist', 'props', 'canvas'].map(c => cols.indexOf(c));
-    expect(order(columns(el))).toEqual([1, -1, 2, 3]);
+    const order = (cols: string[]) => ['tools', 'blist', 'zlist', 'props', 'canvas'].map(c => cols.indexOf(c));
+    expect(order(columns(el))).toEqual([1, -1, -1, 2, 3]);
     await press(el, '[data-mode="binding"]');
-    expect(order(columns(el))).toEqual([-1, 1, 2, 3]);
+    expect(order(columns(el))).toEqual([-1, 1, -1, 2, 3]);
     expect($(el, '.ed').classList.contains('binding')).toBe(true);
     expect(el.shadowRoot!.querySelector('.tools')).toBeNull();
+    await press(el, '[data-mode="zones"]');
+    expect(order(columns(el))).toEqual([-1, -1, 1, 2, 3]);
+    expect($(el, '.ed').classList.contains('zones')).toBe(true);
+    expect($(el, '.ed').classList.contains('binding')).toBe(false);
   });
 
   it('binding props panel shows a placeholder; the selected device shows its name and kind', async () => {
@@ -115,9 +125,9 @@ describe('wizard steps in the panel', () => {
     expect(el.shadowRoot!.querySelector('.blist .brow[data-id="l"] .dot')!.classList.contains('bound')).toBe(true);
     await press(el, '.blist .brow[data-id="k"]');
     expect(el.selection).toEqual({ kind: 'device', id: 'k' });
-    await press(el, '.steps [data-nav="next"]');
+    await press(el, '.props [data-action="next-unbound"]');
     expect(el.selection).toEqual({ kind: 'device', id: 'd' });
-    await press(el, '.steps [data-nav="next"]');
+    await press(el, '.props [data-action="next-unbound"]');
     expect(el.selection).toEqual({ kind: 'device', id: 'k' });
     key(el, 'keydown', 'Escape');
     await el.updateComplete;

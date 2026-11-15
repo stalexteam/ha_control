@@ -79,7 +79,7 @@ describe("i18n t()", () => {
   it("seeds tool names", () => {
     const pairs: [string, string][] = [
       ["tool.select", "Select"], ["tool.box", "Box"], ["tool.wall", "Wall"],
-      ["tool.door", "Door"], ["tool.window", "Window"], ["tool.opening", "Opening"], ["tool.zone", "Zone"],
+      ["tool.door", "Door"], ["tool.window", "Window"], ["tool.opening", "Opening"], ["tool.zone", "Room"],
     ];
     for (const [k, en] of pairs) expect(t(k)).toBe(en);
   });

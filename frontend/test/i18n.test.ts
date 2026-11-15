@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { I18N_KEYS } from '../src/i18n';
+import { I18N_KEYS, t } from '../src/i18n';
 import { DEVICE_PLACEMENTS, WALL_PRESETS, OPENING_DEFAULT_WIDTH } from '../src/model/types';
 import { LIGHT_SHAPES, EQUIPMENT_SHAPES } from '../src/panel/device-props';
 import { LIST_FILTERS } from '../src/panel/binding-list';
 import { ROLE_SPECS } from '../src/model/bindings';
+import { EQUIPMENT_TOOL_IDS, PLAN_TOOL_IDS, ZONES_TOOL_IDS } from '../src/panel/tool-factory';
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap(n => {
@@ -80,12 +81,45 @@ describe('i18n', () => {
       side: ['left', 'right'],
       hinge: ['start', 'end'],
       baseline: ['center', 'left', 'right'],
-      mode: ['plan', 'equipment', 'binding', 'automation'],
+      mode: ['plan', 'equipment', 'binding', 'zones', 'automation'],
+      // The tools with a rail button (the Binding step's only tool has none).
+      tool: [...PLAN_TOOL_IDS, ...EQUIPMENT_TOOL_IDS, ...ZONES_TOOL_IDS],
+      'zones.kind': ['room', 'polygon'],
+      'zones.invalid': ['room', 'lost', 'wall', 'self'],
       'binding.filter': LIST_FILTERS,
       bindstatus: ['bound', 'partial', 'unbound', 'missing'],
       role: [...new Set(Object.values(ROLE_SPECS).flat().map(s => s.role))],
     };
     const missing = Object.entries(sets).flatMap(([pre, members]) => members.map(m => `${pre}.${m}`)).filter(k => !keys.has(k));
     expect(missing).toEqual([]);
+  });
+
+  it('the Zones step copy is exact', () => {
+    const copy: Record<string, string> = {
+      'mode.zones': 'Zones',
+      'tool.zone': 'Room',
+      'tool.zones-select': 'Select',
+      'tool.zone-room': 'Zone from room',
+      'tool.zone-draw': 'Custom zone',
+      'steps.zone': '{n} zone',
+      'steps.zones': '{n} zones',
+      'zones.default': 'Zone',
+      'zones.kind.room': 'Room',
+      'zones.kind.polygon': 'Custom',
+      'zones.room': 'Room',
+      'zones.members': 'Members',
+      'zones.participates': 'Participates',
+      'zones.noMembers': 'No devices inside.',
+      'zones.delete': 'Delete zone',
+      'zones.filter': 'Filter zones',
+      'zones.hint': 'Pick a zone on the plan or in the list, or add one with Zone from room or Custom zone.',
+      'zones.invalid.room': 'The room is broken: fix its walls.',
+      'zones.invalid.lost': 'A vertex lost its wall or corner: drag it to place it again.',
+      'zones.invalid.wall': 'A vertex lies beyond the end of its wall.',
+      'zones.invalid.self': 'The outline crosses itself: move a vertex.',
+      'props.zoneList': 'Zones',
+      'props.noZones': 'Not in any zone.',
+    };
+    expect(Object.fromEntries(Object.keys(copy).map(k => [k, t(k)]))).toEqual(copy);
   });
 });

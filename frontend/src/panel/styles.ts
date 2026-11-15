@@ -34,9 +34,10 @@ export const panelStyles = css`
   }
   .ed.binding { grid-template-columns: 250px 300px 1fr; }
   .ed.binding.rail-off { grid-template-columns: 36px 300px 1fr; }
+  .ed.zones { grid-template-columns: 230px 280px 1fr; }
   @media (max-width: 700px) {
     .ed { grid-template-columns: 54px 170px 1fr; }
-    .ed.binding { grid-template-columns: 170px 200px 1fr; }
+    .ed.binding, .ed.zones { grid-template-columns: 170px 200px 1fr; }
     .ed.binding.rail-off { grid-template-columns: 36px 200px 1fr; }
     .props .row { flex-wrap: wrap; }
     .props .val { max-width: 100%; }
@@ -68,7 +69,7 @@ export const panelStyles = css`
   .save-state.conflict, .save-state.error { color: var(--ch-error); }
 
   /* Wizard steps as a drawing title block: ruled cells, tabular numerals, sentence case. */
-  .steps { display: grid; grid-template-columns: minmax(150px, 1.2fr) repeat(4, minmax(112px, 1fr)) auto;
+  .steps { display: grid; grid-template-columns: minmax(150px, 1.2fr) repeat(5, minmax(100px, 1fr)) auto;
     border-top: 1px solid var(--ch-divider); font-variant-numeric: tabular-nums; }
   .steps > * { min-width: 0; border-right: 1px solid var(--ch-divider); }
   .steps .title { display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 6px 12px; }
@@ -90,14 +91,14 @@ export const panelStyles = css`
   .step.current::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--ch-primary); }
   .steps .nav { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 6px 12px; border-right: 0; }
   @media (max-width: 900px) {
-    .steps { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .steps { grid-template-columns: repeat(5, minmax(0, 1fr)); }
     .steps .title, .steps .nav { grid-column: 1 / -1; border-right: 0; }
     .steps .title { border-bottom: 1px solid var(--ch-divider); }
     .steps .nav { border-top: 1px solid var(--ch-divider); }
     .step { padding: 6px 10px; }
   }
 
-  /* Left rail: tools, or the binding device list. */
+  /* Left rail: tools, the binding device list, or the Zones tools above the zone list. */
   .tools { background: var(--ch-card); border-right: 1px solid var(--ch-divider); display: flex;
     flex-direction: column; align-items: center; gap: 4px; padding-top: 8px; }
   .tool { width: 54px; height: 40px; border-radius: 8px; border: 0; background: transparent; font-size: 11px;
@@ -105,8 +106,10 @@ export const panelStyles = css`
   .tool:hover { background: var(--ch-hover); color: var(--ch-text); }
   .tool.on { background: var(--ch-tint); color: var(--ch-primary); font-weight: 500; }
   .tool-sep { height: 1px; width: 36px; background: var(--ch-divider); margin: 4px 0; }
-  .blist { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ch-card);
+  .blist, .zlist { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ch-card);
     border-right: 1px solid var(--ch-divider); }
+  .ztools { display: flex; gap: 4px; padding: 8px 8px 0; }
+  .ztools .tool { flex: 1; width: auto; }
   .bhead { display: flex; align-items: center; gap: 4px; margin: 10px 6px 0 10px; }
   .filter-seg { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(3, 1fr);
     border: 1px solid var(--ch-divider); border-radius: 8px; overflow: hidden; }
@@ -117,13 +120,16 @@ export const panelStyles = css`
   .filter-seg .count { font-variant-numeric: tabular-nums; opacity: .8; }
   .list-search { margin: 8px 10px 6px; padding: 5px 8px; }
   .rows { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 8px; }
-  .brow { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 10px; align-items: center; width: 100%;
-    padding: 6px 12px; border: 0; background: none; color: var(--ch-text); text-align: left; }
-  .brow:hover { background: var(--ch-hover); }
-  .brow.sel { background: var(--ch-tint); box-shadow: inset 3px 0 0 var(--ch-primary); }
-  .brow .name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .brow .kind { display: block; color: var(--ch-muted); font-size: 12px; }
-  .brow .cnt { color: var(--ch-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .brow, .zrow { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 10px; align-items: center;
+    width: 100%; padding: 6px 12px; border: 0; background: none; color: var(--ch-text); text-align: left; }
+  .brow:hover, .zrow:hover { background: var(--ch-hover); }
+  .brow.sel, .zrow.sel { background: var(--ch-tint); box-shadow: inset 3px 0 0 var(--ch-primary); }
+  .brow .name, .zrow .name, .member .name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .brow .kind, .zrow .kind, .member .kind { display: block; color: var(--ch-muted); font-size: 12px; }
+  .brow .cnt, .zrow .zcount { color: var(--ch-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .zswatch { width: 12px; height: 12px; box-sizing: border-box; border-radius: 3px; }
+  .zswatch.zinvalid { border: 1.5px solid var(--ch-error);
+    background: repeating-linear-gradient(45deg, var(--ch-error) 0 1.5px, transparent 1.5px 4px); }
   .dot { width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px dashed var(--ch-muted); }
   .dot.partial { border: 2px solid #f59e0b; }
   .dot.missing { border: 2px solid #f43f5e; }
@@ -174,6 +180,12 @@ export const panelStyles = css`
   .reg-error { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 8px;
     border: 1px solid var(--ch-error); border-radius: 8px; }
   .reg-error .warn { flex: 1; margin: 0; }
+  /* Zones properties: the member list with its Participates column. */
+  .zmembers { margin-top: 14px; padding-top: 8px; border-top: 1px solid var(--ch-divider); }
+  .zhead { display: flex; justify-content: space-between; gap: 8px; color: var(--ch-muted); font-size: 12px; }
+  .member { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0; cursor: pointer; }
+  .member .nm { min-width: 0; }
+  .member input[type="checkbox"] { margin: 0; }
   .bfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 18px;
     padding-top: 10px; border-top: 1px solid var(--ch-divider); color: var(--ch-muted); }
 

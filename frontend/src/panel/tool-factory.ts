@@ -13,16 +13,22 @@ import type { Selection, Tool, ToolContext } from '../editor/tools/types';
 import { levelZones, type Level } from '../model/types';
 
 export type ToolId = Tool['id'];
-export type EditorMode = 'plan' | 'equipment' | 'binding';
+export type EditorMode = 'plan' | 'equipment' | 'binding' | 'zones';
 
 export const PLAN_TOOL_IDS: ToolId[] = ['select', 'box', 'wall', 'door', 'window', 'opening', 'zone'];
 export const EQUIPMENT_TOOL_IDS: ToolId[] = ['device-select', 'ceiling_light', 'wall_light', 'motion_sensor',
   'illuminance_sensor', 'climate_sensor', 'wall_switch', 'smart_button', 'socket', 'exhaust_fan', 'equipment'];
 /** The Binding step has a single selection-only tool; its rail is the device list. */
 export const BINDING_TOOL_IDS: ToolId[] = ['binding-select'];
+/** The Zones step tools; its rail adds the zone list under them. */
+export const ZONES_TOOL_IDS: ToolId[] = ['zones-select', 'zone-room', 'zone-draw'];
+
+const TOOL_IDS: Record<EditorMode, ToolId[]> = {
+  plan: PLAN_TOOL_IDS, equipment: EQUIPMENT_TOOL_IDS, binding: BINDING_TOOL_IDS, zones: ZONES_TOOL_IDS,
+};
 
 export function toolIdsFor(mode: EditorMode): ToolId[] {
-  return mode === 'plan' ? PLAN_TOOL_IDS : mode === 'equipment' ? EQUIPMENT_TOOL_IDS : BINDING_TOOL_IDS;
+  return TOOL_IDS[mode];
 }
 
 export function createTool(id: ToolId, ctx: ToolContext): Tool {

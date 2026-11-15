@@ -60,9 +60,9 @@ function handleAt(level: Level, id: Id, p: Pt, tol: number): { index: number; fr
  * zones overlap, the smallest comes first and a click next to the previous one picks the next; an empty click clears.
  * With a custom zone selected, a press on one of its vertex handles drags the vertex: it re-snaps to a node, a wall
  * face or the grid, Alt places it free, Shift keeps the angle to the previous vertex. One commit on `up`.
+ * The selection is the panel's (a zone picked in the list drags with the first press); `cancel` drops a gesture only.
  */
 export function createZonesSelectTool(ctx: ToolContext): Tool {
-  let sel: Id | null = null;
   let lastClick: Pt | null = null; // point of the previous pick, for cycling
   let drag: { zoneId: Id; index: number; from: Pt } | null = null; // from: the previous vertex
   let original: Level | null = null;
@@ -72,7 +72,8 @@ export function createZonesSelectTool(ctx: ToolContext): Tool {
   let moved = false;
   let downPt: Pt = { x: 0, y: 0 };
 
-  const setSel = (id: Id | null) => { sel = id; ctx.select(id === null ? null : { kind: 'automationZone', id }); };
+  const selected = (): Id | null => { const s = ctx.selection(); return s?.kind === 'automationZone' ? s.id : null; };
+  const setSel = (id: Id | null) => { ctx.select(id === null ? null : { kind: 'automationZone', id }); };
   const reset = () => { drag = null; original = null; working = null; lastSnap = null; ortho = false; moved = false; };
 
   function update(e: ToolEvent): void {
@@ -90,6 +91,7 @@ export function createZonesSelectTool(ctx: ToolContext): Tool {
     const ids = zonesAt(level, p, ctx.tolMm());
     if (ids.length === 0) { lastClick = null; setSel(null); return; }
     // Next to the previous click: the candidate after the selected one (-1 when it is not a candidate: the first).
+    const sel = selected();
     const at = sel !== null && lastClick !== null && dist(p, lastClick) <= ctx.tolMm() ? ids.indexOf(sel) : -1;
     lastClick = p;
     setSel(ids[(at + 1) % ids.length]);
@@ -101,6 +103,7 @@ export function createZonesSelectTool(ctx: ToolContext): Tool {
       reset();
       downPt = e.pt;
       const level = ctx.level();
+      const sel = selected();
       const h = sel === null ? null : handleAt(level, sel, e.pt, ctx.tolMm());
       if (sel !== null && h) {
         drag = { zoneId: sel, ...h };
@@ -127,6 +130,6 @@ export function createZonesSelectTool(ctx: ToolContext): Tool {
       if (ortho) pv.orthoFrom = drag.from;
       return pv;
     },
-    cancel() { reset(); lastClick = null; setSel(null); },
+    cancel() { reset(); lastClick = null; },
   };
 }

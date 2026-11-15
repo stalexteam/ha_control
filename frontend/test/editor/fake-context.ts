@@ -1,10 +1,11 @@
 import { deviceDefaults, emptyLevel, type Level } from '../../src/model/types';
 import { defaultZoneName } from '../../src/panel/next-object';
-import type { ToolContext } from '../../src/editor/tools/types';
+import type { Selection, ToolContext } from '../../src/editor/tools/types';
 
-/** Minimal ToolContext: keeps the level in memory and records every commit. */
+/** Minimal ToolContext: keeps the level and the selection in memory and records every commit. */
 export function fakeContext(level?: Level): ToolContext & { commits: Level[] } {
   let current: Level = level ?? emptyLevel('l0');
+  let selected: Selection | null = null;
   const commits: Level[] = [];
   return {
     commits,
@@ -15,7 +16,8 @@ export function fakeContext(level?: Level): ToolContext & { commits: Level[] } {
     grid: () => 100,
     wallProps: () => ({ type: 'partition', thickness: 100, baseline: 'center' }),
     boxMeasure: () => 'inner',
-    select: () => {},
+    select: s => { selected = s; },
+    selection: () => selected,
     deviceDefaults: k => deviceDefaults(k, 'free'),
     openingDefaults: k => (k === 'door' ? { width: 900, hinge: 'start', swing: 'left' } : k === 'window' ? { width: 1200, outside: 'left' } : { width: 900 }),
     zoneName: () => defaultZoneName(current),

@@ -1,5 +1,6 @@
 import type { ToolEvent } from '../editor/tools/types';
 import type { PlanStudioPanel } from './plan-studio-panel';
+import type { EditorMode, ToolId } from './tool-factory';
 import { panBy, zoomAt } from './viewport';
 
 /** The panel members the pointer / keyboard handlers use. */
@@ -7,6 +8,9 @@ export type InputHost = Pick<PlanStudioPanel,
   'activeTool' | 'view' | 'history' | 'selection' | 'dialog' | 'toMm' | 'focus' | 'requestUpdate' | 'undo' | 'redo' | 'doSave' | 'deleteSelection' | 'mode' | 'toolId' | 'pickTool'>;
 
 const MODIFIER_KEYS = ['Shift', 'Control', 'Alt', 'Meta'];
+
+/** The select tool an unconsumed Esc returns to, per step; the Binding step has no other tool. */
+const HOME_TOOL: Partial<Record<EditorMode, ToolId>> = { plan: 'select', equipment: 'device-select', zones: 'zones-select' };
 
 function inField(e: KeyboardEvent): boolean {
   const el = e.composedPath()[0] as HTMLElement | undefined;
@@ -103,7 +107,7 @@ export class EditorInput {
     if (!consumed && (e.key === 'Delete' || e.key === 'Backspace')) consumed = this.h.deleteSelection();
     if (!consumed && e.key === 'Escape') {
       // Nothing to cancel: leave a placement tool for the step's select tool.
-      const home = this.h.mode === 'plan' ? 'select' : this.h.mode === 'equipment' ? 'device-select' : null;
+      const home = HOME_TOOL[this.h.mode];
       if (home && this.h.toolId !== home) this.h.pickTool(home);
       else { this.h.activeTool.cancel(); this.h.selection = null; }
       consumed = true;

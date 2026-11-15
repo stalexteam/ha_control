@@ -38,6 +38,29 @@ describe('Esc returns to Select', () => {
     expect(el.toolId).toBe('device-select');
   });
 
+  it('Esc in Zones: draft, then Select', async () => {
+    const el = await mount();
+    el.setMode('zones');
+    await el.updateComplete;
+    await press(el, 'button[data-tool="zone-draw"]');
+    click(el, 1000, 1000);
+    expect(el.activeTool.preview().zoneDraft).toBeDefined();
+    key(el, 'keydown', 'Escape');
+    expect(el.activeTool.preview().zoneDraft).toBeUndefined();
+    expect(el.toolId).toBe('zone-draw');
+    key(el, 'keydown', 'Escape');
+    expect(el.toolId).toBe('zones-select');
+  });
+
+  it('Esc with an idle Zone from room tool switches to Select', async () => {
+    const el = await mount();
+    el.setMode('zones');
+    await el.updateComplete;
+    await press(el, 'button[data-tool="zone-room"]');
+    key(el, 'keydown', 'Escape');
+    expect(el.toolId).toBe('zones-select');
+  });
+
   it('Esc in Select clears the selection and keeps Select', async () => {
     const el = await mount();
     el.selection = { kind: 'wall', id: 'w1' };

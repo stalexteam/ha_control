@@ -33,8 +33,16 @@ describe('createToolContext', () => {
     expect(h.fieldNotice).toBeNull();
   });
 
+  it('selection reads the panel selection', () => {
+    const h = host();
+    const c = createToolContext(h);
+    expect(c.selection()).toBeNull();
+    h.selection = { kind: 'automationZone', id: 'z' };
+    expect(c.selection()).toEqual({ kind: 'automationZone', id: 'z' });
+  });
+
   it('select clears the field notice in every mode; in Binding the session notice stays', () => {
-    for (const mode of ['plan', 'equipment', 'binding']) {
+    for (const mode of ['plan', 'equipment', 'binding', 'zones']) {
       const h = { ...host(), mode };
       createToolContext(h).select({ kind: 'device', id: 'd' });
       expect(h.fieldNotice, mode).toBeNull();

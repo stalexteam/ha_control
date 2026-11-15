@@ -1,12 +1,12 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import type { Device, Level } from '../model/types';
+import { levelZones, type Device, type Level } from '../model/types';
 import { countNotBound, type BindStatus } from '../model/bindings';
 import { t } from '../i18n';
 import { fieldValue } from './field-value';
 import type { EditorMode } from './tool-factory';
 
-/** Wizard steps in order; a fourth one (Automation) is shown after them but not available yet. */
-const MODES: readonly EditorMode[] = ['plan', 'equipment', 'binding'];
+/** Wizard steps in order; a fifth one (Automation) is shown after them but not available yet. */
+const MODES: readonly EditorMode[] = ['plan', 'equipment', 'binding', 'zones'];
 
 export interface StepsOpts {
   mode: EditorMode;
@@ -16,24 +16,28 @@ export interface StepsOpts {
   planName: string;
   onRename(name: string): void;
   onMode(m: EditorMode): void;
-  onNextUnbound(): void;
 }
 
-const count = (n: number, one: string, other: string): string => t(n === 1 ? one : other).replace('{n}', String(n));
+/** "{n} thing" or "{n} things" from the singular and plural keys. */
+export const countText = (n: number, one: string, other: string): string => t(n === 1 ? one : other).replace('{n}', String(n));
 
 /** Live status line of a step and whether the step is finished. */
 export function stepState(mode: EditorMode, level: Level, status: (d: Device) => BindStatus): { text: string; done: boolean } {
   const { walls, zones, devices } = level;
   switch (mode) {
     case 'plan':
-      return { text: `${count(walls.length, 'steps.wall', 'steps.walls')}, ${count(zones.length, 'steps.room', 'steps.rooms')}`,
+      return { text: `${countText(walls.length, 'steps.wall', 'steps.walls')}, ${countText(zones.length, 'steps.room', 'steps.rooms')}`,
         done: walls.length > 0 && zones.length > 0 };
     case 'equipment':
-      return { text: count(devices.length, 'steps.device', 'steps.devices'), done: devices.length > 0 };
+      return { text: countText(devices.length, 'steps.device', 'steps.devices'), done: devices.length > 0 };
     case 'binding': {
       const bound = devices.length - countNotBound(devices.map(status));
       return { text: t('steps.bound').replace('{b}', String(bound)).replace('{n}', String(devices.length)),
         done: devices.length > 0 && bound === devices.length };
+    }
+    case 'zones': {
+      const n = levelZones(level).length;
+      return { text: countText(n, 'steps.zone', 'steps.zones'), done: n > 0 };
     }
   }
 }
@@ -42,8 +46,7 @@ const target = (key: string, m: EditorMode): string => t(key).replace('{step}', 
 
 /**
  * Wizard header styled as a drawing title block: the title cell, one cell per step (number, name, live status;
- * any available step can be clicked) and Back / Next buttons that name their target. In the Binding step Next
- * moves to the next device that is not bound.
+ * any available step can be clicked) and Back / Next buttons that name their target. The last step has no Next.
  */
 export function renderSteps(o: StepsOpts): TemplateResult {
   const i = MODES.indexOf(o.mode);
@@ -70,9 +73,8 @@ export function renderSteps(o: StepsOpts): TemplateResult {
       </button>
       <div class="nav">
         ${back ? html`<button class="btn" data-nav="back" @click=${() => o.onMode(back)}>${target('steps.back', back)}</button>` : nothing}
-        ${next
-          ? html`<button class="btn primary" data-nav="next" @click=${() => o.onMode(next)}>${target('steps.next', next)}</button>`
-          : html`<button class="btn primary" data-nav="next" @click=${() => o.onNextUnbound()}>${t('steps.nextUnbound')}</button>`}
+        ${next ? html`<button class="btn primary" data-nav="next" @click=${() => o.onMode(next)}>${target('steps.next', next)}</button>`
+          : nothing}
       </div>
     </nav>`;
 }

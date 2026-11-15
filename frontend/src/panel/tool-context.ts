@@ -36,6 +36,7 @@ export function createToolContext(h: ToolHost): ToolContext {
     boxMeasure: () => h.boxMeasure,
     // A field message belongs to the selected element; a session error (Binding) outlives the selection.
     select: s => { h.selection = s; h.fieldNotice = null; if (h.mode !== 'binding') h.notice = null; },
+    selection: () => h.selection,
     deviceDefaults: k => h.nextProps[k],
     openingDefaults: (k: OpeningKind) => openingDefaults(h.nextObj, k),
     zoneName: () => h.nextObj.zoneName ?? defaultZoneName(h.history?.current ?? EMPTY_LEVEL),

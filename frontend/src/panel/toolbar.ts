@@ -70,12 +70,14 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
     </div>${o.steps}</div>`;
 }
 
+/** The step's tool buttons (with a separator before the room tool and the first device tool). */
+export function toolButtons(mode: EditorMode, active: ToolId, onPick: (id: ToolId) => void): TemplateResult[] {
+  return toolIdsFor(mode).map(id => html`
+    ${id === 'zone' || id === 'ceiling_light' ? html`<div class="tool-sep"></div>` : nothing}
+    <button class="tool ${active === id ? 'on' : ''}" data-tool=${id} @click=${() => onPick(id)}>
+      ${t(`tool.${id}`)}</button>`);
+}
+
 export function renderToolRail(mode: EditorMode, active: ToolId, onPick: (id: ToolId) => void): TemplateResult {
-  return html`
-    <div class="tools">
-      ${toolIdsFor(mode).map(id => html`
-        ${id === 'zone' || id === 'ceiling_light' ? html`<div class="tool-sep"></div>` : nothing}
-        <button class="tool ${active === id ? 'on' : ''}" data-tool=${id} @click=${() => onPick(id)}>
-          ${t(`tool.${id}`)}</button>`)}
-    </div>`;
+  return html`<div class="tools">${toolButtons(mode, active, onPick)}</div>`;
 }
