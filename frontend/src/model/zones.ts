@@ -1,5 +1,6 @@
 import { newId } from './ids';
 import type { Id, Level, Pt, Zone } from './types';
+import { refreshDevices } from './devices';
 import { outlineFromHoles, roomHoles, sameOutline } from '../geometry/rooms';
 
 export function addZone(level: Level, seed: Pt, name: string): { level: Level; zoneId: Id | null } {
@@ -19,7 +20,7 @@ export function renameZone(level: Level, id: Id, name: string): Level {
 }
 
 export function deleteZone(level: Level, id: Id): Level {
-  return { ...level, zones: level.zones.filter(z => z.id !== id) };
+  return refreshDevices({ ...level, zones: level.zones.filter(z => z.id !== id) });
 }
 
 /** Re-detect every zone's contour from its seed; zones without own contour become broken (outline kept). */

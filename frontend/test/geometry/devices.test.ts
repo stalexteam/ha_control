@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { deviceDefaults, type Device, type DevicePlacement, type DeviceProps, type Level } from '../../src/model/types';
-import { angleFromHandle, clippedCone, coneShape, deviceAt, devicePose, directionHandle } from '../../src/geometry/devices';
+import { addZone } from '../../src/model/zones';
+import { deviceRoomId, angleFromHandle, clippedCone, coneShape, deviceAt, devicePose, directionHandle } from '../../src/geometry/devices';
 import { polygonArea } from '../../src/geometry/vec';
 import { rectRoomLevel } from '../fixtures';
 
@@ -213,5 +214,24 @@ describe('direction handle', () => {
     expect(pl).toMatchObject({ mode: 'wall', aim: 90 });
     const f = dev('w', deviceDefaults('wall_light', 'free'), { mode: 'free', x: 0, y: 0, rotation: 0 });
     expect(angleFromHandle(box, f, { x: 0, y: 100 }, false)).toMatchObject({ mode: 'free', rotation: 270 });
+  });
+});
+
+describe('deviceRoomId and no-cone kinds', () => {
+  const box = rectRoomLevel(3000, 4000, 400);
+  it('sensor inside a zone gives its id, outside null', () => {
+    const z = addZone(box, { x: 1500, y: 2000 }, 'R');
+    const inside = dev('c', deviceDefaults('climate_sensor', 'free'), { mode: 'free', x: 1000, y: 1000, rotation: 0 });
+    const outside = dev('c2', deviceDefaults('climate_sensor', 'free'), { mode: 'free', x: 9000, y: 9000, rotation: 0 });
+    const lv = withDevs(z.level, inside, outside);
+    expect(deviceRoomId(lv, inside)).toBe(z.zoneId);
+    expect(deviceRoomId(lv, outside)).toBeNull();
+  });
+  it('coneShape null for climate sensor and fan', () => {
+    const c = dev('c', deviceDefaults('climate_sensor', 'free'), { mode: 'free', x: 1000, y: 1000, rotation: 0 });
+    const f = dev('f', deviceDefaults('exhaust_fan', 'wall'), { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 });
+    expect(coneShape(box, c)).toBeNull();
+    expect(coneShape(box, f)).toBeNull();
+    expect(deviceAt(withDevs(box, f), { x: 1500, y: 200 }, 50)).toBe('f');
   });
 });

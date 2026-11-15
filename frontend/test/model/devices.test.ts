@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { rectRoomLevel } from '../fixtures';
 import { addDevice, deleteDevice, moveDevice, refreshDevices, setDeviceProps } from '../../src/model/devices';
-import { deleteWall, mergeNodes, moveNode } from '../../src/model/ops';
+import { addZone, deleteZone } from '../../src/model/zones';
+import { addBox, deleteWall, mergeNodes, moveNode } from '../../src/model/ops';
 import { deviceDefaults, normalizeLevel, type DevicePlacement, type Level } from '../../src/model/types';
 
 const room = (): Level => rectRoomLevel(3000, 4000, 400);
@@ -170,5 +171,37 @@ describe('purity', () => {
     moveNode(base, 'n0', { x: -500, y: 0 });
     deleteWall(base, 'w0');
     expect(base).toEqual(snap);
+  });
+});
+
+describe('climate sensor and exhaust fan', () => {
+  it('fan on wall accepted, on free rejected; climate on both', () => {
+    expect(addDevice(room(), deviceDefaults('exhaust_fan', 'wall'), onWall('w0', 1000), 'F').deviceId).not.toBeNull();
+    expect(addDevice(room(), deviceDefaults('exhaust_fan', 'wall'), free, 'F').deviceId).toBeNull();
+    expect(addDevice(room(), deviceDefaults('climate_sensor', 'wall'), onWall('w0', 1000), 'C').deviceId).not.toBeNull();
+    expect(addDevice(room(), deviceDefaults('climate_sensor', 'free'), free, 'C').deviceId).not.toBeNull();
+  });
+  it('defaults', () => {
+    expect(deviceDefaults('climate_sensor', 'free')).toEqual({ kind: 'climate_sensor', zoneIds: [] });
+    expect(deviceDefaults('exhaust_fan', 'wall')).toEqual({ kind: 'exhaust_fan', diameter: 100 });
+  });
+  it('deleteZone drops its id from zoneIds; other ids stay', () => {
+    const l = addBox(room(), { x: 5000, y: 0 }, { x: 8000, y: 3000 }, { type: 'partition', thickness: 100, baseline: 'center' }, 'axis');
+    const a = addZone(l, { x: 1500, y: 2000 }, 'A');
+    const b = addZone(a.level, { x: 6500, y: 1500 }, 'B');
+    const d = addDevice(b.level, { kind: 'climate_sensor', zoneIds: [a.zoneId!, b.zoneId!] }, free, 'C');
+    const r = deleteZone(d.level, a.zoneId!);
+    expect(r.devices[0].props).toEqual({ kind: 'climate_sensor', zoneIds: [b.zoneId] });
+  });
+  it('refreshDevices drops unknown zone ids, same object when nothing to drop', () => {
+    const a = addZone(room(), { x: 1500, y: 2000 }, 'A');
+    const b = addDevice(a.level, { kind: 'climate_sensor', zoneIds: [a.zoneId!, 'gone'] }, free, 'C');
+    expect((refreshDevices(b.level).devices[0].props as { zoneIds: string[] }).zoneIds).toEqual([a.zoneId]);
+    const c = addDevice(a.level, { kind: 'climate_sensor', zoneIds: [a.zoneId!] }, free, 'C');
+    expect(refreshDevices(c.level).devices[0]).toBe(c.level.devices[0]);
+  });
+  it('deleting the hosting wall removes the fan', () => {
+    const a = addDevice(room(), deviceDefaults('exhaust_fan', 'wall'), onWall('w0', 1000), 'F');
+    expect(deleteWall(a.level, 'w0').devices).toHaveLength(0);
   });
 });

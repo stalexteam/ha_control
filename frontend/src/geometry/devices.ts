@@ -1,6 +1,6 @@
 import polygonClipping, { type Polygon } from 'polygon-clipping';
 import type { Device, DevicePlacement, Id, Level, Pt } from '../model/types';
-import { add, dist, dot, perpLeft, scale, sub } from './vec';
+import { add, dist, dot, perpLeft, pointInPolygon, polygonArea, scale, sub } from './vec';
 import { wallFrame } from './walls';
 import { outlineFromHoles, roomHoles } from './rooms';
 
@@ -70,6 +70,26 @@ export function coneShape(level: Level, d: Device): Pt[] | null {
   }
 }
 
+/** Probe point of a device: the face normal step for wall devices, the centre for free ones. */
+function probeOf(pose: DevicePose): Pt {
+  return pose.normal ? add(pose.pt, pose.normal) : pose.pt;
+}
+
+/** Zone (smallest outline) containing the device's probe point, or null. */
+export function deviceRoomId(level: Level, d: Device): Id | null {
+  const pose = devicePose(level, d);
+  if (!pose) return null;
+  const probe = probeOf(pose);
+  let best: Id | null = null;
+  let bestArea = Infinity;
+  for (const z of level.zones) {
+    if (!pointInPolygon(probe, z.outline)) continue;
+    const a = Math.abs(polygonArea(z.outline));
+    if (a < bestArea) { best = z.id; bestArea = a; }
+  }
+  return best;
+}
+
 const toPoly = (ring: Pt[]): Polygon => [ring.map(p => [p.x, p.y] as [number, number])];
 
 /**
@@ -82,7 +102,7 @@ export function clippedCone(level: Level, d: Device, holes: Pt[][] = roomHoles(l
   const shape = coneShape(level, d);
   if (!shape) return [];
   const pose = devicePose(level, d)!;
-  const probe = pose.normal ? add(pose.pt, pose.normal) : pose.pt; // the face normal, not the aim, so the room does not change with aim
+  const probe = probeOf(pose); // the face normal, not the aim, so the room does not change with aim
   const room = outlineFromHoles(holes, probe);
   if (!room) return [shape];
   let mp: ReturnType<typeof polygonClipping.intersection>;

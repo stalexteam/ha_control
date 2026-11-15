@@ -13,7 +13,7 @@ export type EditorMode = 'plan' | 'equipment';
 
 export const PLAN_TOOL_IDS: ToolId[] = ['select', 'box', 'wall', 'door', 'window', 'opening', 'zone'];
 export const EQUIPMENT_TOOL_IDS: ToolId[] = ['device-select', 'ceiling_light', 'wall_light', 'motion_sensor',
-  'illuminance_sensor', 'switch', 'socket', 'equipment'];
+  'illuminance_sensor', 'climate_sensor', 'switch', 'socket', 'exhaust_fan', 'equipment'];
 
 export function toolIdsFor(mode: EditorMode): ToolId[] {
   return mode === 'plan' ? PLAN_TOOL_IDS : EQUIPMENT_TOOL_IDS;

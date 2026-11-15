@@ -47,14 +47,18 @@ export interface Zone {
   broken: boolean;
 }
 
-export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | 'switch' | 'socket' | 'equipment';
+export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | 'switch' | 'socket' | 'equipment' | 'climate_sensor' | 'exhaust_fan';
 export type DevicePlacement =
   | { mode: 'wall'; wallId: Id; side: Side; offset: number; aim?: number } // offset: along axis from node A to device centre; aim: degrees off the face normal, counter-clockwise on screen, integer -90..90 (default 0)
   | { mode: 'free'; x: number; y: number; rotation: number }; // rotation in degrees
+export const FAN_DIAMETERS = [100, 125, 150] as const;
+export type FanDiameter = typeof FAN_DIAMETERS[number];
 export type DeviceProps =
   | { kind: 'ceiling_light'; shape: 'round' | 'linear' | 'spot'; diameter: number; length: number; width: number; poolRadius: number | null }
   | { kind: 'wall_light'; coneAngle: number; coneRange: number }
   | { kind: 'motion_sensor'; zoneAngle: number; zoneRange: number }
+  | { kind: 'climate_sensor'; zoneIds: Id[] } // zoneIds: rooms the reading applies to; empty = the room containing the device (derived by geometry)
+  | { kind: 'exhaust_fan'; diameter: FanDiameter }
   | { kind: 'illuminance_sensor' } | { kind: 'switch' } | { kind: 'socket' }
   | { kind: 'equipment'; shape: 'rect' | 'circle'; width: number; depth: number; diameter: number;
       symbol: 'boiler' | 'pc' | 'automation' | 'other'; label: string };
@@ -116,6 +120,8 @@ export const DEVICE_PLACEMENTS: Record<DeviceKind, ('wall' | 'free')[]> = {
   switch: ['wall'],
   socket: ['wall'],
   equipment: ['free'],
+  climate_sensor: ['free', 'wall'],
+  exhaust_fan: ['wall'],
 };
 
 export function deviceDefaults(kind: DeviceKind, mode: 'wall' | 'free'): DeviceProps {
@@ -126,6 +132,10 @@ export function deviceDefaults(kind: DeviceKind, mode: 'wall' | 'free'): DeviceP
       return { kind, coneAngle: 90, coneRange: 2000 };
     case 'motion_sensor':
       return { kind, zoneAngle: mode === 'free' ? 360 : 110, zoneRange: 5000 };
+    case 'climate_sensor':
+      return { kind, zoneIds: [] };
+    case 'exhaust_fan':
+      return { kind, diameter: 100 };
     case 'equipment':
       return { kind, shape: 'rect', width: 600, depth: 600, diameter: 600, symbol: 'other', label: '' };
     default:

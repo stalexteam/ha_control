@@ -50,9 +50,9 @@ describe('Equipment tab', () => {
     expect(el.selection).toBeNull();
     expect(el.toolId).toBe('device-select');
     const tools = [...el.shadowRoot!.querySelectorAll<HTMLButtonElement>('.tools button.tool')];
-    expect(tools).toHaveLength(8);
+    expect(tools).toHaveLength(10);
     expect(tools.map(b => b.dataset.tool)).toEqual(['device-select', 'ceiling_light', 'wall_light', 'motion_sensor',
-      'illuminance_sensor', 'switch', 'socket', 'equipment']);
+      'illuminance_sensor', 'climate_sensor', 'switch', 'socket', 'exhaust_fan', 'equipment']);
     expect(tools[1].textContent!.trim()).toBe('Ceiling light');
     await tab(el, 'plan');
     expect(el.toolId).toBe('select');

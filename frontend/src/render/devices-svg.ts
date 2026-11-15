@@ -70,6 +70,19 @@ function iconShape(d: Device, R: number, color: string, fill: string): SVGTempla
       return svg`<circle class="icon" r=${R} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
         <circle class="dot" cx=${-R * 0.4} r=${R * 0.15} fill=${color}></circle>
         <circle class="dot" cx=${R * 0.4} r=${R * 0.15} fill=${color}></circle>`;
+    case 'climate_sensor':
+      return svg`<circle class="icon" cx=${-R * 0.3} r=${R * 0.45} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
+        <path class="thermo" d=${`M${-R * 0.3} ${-R * 0.45}V${-R * 1.1}M${-R * 0.3} ${-R * 0.45}H${-R * 1.1}`} fill="none" stroke=${color} stroke-width="1.5" vector-effect=${NS}></path>
+        <path class="drop" d=${`M${R * 0.7} ${-R * 0.7}Q${R * 1.1} ${-R * 0.1} ${R * 0.7} ${R * 0.3}Q${R * 0.3} ${-R * 0.1} ${R * 0.7} ${-R * 0.7}Z`} fill=${color} stroke=${color} stroke-width="1" vector-effect=${NS}></path>`;
+    case 'exhaust_fan': {
+      let blades = '';
+      for (let i = 0; i < 4; i++) {
+        const a = (i * Math.PI) / 2 + Math.PI / 4;
+        blades += `M0 0L${Math.cos(a) * R * 0.85} ${Math.sin(a) * R * 0.85}`;
+      }
+      return svg`<circle class="icon" r=${R} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
+        <path class="blades" d=${blades} fill="none" stroke=${color} stroke-width="1.5" vector-effect=${NS}></path>`;
+    }
     default:
       return svg`${nothing}`;
   }

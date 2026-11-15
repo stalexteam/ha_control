@@ -27,8 +27,10 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 ### Equipment tab
 
 - Switch between "Plan" and "Equipment" in the top bar. Walls, openings and rooms are dimmed and locked in the Equipment tab; devices are dimmed and locked in the Plan tab.
-- Tools: Select, Ceiling light, Wall light, Motion sensor, Illuminance sensor, Switch, Socket, Equipment. One click places one device.
+- Tools: Select, Ceiling light, Wall light, Motion sensor, Illuminance sensor, Climate sensor, Switch, Socket, Exhaust fan, Equipment. One click places one device.
 - Switches and sockets snap to the nearest wall face. Wall lights and sensors go on a wall face near the cursor, otherwise at a free grid point. Ceiling lights and equipment blocks are always free.
+- Climate sensor (wall or free): temperature and humidity; checks the rooms it applies to, none checked means the room it stands in.
+- Exhaust fan (wall only): diameter 100, 125 or 150 mm; no cone and no aim.
 - Select: click a device to select it, drag to move it (Shift locks the axis). A wall device slides along its wall, can be dragged onto another wall, or into open space if its kind allows. Delete removes it. A selected wall light or sensor shows a direction handle (a segment ending in a round knob): drag the knob to set the aim (wall device) or rotation (free device), Shift snaps to 15 degrees, Esc cancels.
 - Right panel: properties of the selected device (name, kind settings, rotation for free devices, side, offset and aim, -90 to 90 degrees off the wall normal, for wall lights and sensors). With a placement tool active and nothing selected, it edits the defaults of the next device.
 - A newly placed device is selected, so the right panel shows its properties. Press Esc (or click empty space with the Select tool) to get back to the next-device defaults.

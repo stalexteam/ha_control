@@ -1,10 +1,10 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
 import type { Device, DeviceKind, DevicePlacement, DeviceProps, Level, Side } from '../model/types';
-import { DEVICE_PLACEMENTS, deviceDefaults } from '../model/types';
+import { DEVICE_PLACEMENTS, FAN_DIAMETERS, deviceDefaults, type FanDiameter } from '../model/types';
 import { AIM_MAX, deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
 import type { Selection } from '../editor/tools/types';
-import { withAim } from '../geometry/devices';
+import { deviceRoomId, withAim } from '../geometry/devices';
 import { t } from '../i18n';
 import { parseMm } from './toolbar';
 import type { ToolId } from './tool-factory';
@@ -20,6 +20,8 @@ export function initialNextProps(): Record<DeviceKind, DeviceProps> {
 export interface DevicePropsOpts {
   /** Selected device, or null. */
   device: Device | null;
+  /** The level of the selected device (its rooms are listed for a climate sensor). */
+  level?: Level;
   /** Kind of the active placement tool (shown when nothing is selected), or null. */
   nextKind: DeviceKind | null;
   /** The panel's defaults for the next device of `nextKind`. */
@@ -125,6 +127,17 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
       return html`${deg('coneAngle', 'props.coneAngle', p.coneAngle)}${mm('coneRange', 'props.coneRange', p.coneRange)}`;
     case 'motion_sensor':
       return html`${deg('zoneAngle', 'props.zoneAngle', p.zoneAngle)}${mm('zoneRange', 'props.zoneRange', p.zoneRange)}`;
+    case 'exhaust_fan':
+      return row(`${t('props.diameter', lang)}, ${t('unit.mm', lang)}`, html`<select class="val" data-field=${`${pre}diameter`}
+        .value=${fieldValue(String(p.diameter))} @change=${(e: Event) => {
+          const el = e.target as HTMLSelectElement;
+          const v = Number(el.value) as FanDiameter;
+          if (v !== p.diameter && !set({ diameter: v })) el.value = String(p.diameter);
+        }}>
+        ${FAN_DIAMETERS.map(v => html`<option value=${String(v)} ?selected=${v === p.diameter}>${v}</option>`)}
+      </select>`);
+    case 'climate_sensor':
+      return pre === '' && o.device && o.level ? zoneFields(o, o.level, o.device, p.zoneIds, set) : nothing_();
     case 'equipment':
       return html`
         ${row(t('props.shape', lang), select(`${pre}shape`, p.shape, ['rect', 'circle'], 'shape', lang, v => set({ shape: v })))}
@@ -141,6 +154,23 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
     default:
       return html`<p class="muted">${t('props.noSettings', lang)}</p>`;
   }
+}
+
+const nothing_ = (): TemplateResult => html`${nothing}`;
+
+/** All rooms of the level as checkboxes; with none checked the derived ("auto") room is named. */
+function zoneFields(o: DevicePropsOpts, level: Level, d: Device, ids: string[], set: (patch: Partial<DeviceProps>) => boolean): TemplateResult {
+  const lang = o.lang;
+  const auto = ids.length === 0 ? level.zones.find(z => z.id === deviceRoomId(level, d))?.name : undefined;
+  return html`<fieldset class="zones" data-field="zoneIds"><legend>${t('props.zones', lang)}${ids.length === 0
+      ? html` (${t('props.zonesAuto', lang)}${auto ? `: ${auto}` : ''})` : nothing}</legend>
+    ${level.zones.map(z => html`<label class="row"><input type="checkbox" data-zone=${z.id} .checked=${ids.includes(z.id)}
+      @change=${(e: Event) => {
+        const on = (e.target as HTMLInputElement).checked;
+        const next = level.zones.map(x => x.id).filter(id => (id === z.id ? on : ids.includes(id)));
+        if (!set({ zoneIds: next })) (e.target as HTMLInputElement).checked = !on;
+      }} /><span>${z.name}</span></label>`)}
+  </fieldset>`;
 }
 
 function placementFields(o: DevicePropsOpts, d: Device): TemplateResult {
@@ -215,7 +245,7 @@ export function renderEquipmentProps(o: EquipmentPropsOpts): TemplateResult {
   };
   return html`<div class="props">
     ${renderDeviceProps({
-      device, nextKind, nextProps: nextKind ? o.nextProps[nextKind] : null, lang: o.lang,
+      device, level, nextKind, nextProps: nextKind ? o.nextProps[nextKind] : null, lang: o.lang,
       onDevice: (patch, name) => !!device && edit(setDeviceProps(level, device.id, patch, name)),
       onPlacement: p => !!device && edit(moveDevice(level, device.id, p)),
       onNext: patch => {

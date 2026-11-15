@@ -137,3 +137,21 @@ describe('aim knob from the placement tool', () => {
     expect(aimOf(ctx)).toBeUndefined();
   });
 });
+
+describe('climate sensor and fan tools', () => {
+  it('fan on open floor: invalid preview, nothing placed', () => {
+    const ctx = fakeContext(box());
+    const t = createDeviceTool(ctx, 'exhaust_fan');
+    t.move(ev(1500, 2000));
+    expect(t.preview().device!.invalid).toBe(true);
+    t.down(ev(1500, 2000)); t.up(ev(1500, 2000));
+    expect(ctx.level().devices).toHaveLength(0);
+  });
+  it('climate sensor placed free with default name', () => {
+    const ctx = fakeContext(box());
+    const t = createDeviceTool(ctx, 'climate_sensor');
+    t.move(ev(1500, 2000)); t.down(ev(1500, 2000)); t.up(ev(1500, 2000));
+    expect(ctx.level().devices[0].placement.mode).toBe('free');
+    expect(ctx.level().devices[0].name).toBe('Climate sensor 1');
+  });
+});

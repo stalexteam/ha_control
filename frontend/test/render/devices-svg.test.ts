@@ -152,3 +152,20 @@ describe('direction handle rendering', () => {
     expect(drawDevs(levelWithAll()).querySelector('.aim-knob')).toBeNull();
   });
 });
+
+describe('climate sensor and fan render', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+  it('one g.device each with own class; selected fan has no aim handle', () => {
+    const box = rectRoomLevel(6000, 5000, 200);
+    const devices: Device[] = [
+      free('cs', 'climate_sensor', 2000, 2000),
+      { id: 'fan', name: 'fan', invalid: false, props: deviceDefaults('exhaust_fan', 'wall'),
+        placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 3000 } },
+    ];
+    const root = drawDevs({ ...box, devices }, { selection: { kind: 'device', id: 'fan' } });
+    expect(root.querySelectorAll('g.device')).toHaveLength(2);
+    expect(root.querySelectorAll('g.device-climate_sensor')).toHaveLength(1);
+    expect(root.querySelectorAll('g.device-exhaust_fan')).toHaveLength(1);
+    expect(root.querySelector('.aim-handle')).toBeNull();
+  });
+});
