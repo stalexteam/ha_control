@@ -141,7 +141,10 @@ function transferFields(o: PowerPropsOpts, b: Block<'transfer'>): TemplateResult
     <p class="note">${t('power.positionHint')}</p>`;
 }
 
-/** Length (the long side, at least BUS_MIN) and Thickness (at least 6); the length stays above the thickness. */
+/**
+ * Orientation (switching swaps w and h; wire `at` values run along the long side, so the wires stay on), Length (the
+ * long side, at least BUS_MIN) and Thickness (at least 6); the length stays above the thickness.
+ */
 function busFields(o: PowerPropsOpts, b: Block<'bus'>): TemplateResult {
   const horizontal = b.w >= b.h;
   const len = horizontal ? b.w : b.h;
@@ -152,7 +155,11 @@ function busFields(o: PowerPropsOpts, b: Block<'bus'>): TemplateResult {
   };
   const num = (field: string, value: number, apply: (v: number) => false | void) =>
     numField({ value, rule: { min: 1 }, bad: 'props.badNumber', field, skipSame: true, apply });
+  const orientations = (['h', 'v'] as const).map(v => ({ v, label: t(`power.orientation.${v}`) }));
   return html`
+    ${row(t('power.orientation'), select(horizontal ? 'h' : 'v', orientations, v => {
+      if (v !== (horizontal ? 'h' : 'v')) o.commitPower(updateBlock(o.power, b.id, { w: b.h, h: b.w }));
+    }, 'bus-orientation'))}
     ${row(t('power.busLength'), num('bus-length', len, v => resize(Math.max(BUS_MIN, thick + 1, v), thick)))}
     ${row(t('power.busThickness'), num('bus-thickness', thick, v => resize(len, Math.min(Math.max(BUS_THICK_MIN, v), len - 1))))}`;
 }

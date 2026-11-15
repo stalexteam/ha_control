@@ -282,6 +282,26 @@ describe('Power properties', () => {
     expect(v.blk('vbus')).toMatchObject({ w: 12, h: 300 });
   });
 
+  it('bus Orientation shows the current one; switching it swaps w and h and keeps the wires', () => {
+    const s: PowerSchema = {
+      blocks: [grid, bus, boiler],
+      wires: [{ id: 'w1', from: { bus: 'bus', at: 0.2 }, to: { block: 'boiler', port: 'IN' } }],
+    };
+    const h = harness(s, selected('bus'));
+    const o = h.q<HTMLSelectElement>('select[data-field="bus-orientation"]')!;
+    expect([...o.options].map(op => op.textContent)).toEqual(['Horizontal', 'Vertical']);
+    expect(o.value).toBe('h');
+    change(o, 'v');
+    expect(h.blk('bus')).toMatchObject({ x: 300, y: 100, w: 12, h: 240 });
+    expect(h.o.power.wires).toEqual(s.wires);
+    expect(h.calls.commits).toBe(1);
+    expect(h.q<HTMLSelectElement>('select[data-field="bus-orientation"]')!.value).toBe('v');
+    expect(h.q<HTMLInputElement>('input[data-field="bus-length"]')!.value).toBe('240');
+    change(h.q<HTMLSelectElement>('select[data-field="bus-orientation"]')!, 'h');
+    expect(h.blk('bus')).toMatchObject({ w: 240, h: 12 });
+    expect(h.calls.commits).toBe(2);
+  });
+
   it('a wire shows its two ends, the live value or a dash, and Delete removes it', () => {
     const s: PowerSchema = {
       blocks: [{ ...grid, name: 'AC-IN' }, bus, boiler],
@@ -432,6 +452,20 @@ describe('Power properties in the panel', () => {
     expect(el.save.dirty).toBe(true);
     await undo(el);
     expect(el.power.blocks.find(b => b.id === 'm1')!.name).toBe('RCBO output');
+  });
+
+  it('switching a bus to Vertical is one undoable edit', async () => {
+    const el = await mountPower({ blocks: [grid, bus], wires: [] });
+    el.selection = { kind: 'powerBlock', id: 'bus' };
+    await el.updateComplete;
+    const o = $<HTMLSelectElement>(el, '.props select[data-field="bus-orientation"]');
+    o.value = 'v';
+    o.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    await el.updateComplete;
+    expect(el.power.blocks.find(b => b.id === 'bus')).toMatchObject({ w: 12, h: 240 });
+    expect(el.save.dirty).toBe(true);
+    await undo(el);
+    expect(el.power.blocks.find(b => b.id === 'bus')).toMatchObject({ w: 240, h: 12 });
   });
 
   it('a position button is live state: it sends the position and leaves the plan clean', async () => {
