@@ -70,6 +70,8 @@ export class PlanStudioPanel extends LitElement {
   @state() dialog: Dialog | null = null;
   /** Error or warning text (field input, plan switch / open failures); shown in every step. */
   @state() notice: string | null = null;
+  /** A rejected Binding field value (slot, window, event); cleared whenever a selection is made. */
+  @state() fieldNotice: string | null = null;
   /**
    * Local draft found on load, waiting for Restore / Discard. While it is undecided and belongs to the open
    * plan, no new draft is written under its key (that would overwrite it).
@@ -212,6 +214,7 @@ export class PlanStudioPanel extends LitElement {
     this.activeTool.cancel();
     this.selection = null;
     this.notice = null;
+    this.fieldNotice = null;
     if (id === 'box') this.wallType = 'bearing';
     this.toolId = id;
     this.activeTool = createTool(id, this.ctx);
@@ -230,7 +233,7 @@ export class PlanStudioPanel extends LitElement {
     const level = this.history?.current;
     const d = level?.devices.find(x => x.id === id);
     if (!level || !d) return;
-    this.selection = { kind: 'device', id };
+    this.ctx.select({ kind: 'device', id });
     const pose = devicePose(level, d);
     if (pose) this.view = revealPt(this.view, pose.pt, this.size.w, this.size.h);
   }

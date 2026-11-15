@@ -5,7 +5,8 @@ import { initialNext } from '../../src/panel/next-object';
 function host(): ToolHost {
   return {
     history: null, view: { x: 0, y: 0, scale: 0.1 }, grid: true, wallType: 'partition', thickness: 250, boxMeasure: 'axis',
-    nextProps: {} as ToolHost['nextProps'], nextObj: initialNext(), selection: null, notice: 'x', mode: 'plan', commit: () => {},
+    nextProps: {} as ToolHost['nextProps'], nextObj: initialNext(), selection: null, notice: 'x', fieldNotice: 'f', mode: 'plan',
+    commit: () => {},
   };
 }
 
@@ -29,5 +30,15 @@ describe('createToolContext', () => {
     createToolContext(h).select({ kind: 'wall', id: 'w' });
     expect(h.selection).toEqual({ kind: 'wall', id: 'w' });
     expect(h.notice).toBeNull();
+    expect(h.fieldNotice).toBeNull();
+  });
+
+  it('select clears the field notice in every mode; in Binding the session notice stays', () => {
+    for (const mode of ['plan', 'equipment', 'binding']) {
+      const h = { ...host(), mode };
+      createToolContext(h).select({ kind: 'device', id: 'd' });
+      expect(h.fieldNotice, mode).toBeNull();
+      expect(h.notice, mode).toBe(mode === 'binding' ? 'x' : null);
+    }
   });
 });

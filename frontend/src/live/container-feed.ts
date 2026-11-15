@@ -18,9 +18,14 @@ export interface ContainerState {
 interface ContainersEvent { full: boolean; containers: Record<string, ContainerState> }
 
 type Unsubscribe = () => Promise<void>;
+type Connection = HassLike['connection'];
 
 /** One subscription; once the feed moves on (`live` false) its messages and its late result are ignored. */
 interface Sub { live: boolean; unsub: Unsubscribe | null }
+
+/** A failed subscription is tried again every RETRY_MS, at most RETRY_MAX times, while the same plan is watched. */
+export const RETRY_MS = 5000;
+export const RETRY_MAX = 12;
 
 /** Ends a subscription; a closed connection may reject the unsubscribe, which is harmless. */
 function release(unsub: Unsubscribe): void {
@@ -31,8 +36,12 @@ function release(unsub: Unsubscribe): void {
  * Live outputs of the input containers of the open plan, from `plan_studio/containers/subscribe`.
  * - `watch(planId)` subscribes for that plan and ends the previous subscription; the same id is a no-op.
  * - Every message re-renders the host.
- * - A connection without subscriptions, or a rejected subscription, sets `error`: the plan stays usable and the
- *   symbols stay neutral.
+ * - A connection without subscriptions sets `error`: the plan stays usable and the symbols stay neutral.
+ * - A rejected subscription sets `error` and is tried again every RETRY_MS, at most RETRY_MAX times; a success
+ *   clears the error.
+ * - While a plan is watched the feed listens to the connection: `disconnected` forgets the outputs at once (nothing
+ *   looks live during an HA restart), `ready` subscribes again. The library is asked not to resubscribe by itself,
+ *   so there is only ever one subscription.
  */
 export class ContainerFeed {
   private planId: string | null = null;
@@ -40,10 +49,15 @@ export class ContainerFeed {
   private map = new Map<string, ContainerState>();
   private gotFull = false;
   private failure: string | null = null;
+  /** The connection of the watched plan, whose events the feed listens to; null when there is none. */
+  private conn: Connection | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Retries made since the last success, `ready` or watch. */
+  private retries = 0;
 
   constructor(
     private readonly host: { requestUpdate(): void },
-    private readonly connection: () => HassLike['connection'] | undefined,
+    private readonly connection: () => Connection | undefined,
   ) {}
 
   /** The first full message for the watched plan has arrived. */
@@ -64,33 +78,106 @@ export class ContainerFeed {
     if (planId === this.planId) return;
     this.stop();
     this.planId = planId;
-    if (planId !== null) this.start(planId);
+    if (planId !== null) this.start();
   }
 
-  /** Ends the subscription (also one still being set up) and forgets the outputs; any plan can be watched again. */
+  /**
+   * Ends the subscription (also one still being set up), cancels the retries, stops listening to the connection
+   * and forgets the outputs; any plan can be watched again.
+   */
   stop(): void {
-    const sub = this.sub;
-    this.sub = null;
+    this.unlisten();
+    this.cancelRetry();
+    this.retries = 0;
+    this.drop(true);
     this.planId = null;
     this.map = new Map();
     this.gotFull = false;
     this.failure = null;
-    if (!sub) return;
-    sub.live = false;
-    if (sub.unsub) release(sub.unsub);
   }
 
-  private start(planId: string): void {
+  private start(): void {
     const conn = this.connection();
-    if (!conn?.subscribeMessage) { this.fail(t('output.noLive')); return; }
+    if (!conn?.subscribeMessage) { this.setFailure(t('output.noLive')); return; }
+    this.conn = conn;
+    conn.addEventListener?.('disconnected', this.onDisconnected);
+    conn.addEventListener?.('ready', this.onReady);
+    this.subscribe();
+  }
+
+  private unlisten(): void {
+    const conn = this.conn;
+    this.conn = null;
+    conn?.removeEventListener?.('disconnected', this.onDisconnected);
+    conn?.removeEventListener?.('ready', this.onReady);
+  }
+
+  /** The socket closed: the outputs are forgotten at once; `ready` subscribes again. */
+  private readonly onDisconnected = (): void => {
+    this.cancelRetry();
+    // The subscription ended with the socket. No unsubscribe goes out: after the reconnect its command id may
+    // belong to another command.
+    this.drop(false);
+    this.map = new Map();
+    this.gotFull = false;
+    this.host.requestUpdate();
+  };
+
+  /** (Re)connected: a fresh subscription for the watched plan, with a fresh run of retries. */
+  private readonly onReady = (): void => {
+    this.cancelRetry();
+    this.retries = 0;
+    this.drop(true);
+    this.subscribe();
+  };
+
+  /** Ends the current subscription: its messages are ignored from now on; `unsubscribe` also tells the server. */
+  private drop(unsubscribe: boolean): void {
+    const sub = this.sub;
+    this.sub = null;
+    if (!sub) return;
+    sub.live = false;
+    if (unsubscribe && sub.unsub) release(sub.unsub);
+  }
+
+  private subscribe(): void {
+    const conn = this.conn;
+    const planId = this.planId;
+    if (!conn?.subscribeMessage || planId === null) return;
     const sub: Sub = { live: true, unsub: null };
     this.sub = sub;
     conn.subscribeMessage<ContainersEvent>(ev => { if (sub.live) this.apply(ev); },
       { type: 'plan_studio/containers/subscribe', plan_id: planId },
+      { resubscribe: false },
     ).then(
-      unsub => { if (sub.live) sub.unsub = unsub; else release(unsub); },
-      err => { if (sub.live) this.fail(messageOf(err)); },
+      unsub => {
+        if (!sub.live) { release(unsub); return; }
+        sub.unsub = unsub;
+        this.retries = 0;
+        if (this.failure !== null) this.setFailure(null);
+      },
+      err => {
+        if (!sub.live) return;
+        sub.live = false;
+        this.sub = null;
+        this.setFailure(messageOf(err));
+        this.scheduleRetry();
+      },
     );
+  }
+
+  private scheduleRetry(): void {
+    if (this.retries >= RETRY_MAX) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.retries++;
+      this.subscribe();
+    }, RETRY_MS);
+  }
+
+  private cancelRetry(): void {
+    if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
   }
 
   private apply(ev: ContainersEvent): void {
@@ -104,7 +191,7 @@ export class ContainerFeed {
     this.host.requestUpdate();
   }
 
-  private fail(msg: string): void {
+  private setFailure(msg: string | null): void {
     this.failure = msg;
     this.host.requestUpdate();
   }

@@ -1,11 +1,14 @@
-import type { Level, Pt } from '../model/types';
+import type { Pt } from '../model/types';
 
 /** Closed SVG path data of a ring; '' for an empty ring. */
 export const ringD = (r: Pt[]): string => (r.length === 0 ? '' : `M${r.map(p => `${p.x} ${p.y}`).join('L')}Z`);
 
-/** `make(level)` cached per level object (levels are immutable snapshots): one computation per frame. */
-export function cached<V>(map: WeakMap<Level, V>, level: Level, make: (l: Level) => V): V {
-  let v = map.get(level);
-  if (v === undefined) { v = make(level); map.set(level, v); }
+/**
+ * `make(key)` cached per key object: a level, or one of its arrays (levels and their parts are immutable snapshots).
+ * One computation per frame.
+ */
+export function cached<K extends object, V>(map: WeakMap<K, V>, key: K, make: (k: K) => V): V {
+  let v = map.get(key);
+  if (v === undefined) { v = make(key); map.set(key, v); }
   return v;
 }

@@ -5,7 +5,7 @@ import type { HassLike } from '../../src/api';
 import { deviceDefaults, type Device, type DeviceKind, type DeviceProps, type Level, type Trigger } from '../../src/model/types';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 import { rectRoomLevel } from '../fixtures';
-import { $, combo, device, mount, pick, redo, registryHass, undo } from './helpers';
+import { $, click, combo, device, mount, pick, redo, registryHass, undo } from './helpers';
 
 const st = (state: string, attributes: Record<string, string> = {}) => ({ state, attributes });
 
@@ -136,12 +136,12 @@ describe('binding step: container sections', () => {
       await type(el, 'windowSec', bad);
       expect(props(el, 'w').windowSec).toBe(3);
       expect(input(el, 'windowSec').value).toBe('3');
-      expect(el.notice).toBe('Window is a whole number of seconds from 1 to 10.');
+      expect(el.fieldNotice).toBe('Window is a whole number of seconds from 1 to 10.');
       expect($(el, '.props [role="alert"]').textContent!.trim()).toBe('Window is a whole number of seconds from 1 to 10.');
     }
     await type(el, 'windowSec', '5');
     expect(props(el, 'w').windowSec).toBe(5);
-    expect(el.notice).toBeNull();
+    expect(el.fieldNotice).toBeNull();
 
     // One undo step per action.
     await undo(el);
@@ -169,10 +169,10 @@ describe('binding step: container sections', () => {
     await type(el, 'on-slot', '10');
     expect(props(el, 'b').on).toEqual({ slot: 9, event: 'single' });
     expect(slot().value).toBe('9');
-    expect(el.notice).toBe('Slot is a whole number from 0 to 9.');
+    expect(el.fieldNotice).toBe('Slot is a whole number from 0 to 9.');
     await type(el, 'on-slot', '0');
     expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single' });
-    expect(el.notice).toBeNull();
+    expect(el.fieldNotice).toBeNull();
 
     expect(evSelect(el, 'on').closest('label')!.textContent).toContain('Event');
     expect(evSelect(el, 'on').value).toBe('single');
@@ -202,16 +202,16 @@ describe('binding step: container sections', () => {
     expect(customInput(el, 'on').value).toBe('');
     await type(el, 'on-event-custom', '   ');
     expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single' });
-    expect(el.notice).toBe('Event cannot be empty.');
+    expect(el.fieldNotice).toBe('Event cannot be empty.');
     await type(el, 'on-event-custom', ' single_left ');
     expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single_left' });
-    expect(el.notice).toBeNull();
+    expect(el.fieldNotice).toBeNull();
     expect(evSelect(el, 'on').value).toBe(OTHER);
     expect(customInput(el, 'on').value).toBe('single_left');
     await type(el, 'on-event-custom', '');
     expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single_left' });
     expect(customInput(el, 'on').value).toBe('single_left');
-    expect(el.notice).toBe('Event cannot be empty.');
+    expect(el.fieldNotice).toBe('Event cannot be empty.');
   });
 
   it('a stored custom event shows Other… with its text; a standard option hides the input again', async () => {
@@ -238,6 +238,65 @@ describe('binding step: container sections', () => {
     await chooseEvent(el, 'on', 'single');
     expect(customInput(el, 'on').hidden).toBe(true);
     expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single' });
+  });
+
+  it('typing hold into Other… switches the select to hold and hides the input', async () => {
+    const el = await open();
+    await pick(el, 'b');
+    await chooseEvent(el, 'on', OTHER);
+    await type(el, 'on-event-custom', 'hold');
+    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'hold' });
+    expect(evSelect(el, 'on').value).toBe('hold');
+    expect(markedEvent(el, 'on')).toBe('hold');
+    expect(customInput(el, 'on').hidden).toBe(true);
+    // Typing the event already stored (nothing to commit) does the same.
+    await chooseEvent(el, 'on', OTHER);
+    expect(customInput(el, 'on').hidden).toBe(false);
+    await type(el, 'on-event-custom', ' hold ');
+    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'hold' });
+    expect(evSelect(el, 'on').value).toBe('hold');
+    expect(customInput(el, 'on').hidden).toBe(true);
+    // Nothing lingers: another device and back shows hold in the select.
+    await pick(el, 'k1');
+    await pick(el, 'b');
+    expect(markedEvent(el, 'on')).toBe('hold');
+    expect(customInput(el, 'on').hidden).toBe(true);
+    // One undo step.
+    await undo(el);
+    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single' });
+    expect(evSelect(el, 'on').value).toBe('single');
+  });
+
+  it('a slot notice disappears when another device is picked; a session error stays', async () => {
+    const el = await open();
+    await pick(el, 'b');
+    await type(el, 'on-slot', '10');
+    const slotMsg = 'Slot is a whole number from 0 to 9.';
+    expect(el.fieldNotice).toBe(slotMsg);
+    expect($(el, '.props [data-notice="field"]').textContent!.trim()).toBe(slotMsg);
+    expect($(el, '.props [role="alert"]').textContent!.trim()).toBe(slotMsg);
+    // A session error (a failed plan switch) meanwhile.
+    await el.session.switchPlan('missing');
+    await el.updateComplete;
+    expect(el.notice).toBe('Plan not found');
+
+    await pick(el, 'k1');
+    expect(el.fieldNotice).toBeNull();
+    expect(q(el, '.props [data-notice="field"]')).toBeNull();
+    expect(el.notice).toBe('Plan not found');
+    expect($(el, '.props [data-notice="session"]').textContent!.trim()).toBe('Plan not found');
+
+    // A click on the plan picks a device the same way.
+    await pick(el, 'w');
+    await toggle(el, 'autoByDoubleToggle');
+    await type(el, 'windowSec', '0');
+    expect(el.fieldNotice).toBe('Window is a whole number of seconds from 1 to 10.');
+    click(el, 1500, 100); // the WC button on the inner face of the top wall
+    await el.updateComplete;
+    expect(el.selection).toEqual({ kind: 'device', id: 'b' });
+    expect(el.fieldNotice).toBeNull();
+    expect(q(el, '.props [data-notice="field"]')).toBeNull();
+    expect(el.notice).toBe('Plan not found');
   });
 
   it('Separate Off adds the Off section prefilled with the On entity; unchecking drops the off binding; undo restores it', async () => {
@@ -377,10 +436,14 @@ describe('binding step: container sections', () => {
 
 type Sub = { msg: Record<string, unknown>; push(ev: unknown): void; unsub: ReturnType<typeof vi.fn> };
 
-/** The registry mock plus a containers subscription the test drives; with `reject` every subscription fails with it. */
-function liveHass(reject?: unknown): { hass: HassLike; subs: Sub[] } {
+/**
+ * The registry mock plus a containers subscription the test drives; with `reject` every subscription fails with it.
+ * `fire` emits HA's connection events.
+ */
+function liveHass(reject?: unknown): { hass: HassLike; subs: Sub[]; fire(type: 'ready' | 'disconnected'): void } {
   const { hass } = registryHass(STATES, REGISTRY);
   const subs: Sub[] = [];
+  const listeners = new Map<string, Set<() => void>>();
   const connection: HassLike['connection'] = {
     ...hass.connection,
     subscribeMessage<T>(cb: (msg: T) => void, msg: Record<string, unknown>) {
@@ -388,8 +451,13 @@ function liveHass(reject?: unknown): { hass: HassLike; subs: Sub[] } {
       subs.push({ msg, push: ev => cb(ev as T), unsub });
       return reject === undefined ? Promise.resolve(unsub) : Promise.reject(reject);
     },
+    addEventListener(type, cb) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type)!.add(cb);
+    },
+    removeEventListener(type, cb) { listeners.get(type)?.delete(cb); },
   };
-  return { hass: { ...hass, connection }, subs };
+  return { hass: { ...hass, connection }, subs, fire: type => { [...listeners.get(type) ?? []].forEach(cb => cb()); } };
 }
 
 describe('binding step: output line', () => {
@@ -442,6 +510,30 @@ describe('binding step: output line', () => {
     expect(line(el)).toBe('Not saved yet');
     expect(coloured(el)).toEqual(['b']);
     expect(live.subs).toHaveLength(1);
+  });
+
+  it('HA restart: the outputs go neutral at the disconnect and come back after the reconnect', async () => {
+    const live = liveHass();
+    const el = await open(live.hass);
+    await push(el, live.subs[0], { full: true, containers: { b: { output: 'on', fault: null, kind: 'smart_button' } } });
+    await pick(el, 'b');
+    expect(line(el)).toBe('Output: On');
+    expect(coloured(el)).toEqual(['b']);
+    const noData = () => [...el.shadowRoot!.querySelectorAll('svg.plan g.device.no-data')].map(g => g.getAttribute('data-id'));
+    expect(noData()).toEqual(['w', 'k1', 'k2']);
+
+    live.fire('disconnected');
+    await el.updateComplete;
+    expect(coloured(el)).toEqual([]);
+    expect(noData()).toEqual(['w', 'b', 'k1', 'k2']);
+    expect(q(el, '.props [data-field="output"]')).toBeNull();
+
+    live.fire('ready');
+    expect(live.subs.map(s => s.msg)).toEqual([0, 1].map(() => ({ type: 'plan_studio/containers/subscribe', plan_id: 'P1' })));
+    await push(el, live.subs[1], { full: true, containers: { b: { output: 'auto', fault: null, kind: 'smart_button' } } });
+    expect(line(el)).toBe('Output: Auto');
+    expect(coloured(el)).toEqual(['b']);
+    expect(noData()).toEqual(['w', 'k1', 'k2']);
   });
 
   it('a saved container of another kind (an unsaved Type change) reads as not saved and stays neutral', async () => {

@@ -26,10 +26,12 @@ export interface BindingPropsOpts {
   onShowAll(role: BindingRole): void;
   commit(next: Level): void;
   onNextUnbound(): void;
-  /** Session error (plan switch or open failure) or a rejected field value, shown as a warning whatever is selected; or null. */
+  /** Session error (plan switch or open failure), shown as a warning whatever is selected; or null. */
   notice: string | null;
+  /** The message for a rejected field value (slot, window, event), shown with the session error; or null. */
+  fieldNotice: string | null;
   /** Shows (or, with null, clears) the message for a rejected field value. */
-  setNotice(msg: string | null): void;
+  setFieldNotice(msg: string | null): void;
   /** Registry load failure text, shown with Retry; null when loaded or not tried yet. */
   registryError: string | null;
   /** A registry load is running: Retry shows "Loading…" and is disabled. */
@@ -113,6 +115,7 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
   const open = countNotBound(o.level.devices.map(o.status));
   return html`<div class="props bprops">
     ${o.notice ? html`<p class="warn" data-notice="session" role="alert">${o.notice}</p>` : nothing}
+    ${o.fieldNotice ? html`<p class="warn" data-notice="field" role="alert">${o.fieldNotice}</p>` : nothing}
     ${o.registryError ? html`<div class="reg-error" data-notice="registry"><p class="warn">${o.registryError}</p>
       <button class="btn" data-action="retry-registry" ?disabled=${o.registryLoading}
         @click=${() => o.onRetry()}>${t(o.registryLoading ? 'load.loading' : 'action.retry')}</button></div>` : nothing}

@@ -17,7 +17,10 @@ export interface PlanPalette {
   dim: string;
   device: string;
   deviceFill: string;
+  /** Light cones and pools (wall and ceiling lights). */
   cone: string;
+  /** Motion sensor zones: violet, apart from the light colour. */
+  motionCone: string;
   breakLine: string;
   /** Opacity of the layer that is not being edited (walls in equipment mode, devices in plan mode). */
   dimOpacity: number;
@@ -51,6 +54,7 @@ const DARK: PlanPalette = {
   device: '#fbbf24',
   deviceFill: '#1e293b',
   cone: '#fbbf24',
+  motionCone: '#a78bfa',
   breakLine: '#94a3b8',
   dimOpacity: 0.35,
   panel: '#0f172a',
@@ -82,6 +86,7 @@ const LIGHT: PlanPalette = {
   device: '#b45309',
   deviceFill: '#fffbeb',
   cone: '#d97706',
+  motionCone: '#7c3aed',
   breakLine: '#7c7368',
   dimOpacity: 0.4,
   panel: '#faf7f2',

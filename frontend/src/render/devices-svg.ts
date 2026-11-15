@@ -3,7 +3,7 @@ import { isContainerKind, type ContainerOutput, type Device, type Level, type Pt
 import type { BindStatus } from '../model/bindings';
 import type { ContainerState } from '../live/container-feed';
 import type { Preview, Selection } from '../editor/tools/types';
-import { clippedCone, devicePose, directionHandle, type DevicePose } from '../geometry/devices';
+import { clippedCone, coneMedium, devicePose, directionHandle, type DevicePose } from '../geometry/devices';
 import { lineOfSightObstacles, type Medium, type Segment } from '../geometry/visibility';
 import type { PlanPalette } from './theme';
 import { cached, ringD } from './shared';
@@ -24,7 +24,10 @@ export interface DeviceRenderOpts {
    * handle is not drawn (devices are not edited in that step).
    */
   bindingStatus?: (d: Device) => BindStatus;
-  /** Live output of an input container, or undefined (no data: neutral). It colours the symbol; a fault adds a mark. */
+  /**
+   * Live output of an input container, or undefined (no data: neutral fill, dashed outline). It colours the symbol;
+   * a fault adds a mark.
+   */
   containerState?: (d: Device) => ContainerState | undefined;
 }
 
@@ -38,6 +41,8 @@ const OUTPUT_FILL: Partial<Record<ContainerOutput, string>> = { on: '#facc15', a
 const OUTPUT_DOT = '#0f172a';
 /** Fault mark colour: a dot on the container symbol. */
 const FAULT_MARK = '#f43f5e';
+/** Outline dash of a container with no live state (screen pixels). */
+const NO_DATA_DASH = '3 2';
 /** MDI `cube-outline` (24x24), the bundled fallback when `ha-icon` is not registered. */
 const CUBE_OUTLINE = 'M21,16.5C21,16.88 20.79,17.21 20.47,17.38L12.57,21.82C12.41,21.94 12.21,22 12,22C11.79,22 11.59,21.94 11.43,21.82L3.53,17.38C3.21,17.21 3,16.88 3,16.5V7.5C3,7.12 3.21,6.79 3.53,6.62L11.43,2.18C11.59,2.06 11.79,2 12,2C12.21,2 12.41,2.06 12.57,2.18L20.47,6.62C20.79,6.79 21,7.12 21,7.5V16.5M12,4.15L6.04,7.5L12,10.85L17.96,7.5L12,4.15M5,15.91L11,19.29V12.58L5,9.21V15.91M19,15.91V9.21L13,12.58V19.29L19,15.91Z';
 /** Equipment icon size in screen pixels. */
@@ -59,23 +64,35 @@ const BIND_STROKE: Record<Exclude<BindStatus, 'bound'>, string> = {
   unbound: 'var(--secondary-text-color, #94a3b8)', partial: '#f59e0b', missing: '#f43f5e',
 };
 
-// Line-of-sight obstacles are cached per level object (levels are immutable snapshots) and medium, and the clipped
-// cone rings per level object and device object: one computation per level, not per frame. The device object (not
+// Line-of-sight obstacles depend only on the walls, nodes and openings: they are cached per medium on the identity of
+// those three arrays (nested WeakMaps; levels and their arrays are immutable snapshots), so a device or aim drag,
+// which keeps them, reuses them. A clipped cone is cached on its obstacle array (which pins the walls and nodes that
+// pose the device) and the device object: a drag recomputes only the dragged device's cone. The device object (not
 // its id) is the key so the placement preview, a fresh object with a fixed id on every render, never reads a stale cone.
 type ByMedium = Partial<Record<Medium, Segment[]>>;
-const obstacleCache = new WeakMap<Level, ByMedium>();
-const obstaclesOf = (level: Level, medium: Medium): Segment[] =>
-  (cached(obstacleCache, level, (): ByMedium => ({}))[medium] ??= lineOfSightObstacles(level, medium));
-const coneCache = new WeakMap<Level, WeakMap<Device, Pt[][]>>();
+type ByOpenings = WeakMap<Level['openings'], ByMedium>;
+const obstacleCache = new WeakMap<Level['walls'], WeakMap<Level['nodes'], ByOpenings>>();
+function obstaclesOf(level: Level, medium: Medium): Segment[] {
+  const byNodes = cached(obstacleCache, level.walls, () => new WeakMap<Level['nodes'], ByOpenings>());
+  const byOpenings = cached(byNodes, level.nodes, (): ByOpenings => new WeakMap());
+  return (cached(byOpenings, level.openings, (): ByMedium => ({}))[medium] ??= lineOfSightObstacles(level, medium));
+}
+const coneCache = new WeakMap<Segment[], WeakMap<Device, Pt[][]>>();
 function coneRings(level: Level, d: Device): Pt[][] {
-  const byDevice = cached(coneCache, level, () => new WeakMap<Device, Pt[][]>());
+  const medium = coneMedium(d.props.kind);
+  if (!medium) return [];
+  const obstacles = obstaclesOf(level, medium);
+  const byDevice = cached(coneCache, obstacles, () => new WeakMap<Device, Pt[][]>());
   let rings = byDevice.get(d);
-  if (!rings) { rings = clippedCone(level, d, obstaclesOf); byDevice.set(d, rings); }
+  if (!rings) { rings = clippedCone(level, d, () => obstacles); byDevice.set(d, rings); }
   return rings;
 }
 
-/** `dot`: the smart button's centre dot (the device colour unless a live output fill needs another ink). */
-function iconShape(d: Device, R: number, color: string, fill: string, dot = color): SVGTemplateResult {
+/**
+ * `dot`: the smart button's centre dot (the device colour unless a live output fill needs another ink).
+ * `dash`: the outline dash of an input container with no live state.
+ */
+function iconShape(d: Device, R: number, color: string, fill: string, dot = color, dash?: string): SVGTemplateResult {
   const pr = d.props;
   const common = { stroke: color, fill };
   switch (pr.kind) {
@@ -107,10 +124,11 @@ function iconShape(d: Device, R: number, color: string, fill: string, dot = colo
     }
     case 'wall_switch':
       return svg`<rect class="icon" x=${-R * 0.6} y=${-R * 0.6} width=${R * 1.2} height=${R * 1.2} fill=${common.fill}
-        stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></rect>`;
+        stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${dash ?? nothing} vector-effect=${NS}></rect>`;
     case 'smart_button':
       return svg`<rect class="icon" x=${-R * 0.6} y=${-R * 0.6} width=${R * 1.2} height=${R * 1.2} rx=${R * 0.35}
-        fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></rect>
+        fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${dash ?? nothing}
+        vector-effect=${NS}></rect>
         <circle class="dot" r=${R * 0.18} fill=${dot}></circle>`;
     case 'socket':
       return svg`<circle class="icon" r=${R} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
@@ -169,11 +187,14 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
   const R = ICON_PX / o.scale;
   const deg = (Math.atan2(pose.dir.y, pose.dir.x) * 180) / Math.PI;
   const selected = !preview && o.selection?.kind === 'device' && o.selection.id === d.id;
-  const live = !preview && isContainerKind(d.props.kind) ? o.containerState?.(d) : undefined;
+  // An input container on the plan (not the placement preview) is either live or has no data (dashed outline).
+  const container = !preview && isContainerKind(d.props.kind);
+  const live = container ? o.containerState?.(d) : undefined;
+  const noData = container && !live;
   const liveFill = live ? OUTPUT_FILL[live.output] : undefined;
   const fill = liveFill ?? p.deviceFill;
   const cls = `device device-${d.props.kind}${selected ? ' selected' : ''}${d.invalid ? ' invalid' : ''}${preview ? ' device-preview' : ''}`
-    + (live ? ` out-${live.output}` : '');
+    + (live ? ` out-${live.output}` : '') + (noData ? ' no-data' : '');
   const opacity = preview ? '0.5' : o.dim ? String(p.dimOpacity) : nothing;
   const reach = d.props.kind === 'equipment'
     ? (d.props.shape === 'circle' ? d.props.diameter / 2 : Math.hypot(d.props.width, d.props.depth) / 2)
@@ -184,7 +205,8 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
         stroke-width="2" stroke-dasharray="4 3" vector-effect=${NS}></circle>` : nothing}
       ${d.props.kind === 'equipment'
         ? equipmentBlock(d, o, color, deg)
-        : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, fill, liveFill ? OUTPUT_DOT : color)}</g>`}
+        : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, fill, liveFill ? OUTPUT_DOT : color,
+          noData ? NO_DATA_DASH : undefined)}</g>`}
       ${live?.fault ? faultMark(R, p) : nothing}
       ${o.bindingStatus && !preview ? bindRing(o.bindingStatus(d), o.scale) : nothing}
     </g>`;
@@ -194,7 +216,8 @@ function renderCone(level: Level, d: Device, o: DeviceRenderOpts, preview: boole
   const rings = coneRings(level, d); // [] for kinds without a cone
   if (rings.length === 0) return nothing;
   const p = o.palette;
-  const color = d.invalid ? p.invalid : p.cone;
+  // Motion zones are violet (motionCone), light cones and pools amber (cone).
+  const color = d.invalid ? p.invalid : coneMedium(d.props.kind) === 'motion' ? p.motionCone : p.cone;
   const opacity = preview ? '0.5' : o.dim ? String(p.dimOpacity) : nothing;
   const path = rings.map(ringD).join('');
   if (d.props.kind === 'ceiling_light') {

@@ -104,6 +104,28 @@ describe('renderDevices', () => {
     expect(coneD(1000)).toBe(coneD(1000));
   });
 
+  it('a motion sensor zone uses motionCone and a wall light cone uses cone', () => {
+    const one = (d: Device): Level => ({ ...rectRoomLevel(6000, 5000, 200), devices: [d] });
+    const ms = free('ms', 'motion_sensor', 3000, 2500);
+    const wl = free('wl', 'wall_light', 3000, 2500);
+    const cl = free('cl', 'ceiling_light', 3000, 2500, { poolRadius: 800 });
+    for (const [dark, violet] of [[true, '#a78bfa'], [false, '#7c3aed']] as const) {
+      const palette = paletteFor(dark);
+      expect(palette.motionCone).toBe(violet);
+      expect(palette.motionCone).not.toBe(palette.cone);
+      const zone = drawDevs(one(ms), { palette }).querySelector('.cone')!;
+      expect(zone.getAttribute('fill')).toBe(violet);
+      expect(zone.getAttribute('stroke')).toBe(violet);
+      const cone = drawDevs(one(wl), { palette }).querySelector('.cone')!;
+      expect(cone.getAttribute('fill')).toBe(palette.cone);
+      expect(cone.getAttribute('stroke')).toBe(palette.cone);
+      expect(drawDevs(one(cl), { palette }).querySelector('.pool')!.getAttribute('stroke')).toBe(palette.cone);
+      // An invalid device keeps the invalid colour.
+      const bad = drawDevs(one({ ...ms, invalid: true }), { palette }).querySelector('.cone')!;
+      expect(bad.getAttribute('fill')).toBe(palette.invalid);
+    }
+  });
+
   it('a cone is clipped by line of sight: a sensor facing a wall stops at it', () => {
     const lv = { ...rectRoomLevel(6000, 5000, 200), devices: [free('ms', 'motion_sensor', 5000, 2500, { zoneAngle: 90, zoneRange: 4000 })] };
     const xs = drawDevs(lv).querySelector('.cone')!.getAttribute('d')!.match(/-?\d+(\.\d+)?(e-?\d+)?/g)!
@@ -303,6 +325,28 @@ describe('container outputs on the plan', () => {
         expect(dot(drawDevs(containers(), { palette, containerState }))).toBe(palette.device);
       }
     }
+  });
+
+  it('a container with no state is dashed; a live off is solid', () => {
+    const st: Record<string, ContainerState> = { sb: { output: 'off', fault: null, kind: 'smart_button' } };
+    const root = drawDevs(containers(), { containerState: (d: Device) => st[d.id] });
+    const g = (kind: string) => root.querySelector(`g.device-${kind}`)!;
+    const dash = (kind: string) => root.querySelector(`g.device-${kind} rect.icon`)!.getAttribute('stroke-dasharray');
+    expect(g('wall_switch').classList.contains('no-data')).toBe(true);
+    expect(dash('wall_switch')).toBe('3 2');
+    expect(g('smart_button').classList.contains('no-data')).toBe(false);
+    expect(dash('smart_button')).toBeNull();
+    // Containers only: a motion sensor never reads as "no data".
+    expect(g('motion_sensor').classList.contains('no-data')).toBe(false);
+    expect(root.querySelector('g.device-motion_sensor [stroke-dasharray]')).toBeNull();
+    // Without any state both containers are dashed, the smart button too.
+    const none = drawDevs(containers(), { containerState: () => undefined });
+    expect(none.querySelectorAll('g.no-data')).toHaveLength(2);
+    expect(none.querySelector('g.device-smart_button rect.icon')!.getAttribute('stroke-dasharray')).toBe('3 2');
+    // A fault is live data: solid, with its mark.
+    const fault = drawDevs(containers(), { containerState: (d: Device) => ({ output: 'on', fault: 'unavailable', kind: kindOf(d) }) });
+    expect(fault.querySelectorAll('g.no-data')).toHaveLength(0);
+    expect(fault.querySelector('rect.icon[stroke-dasharray]')).toBeNull();
   });
 
   it('renderLevel passes the state through in every mode', () => {

@@ -20,6 +20,7 @@ export interface ToolHost {
   nextObj: NextObjects;
   selection: Selection | null;
   notice: string | null;
+  fieldNotice: string | null;
   mode: string;
   commit(next: Level): void;
 }
@@ -33,7 +34,8 @@ export function createToolContext(h: ToolHost): ToolContext {
     grid: () => (h.grid ? 100 : null),
     wallProps: () => ({ type: h.wallType, thickness: h.thickness, baseline: 'center' }),
     boxMeasure: () => h.boxMeasure,
-    select: s => { h.selection = s; if (h.mode !== 'binding') h.notice = null; },
+    // A field message belongs to the selected element; a session error (Binding) outlives the selection.
+    select: s => { h.selection = s; h.fieldNotice = null; if (h.mode !== 'binding') h.notice = null; },
     deviceDefaults: k => h.nextProps[k],
     openingDefaults: (k: OpeningKind) => openingDefaults(h.nextObj, k),
     zoneName: () => h.nextObj.zoneName ?? defaultZoneName(h.history?.current ?? EMPTY_LEVEL),

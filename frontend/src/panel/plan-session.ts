@@ -159,6 +159,7 @@ export class PlanSession {
     this.h.activeTool.cancel();
     this.h.activeTool = createTool(this.h.toolId, this.h.ctx);
     this.h.selection = null;
+    this.h.fieldNotice = null;
     this.h.needFit = true;
   }
 

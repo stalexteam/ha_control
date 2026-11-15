@@ -21,7 +21,7 @@ const WINDOW: WholeRule = { min: 1, max: 10 };
 /** Commits a container edit as one undo step and clears the field notice; false when the model refused it. */
 function commit(o: BindingPropsOpts, next: Level): boolean {
   if (next === o.level) return false;
-  o.setNotice(null);
+  o.setFieldNotice(null);
   o.commit(next);
   return true;
 }
@@ -52,7 +52,8 @@ const customOpen = new Set<string>();
 
 /**
  * The Event control: a select of `single` / `double` / `hold` / "Other…" and, under "Other…", a text input for
- * any other non-empty event. Opening "Other…" changes nothing in the model; a blank custom value reverts with a notice.
+ * any other non-empty event. Opening "Other…" changes nothing in the model; a blank custom value reverts with a notice;
+ * a standard event typed into it shows in the select again.
  */
 function eventField(o: BindingPropsOpts, d: Device, role: TriggerRole, event: string, set: (ev: string) => boolean): TemplateResult {
   const key = `${d.id}:${role}`;
@@ -69,18 +70,29 @@ function eventField(o: BindingPropsOpts, d: Device, role: TriggerRole, event: st
     customOpen.delete(key);
     if (box.value) box.value.hidden = true;
     if (v !== event) set(v);
-    else o.setNotice(null);
+    else o.setFieldNotice(null);
   };
   return html`<span class="evfield">${select<string>(custom ? OTHER : event, options, choose, `${role}-event`)}
     <input class="val wide" type="text" ${ref(box)} data-field=${`${role}-event-custom`} ?hidden=${live(!custom)}
       .value=${fieldValue(standard ? '' : event)} @change=${(e: Event) => {
         const el = e.target as HTMLInputElement;
         const v = el.value.trim();
-        if (!v) { el.value = standard ? '' : event; o.setNotice(t('props.badEvent')); return; }
+        if (!v) { el.value = standard ? '' : event; o.setFieldNotice(t('props.badEvent')); return; }
         el.value = v;
-        o.setNotice(null);
-        if (v !== event) set(v);
-        if (!(TRIGGER_EVENTS as readonly string[]).includes(v)) customOpen.delete(key);
+        o.setFieldNotice(null);
+        // A custom value that commits (or is already stored) ends the open "Other…": a standard value then shows in
+        // the select, a custom one keeps "Other…" by itself.
+        if (v !== event) {
+          if (set(v)) customOpen.delete(key); // the commit re-renders the control
+          return;
+        }
+        customOpen.delete(key);
+        if (standard) {
+          // Nothing to commit, so no re-render: put the stored standard event on the select here.
+          el.hidden = true;
+          const sel = el.parentElement?.querySelector('select');
+          if (sel) sel.value = event;
+        }
       }} /></span>`;
 }
 
@@ -96,7 +108,7 @@ export function triggerFields(o: BindingPropsOpts, d: Device, role: TriggerRole)
   return html`<div class="trigger" data-trigger=${role}>
     ${row(t('binding.slot'), numField({
       value: cur.slot, rule: SLOT, bad: 'props.badSlot', field: `${role}-slot`, skipSame: true,
-      setNotice: msg => o.setNotice(msg), apply: v => set({ slot: v }),
+      setNotice: msg => o.setFieldNotice(msg), apply: v => set({ slot: v }),
     }))}
     ${row(t('binding.event'), eventField(o, d, role, cur.event, ev => set({ event: ev })))}
   </div>`;
@@ -119,7 +131,7 @@ export function containerFlags(o: BindingPropsOpts, d: Device, role: BindingRole
         v => setProps(o, d, { autoByDoubleToggle: v }))}
       ${p.autoByDoubleToggle ? html`<div class="cflag">${row(t('binding.window'), numField({
         value: p.windowSec, rule: WINDOW, bad: 'props.badWindow', field: 'windowSec', skipSame: true,
-        setNotice: msg => o.setNotice(msg), apply: v => setProps(o, d, { windowSec: v }),
+        setNotice: msg => o.setFieldNotice(msg), apply: v => setProps(o, d, { windowSec: v }),
       }))}</div>` : nothing}`;
   }
   if (p.kind !== 'smart_button' || (role !== 'on' && role !== 'off')) return html`${nothing}`;

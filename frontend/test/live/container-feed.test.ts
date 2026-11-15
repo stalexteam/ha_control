@@ -1,34 +1,52 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ContainerFeed, type ContainerState } from '../../src/live/container-feed';
 import type { HassLike } from '../../src/api';
 import { deviceDefaults, type ContainerKind, type Device } from '../../src/model/types';
 
 type Event = { full: boolean; containers: Record<string, ContainerState> };
 
-/** One subscription made through the fake connection: its message, its callback and its unsubscribe spy. */
-interface Sub { msg: Record<string, unknown>; push(ev: Event): void; unsub: ReturnType<typeof vi.fn> }
+/** One subscription made through the fake connection: its message, its options, its callback and its unsubscribe spy. */
+interface Sub { msg: Record<string, unknown>; opts: unknown; push(ev: Event): void; unsub: ReturnType<typeof vi.fn> }
 
 /**
  * A connection whose subscriptions resolve when `settle` is called (all pending ones, in order), or reject with
- * `reject` when it is set.
+ * the failure set when they settle (`reject`, changed by `failWith`). It emits HA's connection events through `fire`.
  */
 function fakeConnection(reject?: unknown) {
   const subs: Sub[] = [];
   const pending: (() => void)[] = [];
+  const failure = { err: reject };
+  const listeners = new Map<string, Set<() => void>>();
   const connection: HassLike['connection'] = {
     sendMessagePromise: () => Promise.reject(new Error('not used')),
-    subscribeMessage<T>(cb: (msg: T) => void, msg: Record<string, unknown>) {
+    subscribeMessage<T>(cb: (msg: T) => void, msg: Record<string, unknown>, opts?: unknown) {
       const unsub = vi.fn(() => Promise.resolve());
-      subs.push({ msg, push: ev => cb(ev as T), unsub });
+      subs.push({ msg, opts, push: ev => cb(ev as T), unsub });
       return new Promise<() => Promise<void>>((resolve, fail) => {
-        pending.push(() => (reject === undefined ? resolve(unsub) : fail(reject)));
+        pending.push(() => (failure.err === undefined ? resolve(unsub) : fail(failure.err)));
       });
     },
+    addEventListener(type, cb) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type)!.add(cb);
+    },
+    removeEventListener(type, cb) { listeners.get(type)?.delete(cb); },
   };
-  return { connection, subs, settle: async () => { pending.splice(0).forEach(f => f()); await flush(); } };
+  return {
+    connection, subs,
+    settle: async () => { pending.splice(0).forEach(f => f()); await flush(); },
+    /** Settles under fake timers (flush would wait on a faked setTimeout). */
+    settleNow: async () => { pending.splice(0).forEach(f => f()); await vi.advanceTimersByTimeAsync(0); },
+    failWith: (err: unknown) => { failure.err = err; },
+    fire: (type: 'ready' | 'disconnected') => { [...listeners.get(type) ?? []].forEach(cb => cb()); },
+    /** The number of listeners per event type. */
+    listening: () => Object.fromEntries([...listeners].map(([k, s]) => [k, s.size])),
+  };
 }
 
 const flush = () => new Promise<void>(r => setTimeout(r, 0));
+const SUBSCRIBE = { type: 'plan_studio/containers/subscribe', plan_id: 'P1' };
+const NOT_READY = { code: 'unknown_command', message: 'Not ready' };
 const host = () => ({ requestUpdate: vi.fn() });
 const on: ContainerState = { output: 'on', fault: null, kind: 'smart_button' };
 const off: ContainerState = { output: 'off', fault: 'not_configured', kind: 'wall_switch' };
@@ -207,6 +225,146 @@ describe('ContainerFeed', () => {
     feed.watch(null);
     expect(c.subs).toHaveLength(0);
     expect(feed.ready).toBe(false);
+    expect(feed.error).toBeNull();
+    expect(c.listening()).toEqual({});
+  });
+});
+
+describe('ContainerFeed: connection loss', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('disconnect clears; ready resubscribes', async () => {
+    const h = host();
+    const c = fakeConnection();
+    const feed = new ContainerFeed(h, () => c.connection);
+    feed.watch('P1');
+    // The feed subscribes again itself on 'ready': the library's own resubscription would be a second one.
+    expect(c.subs[0].opts).toEqual({ resubscribe: false });
+    await c.settle();
+    c.subs[0].push({ full: true, containers: { a: on } });
+    expect(feed.get('a')).toEqual(on);
+
+    h.requestUpdate.mockClear();
+    c.fire('disconnected');
+    expect(feed.get('a')).toBeUndefined();
+    expect(feed.ready).toBe(false);
+    expect(h.requestUpdate).toHaveBeenCalled();
+    expect(c.subs).toHaveLength(1);
+    // The subscription ended with the socket: no unsubscribe goes out (its id may belong to another command after
+    // the reconnect), and anything it still delivers is ignored.
+    expect(c.subs[0].unsub).not.toHaveBeenCalled();
+    c.subs[0].push({ full: true, containers: { a: on } });
+    expect(feed.get('a')).toBeUndefined();
+    expect(feed.ready).toBe(false);
+
+    c.fire('ready');
+    expect(c.subs.map(s => s.msg)).toEqual([SUBSCRIBE, SUBSCRIBE]);
+    await c.settle();
+    h.requestUpdate.mockClear();
+    c.subs[1].push({ full: true, containers: { b: off } });
+    expect(feed.ready).toBe(true);
+    expect(feed.get('b')).toEqual(off);
+    expect(feed.get('a')).toBeUndefined();
+    expect(h.requestUpdate).toHaveBeenCalled();
+    expect(c.subs[0].unsub).not.toHaveBeenCalled();
+
+    // 'ready' while a subscription is still live: that one is ended first, so nothing is counted twice.
+    c.fire('ready');
+    expect(c.subs[1].unsub).toHaveBeenCalledTimes(1);
+    expect(c.subs).toHaveLength(3);
+    await c.settle();
+    c.subs[1].push({ full: false, containers: { a: on } });
+    expect(feed.get('a')).toBeUndefined();
+    c.subs[2].push({ full: true, containers: { a: err } });
+    expect(feed.get('a')).toEqual(err);
+    expect(feed.get('b')).toBeUndefined();
+    expect(c.subs.map(s => s.unsub.mock.calls.length)).toEqual([0, 1, 0]);
+  });
+
+  it('a failed resubscribe retries every 5 s and stops after 12 attempts', async () => {
+    vi.useFakeTimers();
+    const h = host();
+    const c = fakeConnection();
+    const feed = new ContainerFeed(h, () => c.connection);
+    feed.watch('P1');
+    await c.settleNow();
+    c.fire('disconnected');
+    c.failWith(NOT_READY); // HA restarting: the integration is not loaded yet
+    c.fire('ready');
+    await c.settleNow();
+    expect(c.subs).toHaveLength(2);
+    expect(feed.error).toBe('Not ready'); // the output line shows the error meanwhile
+    for (let i = 1; i <= 12; i++) {
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(c.subs).toHaveLength(1 + i);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(c.subs).toHaveLength(2 + i);
+      expect(c.subs[1 + i].msg).toEqual(SUBSCRIBE);
+      await c.settleNow();
+    }
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(c.subs).toHaveLength(14);
+    expect(feed.error).toBe('Not ready');
+    expect(feed.ready).toBe(false);
+  });
+
+  it('a retry that succeeds clears the error and brings the outputs back', async () => {
+    vi.useFakeTimers();
+    const h = host();
+    const c = fakeConnection(NOT_READY);
+    const feed = new ContainerFeed(h, () => c.connection);
+    feed.watch('P1');
+    await c.settleNow();
+    expect(feed.error).toBe('Not ready');
+    await vi.advanceTimersByTimeAsync(5000);
+    await c.settleNow();
+    expect(c.subs).toHaveLength(2);
+    c.failWith(undefined);
+    await vi.advanceTimersByTimeAsync(5000);
+    h.requestUpdate.mockClear();
+    await c.settleNow();
+    expect(c.subs).toHaveLength(3);
+    expect(feed.error).toBeNull();
+    expect(h.requestUpdate).toHaveBeenCalled();
+    c.subs[2].push({ full: true, containers: { a: on } });
+    expect(feed.get('a')).toEqual(on);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(c.subs).toHaveLength(3);
+    // A later failure (after another reconnect) gets a fresh run of 12 retries.
+    c.failWith(NOT_READY);
+    c.fire('disconnected');
+    c.fire('ready');
+    await c.settleNow();
+    expect(c.subs).toHaveLength(4);
+    for (let i = 0; i < 13; i++) {
+      await vi.advanceTimersByTimeAsync(5000);
+      await c.settleNow();
+    }
+    expect(c.subs).toHaveLength(4 + 12);
+  });
+
+  it('stop removes the listeners and cancels the retries', async () => {
+    vi.useFakeTimers();
+    const c = fakeConnection(NOT_READY);
+    const feed = new ContainerFeed(host(), () => c.connection);
+    feed.watch('P1');
+    expect(c.listening()).toEqual({ disconnected: 1, ready: 1 });
+    await c.settleNow();
+    expect(feed.error).toBe('Not ready');
+
+    // Another plan: the retries of the old one stop; one set of listeners stays.
+    feed.watch('P2');
+    expect(c.listening()).toEqual({ disconnected: 1, ready: 1 });
+    await c.settleNow();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(c.subs.map(s => s.msg.plan_id)).toEqual(['P1', 'P2', 'P2']);
+
+    feed.stop();
+    expect(c.listening()).toEqual({ disconnected: 0, ready: 0 });
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    c.fire('ready');
+    c.fire('disconnected');
+    expect(c.subs).toHaveLength(3);
     expect(feed.error).toBeNull();
   });
 });

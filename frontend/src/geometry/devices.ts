@@ -1,5 +1,7 @@
 import polygonClipping from 'polygon-clipping';
-import { AIM_KINDS, AIM_MAX, type Device, type DevicePlacement, type Id, type Level, type Pt } from '../model/types';
+import {
+  AIM_KINDS, AIM_MAX, type Device, type DeviceKind, type DevicePlacement, type DeviceProps, type Id, type Level, type Pt,
+} from '../model/types';
 import { add, dist, dot, perpLeft, pointInPolygon, polygonArea, scale, sub } from './vec';
 import { fromRing, toPoly, wallFrame } from './walls';
 import {
@@ -66,10 +68,31 @@ function sector(c: Pt, dir: Pt, angle: number, r: number): Pt[] {
   return pts;
 }
 
+/**
+ * The kinds with a cone, zone or light pool, and the line-of-sight medium it carries: wall and ceiling lights cast
+ * light, motion sensors see motion. The one list of cone kinds: coneShape must give each a shape (its switch is
+ * checked for exhaustiveness against these keys) and clippedCone takes the medium from here.
+ */
+export const CONE_MEDIUM = {
+  wall_light: 'light',
+  ceiling_light: 'light',
+  motion_sensor: 'motion',
+} as const satisfies Partial<Record<DeviceKind, Medium>>;
+
+/** A device kind with a cone, zone or light pool. */
+export type ConeKind = keyof typeof CONE_MEDIUM;
+
+/** The line-of-sight medium of a kind's cone, or null for a kind without one. */
+export function coneMedium(kind: DeviceKind): Medium | null {
+  return (CONE_MEDIUM as Partial<Record<DeviceKind, Medium>>)[kind] ?? null;
+}
+
+const hasCone = (p: DeviceProps): p is Extract<DeviceProps, { kind: ConeKind }> => coneMedium(p.kind) !== null;
+
 /** Unclipped cone / zone / light pool polygon, or null when the device has none. */
 export function coneShape(level: Level, d: Device): Pt[] | null {
   const pr = d.props;
-  if (pr.kind !== 'wall_light' && pr.kind !== 'motion_sensor' && pr.kind !== 'ceiling_light') return null;
+  if (!hasCone(pr)) return null;
   const pose = devicePose(level, d);
   if (!pose) return null;
   switch (pr.kind) {
@@ -102,25 +125,12 @@ export function deviceRoomId(level: Level, d: Device): Id | null {
   return best;
 }
 
-/** Line-of-sight medium of a device's cone: wall and ceiling lights cast light, motion sensors see motion; else null. */
-function coneMedium(d: Device): Medium | null {
-  switch (d.props.kind) {
-    case 'wall_light':
-    case 'ceiling_light':
-      return 'light';
-    case 'motion_sensor':
-      return 'motion';
-    default:
-      return null;
-  }
-}
-
 /** The fan's chords lie inside its radius by up to cos(step / 2): this factor makes the visibility polygon cover the cone. */
 const FAN_COVER = 1 / Math.cos((FAN_STEP_DEG / 2) * (Math.PI / 180));
 
 /**
  * Cone clipped to what the device sees from its probe point (pt + face normal for wall devices, so sight never
- * starts inside the host wall; pt for free ones): walls block it, openings let its medium through (coneMedium).
+ * starts inside the host wall; pt for free ones): walls block it, openings let its medium through (CONE_MEDIUM).
  * Unclipped when no obstacle comes within reach. `obstaclesOf` may be a per-level cache of lineOfSightObstacles; it
  * runs only for a device with a cone. Returns rings (outer rings and any holes, unclosed): render with fill-rule
  * evenodd. [] when none.
@@ -129,7 +139,7 @@ export function clippedCone(
   level: Level, d: Device, obstaclesOf: (level: Level, medium: Medium) => Segment[] = lineOfSightObstacles,
 ): Pt[][] {
   const shape = coneShape(level, d);
-  const medium = coneMedium(d);
+  const medium = coneMedium(d.props.kind);
   if (!shape || !medium) return [];
   const probe = probeOf(devicePose(level, d)!);
   const reach = Math.max(...shape.map(p => dist(p, probe))) * FAN_COVER;

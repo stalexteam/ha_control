@@ -1,10 +1,19 @@
 import type { Id, Plan } from './model/types';
 
+/** Events of HA's websocket connection: `ready` after every (re)connect, `disconnected` when the socket closes. */
+export type ConnectionEvent = 'ready' | 'disconnected';
+
 export interface HassLike {
   connection: {
     sendMessagePromise<T>(msg: Record<string, unknown>): Promise<T>;
-    /** HA's subscription call: resolves to the unsubscribe function (it sends `unsubscribe_events`). */
-    subscribeMessage?<T>(callback: (msg: T) => void, msg: Record<string, unknown>): Promise<() => Promise<void>>;
+    /**
+     * HA's subscription call: resolves to the unsubscribe function (it sends `unsubscribe_events`). With
+     * `resubscribe: false` the library does not subscribe again by itself after a reconnect.
+     */
+    subscribeMessage?<T>(callback: (msg: T) => void, msg: Record<string, unknown>,
+      options?: { resubscribe?: boolean }): Promise<() => Promise<void>>;
+    addEventListener?(type: ConnectionEvent, cb: () => void): void;
+    removeEventListener?(type: ConnectionEvent, cb: () => void): void;
   };
   themes?: { darkMode?: boolean };
   states?: Record<string, unknown>;

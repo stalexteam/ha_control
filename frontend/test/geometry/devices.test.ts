@@ -1,10 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { deviceDefaults, type Device, type DevicePlacement, type DeviceProps, type Level, type Pt } from '../../src/model/types';
+import {
+  DEVICE_PLACEMENTS, deviceDefaults, type Device, type DeviceKind, type DevicePlacement, type DeviceProps, type Level, type Pt,
+} from '../../src/model/types';
 import { addZone } from '../../src/model/zones';
 import {
-  deviceRoomId, angleFromHandle, clippedCone, coneShape, deviceAt, devicePose, directionHandle, wrap180, wrap360,
+  CONE_MEDIUM, coneMedium, deviceRoomId, angleFromHandle, clippedCone, coneShape, deviceAt, devicePose, directionHandle,
+  wrap180, wrap360,
 } from '../../src/geometry/devices';
-import type { Medium, Segment } from '../../src/geometry/visibility';
+import { lineOfSightObstacles, type Medium, type Segment } from '../../src/geometry/visibility';
 import { pointInPolygon, polygonArea } from '../../src/geometry/vec';
 import { midGap, rectRoomLevel, twoRoomsLevel } from '../fixtures';
 
@@ -154,6 +157,30 @@ describe('coneShape / clippedCone', () => {
     const cl = dev('c', { ...deviceDefaults('ceiling_light', 'free'), poolRadius: 1000 } as DeviceProps, { mode: 'free', x: 1500, y: 2000, rotation: 0 });
     clippedCone(box, cl, obstaclesOf);
     expect(calls).toEqual([[box, 'motion'], [box, 'light'], [box, 'light']]);
+  });
+
+  it('CONE_MEDIUM is the one list of cone kinds: each has a shape and is clipped with its medium; no other kind has a cone', () => {
+    const box = rectRoomLevel(3000, 4000, 400);
+    expect(CONE_MEDIUM).toEqual({ wall_light: 'light', ceiling_light: 'light', motion_sensor: 'motion' });
+    for (const kind of Object.keys(DEVICE_PLACEMENTS) as DeviceKind[]) {
+      const mode = DEVICE_PLACEMENTS[kind][0];
+      const props = { ...deviceDefaults(kind, mode), ...(kind === 'ceiling_light' ? { poolRadius: 1000 } : {}) } as DeviceProps;
+      const pl: DevicePlacement = mode === 'free' ? { mode, x: 1500, y: 2000, rotation: 0 } : { mode, wallId: 'w0', side: 'right', offset: 1500 };
+      const d = dev(kind, props, pl);
+      const media: Medium[] = [];
+      const rings = clippedCone(box, d, (l, m) => { media.push(m); return lineOfSightObstacles(l, m); });
+      const medium = coneMedium(kind);
+      expect(medium, kind).toBe(CONE_MEDIUM[kind as keyof typeof CONE_MEDIUM] ?? null);
+      if (medium) {
+        expect(coneShape(box, d), kind).not.toBeNull();
+        expect(rings.length, kind).toBeGreaterThan(0);
+        expect(media, kind).toEqual([medium]);
+      } else {
+        expect(coneShape(box, d), kind).toBeNull();
+        expect(rings, kind).toEqual([]);
+        expect(media, kind).toEqual([]);
+      }
+    }
   });
 });
 
