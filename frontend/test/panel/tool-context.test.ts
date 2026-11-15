@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { createToolContext, type ToolHost } from '../../src/panel/tool-context';
 import { initialNext } from '../../src/panel/next-object';
+import { History } from '../../src/editor/history';
+import { deviceDefaults, emptyLevel } from '../../src/model/types';
+import type { PlanDoc } from '../../src/model/power';
 
 function host(): ToolHost {
   return {
@@ -50,8 +53,7 @@ describe('createToolContext', () => {
     const c = createToolContext(h);
     expect(c.placeDeviceId()).toBeNull();
     h.placeDeviceId = 'd1';
-    expect(c.placeDeviceId()).toBe('d1');
-    c.devicePlaced?.();
+    expect(c.placeDeviceId()).toBeNull(); // no plan open: d1 is not placeable, so the stale arm is dropped
     expect(h.placeDeviceId).toBeNull();
     c.notify('careful');
     expect(h.notice).toBe('careful');
@@ -61,6 +63,21 @@ describe('createToolContext', () => {
     c.pickTool('power-select');
     expect(calls).toEqual([['position', 'ts', '0'], ['tool', 'power-select']]);
     expect(c.geo().device('d1')).toBeUndefined(); // no plan open
+  });
+
+  it('the armed device counts only while it is placeable; devicePlaced clears the arm', () => {
+    const level = { ...emptyLevel('L1'), devices: [{
+      id: 'd1', name: 'Socket', invalid: false, placement: { mode: 'free' as const, x: 0, y: 0, rotation: 0 },
+      props: deviceDefaults('socket', 'free'),
+    }] };
+    const h = { ...host(), history: new History<PlanDoc>({ level }), placeDeviceId: 'd1' };
+    const c = createToolContext(h);
+    expect(c.placeDeviceId()).toBe('d1');
+    c.devicePlaced?.();
+    expect(h.placeDeviceId).toBeNull();
+    const placed = { ...h, power: { blocks: [{ id: 'b', kind: 'device' as const, x: 0, y: 0, deviceId: 'd1' }], wires: [] }, placeDeviceId: 'd1' };
+    expect(createToolContext(placed).placeDeviceId()).toBeNull(); // already in the schematic
+    expect(placed.placeDeviceId).toBeNull();
   });
 
   it('select clears the field notice in every mode; in Binding the session notice stays', () => {

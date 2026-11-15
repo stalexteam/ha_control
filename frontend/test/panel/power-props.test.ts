@@ -8,7 +8,7 @@ import { blockPorts, type Position, type PowerBlock, type PowerFrame, type Power
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Id, type Level } from '../../src/model/types';
 import { renderPowerProps, type PowerPropsOpts } from '../../src/panel/power-props';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
-import { $, click, mount, press, undo } from './helpers';
+import { $, click, mount, press, redo, undo } from './helpers';
 
 const st = (state: string, attributes: Record<string, string> = {}) => ({ state, attributes });
 
@@ -356,6 +356,40 @@ describe('Power properties in the panel', () => {
     await el.updateComplete;
     expect(el.toolId).toBe('power-device');
     expect(el.placeDeviceId).toBe('s');
+  });
+
+  it('a stale arm is not placed: place s, Undo, arm s, Redo, click leaves one block for s and asks for a pick', async () => {
+    const el = await mountPower();
+    await press(el, 'button[data-tool="power-device"]');
+    await press(el, '.props [data-place-device="s"]');
+    click(el, 400, 300);
+    await el.updateComplete;
+    await undo(el);
+    expect(el.power.blocks.some(b => b.kind === 'device')).toBe(false);
+    await press(el, 'button[data-tool="power-device"]');
+    await press(el, '.props [data-place-device="s"]');
+    expect(el.placeDeviceId).toBe('s');
+    await redo(el);
+    expect(el.shadowRoot!.querySelector('.props [data-place-device="s"]')).toBeNull();
+    click(el, 600, 300);
+    await el.updateComplete;
+    expect(el.power.blocks.filter(b => b.kind === 'device' && b.deviceId === 's')).toHaveLength(1);
+    expect(el.notice).toBe('Pick a device in the list first');
+    expect(el.placeDeviceId).toBeNull();
+    expect(el.toolId).toBe('power-device');
+  });
+
+  it('an armed device that left the level is not placed', async () => {
+    const el = await mountPower();
+    await press(el, 'button[data-tool="power-device"]');
+    await press(el, '.props [data-place-device="s"]');
+    el.commit({ ...el.level!, devices: el.level!.devices.filter(d => d.id !== 's') });
+    await el.updateComplete;
+    click(el, 400, 300);
+    await el.updateComplete;
+    expect(el.power.blocks.map(b => b.kind)).toEqual(['grid']);
+    expect(el.notice).toBe('Pick a device in the list first');
+    expect(el.placeDeviceId).toBeNull();
   });
 
   it('leaving the Power step clears the arm', async () => {

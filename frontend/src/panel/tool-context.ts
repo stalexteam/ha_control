@@ -2,7 +2,7 @@ import { emptyLevel, type Id, type Level } from '../model/types';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
 import type { DeviceKind, DeviceProps, WallType, OpeningKind } from '../model/types';
 import type { History } from '../editor/history';
-import type { PlanDoc, Position, PowerSchema } from '../model/power';
+import { placeableDevices, type PlanDoc, type Position, type PowerSchema } from '../model/power';
 import { defaultZoneName, openingDefaults, type NextObjects } from './next-object';
 import type { BoxMeasure } from './props-panel';
 import type { View } from './viewport';
@@ -55,7 +55,15 @@ export function createToolContext(h: ToolHost): ToolContext {
       const devices = (h.history?.current.level ?? EMPTY_LEVEL).devices;
       return { device: id => devices.find(d => d.id === id) };
     },
-    placeDeviceId: () => h.placeDeviceId,
+    // The arm counts only while its device is placeable: Undo / Redo may have put its block back or removed the
+    // device from the level. A stale arm is dropped, so the tool asks for a pick and places nothing.
+    placeDeviceId: () => {
+      const id = h.placeDeviceId;
+      if (id === null) return null;
+      if (placeableDevices(h.history?.current.level ?? EMPTY_LEVEL, h.power).some(d => d.id === id)) return id;
+      h.placeDeviceId = null;
+      return null;
+    },
     devicePlaced: () => { h.placeDeviceId = null; },
     setPosition: (blockId, p) => h.setPowerPosition(blockId, p),
     notify: msg => { h.notice = msg; },

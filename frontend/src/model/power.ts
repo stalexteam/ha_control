@@ -1,6 +1,6 @@
 import { t } from '../i18n';
 import { newId } from './ids';
-import type { Id, Level, Pt } from './types';
+import type { Device, Id, Level, Pt } from './types';
 
 export type PortSide = 'top' | 'right' | 'bottom' | 'left';
 export type PortName = 'IN' | 'OUT' | 'PV' | 'BAT' | 'A' | 'B';
@@ -292,6 +292,18 @@ export function normalizePower(raw: unknown): PowerSchema | undefined {
     else { changed = true; wires.push({ ...(w as unknown as PowerWire), from, to }); }
   }
   return changed ? ({ ...raw, blocks, wires } as unknown as PowerSchema) : (raw as unknown as PowerSchema);
+}
+
+/**
+ * Plan devices the Plan device tool can place, by name: sockets, equipment and devices with a power or control
+ * binding that are not in the schematic yet.
+ */
+export function placeableDevices(level: Level, power: PowerSchema): Device[] {
+  const placed = new Set(power.blocks.flatMap(b => (b.kind === 'device' ? [b.deviceId] : [])));
+  return level.devices
+    .filter(d => !placed.has(d.id) && (d.props.kind === 'socket' || d.props.kind === 'equipment'
+      || !!d.bindings?.power || !!d.bindings?.control))
+    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
 /** The grid has a power entity and at least one wire exists. */

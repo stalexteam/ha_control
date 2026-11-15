@@ -1,7 +1,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import type { Device, Id, Level } from '../model/types';
 import {
-  clearPins, deleteBlock, deleteWire, updateBlock,
+  clearPins, deleteBlock, deleteWire, placeableDevices, updateBlock,
   type Position, type PowerBlock, type PowerFrame, type PowerSchema, type PowerSwitch, type PowerWire, type WireEnd,
 } from '../model/power';
 import { POWER, activeRoleSpecs } from '../model/bindings';
@@ -52,18 +52,6 @@ export interface PowerPropsOpts {
 
 type Block<K extends PowerBlock['kind']> = Extract<PowerBlock, { kind: K }>;
 type Field = 'power' | 'voltage' | 'soc' | 'switch';
-
-/**
- * Plan devices the Plan device tool can place, by name: sockets, equipment and devices with a power or control
- * binding that are not in the schematic yet.
- */
-export function placeableDevices(level: Level, power: PowerSchema): Device[] {
-  const placed = new Set(power.blocks.flatMap(b => (b.kind === 'device' ? [b.deviceId] : [])));
-  return level.devices
-    .filter(d => !placed.has(d.id) && (d.props.kind === 'socket' || d.props.kind === 'equipment'
-      || !!d.bindings?.power || !!d.bindings?.control))
-    .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-}
 
 /** Sets an entity field of a block, or removes it (null). Entity fields never change the block's ports. */
 function setField(o: PowerPropsOpts, b: PowerBlock, key: Field, value: string | PowerSwitch | null): void {
