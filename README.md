@@ -1,6 +1,6 @@
 # Plan Studio
 
-Home Assistant custom integration that adds a "Plan Studio" sidebar panel: a 2D floor-plan editor in four steps. Plan: draw walls, openings and rooms. Equipment: place lights, sensors, switches and other devices. Binding: link each device to Home Assistant entities. Zones: mark automation zones, from rooms or drawn by hand, and see which devices each one contains. Plans are saved to Home Assistant storage, and wall switches and smart buttons report button and switch events. Zones are a layer of the plan only: no automation uses them yet, and they create no Home Assistant entities.
+Home Assistant custom integration that adds a "Plan Studio" sidebar panel: a 2D floor-plan editor in five steps. Plan: draw walls, openings and rooms. Equipment: place lights, sensors, switches and other devices. Binding: link each device to Home Assistant entities. Zones: mark automation zones, from rooms or drawn by hand, and see which devices each one contains. Power: draw the power-flow schematic from the grid to the devices and watch live values. Plans are saved to Home Assistant storage, and wall switches and smart buttons report button and switch events. Zones are a layer of the plan only: no automation uses them yet, and they create no Home Assistant entities.
 
 ## Install
 
@@ -120,6 +120,28 @@ Automation zones are named areas for future automations: a room zone covers a ro
   - "The outline crosses itself: move a vertex." (also for an outline collapsed to no area)
 - Tip: adjacent custom zones do not snap to each other yet. Place their shared vertices on the same wall points (a corner, a wall midpoint) so that their edges meet.
 
+### Power
+
+The Power step draws how electricity reaches the devices: a schematic of blocks joined by wires, with live values from Home Assistant. It has its own canvas; the floor plan is not shown. Pan and zoom work as on the plan.
+
+- Layout: tool rail | properties | schematic.
+- Blocks:
+  - Grid source (AC-IN): always present and cannot be deleted. Power and voltage entities.
+  - Plan device: a device from the plan. With the Plan device tool active, the properties list the devices that can be placed (sockets, equipment, and devices with a power or control binding that are not in the schematic yet): click one, then click the canvas. Its values come from the entities bound in the Binding step. The "Inverter" checkbox adds a PV input and a battery port.
+  - Meter: a smart breaker or a metered output. Power, voltage and an optional switch. A switch is read-only (lock mark) unless "Controllable" is checked.
+  - Bus: a bar, horizontal or vertical (Orientation in the properties), that any number of wires can join anywhere along its length. Drag its ends to resize it, or set Length and Thickness.
+  - Battery: power (positive while charging) and state of charge. It connects to an inverter's battery port, directly or through a bus.
+  - PV field: power. It connects to an inverter's PV port, directly or through a bus.
+  - Transfer switch: "2 inputs → 1 output" or "1 input → 2 outputs", with the position A, 0 (off) or B.
+  - Remainder: the consumption no meter accounts for (dashed amber outline). One per bus.
+- Wiring: drag from a free port to another port or onto a bus. A wire always runs from an output to an input, whichever end you start from. Each port takes one wire; branch through a bus. A wire that would close a loop, or join a battery or PV line to a different line, is refused with a message.
+- Ports place themselves on the side facing the other end of their wire. Drag a wired port along the block edge to pin it there; "Auto ports" in the properties drops the pins.
+- Editing: drag a block to move it, and its wires follow. Delete removes the selected block with its wires, or the selected wire. Ctrl+Z / Ctrl+Y undo and redo, in one history with the plan steps. The schematic is saved with the plan.
+- Live values are computed by the integration and shown inside the blocks: power, voltage, state of charge, and the inverter's loss. Power is converted to W (from W, kW, MW, mW) and voltage to V (from V, kV, mV). A missing or unavailable entity, or an unsupported unit, shows "—": nothing is estimated.
+- Wires show the flow: an arrow in the direction of the power, a glow while energized, a thin line while de-energized, and a grey dashed line when there is no data. When the live feed fails, the reason is shown at the top of the properties.
+- Transfer position: click A, 0 or B on the block or in its properties. The position is live state kept by the integration (default A); it is not part of the plan and needs no Save.
+- The step is done when the grid source has a power entity and at least one wire exists.
+
 ## Development
 
 ```
@@ -151,3 +173,4 @@ Manual scenario on a live instance.
 2. Restart Home Assistant core and reopen the panel. Expected: the plan is intact and looks the same; edit and save still work and the revision increases.
 3. Open the panel in two tabs. Save in the second, then save in the first. Expected: a conflict dialog; "Save as new" creates a second plan and leaves the first untouched.
 4. Zones. On a plan with the rooms kitchen, entrance, WC and main, add a room zone for each with Zone from room. Draw the custom zones "door" (at the entrance door) and "middle" (in the middle of the main room), renaming them in the properties, and one zone outdoors. Expected: every device is listed in each zone that contains it (member lists, list counts and the Equipment "Zones" list). Uncheck Participates for one device, move the device out of the zone and back: the opt-out stays. Delete a wall under a custom zone vertex: the zone turns invalid with "A vertex lost its wall or corner: drag it to place it again."; Ctrl+Z restores the wall and the zone is valid again. Save and reopen: the zones, memberships and opt-outs are intact.
+5. Power. Set the grid source's power entity. Place the inverter as a plan device with "Inverter" checked, a battery on its battery port, a meter after it, and a transfer switch (2 inputs → 1 output) with A from the meter and B from a bus fed by the grid. Wire the transfer output to a bus with two plan devices and a remainder. Expected: values appear in the blocks, energized wires glow with arrows in the flow direction, and the remainder shows the consumption no meter accounts for. Click B on the transfer switch: the energized path moves to B at once, with no Save. Make one entity unavailable: every value that depends on it shows "—". Delete a wire and press Ctrl+Z: it comes back. Save and reopen: the schematic is intact.
