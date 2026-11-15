@@ -16,7 +16,7 @@ export function contrast(a: string, b: string): number {
 
 const POWER_KEYS: (keyof PlanPalette)[] = [
   'powerLive', 'powerIdle', 'powerDead', 'powerNoData', 'powerRemainder',
-  'blockFill', 'blockStroke', 'blockName', 'blockValue', 'portFill', 'portIcon',
+  'blockFill', 'blockStroke', 'blockName', 'blockValue', 'blockInvalid', 'portFill', 'portIcon',
 ];
 
 describe('contrast', () => {
@@ -34,9 +34,16 @@ describe.each([['dark', true], ['light', false]] as const)('%s power palette', (
     for (const k of POWER_KEYS) expect(p[k], k).toMatch(/^#[0-9a-f]{6}$/);
   });
 
-  it('block names reach 7:1 and values 4.5:1 against the block fill', () => {
+  // Every text colour the power renderer puts on blockFill: the name, value lines (labels, switch and lock icons,
+  // free chip letters, bus names) and error lines ("Device missing", the meters-disagree hint).
+  it('block names reach 7:1, values and error lines 4.5:1 against the block fill', () => {
     expect(contrast(p.blockName, p.blockFill)).toBeGreaterThanOrEqual(7);
     expect(contrast(p.blockValue, p.blockFill)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(p.blockInvalid, p.blockFill)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('the current transfer chip letter reaches 4.5:1 against its accent fill', () => {
+    expect(contrast(p.accentText, p.accent)).toBeGreaterThanOrEqual(4.5);
   });
 
   it('port icons reach 4.5:1 against the port fill', () => {

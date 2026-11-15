@@ -41,6 +41,8 @@ export interface PlanPalette {
   blockName: string;
   /** Block value lines: at least 4.5:1 against blockFill. */
   blockValue: string;
+  /** Error text inside a block ("Device missing", a meters-disagree hint): at least 4.5:1 against blockFill. */
+  blockInvalid: string;
   portFill: string;
   portIcon: string;
   // Chrome
@@ -85,6 +87,7 @@ const DARK: PlanPalette = {
   blockStroke: '#3b4a66',
   blockName: '#e2e8f0',
   blockValue: '#b4c0d3',
+  blockInvalid: '#fb7185',
   portFill: '#0b1220',
   portIcon: '#cbd5e1',
   panel: '#0f172a',
@@ -128,6 +131,7 @@ const LIGHT: PlanPalette = {
   blockStroke: '#c9bfb1',
   blockName: '#2b2622',
   blockValue: '#5c534b',
+  blockInvalid: '#cd2b31',
   portFill: '#ffffff',
   portIcon: '#4a423b',
   panel: '#faf7f2',

@@ -148,7 +148,7 @@ describe('renderPower blocks', () => {
     const g = root.querySelector('g.block[data-id="d"]')!;
     expect(g.classList.contains('missing')).toBe(true);
     const line = [...g.querySelectorAll('text')].find((t) => t.textContent === 'Device missing')!;
-    expect(line.getAttribute('fill')).toBe(P.invalid);
+    expect(line.getAttribute('fill')).toBe(P.blockInvalid);
   });
 
   it('a plan device block carries the pin mark', () => {
@@ -214,6 +214,15 @@ describe('renderPower blocks', () => {
     expect(sw('on').getAttribute('opacity')).toBeNull();
     const locks = (id: string) => [...sw(id).querySelectorAll('path')].filter((p) => p.getAttribute('d') === mdiLock).length;
     expect([locks('on'), locks('off'), locks('unk')]).toEqual([0, 1, 0]);
+  });
+
+  it('a remainder whose meters disagree shows a dash and the hint in the block error colour', () => {
+    const r: PowerBlock = { id: 'r', kind: 'remainder', x: 0, y: 0, name: 'Other' };
+    const root = draw({ blocks: [r], wires: [] }, { frame: frameOf({}, { r: { power: null, hint: 'disagree' } }) });
+    const texts = [...root.querySelectorAll('g.block[data-id="r"] text')];
+    const line = texts.find((t) => t.textContent!.includes('meters disagree'))!;
+    expect(line.textContent).toBe('— meters disagree');
+    expect(line.getAttribute('fill')).toBe(P.blockInvalid);
   });
 
   it('a remainder has a dashed outline in the remainder colour', () => {

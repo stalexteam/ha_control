@@ -169,7 +169,7 @@ function blockContent(b: PowerBlock, g: GeoCtx, live: BlockLive | undefined, p: 
       return b.voltage ? [watts(), { kind: 'text', value: unit(live?.voltage, 'V') }] : [watts()];
     case 'device': {
       const dev = g.device(b.deviceId);
-      if (!dev) return [{ kind: 'text', value: t('power.missing'), fill: p.invalid }];
+      if (!dev) return [{ kind: 'text', value: t('power.missing'), fill: p.blockInvalid }];
       const out: Line[] = [];
       if (dev.bindings?.power) out.push(watts());
       // A plan device's control is an actuator Plan Studio operates: controllable.
@@ -191,7 +191,7 @@ function blockContent(b: PowerBlock, g: GeoCtx, live: BlockLive | undefined, p: 
       return [{ kind: 'chips' }];
     case 'remainder':
       return live?.hint === 'disagree'
-        ? [{ kind: 'text', value: '—', note: t('power.hint.disagree'), fill: p.invalid }]
+        ? [{ kind: 'text', value: '—', note: t('power.hint.disagree'), fill: p.blockInvalid }]
         : [watts()];
     case 'bus':
       return [];
