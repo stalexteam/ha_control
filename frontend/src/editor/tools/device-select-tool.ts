@@ -5,7 +5,7 @@ import { orthoConstrain } from '../../geometry/snap';
 import { wallFrame, wallLocal } from '../../geometry/walls';
 import { add, dist, dot, sub } from '../../geometry/vec';
 import { createAimDrag } from './aim-drag';
-import { deviceCandidate } from './device-tool';
+import { candidateModes, deviceCandidate } from './device-tool';
 import { DRAG_PX, type Preview, type Selection, type Tool, type ToolContext, type ToolEvent } from './types';
 
 const placementOf = (l: Level, id: Id) => JSON.stringify(l.devices.find(d => d.id === id)?.placement);
@@ -31,7 +31,7 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
     moved = true;
     if (e.pt.x === downPt.x && e.pt.y === downPt.y) { working = original; return; } // back at the grab point: nothing moved
     const d = original.devices.find(x => x.id === drag!.id);
-    if (!d) return;
+    if (!d || d.placement.mode === 'none') return; // never hit, so never dragged: a guard
     const p = e.shift ? orthoConstrain(downPt, e.pt) : e.pt;
     // A free device keeps the grab offset so it does not jump to the pointer; a wall device follows the pointer.
     const pl = d.placement;
@@ -39,7 +39,8 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
     // Leaving the wall keeps the world direction (as the free rotation) so the cone does not jump.
     const pose = free ? null : devicePose(original, d);
     const rot = pl.mode === 'free' ? pl.rotation : pose ? wrap360(Math.round(angleOf(pose.dir))) : 0;
-    const cand = deviceCandidate(ctx, original, d.props.kind, free ? add(p, drag.grab) : p, rot);
+    const cand = deviceCandidate(ctx, original, d.props.kind, free ? add(p, drag.grab) : p, rot,
+      candidateModes(d.props.kind, pl.mode));
     // A wall candidate keeps the aim of a wall device; a free device landing on a wall starts at aim 0.
     const keep = cand && cand.mode === 'wall' && pl.mode === 'wall' && pl.aim !== undefined ? { ...cand, aim: pl.aim } : cand;
     working = keep ? moveDevice(original, d.id, wallStable(original, d.placement, keep, p)) : original;

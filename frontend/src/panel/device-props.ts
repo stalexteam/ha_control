@@ -133,8 +133,10 @@ function iconField(o: DevicePropsOpts, value: string, field: string, set: (patch
     }} />`;
 }
 
-function placementFields(o: DevicePropsOpts, d: Device): TemplateResult {
+/** Rotation of a free device; side, offset (and aim) of a wall device; nothing for a device not on the plan. */
+function placementFields(o: DevicePropsOpts, d: Device): TemplateResult | typeof nothing {
   const pl = d.placement;
+  if (pl.mode === 'none') return nothing;
   if (pl.mode === 'free') {
     return row(`${t('props.rotation')}, ${t('unit.deg')}`,
       numProp(o, 'rotation', pl.rotation, 'rotation', v => o.onPlacement({ ...pl, rotation: v })));

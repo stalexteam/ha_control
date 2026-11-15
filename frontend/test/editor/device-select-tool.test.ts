@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createDeviceSelectTool } from '../../src/editor/tools/device-select-tool';
 import { addBox } from '../../src/model/ops';
 import { addDevice } from '../../src/model/devices';
-import { deviceDefaults, type DeviceKind, type DevicePlacement, type Level } from '../../src/model/types';
+import { defaultsMode, deviceDefaults, type DeviceKind, type DevicePlacement, type Level } from '../../src/model/types';
 import { fakeContext } from './fake-context';
 
 const ev = (x: number, y: number, shift = false) => ({ pt: { x, y }, shift, alt: false, ctrl: false });
@@ -14,7 +14,7 @@ const k = { shift: false };
 function withDevice(kind: DeviceKind, placement: (walls: Level['walls']) => DevicePlacement) {
   const base = addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 4000 }, props, 'axis');
   const pl = placement(base.walls);
-  const r = addDevice(base, deviceDefaults(kind, pl.mode), pl, 'D');
+  const r = addDevice(base, deviceDefaults(kind, defaultsMode(pl.mode)), pl, 'D');
   return { lv: r.level, id: r.deviceId! };
 }
 const free = (x: number, y: number): (() => DevicePlacement) => () => ({ mode: 'free', x, y, rotation: 0 });
@@ -49,6 +49,25 @@ describe('device select tool', () => {
     const t = createDeviceSelectTool(ctx);
     t.down(ev(1000, 1000)); t.move(ev(1500, 1100, true)); t.up(ev(1500, 1100, true));
     expect(ctx.level().devices[0].placement).toMatchObject({ x: 1500, y: 1000 });
+  });
+
+  it('free equipment dragged onto a wall stays free', () => {
+    const { lv, id } = withDevice('equipment', free(1000, 1000));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    t.down(ev(1000, 1000)); t.move(ev(1500, 500)); t.move(ev(1500, 10)); t.up(ev(1500, 10));
+    expect(ctx.level().devices.find(d => d.id === id)!.placement).toMatchObject({ mode: 'free' });
+  });
+
+  it('wall-mounted equipment dragged along its wall stays on it; dragged into the room it stays put', () => {
+    const { lv, id } = withDevice('equipment', onTop(1500));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    // Its body (600 deep) spans y 50..650 below the top wall's face at y = 50.
+    t.down(ev(1500, 60)); t.move(ev(1800, 60)); t.move(ev(2000, 60)); t.up(ev(2000, 60));
+    expect(ctx.level().devices.find(d => d.id === id)!.placement).toMatchObject({ mode: 'wall', offset: 2000 });
+    t.down(ev(2000, 60)); t.move(ev(2000, 1000)); t.move(ev(2000, 2000)); t.up(ev(2000, 2000));
+    expect(ctx.level().devices.find(d => d.id === id)!.placement).toMatchObject({ mode: 'wall', offset: 2000 });
   });
 
   it('drag a wall switch into the room centre: unchanged, no commit', () => {

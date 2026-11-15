@@ -37,6 +37,15 @@ describe('device place tool', () => {
     expect(ctx.commits).toHaveLength(0);
   });
 
+  it('equipment near a wall is placed free: a wall mount is chosen, not snapped to', () => {
+    const ctx = fakeContext(box());
+    const t = createDeviceTool(ctx, 'equipment');
+    t.move(ev(1500, 10));
+    expect(t.preview().device!.placement).toMatchObject({ mode: 'free' });
+    t.down(ev(1500, 10));
+    expect(ctx.level().devices[0].placement).toMatchObject({ mode: 'free' });
+  });
+
   it('ceiling light snaps to the grid', () => {
     const ctx = fakeContext(box());
     const t = createDeviceTool(ctx, 'ceiling_light');

@@ -9,7 +9,10 @@ import {
   FAN_STEP_DEG, lineOfSightObstacles, obstaclesWithin, visibilityPolygon, type Medium, type Segment,
 } from './visibility';
 
-/** pt: device centre; dir: unit facing direction (a wall device's face normal turned by its aim); normal: the wall face normal, wall devices only. */
+/**
+ * pt: device centre; dir: unit facing direction (a wall device's face normal turned by its aim; along the wall for
+ * wall-mounted equipment); normal: the wall face normal, wall devices only.
+ */
 export interface DevicePose { pt: Pt; dir: Pt; normal?: Pt }
 
 const SEGS_PER_90 = 32;
@@ -58,14 +61,23 @@ export function facePoint(level: Level, wallId: Id, side: Side, offset: number):
 
 /**
  * Wall device: axis point at offset, moved onto the face of its side; dir = that face's outward normal
- * (left = perpLeft(wall dir)). Free device: (x, y) facing (cos r, -sin r). Null when the host wall is missing.
+ * (left = perpLeft(wall dir)). Wall-mounted equipment: its body centre, half its depth (a circle: its radius) off that
+ * face point along the normal, with dir = perpLeft(normal) (along the wall), so a rect's width runs along the wall and its
+ * back edge lies on the face. Free device: (x, y) facing (cos r, -sin r). Null when the host wall is missing, and for a
+ * device not on the plan.
  */
 export function devicePose(level: Level, d: Device): DevicePose | null {
   const p = d.placement;
+  if (p.mode === 'none') return null;
   if (p.mode === 'free') return { pt: { x: p.x, y: p.y }, dir: dirAt(p.rotation) };
   const face = wallFace(level, p.wallId, p.side, p.offset);
   if (!face) return null;
   const n = face.normal;
+  const pr = d.props;
+  if (pr.kind === 'equipment') {
+    const half = pr.shape === 'circle' ? pr.diameter / 2 : pr.depth / 2;
+    return { pt: add(face.pt, scale(n, half)), dir: perpLeft(n), normal: n };
+  }
   return { pt: face.pt, dir: p.aim ? dirAt(angleOf(n) + p.aim) : n, normal: n };
 }
 
@@ -310,7 +322,7 @@ export function withAim(pl: Extract<DevicePlacement, { mode: 'wall' }>, aim: num
 export function angleFromHandle(level: Level, d: Device, p: Pt, snap15: boolean): DevicePlacement {
   const pl = d.placement;
   const pose = devicePose(level, d);
-  if (!pose || (p.x === pose.pt.x && p.y === pose.pt.y)) return pl;
+  if (pl.mode === 'none' || !pose || (p.x === pose.pt.x && p.y === pose.pt.y)) return pl;
   const a = angleOf(sub(p, pose.pt));
   const round = (v: number) => (snap15 ? Math.round(v / 15) * 15 : Math.round(v));
   if (pl.mode === 'free') return { ...pl, rotation: wrap360(round(a)) };

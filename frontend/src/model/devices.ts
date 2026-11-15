@@ -1,20 +1,21 @@
 import { newId } from './ids';
 import {
-  AIM_MAX, DEVICE_PLACEMENTS, deviceDefaults, isContainerKind,
-  type ContainerKind, type Device, type DevicePlacement, type DeviceProps, type Id, type Level,
+  AIM_MAX, DEVICE_PLACEMENTS, defaultsMode, deviceDefaults, isContainerKind,
+  type BindingRole, type ContainerKind, type Device, type DevicePlacement, type DeviceProps, type Id, type Level,
 } from './types';
 import { sanitizeBindings } from './bindings';
 import { wallLen } from '../geometry/walls';
 
 const EPS = 1e-6; // mm
 
+/** A plan placement the kind allows ('none' never: a device goes off the plan only through addUnplacedDevice). */
 function allowed(props: DeviceProps, placement: DevicePlacement): boolean {
-  return DEVICE_PLACEMENTS[props.kind].includes(placement.mode);
+  return placement.mode !== 'none' && DEVICE_PLACEMENTS[props.kind].includes(placement.mode);
 }
 
 /** Placement is allowed for the kind and, on a wall, the centre offset lies within [0, len]. */
 function fits(level: Level, props: DeviceProps, placement: DevicePlacement): boolean {
-  if (!allowed(props, placement)) return false;
+  if (placement.mode === 'none' || !allowed(props, placement)) return false;
   if (placement.mode === 'free') return true;
   const aim = placement.aim;
   if (aim !== undefined && (!Number.isInteger(aim) || aim < -AIM_MAX || aim > AIM_MAX)) return false;
@@ -34,14 +35,66 @@ export function addDevice(
   return { level: withDevices(level, [...level.devices, d]), deviceId: d.id };
 }
 
+/** A new equipment device that is not on the plan, with the free defaults. */
+export function addUnplacedDevice(level: Level, name: string): { level: Level; id: Id } {
+  const d: Device = { id: newId(), name, placement: { mode: 'none' }, props: deviceDefaults('equipment', 'free'), invalid: false };
+  return { level: withDevices(level, [...level.devices, d]), id: d.id };
+}
+
+/** What an equipment device is, by what is bound: the switch is `control`, a measurement any power or voltage. */
+export type DeviceRole = 'meter' | 'switch' | 'metered-switch' | 'dummy';
+const MEASUREMENTS: BindingRole[] = ['power', 'power_in', 'power_out', 'voltage'];
+
+/** The role of an equipment device (null for other kinds): see DeviceRole. */
+export function deviceRole(d: Device): DeviceRole | null {
+  if (d.props.kind !== 'equipment') return null;
+  const b = d.bindings ?? {};
+  const measures = MEASUREMENTS.some(r => !!b[r]);
+  if (b.control) return measures ? 'metered-switch' : 'switch';
+  return measures ? 'meter' : 'dummy';
+}
+
+/** Equipment props with a flag set (`true`) or removed (a missing flag means false). */
+function withFlag(p: Extract<DeviceProps, { kind: 'equipment' }>, flag: 'inverter' | 'controllable', on: boolean): DeviceProps {
+  const next = { ...p };
+  if (on) next[flag] = true;
+  else delete next[flag];
+  return next;
+}
+
+/**
+ * Turns an equipment device's inverter flag on or off, carrying the reading over: on moves `power` to `power_out`;
+ * off moves `power_out` to `power` and drops `power_in`. Same level when the flag is already so, the id is unknown or
+ * the device is not equipment.
+ */
+export function setDeviceInverter(level: Level, id: Id, on: boolean): Level {
+  const d = level.devices.find(x => x.id === id);
+  if (!d || d.props.kind !== 'equipment' || !!d.props.inverter === on) return level;
+  const [from, to] = on ? (['power', 'power_out'] as const) : (['power_out', 'power'] as const);
+  const bindings = { ...d.bindings };
+  if (bindings[from]) bindings[to] = bindings[from];
+  delete bindings[from];
+  // sanitizeBindings drops the roles the new flag disables (power_in when off) and an empty bindings field.
+  const next = sanitizeBindings({ ...d, props: withFlag(d.props, 'inverter', on), bindings });
+  return withDevices(level, level.devices.map(x => (x === d ? next : x)));
+}
+
+/** Sets an equipment device's controllable flag. Same level when it is already so, the id is unknown or not equipment. */
+export function setDeviceControllable(level: Level, id: Id, on: boolean): Level {
+  const d = level.devices.find(x => x.id === id);
+  if (!d || d.props.kind !== 'equipment' || !!d.props.controllable === on) return level;
+  const next: Device = { ...d, props: withFlag(d.props, 'controllable', on) };
+  return withDevices(level, level.devices.map(x => (x === d ? next : x)));
+}
+
 /**
  * Props of a device going from placement mode `from` to `to`: a motion sensor whose zone angle is still the
  * default of `from` gets the default of `to`; a user-set angle stays. Anything else: the same object.
  */
 export function retargetZoneAngle(props: DeviceProps, from: DevicePlacement['mode'], to: DevicePlacement['mode']): DeviceProps {
   if (props.kind !== 'motion_sensor' || from === to) return props;
-  const old = deviceDefaults('motion_sensor', from);
-  const next = deviceDefaults('motion_sensor', to);
+  const old = deviceDefaults('motion_sensor', defaultsMode(from));
+  const next = deviceDefaults('motion_sensor', defaultsMode(to));
   if (old.kind === 'motion_sensor' && next.kind === 'motion_sensor' && props.zoneAngle === old.zoneAngle) {
     return { ...props, zoneAngle: next.zoneAngle };
   }
@@ -79,7 +132,7 @@ export function setDeviceProps(level: Level, id: Id, patch: Partial<DeviceProps>
 export function changeDeviceKind(level: Level, id: Id, kind: ContainerKind): Level {
   const d = level.devices.find(x => x.id === id);
   if (!d || !isContainerKind(d.props.kind) || d.props.kind === kind) return level;
-  const props = deviceDefaults(kind, d.placement.mode);
+  const props = deviceDefaults(kind, defaultsMode(d.placement.mode));
   if (!allowed(props, d.placement)) return level;
   const next = sanitizeBindings({ ...d, props });
   return withDevices(level, level.devices.map(x => (x === d ? next : x)));
@@ -91,6 +144,7 @@ export function deleteDevice(level: Level, id: Id): Level {
 
 /**
  * invalid = wall device whose offset is outside [0, len] of its wall (or whose wall is gone). Never deletes or clamps.
+ * A free device and one not on the plan are never invalid.
  * An unchanged device keeps its object (the renderer caches cones on it).
  */
 export function refreshDevices(level: Level): Level {

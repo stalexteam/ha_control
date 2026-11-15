@@ -35,6 +35,7 @@ const ENTITIES: DemoEntity[] = [
   { id: 'fan.bath_fan', name: 'Bath fan', state: 'unavailable', device: 'bath_fan' },
   { id: 'switch.boiler', name: 'Boiler', state: 'on', device: 'boiler' },
   { id: 'sensor.boiler_power', name: 'Boiler power', state: '1.8', device: 'boiler', cls: 'power', unit: 'kW' },
+  { id: 'sensor.boiler_voltage', name: 'Boiler voltage', state: '229', device: 'boiler', cls: 'voltage', unit: 'V' },
 ];
 
 export const DEMO_STATES: Record<string, unknown> = Object.fromEntries(ENTITIES.map(e => [e.id, {

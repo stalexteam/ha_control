@@ -22,14 +22,21 @@ export function freePoint(ctx: ToolContext, p: Pt): Pt {
 }
 
 /**
- * Where a device of `kind` would go for a cursor at `cursor`: on a wall when the kind allows it and the
+ * The placement modes a placed or dragged device of `kind` may take: equipment keeps `mode` (a wall mount is chosen,
+ * not snapped to; a new one is free), any other kind every mode of DEVICE_PLACEMENTS.
+ */
+export function candidateModes(kind: DeviceKind, mode: 'wall' | 'free' = 'free'): readonly ('wall' | 'free')[] {
+  return kind === 'equipment' ? [mode] : DEVICE_PLACEMENTS[kind];
+}
+
+/**
+ * Where a device of `kind` would go for a cursor at `cursor`: on a wall when `modes` allow it and the
  * cursor snaps to a wall (or wall end), else free at the grid point when allowed, else null.
  * `rotation` is used for a free result.
  */
 export function deviceCandidate(
-  ctx: ToolContext, level: Level, kind: DeviceKind, cursor: Pt, rotation = 0,
+  ctx: ToolContext, level: Level, kind: DeviceKind, cursor: Pt, rotation = 0, modes = candidateModes(kind),
 ): DevicePlacement | null {
-  const modes = DEVICE_PLACEMENTS[kind];
   if (modes.includes('wall')) {
     const s = snap(level, cursor, { tolMm: ctx.tolMm(), grid: ctx.grid(), ortho: false });
     const ep = s.endpoint;

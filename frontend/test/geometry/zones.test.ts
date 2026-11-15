@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  deviceDefaults, levelZones, type AutomationZone, type Device, type DevicePlacement, type Id, type Level, type Pt,
+  defaultsMode, deviceDefaults, levelZones, type AutomationZone, type Device, type DevicePlacement, type Id, type Level, type Pt,
   type Zone, type ZoneVertex,
 } from '../../src/model/types';
 import { devicePose } from '../../src/geometry/devices';
@@ -17,7 +17,7 @@ const square = (id: Id, x0: number, y0: number, size: number): AutomationZone =>
 const pts = (...xy: [number, number][]): Pt[] => xy.map(([x, y]) => ({ x, y }));
 const dev = (id: Id, placement: DevicePlacement, zoneBlacklist?: Id[]): Device => ({
   id, name: id, placement, invalid: false, ...(zoneBlacklist ? { zoneBlacklist } : {}),
-  props: deviceDefaults('socket', placement.mode),
+  props: deviceDefaults('socket', defaultsMode(placement.mode)),
 });
 const at = (x: number, y: number): DevicePlacement => ({ mode: 'free', x, y, rotation: 0 });
 const withZones = (level: Level, automationZones: AutomationZone[], devices: Device[] = []): Level =>

@@ -5,7 +5,7 @@ import type { HassLike } from '../../src/api';
 import { candidates } from '../../src/binding/candidates';
 import { loadRegistries, mergeMeta, metaFromStates } from '../../src/binding/ha-meta';
 import { ROLE_SPECS } from '../../src/model/bindings';
-import { deviceDefaults, type Device, type DeviceKind, type DevicePlacement, type Level } from '../../src/model/types';
+import { defaultsMode, deviceDefaults, type Device, type DeviceKind, type DevicePlacement, type Level } from '../../src/model/types';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 import { rectRoomLevel } from '../fixtures';
 import {
@@ -55,7 +55,7 @@ const haHass = (fail: Fail = { on: false }): { hass: HassLike; calls: string[] }
 
 const free = (x: number, y: number): DevicePlacement => ({ mode: 'free', x, y, rotation: 0 });
 const dev = (id: string, name: string, kind: DeviceKind, placement: DevicePlacement, bindings?: Device['bindings']): Device =>
-  ({ id, name, invalid: false, placement, props: deviceDefaults(kind, placement.mode), bindings });
+  ({ id, name, invalid: false, placement, props: deviceDefaults(kind, defaultsMode(placement.mode)), bindings });
 
 /**
  * List order (by name): Dead light (bound, entity unavailable), Desk light (bound), Ghost light (bound to an

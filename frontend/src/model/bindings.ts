@@ -10,6 +10,11 @@ export interface RoleSpec {
 
 /** A power meter: a `sensor` of class power, or with a W / kW unit (also the Power step's power fields). */
 export const POWER: RoleSpec = { role: 'power', domains: ['sensor'], deviceClasses: ['power'], units: ['W', 'kW'], primary: false };
+/** A voltage meter: a `sensor` of class voltage, or with a V / kV / mV unit. */
+export const VOLTAGE: RoleSpec = { role: 'voltage', domains: ['sensor'], deviceClasses: ['voltage'], units: ['V', 'kV', 'mV'], primary: false };
+/** An inverter's input and output power: the Power filter. */
+export const POWER_IN: RoleSpec = { ...POWER, role: 'power_in' };
+export const POWER_OUT: RoleSpec = { ...POWER, role: 'power_out' };
 /** Smart button roles whose binding is a trigger (entity, slot and event). */
 const TRIGGER_ROLES = ['on', 'off', 'auto'] as const;
 export type TriggerRole = typeof TRIGGER_ROLES[number];
@@ -33,7 +38,8 @@ export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
   smart_button: [trigger('on'), trigger('off'), trigger('auto')],
   socket: [{ role: 'control', domains: ['switch'], primary: true }, POWER],
   exhaust_fan: [{ role: 'control', domains: ['switch', 'fan'], primary: true }],
-  equipment: [{ role: 'control', domains: ['switch'], primary: true }, POWER],
+  // Every role optional (a dummy has none); active roles depend on the inverter flag: see activeRoleSpecs.
+  equipment: [{ role: 'control', domains: ['switch'], primary: false }, POWER, VOLTAGE, POWER_IN, POWER_OUT],
 };
 
 /** How many of the statuses are not `bound` (partly bound and missing count as not bound). */
@@ -47,14 +53,19 @@ export type BindStatus = 'bound' | 'partial' | 'unbound' | 'missing';
 
 /**
  * The roles the device uses now: all roles of its kind, except for a smart button, where `off` needs separateOff,
- * and `auto` needs autoEnabled.
+ * and `auto` needs autoEnabled, and for equipment, where the inverter flag swaps `power` for `power_in` and `power_out`.
  */
 export function activeRoleSpecs(d: Device): RoleSpec[] {
   const p = d.props;
   const specs = ROLE_SPECS[p.kind];
-  if (p.kind !== 'smart_button') return specs;
-  return specs.filter(({ role: r }) =>
-    r === 'off' ? p.separateOff : r === 'auto' ? p.autoEnabled : true);
+  if (p.kind === 'smart_button') {
+    return specs.filter(({ role: r }) => (r === 'off' ? p.separateOff : r === 'auto' ? p.autoEnabled : true));
+  }
+  if (p.kind === 'equipment') {
+    const inverter = !!p.inverter;
+    return specs.filter(({ role: r }) => (r === 'power' ? !inverter : r === 'power_in' || r === 'power_out' ? inverter : true));
+  }
+  return specs;
 }
 
 function validRoles(d: Device): ReadonlySet<BindingRole> {
@@ -78,12 +89,13 @@ export function setBinding(level: Level, deviceId: Id, role: BindingRole, entity
   return { ...level, devices: level.devices.map(x => (x === d ? next : x)) };
 }
 
+/** A device whose roles are all optional (equipment) is bound with nothing bound: a dummy needs nothing. */
 export function bindingStatus(d: Device, presence: (eid: string) => Presence): BindStatus {
   const b = d.bindings ?? {};
   const ids = Object.values(b).filter((e): e is string => !!e);
-  if (ids.length === 0) return 'unbound';
-  if (ids.some(e => presence(e) === 'missing')) return 'missing';
   const primaries = activeRoleSpecs(d).filter(s => s.primary);
+  if (ids.length === 0) return primaries.length === 0 ? 'bound' : 'unbound';
+  if (ids.some(e => presence(e) === 'missing')) return 'missing';
   const set = primaries.filter(s => !!b[s.role]);
   const ok = PRIMARY_MODE[d.props.kind] === 'any' ? set.length > 0 : set.length === primaries.length;
   return ok ? 'bound' : 'partial';

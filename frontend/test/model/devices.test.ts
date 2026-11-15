@@ -24,8 +24,9 @@ describe('addDevice', () => {
     expect(r.deviceId).toBeNull();
     expect(r.level).toBe(l);
   });
-  it('equipment on wall -> null', () => {
-    expect(addDevice(room(), deviceDefaults('equipment', 'free'), onWall('w0', 1000), 'E').deviceId).toBeNull();
+  it('equipment on a wall is a wall mount; a ceiling light on a wall -> null', () => {
+    expect(addDevice(room(), deviceDefaults('equipment', 'wall'), onWall('w0', 1000), 'E').deviceId).not.toBeNull();
+    expect(addDevice(room(), deviceDefaults('ceiling_light', 'free'), onWall('w0', 1000), 'L').deviceId).toBeNull();
   });
   it('offset 3500 on 3000 wall -> null', () => {
     expect(addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 3500), 'S').deviceId).toBeNull();

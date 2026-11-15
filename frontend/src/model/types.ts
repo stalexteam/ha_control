@@ -76,7 +76,10 @@ export const isContainerKind = (kind: DeviceKind): kind is ContainerKind => kind
 export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | ContainerKind | 'socket' | 'equipment' | 'climate_sensor' | 'exhaust_fan';
 export type DevicePlacement =
   | { mode: 'wall'; wallId: Id; side: Side; offset: number; aim?: number } // offset: along axis from node A to device centre; aim: degrees off the face normal, counter-clockwise on screen, integer -90..90 (default 0)
-  | { mode: 'free'; x: number; y: number; rotation: number }; // rotation in degrees
+  | { mode: 'free'; x: number; y: number; rotation: number } // rotation in degrees
+  | { mode: 'none' }; // not on the plan (equipment only): never drawn, hit, in zones or cones, or invalid
+/** The placement mode whose defaults (deviceDefaults) apply: a device not on the plan takes the free ones. */
+export const defaultsMode = (mode: DevicePlacement['mode']): 'wall' | 'free' => (mode === 'wall' ? 'wall' : 'free');
 export const FAN_DIAMETERS = [100, 125, 150] as const;
 export type FanDiameter = typeof FAN_DIAMETERS[number];
 export type DeviceProps =
@@ -86,8 +89,10 @@ export type DeviceProps =
   | { kind: 'exhaust_fan'; diameter: FanDiameter }
   // A climate sensor's reading applies to the automation zones containing it (its stage-2a `zoneIds` is retired).
   | { kind: 'illuminance_sensor' } | { kind: 'socket' } | { kind: 'climate_sensor' }
+  // inverter: Power is replaced by Input / Output power; controllable: Plan Studio may switch its control.
+  // A missing flag means false. Shape, size, icon and label matter only while the device is on the plan.
   | { kind: 'equipment'; shape: 'rect' | 'circle'; width: number; depth: number; diameter: number;
-      icon: string; label: string }
+      icon: string; label: string; inverter?: true; controllable?: true }
   // windowSec: whole seconds 1..10, used only with autoByDoubleToggle.
   | { kind: 'wall_switch'; autoByDoubleToggle: boolean; windowSec: number }
   // off is used only with separateOff (otherwise the on trigger toggles); auto only with autoEnabled.
@@ -100,7 +105,7 @@ export const DEFAULT_EQUIPMENT_ICON = 'mdi:cube-outline';
 export const TRIGGER_EVENTS = ['single', 'double', 'hold'] as const;
 
 export type BindingRole = 'control' | 'motion' | 'illuminance' | 'temperature' | 'humidity' | 'state' | 'power'
-  | 'on' | 'off' | 'auto';
+  | 'on' | 'off' | 'auto' | 'voltage' | 'power_in' | 'power_out';
 
 /** zoneBlacklist: automation zones the device opts out of (missing = []; the field is removed when it becomes empty). */
 export interface Device {
@@ -167,6 +172,7 @@ export function emptyPlan(name: string): Plan {
   };
 }
 
+/** The placements a kind may take on the plan ('none' is not one: see addUnplacedDevice). Equipment on a wall = wall mount. */
 export const DEVICE_PLACEMENTS: Record<DeviceKind, ('wall' | 'free')[]> = {
   ceiling_light: ['free'],
   wall_light: ['wall', 'free'],
@@ -175,7 +181,7 @@ export const DEVICE_PLACEMENTS: Record<DeviceKind, ('wall' | 'free')[]> = {
   wall_switch: ['wall'],
   smart_button: ['wall', 'free'],
   socket: ['wall'],
-  equipment: ['free'],
+  equipment: ['free', 'wall'],
   climate_sensor: ['free', 'wall'],
   exhaust_fan: ['wall'],
 };
@@ -231,9 +237,10 @@ function migrateEquipment(d: Device): Device {
 function migrateSwitch(d: Device): Device {
   if ((d.props as { kind: string }).kind !== 'switch') return d;
   const action = (d.bindings as Record<string, string | undefined> | undefined)?.action;
-  if (action) return { ...d, props: deviceDefaults('smart_button', d.placement.mode), bindings: { on: action } };
+  const mode = defaultsMode(d.placement.mode);
+  if (action) return { ...d, props: deviceDefaults('smart_button', mode), bindings: { on: action } };
   // Roles a wall switch does not have (`action: ''` and the like) are dropped by sanitizeBindings.
-  return { ...d, props: deviceDefaults('wall_switch', d.placement.mode) };
+  return { ...d, props: deviceDefaults('wall_switch', mode) };
 }
 
 const isWhole = (v: unknown, min: number, max: number): v is number =>
@@ -257,7 +264,7 @@ function completeContainer(d: Device): Device {
   if (!isContainerKind(kind)) return d;
   const cur = d.props as unknown as Record<string, unknown>;
   let next: Record<string, unknown> | null = null;
-  for (const [k, def] of Object.entries(deviceDefaults(kind, d.placement.mode))) {
+  for (const [k, def] of Object.entries(deviceDefaults(kind, defaultsMode(d.placement.mode)))) {
     const v = cur[k];
     const fixed = k === 'on' || k === 'off' || k === 'auto' ? completeTrigger(v, def as Trigger)
       : k === 'windowSec' ? (isWhole(v, 1, 10) ? v : def)
