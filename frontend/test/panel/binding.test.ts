@@ -276,7 +276,7 @@ describe('binding step', () => {
     await press(el, '[data-mode="binding"]');
     await pick(el, 'm');
     const ph = () => deviceCombo(el).shadowRoot!.querySelector('.ph')!.textContent!.trim();
-    expect(ph()).toBe('Loading Home Assistant devices…');
+    expect(ph()).toBe('Loading Home Assistant devicesâ€¦');
     release();
     await vi.waitFor(() => expect(notice(el)).not.toBeNull());
     expect(ph()).toBe('Home Assistant devices unavailable');

@@ -2889,7 +2889,7 @@ const Io = {
   "binding.haDevice": "Home Assistant device",
   "binding.haDevicePick": "Choose one to fill the empty roles",
   "binding.haDeviceNone": "No Home Assistant device has a matching entity",
-  "binding.haDevicesLoading": "Loading Home Assistant devices�",
+  "binding.haDevicesLoading": "Loading Home Assistant devices…",
   "binding.haDevicesUnavailable": "Home Assistant devices unavailable",
   "binding.reload": "Reload from Home Assistant",
   "binding.showAll": "Show all",
