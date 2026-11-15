@@ -6,7 +6,7 @@ import { deviceDefaults, type DeviceKind } from '../../src/model/types';
 import { rectRoomLevel } from '../fixtures';
 import { ent, fixtureMeta, makeMeta } from './fixtures';
 
-const ids = (l: { entityId: string }[]) => l.map(e => e.entityId).sort();
+const ids = (l: readonly { entityId: string }[]) => l.map(e => e.entityId).sort();
 const spec = (k: DeviceKind, role: string) => ROLE_SPECS[k].find(s => s.role === role)!;
 
 describe('candidates', () => {

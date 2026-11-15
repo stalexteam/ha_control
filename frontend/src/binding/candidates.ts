@@ -9,10 +9,10 @@ function matches(e: EntityMeta, spec: RoleSpec): boolean {
   return e.unit !== null && !!spec.units?.includes(e.unit);
 }
 
-const cache = new WeakMap<HaMeta, WeakMap<RoleSpec, [EntityMeta[] | null, EntityMeta[] | null]>>();
+const cache = new WeakMap<HaMeta, WeakMap<RoleSpec, [readonly EntityMeta[] | null, readonly EntityMeta[] | null]>>();
 
 /** Strict: domain and class/unit rules, no hidden, disabled or categorised entries. showAll: domain filter only. Sorted by name, then id. */
-export function candidates(meta: HaMeta, spec: RoleSpec, showAll: boolean): EntityMeta[] {
+export function candidates(meta: HaMeta, spec: RoleSpec, showAll: boolean): readonly EntityMeta[] {
   let bySpec = cache.get(meta);
   if (!bySpec) cache.set(meta, (bySpec = new WeakMap()));
   let slot = bySpec.get(spec);

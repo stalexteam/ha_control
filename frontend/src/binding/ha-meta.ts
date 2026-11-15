@@ -36,29 +36,25 @@ export function metaFromStates(states: Record<string, unknown> | undefined): HaM
   return { entities, devices: new Map(), areas: new Map(), registryLoaded: false };
 }
 
-/** One websocket load of states plus the three registries. Registry-only entities get state "unavailable". */
+/** One websocket load of the three registries (states come from hass.states). Registry entities get state "unavailable" until mergeMeta applies a live state. */
 export async function loadRegistries(hass: HassLike): Promise<Registries> {
   const send = <T>(type: string) => hass.connection.sendMessagePromise<T>({ type });
-  const [states, ents, devs, areas] = await Promise.all([
-    send<({ entity_id: string } & StateObj)[]>('get_states'),
+  const [ents, devs, areas] = await Promise.all([
     send<RegEntity[]>('config/entity_registry/list'),
     send<RegDevice[]>('config/device_registry/list'),
     send<RegArea[]>('config/area_registry/list'),
   ]);
-  const byState = new Map(states.map(s => [s.entity_id, s]));
   const entities = new Map<string, EntityMeta>();
-  for (const s of states) entities.set(s.entity_id, fromState(s.entity_id, s));
   for (const r of ents) {
-    const live = byState.get(r.entity_id);
-    const base = live ? entities.get(r.entity_id)! : { ...fromState(r.entity_id, { state: 'unavailable' }) };
+    const base = fromState(r.entity_id, { state: 'unavailable' });
     entities.set(r.entity_id, {
       ...base,
       name: str(r.name) ?? str(r.original_name) ?? base.name,
-      deviceClass: base.deviceClass ?? str(r.device_class) ?? str(r.original_device_class),
-      unit: base.unit ?? str(r.unit_of_measurement),
+      deviceClass: str(r.device_class) ?? str(r.original_device_class),
+      unit: str(r.unit_of_measurement),
       deviceId: str(r.device_id), areaId: str(r.area_id),
       hidden: !!r.hidden_by, disabled: !!r.disabled_by, category: str(r.entity_category),
-      icon: str(r.icon) ?? str(r.original_icon) ?? base.icon,
+      icon: str(r.icon) ?? str(r.original_icon),
     });
   }
   return {
@@ -73,13 +69,13 @@ export function mergeMeta(states: HaMeta, regs: Registries): HaMeta {
   const entities = new Map(regs.entities);
   for (const [eid, live] of states.entities) {
     const reg = regs.entities.get(eid);
-    entities.set(eid, reg ? { ...reg, state: live.state } : live);
+    entities.set(eid, reg ? { ...reg, state: live.state, deviceClass: live.deviceClass ?? reg.deviceClass, unit: live.unit ?? reg.unit, icon: reg.icon ?? live.icon } : live);
   }
   return { entities, devices: regs.devices, areas: regs.areas, registryLoaded: true };
 }
 
 export function presence(meta: HaMeta, eid: string): Presence {
   const e = meta.entities.get(eid);
-  if (e) return e.state === 'unavailable' ? 'unavailable' : 'present';
+  if (e) return e.disabled || e.state === 'unavailable' ? 'unavailable' : 'present';
   return meta.registryLoaded ? 'missing' : 'unknown';
 }

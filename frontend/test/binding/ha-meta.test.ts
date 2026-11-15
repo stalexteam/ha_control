@@ -19,7 +19,8 @@ describe('metaFromStates', () => {
 
 describe('presence', () => {
   it('present / unavailable / missing / unknown', () => {
-    const loaded = makeMeta([ent('light.a'), ent('light.u', { state: 'unavailable' })]);
+    const loaded = makeMeta([ent('light.a'), ent('light.u', { state: 'unavailable' }), ent('light.d', { disabled: true })]);
+    expect(presence(loaded, 'light.d')).toBe('unavailable');
     expect(presence(loaded, 'light.a')).toBe('present');
     expect(presence(loaded, 'light.u')).toBe('unavailable');
     expect(presence(loaded, 'light.zzz')).toBe('missing');
@@ -31,9 +32,6 @@ describe('presence', () => {
 
 describe('loadRegistries / mergeMeta', () => {
   const answers: Record<string, unknown> = {
-    get_states: [
-      { entity_id: 'sensor.t', state: '21', attributes: { device_class: 'temperature', unit_of_measurement: '°C', friendly_name: 'T state' } },
-    ],
     'config/entity_registry/list': [
       { entity_id: 'sensor.t', device_id: 'd1', area_id: null, name: null, original_name: 'T reg', hidden_by: null, disabled_by: null, entity_category: 'diagnostic', icon: null, original_icon: 'mdi:thermometer' },
       { entity_id: 'light.off', device_id: null, area_id: 'a1', name: 'Off light', hidden_by: 'user', disabled_by: 'integration', entity_category: null, icon: 'mdi:x', original_icon: 'mdi:y' },
@@ -50,11 +48,19 @@ describe('loadRegistries / mergeMeta', () => {
   it('maps fields', async () => {
     const { hass, calls } = fakeHass();
     const r = await loadRegistries(hass);
-    expect([...calls].sort()).toEqual(['config/area_registry/list', 'config/device_registry/list', 'config/entity_registry/list', 'get_states']);
-    expect(r.entities.get('sensor.t')).toMatchObject({ deviceId: 'd1', category: 'diagnostic', icon: 'mdi:thermometer', hidden: false, disabled: false, state: '21', deviceClass: 'temperature' });
+    expect([...calls].sort()).toEqual(['config/area_registry/list', 'config/device_registry/list', 'config/entity_registry/list']);
+    expect(r.entities.get('sensor.t')).toMatchObject({ name: 'T reg', deviceId: 'd1', category: 'diagnostic', icon: 'mdi:thermometer', hidden: false, disabled: false });
     expect(r.entities.get('light.off')).toMatchObject({ hidden: true, disabled: true, icon: 'mdi:x', areaId: 'a1', name: 'Off light', state: 'unavailable' });
     expect(r.devices.get('d1')).toEqual({ id: 'd1', name: 'My dev', model: 'M1', areaId: 'a2' });
     expect(r.areas.get('a1')).toBe('Hall');
+  });
+
+  it('rejects when one command fails', async () => {
+    const hass = { connection: { sendMessagePromise: async <T>(msg: Record<string, unknown>): Promise<T> => {
+      if (msg.type === 'config/device_registry/list') throw new Error('boom');
+      return [] as T;
+    } } };
+    await expect(loadRegistries(hass)).rejects.toThrow('boom');
   });
 
   it('merge sets registryLoaded; registry fields win, live state kept', async () => {
@@ -66,5 +72,6 @@ describe('loadRegistries / mergeMeta', () => {
     expect(m.entities.has('sensor.only')).toBe(true);
     expect(m.entities.has('light.off')).toBe(true);
     expect(presence(m, 'light.off')).toBe('unavailable');
+    expect(presence(m, 'sensor.t')).toBe('present');
   });
 });
