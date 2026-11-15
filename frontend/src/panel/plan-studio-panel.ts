@@ -1,6 +1,6 @@
 import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from 'lit';
 import { property, state } from 'lit/decorators.js';
-import type { Id, Level, Plan, Pt, WallType } from '../model/types';
+import type { Level, Plan, Pt, WallType } from '../model/types';
 import { WALL_PRESETS } from '../model/types';
 import { deleteWall } from '../model/ops';
 import { deleteOpening } from '../model/openings';
@@ -27,7 +27,7 @@ import { panelStyles, paletteVars } from './styles';
 import { fitView, renderGrid, screenToMm, type View } from './viewport';
 import { EditorInput } from './input';
 import { createInputHost } from './input-host';
-import { renderActiveDialog, renderDraftBanner } from './dialogs';
+import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 
 export class PlanStudioPanel extends LitElement {
@@ -54,24 +54,16 @@ export class PlanStudioPanel extends LitElement {
   @state() nextObj = initialNext();
   @state() view: View = { x: -1000, y: -1000, scale: 0.08 };
   @state() private size = { w: 0, h: 0 };
-  @state() dialog: 'none' | 'conflict' | 'conflict-again' = 'none';
+  /** The open modal dialog; Escape closes it (the restore prompt then leaves a non-modal banner). */
+  @state() dialog: Dialog | null = null;
   @state() notice: string | null = null;
   /**
    * Local draft found on load, waiting for Restore / Discard. While it is undecided and belongs to the open
    * plan, no new draft is written under its key (that would overwrite it).
    */
   @state() pendingDraft: Draft | null = null;
-  /** The modal restore prompt is shown; Escape hides it and leaves a non-modal banner instead. */
-  @state() restoreOpen = false;
   /** Stored plans for the selector. */
   @state() plans: PlanSummary[] = [];
-  /** Plan the user picked while the current one is dirty: waiting for confirmation. */
-  @state() switchTo: Id | null = null;
-
-  /** Confirmation for "New plan" (current plan is dirty) is open. */
-  @state() newConfirm = false;
-  /** Confirmation for "Delete plan" is open. */
-  @state() deleteConfirm = false;
   /** A delete request is running. */
   @state() deleting = false;
 
@@ -240,14 +232,12 @@ export class PlanStudioPanel extends LitElement {
 
   private renderDialog(): TemplateResult | typeof nothing {
     return renderActiveDialog({
-      draft: this.pendingDraft, restoreOpen: this.restoreOpen, newConfirm: this.newConfirm,
-      deleteConfirm: this.deleteConfirm, switchTo: this.switchTo, dialog: this.dialog, planName: this.plan?.name ?? '',
+      dialog: this.dialog, draft: this.pendingDraft, planName: this.plan?.name ?? '',
       saving: this.save.state === 'saving', message: this.save.errorMessage,
       restore: d => this.session.restoreDraft(d), discard: d => this.session.discardDraft(d), startNew: () => this.session.startNewPlan(),
-      cancelNew: () => { this.newConfirm = false; }, confirmDelete: () => { void this.session.confirmDelete(); },
-      cancelDelete: () => { this.deleteConfirm = false; }, confirmSwitch: () => this.session.confirmSwitch(),
-      cancelSwitch: () => { this.switchTo = null; }, overwrite: () => this.session.doOverwrite(), saveAsNew: () => this.session.doSaveAsNew(),
-      cancelConflict: () => { this.dialog = 'none'; },
+      confirmDelete: () => { void this.session.confirmDelete(); }, confirmSwitch: () => this.session.confirmSwitch(),
+      overwrite: () => this.session.doOverwrite(), saveAsNew: () => this.session.doSaveAsNew(),
+      close: () => { this.dialog = null; },
     });
   }
 
@@ -291,7 +281,7 @@ export class PlanStudioPanel extends LitElement {
               live: trackerLive(preview, this.toolId === 'box' ? 'box' : 'wall', this.boxMeasure, this.thickness),
             }) : nothing}
           </svg>
-          ${this.pendingDraft && !this.restoreOpen ? renderDraftBanner({
+          ${this.pendingDraft && this.dialog?.kind !== 'restore' ? renderDraftBanner({
             savedAt: this.pendingDraft.savedAt,
             onRestore: () => this.session.restoreDraft(this.pendingDraft!), onDiscard: () => this.session.discardDraft(this.pendingDraft!),
           }) : nothing}

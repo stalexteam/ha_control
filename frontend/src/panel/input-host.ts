@@ -2,6 +2,7 @@ import type { Level, Pt } from '../model/types';
 import type { Tool } from '../editor/tools/types';
 import type { History } from '../editor/history';
 import type { InputHost } from './input';
+import type { Dialog } from './dialogs';
 import type { View } from './viewport';
 import type { Selection } from '../editor/tools/types';
 
@@ -11,11 +12,7 @@ export interface InputSource {
   view: View;
   history: History<Level> | null;
   selection: Selection | null;
-  restoreOpen: boolean;
-  dialog: 'none' | 'conflict' | 'conflict-again';
-  switchTo: string | null;
-  newConfirm: boolean;
-  deleteConfirm: boolean;
+  dialog: Dialog | null;
   toMm(e: { clientX: number; clientY: number }): Pt;
   focus(): void;
   requestUpdate(): void;
@@ -31,9 +28,9 @@ export function createInputHost(p: InputSource): InputHost {
     get view() { return p.view; },
     set view(v: View) { p.view = v; },
     ready: () => !!p.history,
-    modal: () => p.restoreOpen || p.dialog !== 'none' || p.switchTo !== null || p.newConfirm || p.deleteConfirm,
+    modal: () => p.dialog !== null,
     // Escape on the restore prompt = decide later: the draft is kept and a banner keeps offering it.
-    closeModal: () => { p.restoreOpen = false; p.dialog = 'none'; p.switchTo = null; p.newConfirm = false; p.deleteConfirm = false; },
+    closeModal: () => { p.dialog = null; },
     toMm: e => p.toMm(e),
     focus: () => p.focus(),
     update: () => p.requestUpdate(),

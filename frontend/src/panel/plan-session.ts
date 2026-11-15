@@ -6,6 +6,7 @@ import type { DraftStore, Draft } from '../editor/draft';
 import type { Selection, Tool } from '../editor/tools/types';
 import { deletePlan, errorText, getPlan, listPlans, type HassLike, type PlanSummary } from '../api';
 import { t } from '../i18n';
+import type { Dialog } from './dialogs';
 import { createTool, toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
 import type { ToolContext } from '../editor/tools/types';
 
@@ -28,11 +29,7 @@ export interface SessionHost {
   selection: Selection | null;
   notice: string | null;
   pendingDraft: Draft | null;
-  restoreOpen: boolean;
-  switchTo: Id | null;
-  newConfirm: boolean;
-  deleteConfirm: boolean;
-  dialog: 'none' | 'conflict' | 'conflict-again';
+  dialog: Dialog | null;
 }
 
 /** Plan lifecycle: load / open / switch / new / delete, local drafts and saving. */
@@ -72,9 +69,14 @@ export class PlanSession {
     this.offerDraft(this.h.drafts.read(plan.id));
   }
 
+  /** Closes the open dialog when it is of the given kind. */
+  private closeDialog(kind: Dialog['kind']): void {
+    if (this.h.dialog?.kind === kind) this.h.dialog = null;
+  }
+
   offerDraft(d: Draft | null): void {
     this.h.pendingDraft = d;
-    this.h.restoreOpen = !!d;
+    if (d) this.h.dialog = { kind: 'restore' }; else this.closeDialog('restore');
   }
 
   async refreshPlans(): Promise<void> {
@@ -92,7 +94,7 @@ export class PlanSession {
 
   pickPlan(id: Id): void {
     if (!this.h.plan || id === this.h.plan.id || this.h.save.state === 'saving') return;
-    if (this.h.save.dirty) { this.h.switchTo = id; return; }
+    if (this.h.save.dirty) { this.h.dialog = { kind: 'switch', to: id }; return; }
     void this.switchPlan(id);
   }
 
@@ -106,8 +108,8 @@ export class PlanSession {
 
   /** "Discard and open": drop the unsaved edits (and their draft, unless it is an undecided older one). */
   confirmSwitch(): void {
-    const id = this.h.switchTo;
-    this.h.switchTo = null;
+    const id = this.h.dialog?.kind === 'switch' ? this.h.dialog.to : null;
+    this.closeDialog('switch');
     if (!id || !this.h.plan) return;
     this.h.drafts.cancel();
     if (!this.draftBlocked()) this.h.drafts.clear(this.h.plan.id);
@@ -118,13 +120,13 @@ export class PlanSession {
 
   requestNewPlan(): void {
     if (!this.h.plan || this.busy()) return;
-    if (this.h.save.dirty) { this.h.newConfirm = true; return; }
+    if (this.h.save.dirty) { this.h.dialog = { kind: 'new' }; return; }
     this.startNewPlan();
   }
 
   /** Replaces the open plan with a fresh unsaved one (tool, selection and history are reset by adopt). */
   startNewPlan(): void {
-    this.h.newConfirm = false;
+    this.closeDialog('new');
     this.h.drafts.cancel();
     if (this.h.plan && !this.draftBlocked()) this.h.drafts.clear(this.h.plan.id);
     this.openFresh();
@@ -140,11 +142,11 @@ export class PlanSession {
 
   requestDelete(): void {
     if (!this.h.plan || this.busy()) return;
-    this.h.deleteConfirm = true;
+    this.h.dialog = { kind: 'delete' };
   }
 
   async confirmDelete(): Promise<void> {
-    this.h.deleteConfirm = false;
+    this.closeDialog('delete');
     const plan = this.h.plan;
     if (!plan || !this.h.hass || this.busy()) return;
     this.h.deleting = true;
@@ -194,7 +196,7 @@ export class PlanSession {
 
   restoreDraft(d: Draft): void {
     this.h.pendingDraft = null;
-    this.h.restoreOpen = false;
+    this.closeDialog('restore');
     this.adopt(d.plan);
     this.h.save.baseRevision = d.baseRevision;
     this.h.save.markDirty(); // the next save goes through the normal revision / conflict flow
@@ -202,7 +204,7 @@ export class PlanSession {
 
   discardDraft(d: Draft): void {
     this.h.pendingDraft = null;
-    this.h.restoreOpen = false;
+    this.closeDialog('restore');
     this.h.drafts.clear(d.planId);
     // Edits made while the decision was pending are drafted from now on.
     if (this.h.save.dirty && this.h.plan) this.h.drafts.schedule(() => this.makeDraft());
@@ -229,7 +231,7 @@ export class PlanSession {
     if (!this.h.plan || this.h.save.state === 'saving') return;
     await this.h.save.save(this.currentPlan());
     this.afterSaved(this.h.plan.id);
-    if (this.h.save.state === 'conflict') this.h.dialog = 'conflict';
+    if (this.h.save.state === 'conflict') this.h.dialog = { kind: 'conflict' };
   }
 
   async doOverwrite(): Promise<void> {
@@ -237,7 +239,7 @@ export class PlanSession {
     await this.h.save.overwrite(this.currentPlan());
     this.afterSaved(this.h.plan.id);
     // A second conflict (e.g. the plan was deleted elsewhere) leaves only "Save as new".
-    this.h.dialog = this.h.save.state === 'conflict' ? 'conflict-again' : 'none';
+    this.h.dialog = this.h.save.state === 'conflict' ? { kind: 'conflict-again' } : null;
   }
 
   async doSaveAsNew(): Promise<void> {
@@ -245,6 +247,6 @@ export class PlanSession {
     const name = `${this.h.plan.name} ${t('plan.copySuffix')}`;
     const oldId = this.h.plan.id;
     const res = await this.h.save.saveAsNew(this.currentPlan(), name);
-    if (res) { this.h.plan = res; this.h.dialog = 'none'; this.afterSaved(oldId, res.id); } else if (this.h.save.state === 'error') this.h.dialog = 'none';
+    if (res) { this.h.plan = res; this.h.dialog = null; this.afterSaved(oldId, res.id); } else if (this.h.save.state === 'error') this.h.dialog = null;
   }
 }
