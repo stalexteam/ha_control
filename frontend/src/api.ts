@@ -3,6 +3,7 @@ import type { Id, Plan } from './model/types';
 export interface HassLike {
   connection: { sendMessagePromise<T>(msg: Record<string, unknown>): Promise<T> };
   themes?: { darkMode?: boolean };
+  states?: Record<string, unknown>;
 }
 
 export interface PlanSummary { id: Id; name: string; revision: number }

@@ -97,3 +97,11 @@ describe('sanitizeBindings / normalizeLevel', () => {
     expect(normalizeLevel(level)).toBe(level);
   });
 });
+
+describe("sanitizeBindings empty", () => {
+  it("drops an empty bindings object", () => {
+    const { level } = withDevice("socket");
+    const d = { ...level.devices[0], bindings: {} };
+    expect("bindings" in sanitizeBindings(d)).toBe(false);
+  });
+});

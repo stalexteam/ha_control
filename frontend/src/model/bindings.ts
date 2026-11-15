@@ -74,7 +74,7 @@ export function sanitizeBindings(d: Device): Device {
   if (!d.bindings) return d;
   const ok = validRoles(d);
   const entries = Object.entries(d.bindings).filter(([r, e]) => ok.has(r as BindingRole) && !!e);
-  if (entries.length === Object.keys(d.bindings).length) return d;
+  if (entries.length > 0 && entries.length === Object.keys(d.bindings).length) return d;
   const next: Device = { ...d };
   if (entries.length) next.bindings = Object.fromEntries(entries);
   else delete next.bindings;
