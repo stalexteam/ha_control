@@ -160,15 +160,15 @@ describe('Power properties', () => {
     expect(h.calls.commits).toBe(1);
   });
 
-  it('"Controllable" appears only with a switch; a new switch is controllable; the box toggles it', async () => {
+  it('"Controllable" appears only with a switch; a new switch is read-only; the box toggles it', async () => {
     const h = harness(schema(meter), selected('m1'));
     expect(h.q('[data-field="controllable"]')).toBeNull();
     await choose(h.q<EntityCombo>('ps-entity-combo[data-field="switch"]')!, 'switch.rcbo');
-    expect(h.blk('m1')).toMatchObject({ switch: { entity: 'switch.rcbo', controllable: true } });
-    const box = h.q<HTMLInputElement>('input[data-field="controllable"]')!;
-    expect(box.checked).toBe(true);
-    toggle(box);
     expect(h.blk('m1')).toMatchObject({ switch: { entity: 'switch.rcbo', controllable: false } });
+    const box = h.q<HTMLInputElement>('input[data-field="controllable"]')!;
+    expect(box.checked).toBe(false);
+    toggle(box);
+    expect(h.blk('m1')).toMatchObject({ switch: { entity: 'switch.rcbo', controllable: true } });
     expect(h.calls.commits).toBe(2);
   });
 

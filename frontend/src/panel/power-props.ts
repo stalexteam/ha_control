@@ -122,7 +122,7 @@ function meterFields(o: PowerPropsOpts, b: Block<'meter'>): TemplateResult {
     ${entityField(o, 'power', t('power.field.power'), POWER, b.power, v => setField(o, b, 'power', v))}
     ${entityField(o, 'voltage', t('power.field.voltage'), VOLTAGE, b.voltage, v => setField(o, b, 'voltage', v))}
     ${entityField(o, 'switch', t('power.field.switch'), SWITCH, sw?.entity,
-      v => setField(o, b, 'switch', v ? { entity: v, controllable: sw?.controllable ?? true } : null))}
+      v => setField(o, b, 'switch', v ? { entity: v, controllable: sw?.controllable ?? false } : null))}
     ${sw ? check('controllable', t('power.controllable'), sw.controllable,
       on => setField(o, b, 'switch', { ...sw, controllable: on })) : nothing}`;
 }
