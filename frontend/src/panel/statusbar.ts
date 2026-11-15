@@ -8,6 +8,9 @@ export interface StatusOpts {
   snap: string | null;
   zoomPct: number;
   onGrid(on: boolean): void;
+  /** Cones and zones of devices are drawn. */
+  cones: boolean;
+  onCones(on: boolean): void;
 }
 
 export function renderStatusBar(o: StatusOpts): TemplateResult {
@@ -24,6 +27,11 @@ export function renderStatusBar(o: StatusOpts): TemplateResult {
       <label class="grid-toggle">
         <input type="checkbox" .checked=${o.grid} @change=${(e: Event) => o.onGrid((e.target as HTMLInputElement).checked)} />
         ${t('status.grid', lang)}
+      </label>
+      <label class="grid-toggle">
+        <input type="checkbox" data-toggle="cones" .checked=${o.cones}
+          @change=${(e: Event) => o.onCones((e.target as HTMLInputElement).checked)} />
+        ${t('status.cones', lang)}
       </label>
     </div>`;
 }

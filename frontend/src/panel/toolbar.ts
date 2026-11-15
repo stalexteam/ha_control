@@ -2,17 +2,18 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { live } from 'lit/directives/live.js';
 import type { WallType } from '../model/types';
 import { WALL_PRESETS } from '../model/types';
-import type { Tool } from '../editor/tools/types';
 import type { SaveState } from '../editor/save';
 import { t } from '../i18n';
+import { toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
 
-export type ToolId = Tool['id'];
-
-export const TOOL_IDS: ToolId[] = ['select', 'box', 'wall', 'door', 'window', 'opening', 'zone'];
+export type { ToolId } from './tool-factory';
 const EDITOR_WALL_TYPES: WallType[] = ['bearing', 'partition', 'railing'];
 
 export interface TopBarOpts {
   lang: string;
+  /** Plan or Equipment tab; the wall type settings show only in the Plan tab. */
+  mode: EditorMode;
+  onMode(mode: EditorMode): void;
   planName: string;
   planId: string;
   /** Plans the selector offers (stored plans plus the open one); hidden when there is only one. */
@@ -80,20 +81,26 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
         ?disabled=${o.busy || o.saveState === 'saving'} @click=${o.onDeletePlan}>&#128465;</button>
       <input class="plan-name" .value=${o.planName} aria-label=${t('plan.name', lang)} title=${t('plan.name', lang)}
         @change=${(e: Event) => o.onRename((e.target as HTMLInputElement).value)} />
+      <span class="seg mode-tabs">
+        ${(['plan', 'equipment'] as EditorMode[]).map(m => html`
+          <button class="tab ${o.mode === m ? 'on' : ''}" data-mode=${m} @click=${() => o.onMode(m)}>
+            ${t(`mode.${m}`, lang)}</button>`)}
+      </span>
       <span class="sp"></span>
-      <span class="muted">${t('walltype.label', lang)}:</span>
-      ${EDITOR_WALL_TYPES.map(wt => html`
-        <button class="tab ${o.wallType === wt ? 'on' : ''}" data-walltype=${wt} @click=${() => o.onWallType(wt)}>
-          ${t(`walltype.${wt}`, lang)} ${WALL_PRESETS[wt]}</button>`)}
-      <input class="num" type="text" inputmode="numeric" .value=${String(o.thickness)}
-        aria-label=${t('props.thickness', lang)} title=${t('props.thickness', lang)}
-        @change=${(e: Event) => {
-          const el = e.target as HTMLInputElement;
-          const v = parseMm(el.value);
-          if (v === null) el.value = String(o.thickness); else o.onThickness(v);
-        }} />
-      <span class="muted">${t('unit.mm', lang)}</span>
-      <span class="sp"></span>
+      ${o.mode === 'plan' ? html`
+        <span class="muted">${t('walltype.label', lang)}:</span>
+        ${EDITOR_WALL_TYPES.map(wt => html`
+          <button class="tab ${o.wallType === wt ? 'on' : ''}" data-walltype=${wt} @click=${() => o.onWallType(wt)}>
+            ${t(`walltype.${wt}`, lang)} ${WALL_PRESETS[wt]}</button>`)}
+        <input class="num" type="text" inputmode="numeric" .value=${String(o.thickness)}
+          aria-label=${t('props.thickness', lang)} title=${t('props.thickness', lang)}
+          @change=${(e: Event) => {
+            const el = e.target as HTMLInputElement;
+            const v = parseMm(el.value);
+            if (v === null) el.value = String(o.thickness); else o.onThickness(v);
+          }} />
+        <span class="muted">${t('unit.mm', lang)}</span>
+        <span class="sp"></span>` : nothing}
       <button class="btn" title=${t('action.undo', lang)} aria-label=${t('action.undo', lang)} ?disabled=${!o.canUndo}
         @click=${o.onUndo}>↶</button>
       <button class="btn" title=${t('action.redo', lang)} aria-label=${t('action.redo', lang)} ?disabled=${!o.canRedo}
@@ -105,11 +112,11 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
     </div>`;
 }
 
-export function renderToolRail(active: ToolId, lang: string, onPick: (id: ToolId) => void): TemplateResult {
+export function renderToolRail(mode: EditorMode, active: ToolId, lang: string, onPick: (id: ToolId) => void): TemplateResult {
   return html`
     <div class="tools">
-      ${TOOL_IDS.map(id => html`
-        ${id === 'zone' ? html`<div class="tool-sep"></div>` : nothing}
+      ${toolIdsFor(mode).map(id => html`
+        ${id === 'zone' || id === 'ceiling_light' ? html`<div class="tool-sep"></div>` : nothing}
         <button class="tool ${active === id ? 'on' : ''}" data-tool=${id} @click=${() => onPick(id)}>
           ${t(`tool.${id}`, lang)}</button>`)}
     </div>`;

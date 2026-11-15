@@ -24,6 +24,16 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 - New / delete plan: the "+" and bin buttons next to the plan name start a new unsaved plan (asks first if there are unsaved changes) or delete the open plan after confirmation (admin only; Escape cancels).
 - Draft recovery: unsaved edits are kept locally in the browser and offered for restore on reopen. Esc postpones the decision; a banner keeps offering Restore / Discard.
 
+### Equipment tab
+
+- Switch between "Plan" and "Equipment" in the top bar. Walls, openings and rooms are dimmed and locked in the Equipment tab; devices are dimmed and locked in the Plan tab.
+- Tools: Select, Ceiling light, Wall light, Motion sensor, Illuminance sensor, Switch, Socket, Equipment. One click places one device.
+- Switches and sockets snap to the nearest wall face. Wall lights and sensors go on a wall face near the cursor, otherwise at a free grid point. Ceiling lights and equipment blocks are always free.
+- Select: click a device to select it, drag to move it (Shift locks the axis). A wall device slides along its wall, can be dragged onto another wall, or into open space if its kind allows. Delete removes it.
+- Right panel: properties of the selected device (name, kind settings, rotation for free devices, side and offset for wall devices). With a placement tool active and nothing selected, it edits the defaults of the next device.
+- Deleting a wall also deletes the devices on it; Ctrl+Z brings both back.
+- "Cones & zones" in the status bar shows or hides light pools, wall-light cones and motion zones.
+
 ## Development
 
 ```

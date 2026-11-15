@@ -59,6 +59,7 @@ export const panelStyles = css`
   .val.wide { max-width: 140px; text-align: left; }
   .val.ro { padding: 2px 6px; }
   .seg { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .seg.mode-tabs { display: inline-flex; margin-top: 0; }
   .warn { color: var(--ps-invalid); font-size: 12px; }
   .status { grid-column: 1 / 4; background: var(--ps-panel); border-top: 1px solid var(--ps-border); display: flex;
     gap: 18px; align-items: center; padding: 0 10px; font-size: 12px; color: var(--ps-muted); white-space: nowrap;

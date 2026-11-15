@@ -1,0 +1,202 @@
+import { html, nothing, type TemplateResult } from 'lit';
+import { live } from 'lit/directives/live.js';
+import type { Device, DeviceKind, DevicePlacement, DeviceProps, Level, Side } from '../model/types';
+import { DEVICE_PLACEMENTS, deviceDefaults } from '../model/types';
+import { deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
+import type { Selection } from '../editor/tools/types';
+import { t } from '../i18n';
+import { parseMm } from './toolbar';
+import type { ToolId } from './tool-factory';
+
+const DEVICE_KINDS = Object.keys(DEVICE_PLACEMENTS) as DeviceKind[];
+const isDeviceKind = (id: ToolId): id is DeviceKind => (DEVICE_KINDS as string[]).includes(id);
+
+/** Initial "next device" props of every kind: the free-mode defaults. */
+export function initialNextProps(): Record<DeviceKind, DeviceProps> {
+  return Object.fromEntries(DEVICE_KINDS.map(k => [k, deviceDefaults(k, 'free')])) as Record<DeviceKind, DeviceProps>;
+}
+
+export interface DevicePropsOpts {
+  /** Selected device, or null. */
+  device: Device | null;
+  /** Kind of the active placement tool (shown when nothing is selected), or null. */
+  nextKind: DeviceKind | null;
+  /** The panel's defaults for the next device of `nextKind`. */
+  nextProps: DeviceProps | null;
+  lang: string;
+  onDevice(patch: Partial<DeviceProps>, name?: string): void;
+  onPlacement(p: DevicePlacement): void;
+  onNext(patch: Partial<DeviceProps>): void;
+  onDelete(): void;
+  /** Validation message for a rejected field (null clears it). */
+  onNotice?(msg: string | null): void;
+}
+
+type NumRule = 'mm' | 'angle' | 'rotation' | 'offset';
+
+const BAD: Record<NumRule, string> = {
+  mm: 'props.badNumber', angle: 'props.badAngle', rotation: 'props.badRotation', offset: 'props.noFit',
+};
+
+/** Integer by rule: mm > 0, angle 1..360, rotation 0..359, offset >= 0; else null. */
+export function parseNum(value: string, rule: NumRule): number | null {
+  if (rule === 'mm' || rule === 'angle') {
+    const v = parseMm(value);
+    return v === null || (rule === 'angle' && v > 360) ? null : v;
+  }
+  const s = value.replace(/[\s ]/g, '');
+  if (!/^\d+$/.test(s)) return null;
+  const n = Number(s);
+  return rule === 'rotation' && n > 359 ? null : n;
+}
+
+function row(label: string, field: TemplateResult): TemplateResult {
+  return html`<label class="row"><span>${label}</span>${field}</label>`;
+}
+
+function select<T extends string>(field: string, value: T, options: T[], prefix: string, lang: string,
+  on: (v: T) => void): TemplateResult {
+  return html`<select class="val" data-field=${field} @change=${(e: Event) => on((e.target as HTMLSelectElement).value as T)}>
+    ${options.map(v => html`<option value=${v} ?selected=${v === value}>${t(`${prefix}.${v}`, lang)}</option>`)}
+  </select>`;
+}
+
+/** Whole-number field committing on change; a bad value (or `apply` returning false) reverts it. */
+function numField(o: DevicePropsOpts, field: string, value: number, rule: NumRule, apply: (v: number) => boolean | void): TemplateResult {
+  const shown = String(Math.round(value));
+  return html`<input class="val" type="text" inputmode="numeric" data-field=${field} .value=${live(shown)}
+    @change=${(e: Event) => {
+      const el = e.target as HTMLInputElement;
+      const v = parseNum(el.value, rule);
+      if (v === null || apply(v) === false) {
+        el.value = shown;
+        o.onNotice?.(t(BAD[rule], o.lang));
+      } else o.onNotice?.(null);
+    }} />`;
+}
+
+/** Kind-specific fields; `pre` prefixes data-field names ("next-" for the next-device defaults). */
+function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch: Partial<DeviceProps>) => void): TemplateResult {
+  const lang = o.lang;
+  const mm = (name: string, label: string, v: number) =>
+    row(`${t(label, lang)}, ${t('unit.mm', lang)}`, numField(o, pre + name, v, 'mm', x => set({ [name]: x } as Partial<DeviceProps>)));
+  const deg = (name: string, label: string, v: number) =>
+    row(`${t(label, lang)}, ${t('unit.deg', lang)}`, numField(o, pre + name, v, 'angle', x => set({ [name]: x } as Partial<DeviceProps>)));
+  switch (p.kind) {
+    case 'ceiling_light': {
+      const pool = p.poolRadius === null ? '' : String(p.poolRadius);
+      return html`
+        ${row(t('props.shape', lang), select(`${pre}shape`, p.shape, ['round', 'linear', 'spot'], 'shape', lang, v => set({ shape: v })))}
+        ${p.shape === 'linear'
+          ? html`${mm('length', 'props.length', p.length)}${mm('width', 'props.width', p.width)}`
+          : mm('diameter', 'props.diameter', p.diameter)}
+        ${row(`${t('props.poolRadius', lang)}, ${t('unit.mm', lang)}`, html`<input class="val" type="text" inputmode="numeric"
+          data-field=${`${pre}poolRadius`} placeholder=${t('props.poolHint', lang)} title=${t('props.poolHint', lang)}
+          .value=${live(pool)} @change=${(e: Event) => {
+            const el = e.target as HTMLInputElement;
+            if (el.value.trim() === '') { o.onNotice?.(null); set({ poolRadius: null }); return; }
+            const v = parseNum(el.value, 'mm');
+            if (v === null) { el.value = pool; o.onNotice?.(t('props.badNumber', lang)); return; }
+            o.onNotice?.(null);
+            set({ poolRadius: v });
+          }} />`)}`;
+    }
+    case 'wall_light':
+      return html`${deg('coneAngle', 'props.coneAngle', p.coneAngle)}${mm('coneRange', 'props.coneRange', p.coneRange)}`;
+    case 'motion_sensor':
+      return html`${deg('zoneAngle', 'props.zoneAngle', p.zoneAngle)}${mm('zoneRange', 'props.zoneRange', p.zoneRange)}`;
+    case 'equipment':
+      return html`
+        ${row(t('props.shape', lang), select(`${pre}shape`, p.shape, ['rect', 'circle'], 'shape', lang, v => set({ shape: v })))}
+        ${p.shape === 'rect'
+          ? html`${mm('width', 'props.width', p.width)}${mm('depth', 'props.depth', p.depth)}`
+          : mm('diameter', 'props.diameter', p.diameter)}
+        ${row(t('props.symbol', lang), select(`${pre}symbol`, p.symbol, ['boiler', 'pc', 'automation', 'other'], 'symbol', lang,
+          v => set({ symbol: v })))}
+        ${row(t('props.label', lang), html`<input class="val wide" type="text" data-field=${`${pre}label`} .value=${live(p.label)}
+          @change=${(e: Event) => set({ label: (e.target as HTMLInputElement).value.trim() })} />`)}`;
+    default:
+      return html`<p class="muted">${t('props.noSettings', lang)}</p>`;
+  }
+}
+
+function placementFields(o: DevicePropsOpts, d: Device): TemplateResult {
+  const lang = o.lang;
+  const pl = d.placement;
+  if (pl.mode === 'free') {
+    return row(`${t('props.rotation', lang)}, ${t('unit.deg', lang)}`,
+      numField(o, 'rotation', pl.rotation, 'rotation', v => o.onPlacement({ ...pl, rotation: v })));
+  }
+  return html`
+    ${row(t('props.side', lang), select<Side>('side', pl.side, ['left', 'right'], 'side', lang, v => o.onPlacement({ ...pl, side: v })))}
+    ${row(`${t('props.offset', lang)}, ${t('unit.mm', lang)}`, numField(o, 'offset', pl.offset, 'offset',
+      v => o.onPlacement({ ...pl, offset: v })))}`;
+}
+
+function deviceProps(o: DevicePropsOpts, d: Device): TemplateResult {
+  const lang = o.lang;
+  return html`
+    <h4>${t(`device.${d.props.kind}`, lang)}</h4>
+    ${row(t('props.name', lang), html`<input class="val wide" type="text" data-field="name" .value=${live(d.name)}
+      @change=${(e: Event) => {
+        const el = e.target as HTMLInputElement;
+        const name = el.value.trim();
+        if (!name) { el.value = d.name; return; }
+        if (name !== d.name) o.onDevice({}, name);
+      }} />`)}
+    ${kindFields(o, d.props, '', patch => o.onDevice(patch))}
+    ${placementFields(o, d)}
+    ${d.invalid ? html`<p class="warn">${t('props.invalidDevice', lang)}</p>` : nothing}
+    <button class="btn danger" data-action="delete-device" @click=${() => o.onDelete()}>${t('action.delete', lang)}</button>`;
+}
+
+/** Right panel of the Equipment tab: the selected device, or the defaults of the next device to place. */
+export function renderDeviceProps(o: DevicePropsOpts): TemplateResult {
+  if (o.device) return deviceProps(o, o.device);
+  if (o.nextKind && o.nextProps) {
+    return html`
+      <h4>${t('props.nextDevice', o.lang)}: ${t(`device.${o.nextKind}`, o.lang)}</h4>
+      ${kindFields(o, o.nextProps, 'next-', patch => o.onNext(patch))}`;
+  }
+  return html`<p class="muted">${t('props.none', o.lang)}</p>`;
+}
+
+export interface EquipmentPropsOpts {
+  level: Level;
+  selection: Selection | null;
+  toolId: ToolId;
+  nextProps: Record<DeviceKind, DeviceProps>;
+  lang: string;
+  notice: string | null;
+  commit(next: Level): void;
+  /** Commits a level in which the selected device was deleted. */
+  remove(next: Level): void;
+  setNextProps(next: Record<DeviceKind, DeviceProps>): void;
+  setNotice(msg: string | null): void;
+}
+
+/** The whole right panel of the Equipment tab, wired to the level and the panel's next-device state. */
+export function renderEquipmentProps(o: EquipmentPropsOpts): TemplateResult {
+  const { level, selection: s } = o;
+  const device = s?.kind === 'device' ? level.devices.find(d => d.id === s.id) ?? null : null;
+  const nextKind = isDeviceKind(o.toolId) ? o.toolId : null;
+  const edit = (next: Level) => {
+    if (next === level) { o.setNotice(t('props.noFit', o.lang)); return; }
+    o.setNotice(null);
+    o.commit(next);
+  };
+  return html`<div class="props">
+    ${renderDeviceProps({
+      device, nextKind, nextProps: nextKind ? o.nextProps[nextKind] : null, lang: o.lang,
+      onDevice: (patch, name) => { if (device) edit(setDeviceProps(level, device.id, patch, name)); },
+      onPlacement: p => { if (device) edit(moveDevice(level, device.id, p)); },
+      onNext: patch => {
+        if (!nextKind) return;
+        o.setNextProps({ ...o.nextProps, [nextKind]: { ...o.nextProps[nextKind], ...patch, kind: nextKind } as DeviceProps });
+      },
+      onDelete: () => { if (device) o.remove(deleteDevice(level, device.id)); },
+      onNotice: msg => o.setNotice(msg),
+    })}
+    ${o.notice ? html`<p class="warn">${o.notice}</p>` : nothing}
+  </div>`;
+}

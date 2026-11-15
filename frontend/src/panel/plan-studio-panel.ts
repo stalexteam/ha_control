@@ -1,7 +1,7 @@
 import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from 'lit';
 import { property, state } from 'lit/decorators.js';
 import type { Id, Level, Plan, Pt, WallType } from '../model/types';
-import { WALL_PRESETS, deviceDefaults, emptyPlan, normalizeLevel } from '../model/types';
+import { WALL_PRESETS, emptyPlan, normalizeLevel } from '../model/types';
 import { newId } from '../model/ids';
 import { deleteWall } from '../model/ops';
 import { deleteOpening } from '../model/openings';
@@ -9,17 +9,14 @@ import { deleteDevice } from '../model/devices';
 import { deleteZone } from '../model/zones';
 import { History } from '../editor/history';
 import { SaveController } from '../editor/save';
-import { createSelectTool } from '../editor/tools/select-tool';
-import { createBoxTool } from '../editor/tools/box-tool';
-import { createWallTool } from '../editor/tools/wall-tool';
-import { createOpeningTool } from '../editor/tools/opening-tool';
-import { createZoneTool } from '../editor/tools/zone-tool';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
-import { deletePlan, getPlan, listPlans, type HassLike, type PlanSummary } from '../api';
+import { deletePlan, errorText, getPlan, listPlans, type HassLike, type PlanSummary } from '../api';
 import { paletteFor, renderLevel } from '../render/plan-svg';
 import { t } from '../i18n';
-import { renderToolRail, renderTopBar, type ToolId } from './toolbar';
+import { renderToolRail, renderTopBar } from './toolbar';
+import { createTool, selectionExists, toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
 import { renderProps, type BoxMeasure } from './props-panel';
+import { initialNextProps, renderEquipmentProps } from './device-props';
 import { renderStatusBar } from './statusbar';
 import { renderTracker, trackerLive } from './tracker';
 import { panelStyles, paletteVars } from './styles';
@@ -29,20 +26,6 @@ import { renderConflictDialog, renderDeleteDialog, renderDraftBanner, renderNewP
 import { DraftStore, type Draft } from '../editor/draft';
 
 const EMPTY_LEVEL: Level = { id: '', name: '', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] };
-
-function exists(level: Level, s: Selection): boolean {
-  const list = s.kind === 'wall' ? level.walls : s.kind === 'node' ? level.nodes
-    : s.kind === 'opening' ? level.openings : s.kind === 'device' ? level.devices : level.zones;
-  return list.some(x => x.id === s.id);
-}
-
-function errorText(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'object' && err !== null && typeof (err as { message?: unknown }).message === 'string') {
-    return (err as { message: string }).message;
-  }
-  return String(err);
-}
 
 export class PlanStudioPanel extends LitElement {
   static styles = panelStyles;
@@ -59,6 +42,11 @@ export class PlanStudioPanel extends LitElement {
   @state() thickness = WALL_PRESETS.bearing;
   @state() private boxMeasure: BoxMeasure = 'inner';
   @state() private grid = true;
+  /** Plan / Equipment tab (per session, not saved); cones: device cones and zones are drawn. */
+  @state() mode: EditorMode = 'plan';
+  @state() private cones = true;
+  /** "Next device" props per kind; they drive ctx.deviceDefaults. */
+  @state() nextProps = initialNextProps();
   @state() private view: View = { x: -1000, y: -1000, scale: 0.08 };
   @state() private size = { w: 0, h: 0 };
   @state() private dialog: 'none' | 'conflict' | 'conflict-again' = 'none';
@@ -114,9 +102,9 @@ export class PlanStudioPanel extends LitElement {
       boxMeasure: () => this.boxMeasure,
       select: s => { this.selection = s; this.notice = null; },
       lang: () => this.uiLang,
-      deviceDefaults: k => deviceDefaults(k, 'free'),
+      deviceDefaults: k => this.nextProps[k],
     };
-    this.activeTool = this.makeTool('select');
+    this.activeTool = createTool('select', this.ctx);
     const host: InputHost = {
       tool: () => this.activeTool,
       get view() { return self.view; },
@@ -140,16 +128,6 @@ export class PlanStudioPanel extends LitElement {
   }
 
   private get uiLang(): string { return this.hass?.language ?? 'en'; }
-
-  private makeTool(id: ToolId): Tool {
-    switch (id) {
-      case 'box': return createBoxTool(this.ctx);
-      case 'wall': return createWallTool(this.ctx);
-      case 'door': case 'window': case 'opening': return createOpeningTool(this.ctx, id);
-      case 'zone': return createZoneTool(this.ctx);
-      default: return createSelectTool(this.ctx);
-    }
-  }
 
   // ---- lifecycle ----
 
@@ -296,7 +274,7 @@ export class PlanStudioPanel extends LitElement {
   }
 
   private openFresh(): void {
-    this.toolId = 'select';
+    this.toolId = toolIdsFor(this.mode)[0];
     this.notice = null;
     this.save.reset(null);
     this.adopt(emptyPlan(t('plan.default', this.uiLang)));
@@ -348,7 +326,7 @@ export class PlanStudioPanel extends LitElement {
     this.plan = { ...plan, levels: plan.levels.map(normalizeLevel) };
     this.history = new History<Level>(this.plan.levels[0]);
     this.activeTool.cancel();
-    this.activeTool = this.makeTool(this.toolId);
+    this.activeTool = createTool(this.toolId, this.ctx);
     this.selection = null;
     this.needFit = true;
   }
@@ -397,7 +375,7 @@ export class PlanStudioPanel extends LitElement {
     if (!this.history) return;
     this.history.push(next);
     this.save.markDirty();
-    if (this.selection && !exists(next, this.selection)) { this.activeTool.cancel(); this.selection = null; }
+    if (this.selection && !selectionExists(next, this.selection)) { this.activeTool.cancel(); this.selection = null; }
     this.requestUpdate();
   }
 
@@ -411,7 +389,7 @@ export class PlanStudioPanel extends LitElement {
   private deleteSelection(): boolean {
     const s = this.selection;
     const level = this.history?.current;
-    if (!s || !level || s.kind === 'node' || !exists(level, s)) return false;
+    if (!s || !level || s.kind === 'node' || !selectionExists(level, s)) return false;
     this.commitRemoval(s.kind === 'wall' ? deleteWall(level, s.id) : s.kind === 'opening' ? deleteOpening(level, s.id)
       : s.kind === 'device' ? deleteDevice(level, s.id) : deleteZone(level, s.id));
     return true;
@@ -439,7 +417,14 @@ export class PlanStudioPanel extends LitElement {
     this.notice = null;
     if (id === 'box') { this.wallType = 'bearing'; this.thickness = WALL_PRESETS.bearing; }
     this.toolId = id;
-    this.activeTool = this.makeTool(id);
+    this.activeTool = createTool(id, this.ctx);
+  }
+
+  /** Plan / Equipment tab: cancels the tool, clears the selection, activates the tab's first tool. */
+  setMode(mode: EditorMode): void {
+    if (mode === this.mode) return;
+    this.mode = mode;
+    this.pickTool(toolIdsFor(mode)[0]);
   }
 
   // ---- saving ----
@@ -553,7 +538,7 @@ export class PlanStudioPanel extends LitElement {
     return html`
       <div class="ed" style=${paletteVars(pal)} @click=${this.refocus} @change=${this.refocusAfterChange}>
         ${renderTopBar({
-          lang, planName: this.plan.name, planId: this.plan.id, plans: this.planOptions(), wallType: this.wallType, thickness: this.thickness,
+          lang, mode: this.mode, onMode: m => this.setMode(m), planName: this.plan.name, planId: this.plan.id, plans: this.planOptions(), wallType: this.wallType, thickness: this.thickness,
           canUndo: this.history.canUndo, canRedo: this.history.canRedo,
           saveState: s.state, dirty: s.dirty, errorMessage: s.errorMessage,
           lead: this.narrow ? html`<ha-menu-button .hass=${this.hass} .narrow=${this.narrow}></ha-menu-button>` : nothing,
@@ -564,7 +549,7 @@ export class PlanStudioPanel extends LitElement {
           onThickness: mm => { this.thickness = mm; },
           onUndo: () => this.undo(), onRedo: () => this.redo(), onSave: () => this.doSave(),
         })}
-        ${renderToolRail(this.toolId, lang, id => this.pickTool(id))}
+        ${renderToolRail(this.mode, this.toolId, lang, id => this.pickTool(id))}
         <div class="canvas">
           <svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox=${`${x} ${y} ${w} ${h}`}
             preserveAspectRatio="xMinYMin meet" style=${`background:${pal.background}`}
@@ -572,7 +557,7 @@ export class PlanStudioPanel extends LitElement {
             @pointerup=${this.input.pointerUp} @pointercancel=${this.input.pointerAbort}
             @lostpointercapture=${this.input.pointerAbort} @wheel=${this.input.wheel} @contextmenu=${(e: Event) => e.preventDefault()}>
             ${this.grid ? renderGrid(this.view, w, h, pal) : nothing}
-            ${renderLevel(level, { palette: pal, selection: this.selection, preview, scale, lang })}
+            ${renderLevel(level, { palette: pal, selection: this.selection, preview, scale, lang, mode: this.mode, showCones: this.cones })}
             ${preview.tracker ? renderTracker(preview.tracker, {
               palette: pal, scale, lang, mode: this.toolId === 'box' ? 'box' : 'wall',
               live: trackerLive(preview, this.toolId === 'box' ? 'box' : 'wall', this.boxMeasure, this.thickness),
@@ -583,7 +568,11 @@ export class PlanStudioPanel extends LitElement {
             onRestore: () => this.restoreDraft(this.pendingDraft!), onDiscard: () => this.discardDraft(this.pendingDraft!),
           }) : nothing}
         </div>
-        ${renderProps({
+        ${this.mode === 'equipment' ? renderEquipmentProps({
+          level, selection: this.selection, toolId: this.toolId, nextProps: this.nextProps, lang, notice: this.notice,
+          commit: next => this.commit(next), remove: next => this.commitRemoval(next),
+          setNextProps: np => { this.nextProps = np; }, setNotice: msg => { this.notice = msg; },
+        }) : renderProps({
           level, selection: this.selection, tool: this.toolId, boxMeasure: this.boxMeasure, lang, notice: this.notice,
           wallType: this.wallType, thickness: this.thickness,
           setWallType: wt => this.setWallType(wt), setThickness: mm => { this.thickness = mm; },
@@ -593,7 +582,7 @@ export class PlanStudioPanel extends LitElement {
         ${renderStatusBar({
           lang, grid: this.grid, zoomPct: Math.round(scale * 1000),
           snap: preview.snap && preview.snap.kind !== 'none' ? t(`snap.${preview.snap.kind}`, lang) : null,
-          onGrid: on => { this.grid = on; },
+          onGrid: on => { this.grid = on; }, cones: this.cones, onCones: on => { this.cones = on; },
         })}
         ${this.renderDialog()}
       </div>`;
