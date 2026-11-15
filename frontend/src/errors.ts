@@ -12,5 +12,6 @@ export function messageOf(err: unknown): string {
     if (typeof e.message === 'string' && e.message) return e.message;
     if (e.code !== undefined) return String(e.code);
   }
+  if (typeof err === 'object' && err !== null) return 'Unknown error';
   return String(err);
 }

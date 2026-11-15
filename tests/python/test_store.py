@@ -25,7 +25,8 @@ class FailingStore:
         self.saved = data
 
 
-def _load_store_module():
+@pytest.fixture
+def store_module(monkeypatch):
     """Import store.py inside a synthetic package with the two Home Assistant imports stubbed."""
     stubs = {
         "homeassistant": types.ModuleType("homeassistant"),
@@ -37,18 +38,21 @@ def _load_store_module():
     stubs["homeassistant.helpers.storage"].Store = FailingStore
     pkg = types.ModuleType("ps_under_test")
     pkg.__path__ = [str(PKG)]
-    sys.modules.update(stubs)
-    sys.modules["ps_under_test"] = pkg
+    for name, mod in stubs.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+    monkeypatch.setitem(sys.modules, "ps_under_test", pkg)
+    monkeypatch.delitem(sys.modules, "ps_under_test.store", raising=False)
+    module = importlib.import_module("ps_under_test.store")
+    yield module
     sys.modules.pop("ps_under_test.store", None)
-    return importlib.import_module("ps_under_test.store")
 
 
 def _plan(name: str) -> dict:
     return {"id": "p1", "name": name, "schemaVersion": 1, "levels": [{"id": "l1"}]}
 
 
-def test_failed_save_rolls_back_and_failed_delete_restores():
-    store = _load_store_module().PlanStore(None)
+def test_failed_save_rolls_back_and_failed_delete_restores(store_module):
+    store = store_module.PlanStore(None)
 
     async def run() -> None:
         await store.async_load()

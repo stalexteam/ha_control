@@ -12,6 +12,10 @@ describe('messageOf', () => {
     expect(messageOf({ code: 'unauthorized', message: 'Admin only' })).toBe('Admin only');
     expect(messageOf({ code: 'not_found' })).toBe('not_found');
   });
+  it('gives generic text for objects without message or code', () => {
+    expect(messageOf({})).toBe('Unknown error');
+    expect(messageOf({ message: '' })).toBe('Unknown error');
+  });
   it('falls back to String()', () => {
     expect(messageOf(null)).toBe('null');
   });

@@ -51,6 +51,11 @@ const NUM: Record<NumRule, { rule: WholeRule; bad: string }> = {
 const numProp = (o: DevicePropsOpts, field: string, value: number, rule: NumRule, apply: (v: number) => boolean) =>
   numField({ ...NUM[rule], value, field, setNotice: o.onNotice, apply, skipSame: true });
 
+/** Option sets rendered through `labelled` (each member needs a `shape.*` / `symbol.*` dictionary key). */
+export const LIGHT_SHAPES = ['round', 'linear', 'spot'] as const;
+export const EQUIPMENT_SHAPES = ['rect', 'circle'] as const;
+export const EQUIPMENT_SYMBOLS = ['boiler', 'pc', 'automation', 'other'] as const;
+
 const labelled = <T extends string>(values: T[], prefix: string) => values.map(v => ({ v, label: t(`${prefix}.${v}`) }));
 
 /** Kind-specific fields; `pre` prefixes data-field names ("next-" for the next-device defaults). */
@@ -62,7 +67,7 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
   switch (p.kind) {
     case 'ceiling_light': {
       return html`
-        ${row(t('props.shape'), select(p.shape, labelled(['round', 'linear', 'spot'], 'shape'), v => set({ shape: v }), `${pre}shape`))}
+        ${row(t('props.shape'), select(p.shape, labelled([...LIGHT_SHAPES], 'shape'), v => set({ shape: v }), `${pre}shape`))}
         ${p.shape === 'linear'
           ? html`${mm('length', 'props.length', p.length)}${mm('width', 'props.width', p.width)}`
           : mm('diameter', 'props.diameter', p.diameter)}
@@ -88,11 +93,11 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
       return pre === '' && o.device && o.level ? zoneFields(o.level, o.device, p.zoneIds, set) : nothing_();
     case 'equipment':
       return html`
-        ${row(t('props.shape'), select(p.shape, labelled(['rect', 'circle'], 'shape'), v => set({ shape: v }), `${pre}shape`))}
+        ${row(t('props.shape'), select(p.shape, labelled([...EQUIPMENT_SHAPES], 'shape'), v => set({ shape: v }), `${pre}shape`))}
         ${p.shape === 'rect'
           ? html`${mm('width', 'props.width', p.width)}${mm('depth', 'props.depth', p.depth)}`
           : mm('diameter', 'props.diameter', p.diameter)}
-        ${row(t('props.symbol'), select(p.symbol, labelled(['boiler', 'pc', 'automation', 'other'], 'symbol'),
+        ${row(t('props.symbol'), select(p.symbol, labelled([...EQUIPMENT_SYMBOLS], 'symbol'),
           v => set({ symbol: v }), `${pre}symbol`))}
         ${row(t('props.label'), html`<input class="val wide" type="text" data-field=${`${pre}label`} .value=${fieldValue(p.label)}
           @change=${(e: Event) => {
