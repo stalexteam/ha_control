@@ -48,6 +48,8 @@ export interface ToolContext {
   geo(): GeoCtx;
   /** The plan device the Power step's Plan device tool places next (armed in the device list), or null. */
   placeDeviceId(): Id | null;
+  /** Called after the Plan device tool placed the armed device (the arm is cleared). */
+  devicePlaced?(): void;
   /** Sets a transfer switch position live (not part of the plan document). */
   setPosition(blockId: Id, p: Position): void;
   /** Shows (or clears with null) the panel notice. */

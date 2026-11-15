@@ -283,15 +283,26 @@ export class PlanStudioPanel extends LitElement {
     this.selection = null;
     this.notice = null;
     this.fieldNotice = null;
-    this.placeDeviceId = null;
     if (id === 'box') this.wallType = 'bearing';
     this.toolId = id;
     this.activeTool = createTool(id, this.ctx);
   }
 
+  /**
+   * Power step device list: arms a plan device for the Plan device tool (activated when another tool is on), so the
+   * next canvas click places it; the "pick a device first" notice goes. The arm stays across tool switches; a
+   * placement, leaving the step or opening another plan clears it.
+   */
+  armDevice(id: Id): void {
+    if (this.toolId !== 'power-device') this.pickTool('power-device');
+    this.placeDeviceId = id;
+    this.notice = null;
+  }
+
   /** Wizard step switch: cancels the tool, clears the selection, activates the step's first tool. */
   setMode(mode: EditorMode): void {
     if (mode === this.mode) return;
+    if (this.mode === 'power') this.placeDeviceId = null;
     this.mode = mode;
     this.pickTool(toolIdsFor(mode)[0]);
     if (mode === 'binding' || mode === 'power') this.haMeta.enter();
@@ -389,7 +400,7 @@ export class PlanStudioPanel extends LitElement {
     const s = this.save;
     const power = this.mode === 'power';
     return html`
-      <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : this.mode === 'zones' ? ' zones' : ''}"
+      <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : this.mode === 'zones' || power ? ` ${this.mode}` : ''}"
         style=${paletteVars(pal)}
         @click=${this.refocus} @change=${this.refocusAfterChange}>
         ${renderTopBar({

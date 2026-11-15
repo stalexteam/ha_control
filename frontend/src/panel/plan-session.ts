@@ -163,6 +163,7 @@ export class PlanSession {
     this.h.activeTool = createTool(this.h.toolId, this.h.ctx);
     this.h.selection = null;
     this.h.fieldNotice = null;
+    this.h.placeDeviceId = null; // an armed device belongs to the plan that was open
     this.h.needFit = true;
     this.h.needPowerFit = true;
   }

@@ -1,7 +1,10 @@
 import type { RoleSpec } from '../model/bindings';
 import type { EntityMeta, HaMeta } from './ha-meta';
 
-function matches(e: EntityMeta, spec: RoleSpec): boolean {
+/** The matching rules of a role spec; a field that is not a binding role (e.g. a power block's voltage) uses one too. */
+export type MatchSpec = Pick<RoleSpec, 'domains' | 'deviceClasses' | 'units' | 'plainDomains' | 'categories'>;
+
+function matches(e: EntityMeta, spec: MatchSpec): boolean {
   if (!spec.domains.includes(e.domain)) return false;
   if (spec.plainDomains?.includes(e.domain)) return e.deviceClass === null && e.unit === null;
   if (!spec.deviceClasses) return true;
@@ -9,10 +12,10 @@ function matches(e: EntityMeta, spec: RoleSpec): boolean {
   return e.unit !== null && !!spec.units?.includes(e.unit);
 }
 
-const cache = new WeakMap<HaMeta, WeakMap<RoleSpec, [readonly EntityMeta[] | null, readonly EntityMeta[] | null]>>();
+const cache = new WeakMap<HaMeta, WeakMap<MatchSpec, [readonly EntityMeta[] | null, readonly EntityMeta[] | null]>>();
 
 /** Strict: domain and class/unit rules, no hidden, disabled or categorised entries (except the spec's categories). showAll: domain filter only. Sorted by name, then id. */
-export function candidates(meta: HaMeta, spec: RoleSpec, showAll: boolean): readonly EntityMeta[] {
+export function candidates(meta: HaMeta, spec: MatchSpec, showAll: boolean): readonly EntityMeta[] {
   let bySpec = cache.get(meta);
   if (!bySpec) cache.set(meta, (bySpec = new WeakMap()));
   let slot = bySpec.get(spec);

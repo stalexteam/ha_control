@@ -1,4 +1,4 @@
-import { html, nothing, type TemplateResult } from 'lit';
+import type { TemplateResult } from 'lit';
 import type { Level } from '../model/types';
 import { renderEquipmentProps } from './device-props';
 import { renderProps } from './props-panel';
@@ -7,9 +7,8 @@ import { renderBindingList } from './binding-list';
 import { renderBindingProps } from './binding-props';
 import { renderZonesList } from './zones-list';
 import { renderZonesProps } from './zones-props';
+import { renderPowerProps } from './power-props';
 import type { PlanStudioPanel } from './plan-studio-panel';
-import type { ToolId } from './tool-factory';
-import { t } from '../i18n';
 
 /** The left rail: the step's tool buttons, the tools and the zone list in the Zones step, or the device list in the Binding step. */
 export function renderRail(h: PlanStudioPanel, level: Level): TemplateResult {
@@ -41,19 +40,16 @@ function bindingSide(h: PlanStudioPanel, level: Level): TemplateResult {
   });
 }
 
-/** The Power step side panel: a one-line hint for the active tool and the notice. */
-function powerSide(toolId: ToolId, notice: string | null): TemplateResult {
-  const hint = toolId === 'power-select' ? 'select' : toolId === 'power-device' ? 'device' : 'place';
-  return html`<div class="props pprops">
-    <p class="muted" data-note="power-hint">${t(`power.help.${hint}`)}</p>
-    ${notice ? html`<p class="warn">${notice}</p>` : nothing}
-  </div>`;
-}
-
 /** The properties panel of the active step. */
 export function renderSide(h: PlanStudioPanel, level: Level): TemplateResult {
   if (h.mode === 'binding') return bindingSide(h, level);
-  if (h.mode === 'power') return powerSide(h.toolId, h.notice);
+  if (h.mode === 'power') {
+    return renderPowerProps({
+      power: h.power, level, selection: h.selection, meta: h.haMeta.get(), states: h.hass?.states, frame: null,
+      notice: h.notice, toolId: h.toolId, placeDeviceId: h.placeDeviceId, onPlaceDevice: id => h.armDevice(id),
+      commitPower: next => h.commitPower(next), setPosition: (id, p) => h.setPowerPosition(id, p),
+    });
+  }
   if (h.mode === 'zones') return renderZonesProps({ level, selection: h.selection, notice: h.notice, commit: next => h.commit(next) });
   const common = {
     level, selection: h.selection, notice: h.notice,

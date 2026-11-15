@@ -51,6 +51,8 @@ describe('createToolContext', () => {
     expect(c.placeDeviceId()).toBeNull();
     h.placeDeviceId = 'd1';
     expect(c.placeDeviceId()).toBe('d1');
+    c.devicePlaced?.();
+    expect(h.placeDeviceId).toBeNull();
     c.notify('careful');
     expect(h.notice).toBe('careful');
     c.notify(null);

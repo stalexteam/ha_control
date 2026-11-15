@@ -56,6 +56,7 @@ export function createToolContext(h: ToolHost): ToolContext {
       return { device: id => devices.find(d => d.id === id) };
     },
     placeDeviceId: () => h.placeDeviceId,
+    devicePlaced: () => { h.placeDeviceId = null; },
     setPosition: (blockId, p) => h.setPowerPosition(blockId, p),
     notify: msg => { h.notice = msg; },
     pickTool: id => h.pickTool(id),

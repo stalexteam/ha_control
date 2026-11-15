@@ -35,9 +35,11 @@ export const panelStyles = css`
   .ed.binding { grid-template-columns: 250px 300px 1fr; }
   .ed.binding.rail-off { grid-template-columns: 36px 300px 1fr; }
   .ed.zones { grid-template-columns: 230px 280px 1fr; }
+  .ed.power { grid-template-columns: 64px 300px 1fr; }
   @media (max-width: 700px) {
     .ed { grid-template-columns: 54px 170px 1fr; }
     .ed.binding, .ed.zones { grid-template-columns: 170px 200px 1fr; }
+    .ed.power { grid-template-columns: 54px 200px 1fr; }
     .ed.binding.rail-off { grid-template-columns: 36px 200px 1fr; }
     .props .row { flex-wrap: wrap; }
     .props .val { max-width: 100%; }
@@ -186,6 +188,24 @@ export const panelStyles = css`
   .member { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0; cursor: pointer; }
   .member .nm { min-width: 0; }
   .member input[type="checkbox"] { margin: 0; }
+  /* Power properties: the Plan device tool's device list, read-only bindings, the action buttons. */
+  .pdevs { display: flex; flex-direction: column; margin: 8px -12px 0; }
+  .pdev { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 6px 12px;
+    border: 0; background: none; color: var(--ch-text); text-align: left; }
+  .pdev:hover { background: var(--ch-hover); }
+  .pdev.sel { background: var(--ch-tint); box-shadow: inset 3px 0 0 var(--ch-primary); }
+  .pdev .name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pdev .kind { color: var(--ch-muted); font-size: 12px; }
+  .bound { display: flex; flex-direction: column; gap: 1px; padding: 6px 10px; border: 1px solid var(--ch-divider);
+    border-radius: 6px; color: var(--ch-muted); overflow-wrap: anywhere; }
+  .bound b { font-weight: 400; color: var(--ch-text); }
+  .bound small { font-size: 12px; }
+  .pprops .val, .pprops .val.wide { max-width: min(190px, 100%); }
+  .pprops .seg { margin-top: 0; }
+  .pprops .seg button { min-width: 34px; border: 1px solid var(--ch-divider); font-variant-numeric: tabular-nums; }
+  .pprops .seg button.on { border-color: var(--ch-primary); }
+  .pactions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .pactions .btn.danger { margin-top: 0; }
   .bfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 18px;
     padding-top: 10px; border-top: 1px solid var(--ch-divider); color: var(--ch-muted); }
 

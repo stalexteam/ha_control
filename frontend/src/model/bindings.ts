@@ -8,7 +8,8 @@ export interface RoleSpec {
   categories?: string[];
 }
 
-const POWER: RoleSpec = { role: 'power', domains: ['sensor'], deviceClasses: ['power'], units: ['W', 'kW'], primary: false };
+/** A power meter: a `sensor` of class power, or with a W / kW unit (also the Power step's power fields). */
+export const POWER: RoleSpec = { role: 'power', domains: ['sensor'], deviceClasses: ['power'], units: ['W', 'kW'], primary: false };
 /** Smart button roles whose binding is a trigger (entity, slot and event). */
 const TRIGGER_ROLES = ['on', 'off', 'auto'] as const;
 export type TriggerRole = typeof TRIGGER_ROLES[number];
