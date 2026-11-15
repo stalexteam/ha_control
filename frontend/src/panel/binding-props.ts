@@ -3,10 +3,9 @@ import { isContainerKind, type BindingRole, type Device, type Level } from '../m
 import {
   activeRoleSpecs, alsoBoundTo, countNotBound, isTriggerRole, setBinding, type BindStatus, type RoleSpec,
 } from '../model/bindings';
-import { autoFill, candidates, haDevicesFor } from '../binding/candidates';
+import { candidates } from '../binding/candidates';
 import { presence, type HaMeta, type States } from '../binding/ha-meta';
 import '../binding/entity-combo';
-import '../binding/device-combo';
 import { setDeviceProps } from '../model/devices';
 import { deviceNameRow } from './device-props';
 import { containerFields, containerFlags, triggerFields } from './container-fields';
@@ -31,9 +30,6 @@ export interface BindingPropsOpts {
   notice: string | null;
   /** Shows (or, with null, clears) the message for a rejected field value. */
   setNotice(msg: string | null): void;
-  /** Report of the last HA device auto-fill, or null. */
-  fillNotice: string | null;
-  setFillNotice(msg: string | null): void;
   /** Registry load failure text, shown with Retry; null when loaded or not tried yet. */
   registryError: string | null;
   /** A registry load is running: Retry shows "Loading…" and is disabled. */
@@ -46,16 +42,6 @@ export interface BindingPropsOpts {
 /** The role's name; a smart button in toggle mode calls its `on` role "On / Off" (that trigger does both). */
 function roleLabel(d: Device, r: BindingRole): string {
   return r === 'on' && d.props.kind === 'smart_button' && !d.props.separateOff ? t('binding.onOff') : t(`role.${r}`);
-}
-
-/** What the HA device picker filled, and the roles left empty because several entities matched (with the count). */
-function fillReport(d: Device, filled: BindingRole[], several: { role: BindingRole; n: number }[]): string {
-  if (filled.length === 0 && several.length === 0) return t('binding.nothingToFill');
-  const head = filled.length
-    ? t('binding.filled').replace('{roles}', filled.map(r => roleLabel(d, r)).join(', '))
-    : t('binding.nothingFilled');
-  if (several.length === 0) return head;
-  return `${head}; ${t('binding.several').replace('{roles}', several.map(s => `${roleLabel(d, s.role)} (${s.n})`).join(', '))}`;
 }
 
 /** "Output: On", and in fault why the output is the default: "— default: not configured" or "— default: unavailable (ids)". */
@@ -76,38 +62,6 @@ function outputLine(o: BindingPropsOpts, d: Device): TemplateResult | typeof not
   const s = o.feed.stateOf(d);
   const text = s ? outputText(s) : o.feed.error ?? (o.feed.ready ? t('output.notSaved') : null);
   return text === null ? nothing : html`<p class="note" data-field="output">${text}</p>`;
-}
-
-/** Placeholder key of the HA device picker: devices to choose, registries loading, load failed, or none match. */
-function pickerText(o: BindingPropsOpts, n: number): string {
-  if (n > 0) return 'binding.haDevicePick';
-  if (o.registryLoading || (!o.meta.registryLoaded && !o.registryError)) return 'binding.haDevicesLoading';
-  return !o.meta.registryLoaded ? 'binding.haDevicesUnavailable' : 'binding.haDeviceNone';
-}
-
-/**
- * A searchable picker (by name, model and area) of the HA devices with a strict candidate for a role of the kind
- * that auto-fill fills (a smart button: `on` only). Choosing one fills the empty active roles that have exactly one
- * match on it, in one commit, and reports the result.
- */
-function haDevicePicker(o: BindingPropsOpts, d: Device): TemplateResult {
-  const devices = haDevicesFor(o.meta, d.props.kind);
-  const fill = (haId: string): void => {
-    const r = autoFill(o.level, d.id, haId, o.meta);
-    const specs = activeRoleSpecs(d);
-    const several = r.ambiguous.map(role => ({
-      role, n: candidates(o.meta, specs.find(s => s.role === role)!, false).filter(e => e.deviceId === haId).length,
-    }));
-    if (r.level !== o.level) o.commit(r.level);
-    o.setFillNotice(fillReport(d, r.filled, several));
-  };
-  return html`<div class="bfield"><span>${t('binding.haDevice')}</span>
-    <ps-device-combo data-field="ha-device" .meta=${o.meta} .devices=${devices} .label=${t('binding.haDevice')}
-      .placeholder=${t(pickerText(o, devices.length))}
-      @value-changed=${(e: CustomEvent<{ value: string | null }>) => {
-        e.stopPropagation();
-        if (e.detail.value) fill(e.detail.value);
-      }}></ps-device-combo></div>`;
 }
 
 /** Notes under a bound field: missing or unavailable in HA, and the other devices bound to the same entity (or trigger). */
@@ -141,7 +95,6 @@ function roleField(o: BindingPropsOpts, d: Device, spec: RoleSpec): TemplateResu
         e.stopPropagation();
         const next = setBinding(o.level, d.id, role, e.detail.value);
         if (next === o.level) return;
-        o.setFillNotice(null);
         o.commit(next);
       }}></ps-entity-combo>
     ${d.props.kind === 'smart_button' && isTriggerRole(role) ? triggerFields(o, d, role) : nothing}
@@ -150,8 +103,8 @@ function roleField(o: BindingPropsOpts, d: Device, spec: RoleSpec): TemplateResu
 }
 
 /**
- * Binding step properties: the selected device's name and kind, an input container's output line, the HA device
- * picker, one field per active role and, for an input container, its checkboxes after the sections above them and
+ * Binding step properties: the selected device's name and kind, an input container's output line, one field
+ * per active role and, for an input container, its checkboxes after the sections above them and
  * its settings after the roles; with nothing selected, an invitation to pick a device. The footer counts the devices
  * not bound and offers Next unbound device.
  */
@@ -167,8 +120,6 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
       <h4>${t(`device.${d.props.kind}`)}</h4>
       ${deviceNameRow(d, name => o.commit(setDeviceProps(o.level, d.id, {}, name)))}
       ${outputLine(o, d)}
-      ${haDevicePicker(o, d)}
-      ${o.fillNotice ? html`<p class="note" data-notice="fill">${o.fillNotice}</p>` : nothing}
       ${activeRoleSpecs(d).map(spec => html`${roleField(o, d, spec)}${containerFlags(o, d, spec.role)}`)}
       ${containerFields(o, d)}`
     : html`<p class="muted">${t('binding.pick')}</p>`}

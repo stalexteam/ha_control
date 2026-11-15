@@ -70,8 +70,6 @@ export class PlanStudioPanel extends LitElement {
   @state() dialog: Dialog | null = null;
   /** Error or warning text (field input, plan switch / open failures); shown in every step. */
   @state() notice: string | null = null;
-  /** Binding step: report of the last HA device auto-fill. */
-  @state() fillNotice: string | null = null;
   /**
    * Local draft found on load, waiting for Restore / Discard. While it is undecided and belongs to the open
    * plan, no new draft is written under its key (that would overwrite it).
@@ -202,7 +200,6 @@ export class PlanStudioPanel extends LitElement {
     if (op()) this.save.markDirty();
     const s = this.selection, level = this.history?.current;
     this.selection = this.mode === 'binding' && s && level && selectionExists(level, s) ? s : null;
-    if (this.mode === 'binding') this.fillNotice = null;
     this.requestUpdate();
   }
 
@@ -215,7 +212,6 @@ export class PlanStudioPanel extends LitElement {
     this.activeTool.cancel();
     this.selection = null;
     this.notice = null;
-    this.fillNotice = null;
     if (id === 'box') this.wallType = 'bearing';
     this.toolId = id;
     this.activeTool = createTool(id, this.ctx);
@@ -235,7 +231,6 @@ export class PlanStudioPanel extends LitElement {
     const d = level?.devices.find(x => x.id === id);
     if (!level || !d) return;
     this.selection = { kind: 'device', id };
-    this.fillNotice = null;
     const pose = devicePose(level, d);
     if (pose) this.view = revealPt(this.view, pose.pt, this.size.w, this.size.h);
   }

@@ -48,8 +48,7 @@ Binding links every device on the plan to Home Assistant entities, one field per
 - Layout: device list | properties | plan. The list filters Not bound / Bound / All and by text; its arrow button folds it to a narrow strip.
 - Steps:
   1. Select a device on the plan or in the list, or press "Next unbound device".
-  2. Optional: pick its "Home Assistant device" (search by name, model or area). Every empty role with exactly one matching entity on that device is filled in one undoable step. Roles with several matches stay empty, and the panel says how many matched. Filled roles are never overwritten.
-  3. Fill or change each role in its search field (for example Control and Power for a socket, Temperature and Humidity for a climate sensor). The clear button empties a role; Ctrl+Z undoes.
+  2. Fill or change each role in its search field (for example Control and Power for a socket, Temperature and Humidity for a climate sensor). The clear button empties a role; Ctrl+Z undoes.
 - Filter rules: candidates are chosen only by domain, device class and unit, never by guessing from entity ids or names. The strict list needs the role's domain and a matching device class; an entity without a device class matches by unit, and a conflicting device class excludes it (a battery % sensor is never a humidity candidate). Hidden, disabled, config and diagnostic entities are left out. "Show all" keeps only the domain filter.
 - Status:
   - Bound: the primary role is set (Control for lights, sockets, fans and equipment; Motion or Illuminance for sensors; State for a wall switch; On for a smart button, plus Off and Auto while they are enabled; Temperature or Humidity for a climate sensor).

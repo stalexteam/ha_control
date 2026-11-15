@@ -6,8 +6,6 @@ export interface RoleSpec {
   plainDomains?: string[];
   /** Entity categories the strict filter still offers (default: none). */
   categories?: string[];
-  /** false: the HA device picker neither fills this role nor lists devices for it. */
-  autoFill?: false;
 }
 
 const POWER: RoleSpec = { role: 'power', domains: ['sensor'], deviceClasses: ['power'], units: ['W', 'kW'], primary: false };
@@ -16,9 +14,8 @@ const TRIGGER_ROLES = ['on', 'off', 'auto'] as const;
 export type TriggerRole = typeof TRIGGER_ROLES[number];
 export const isTriggerRole = (r: BindingRole): r is TriggerRole => (TRIGGER_ROLES as readonly string[]).includes(r);
 /** A trigger role: events, or plain sensors. Zigbee2MQTT registers its action sensors as diagnostic, with no class and no unit. */
-const trigger = (role: TriggerRole, autoFill?: false): RoleSpec => ({
+const trigger = (role: TriggerRole): RoleSpec => ({
   role, domains: ['event', 'sensor'], plainDomains: ['sensor'], categories: ['diagnostic'], primary: true,
-  ...(autoFill === false ? { autoFill } : {}),
 });
 
 export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
@@ -33,8 +30,8 @@ export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
   wall_switch: [{ role: 'state', domains: ['switch', 'light', 'binary_sensor'], primary: true }],
   // Active roles depend on the flags: see activeRoleSpecs.
   smart_button: [
-    trigger('on'), trigger('off', false), trigger('auto', false),
-    { role: 'final', domains: ['light', 'switch'], primary: false, autoFill: false },
+    trigger('on'), trigger('off'), trigger('auto'),
+    { role: 'final', domains: ['light', 'switch'], primary: false },
   ],
   socket: [{ role: 'control', domains: ['switch'], primary: true }, POWER],
   exhaust_fan: [{ role: 'control', domains: ['switch', 'fan'], primary: true }],

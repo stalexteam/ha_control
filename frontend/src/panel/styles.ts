@@ -157,8 +157,7 @@ export const panelStyles = css`
   .warn { color: var(--ch-error); font-size: 12px; }
 
   /* Binding properties: stacked fields like HA forms. */
-  .bfield { display: flex; flex-direction: column; gap: 4px; margin: 0 0 6px; }
-  .bfield > span, .role-label { color: var(--ch-muted); font-size: 12px; }
+  .role-label { color: var(--ch-muted); font-size: 12px; }
   .role { margin-top: 14px; }
   .role-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
   .showall { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ch-muted); cursor: pointer; }

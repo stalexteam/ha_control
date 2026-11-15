@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { MetaSource } from '../../src/panel/meta-source';
-import { candidates, haDevicesFor } from '../../src/binding/candidates';
+import { candidates } from '../../src/binding/candidates';
 import { presence } from '../../src/binding/ha-meta';
 import { ROLE_SPECS } from '../../src/model/bindings';
 import type { HassLike } from '../../src/api';
@@ -36,11 +36,9 @@ describe('MetaSource', () => {
     const src = new MetaSource(h);
     const m1 = src.get();
     const c1 = candidates(m1, TEMP, false);
-    const d1 = haDevicesFor(m1, 'climate_sensor');
     tick(h, valueTick(S1, 'sensor.t', '22'));
     expect(src.get()).toBe(m1);
     expect(candidates(src.get(), TEMP, false)).toBe(c1);
-    expect(haDevicesFor(src.get(), 'climate_sensor')).toBe(d1);
   });
 
   it('a changed device_class, a new entity or a renamed one gives a new meta', () => {

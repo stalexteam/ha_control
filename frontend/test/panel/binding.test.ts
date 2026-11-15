@@ -2,8 +2,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createMockHass, STORAGE_KEY } from '../../dev/mock-hass';
 import type { HassLike } from '../../src/api';
-import type { DeviceCombo } from '../../src/binding/device-combo';
-import { candidates, haDevicesFor } from '../../src/binding/candidates';
+import { candidates } from '../../src/binding/candidates';
 import { loadRegistries, mergeMeta, metaFromStates } from '../../src/binding/ha-meta';
 import { ROLE_SPECS } from '../../src/model/bindings';
 import { deviceDefaults, type Device, type DeviceKind, type DevicePlacement, type Level } from '../../src/model/types';
@@ -94,31 +93,6 @@ async function open(fail: Fail = { on: false }): Promise<{ el: PlanStudioPanel; 
   return { el, calls };
 }
 
-const deviceCombo = (el: PlanStudioPanel) => $<DeviceCombo>(el, '.props ps-device-combo[data-field="ha-device"]');
-
-/** Opens the HA device picker and types `query`; returns the ids of the rows shown. */
-async function searchDevices(el: PlanStudioPanel, query: string): Promise<string[]> {
-  const c = deviceCombo(el);
-  if (!c.shadowRoot!.querySelector('.srch')) {
-    c.shadowRoot!.querySelector<HTMLElement>('.cbox')!.click();
-    await c.updateComplete;
-  }
-  const input = c.shadowRoot!.querySelector<HTMLInputElement>('.srch input')!;
-  input.value = query;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-  await c.updateComplete;
-  return [...c.shadowRoot!.querySelectorAll('.opt')].map(r => r.getAttribute('data-id')!);
-}
-
-/** Picks the first HA device matching `query` with Enter. */
-async function haDevice(el: PlanStudioPanel, query: string): Promise<void> {
-  await searchDevices(el, query);
-  const c = deviceCombo(el);
-  c.shadowRoot!.querySelector('.srch input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-  await c.updateComplete;
-  await el.updateComplete;
-}
-
 describe('binding step', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -163,7 +137,7 @@ describe('binding step', () => {
     expect(dot(el, 'g')).toContain('missing');
   });
 
-  it('a session error notice shows as a warning in the Binding step with nothing selected, and apart from the fill report', async () => {
+  it('a session error notice shows as a warning in the Binding step with nothing selected', async () => {
     const { el } = await open();
     expect(el.selection).toBeNull();
     el.notice = 'Plan not found';
@@ -172,10 +146,7 @@ describe('binding step', () => {
     expect(n.textContent!.trim()).toBe('Plan not found');
     expect(n.classList.contains('warn')).toBe(true);
     await pick(el, 'c');
-    await haDevice(el, 'WC sensor');
     expect($(el, '.props [data-notice="session"]').textContent!.trim()).toBe('Plan not found');
-    expect($(el, '.props [data-notice="fill"]').textContent!.trim()).toBe('Filled: Temperature, Humidity');
-    expect(el.fillNotice).toBe('Filled: Temperature, Humidity');
     expect(el.notice).toBe('Plan not found');
   });
 
@@ -206,32 +177,6 @@ describe('binding step', () => {
     await press(el, '.props [data-action="reload-registries"]');
     await vi.waitFor(() => expect(notice(el)).toBeNull());
     expect(calls).toHaveLength(9);
-  });
-
-  it('the HA device picker placeholder tells loading, failed and loaded-but-empty apart', async () => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      plans: { P1: { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level()] } },
-    }));
-    const fail: Fail = { on: true };
-    let release!: () => void;
-    fail.gate = new Promise<void>(r => { release = r; });
-    const { hass } = haHass(fail);
-    const el = await mount(hass);
-    el.history!.push({ ...el.history!.current, devices: [...el.history!.current.devices, dev('m', 'Motion', 'motion_sensor', free(500, 500))] });
-    await press(el, '[data-mode="binding"]');
-    await pick(el, 'm');
-    const ph = () => deviceCombo(el).shadowRoot!.querySelector('.ph')!.textContent!.trim();
-    expect(ph()).toBe('Loading Home Assistant devices…');
-    release();
-    await vi.waitFor(() => expect(notice(el)).not.toBeNull());
-    expect(ph()).toBe('Home Assistant devices unavailable');
-    fail.on = false;
-    await press(el, '[data-action="retry-registry"]');
-    await vi.waitFor(() => expect(notice(el)).toBeNull());
-    await pick(el, 'c');
-    expect(ph()).toBe('Choose one to fill the empty roles');
-    await pick(el, 'm');
-    expect(ph()).toBe('No Home Assistant device has a matching entity');
   });
 
   it('a socket shows its name, kind, and the Control and Power fields', async () => {
@@ -360,46 +305,6 @@ describe('binding step', () => {
     expect(el.shadowRoot!.querySelector('.props [data-note="unavailable"]')).toBeNull();
   });
 
-  it('the HA device picker is searchable by name, model and area', async () => {
-    const { el } = await open();
-    await pick(el, 'c');
-    expect(deviceCombo(el).shadowRoot!.querySelector('.cbox')!.textContent).toContain('Choose one to fill the empty roles');
-    expect(await searchDevices(el, '')).toEqual(['th2', 'th1']);
-    expect(await searchDevices(el, 'th-2')).toEqual(['th2']);
-    expect(await searchDevices(el, 'wc')).toEqual(['th1']);
-    expect(await searchDevices(el, 'plug')).toEqual([]);
-  });
-
-  it('the HA device picker fills the empty climate roles in one undoable commit; the selection stays', async () => {
-    const { el } = await open();
-    await pick(el, 'c');
-    const commit = vi.spyOn(el, 'commit');
-    await haDevice(el, 'WC sensor');
-    expect(commit).toHaveBeenCalledTimes(1);
-    expect(device(el, 'c').bindings).toEqual({ temperature: 'sensor.t_wc', humidity: 'sensor.h_wc' });
-    expect($(el, '.props [data-notice="fill"]').textContent!.trim()).toBe('Filled: Temperature, Humidity');
-    expect(deviceCombo(el).value).toBeNull();
-    await undo(el);
-    expect(device(el, 'c').bindings).toBeUndefined();
-    expect(el.selection).toEqual({ kind: 'device', id: 'c' });
-    expect(el.shadowRoot!.querySelector('.props [data-notice="fill"]')).toBeNull();
-  });
-
-  it('the HA device picker leaves ambiguous roles empty and says how many matched', async () => {
-    const { el } = await open();
-    await pick(el, 'c');
-    await haDevice(el, 'TH-200');
-    expect(device(el, 'c').bindings).toEqual({ humidity: 'sensor.h_b' });
-    expect($(el, '.props [data-notice="fill"]').textContent!.trim()).toBe('Filled: Humidity; several matches for: Temperature (2)');
-    // Filled roles are never overwritten.
-    await haDevice(el, 'WC sensor');
-    expect(device(el, 'c').bindings).toEqual({ humidity: 'sensor.h_b', temperature: 'sensor.t_wc' });
-    expect($(el, '.props [data-notice="fill"]').textContent!.trim()).toBe('Filled: Temperature');
-    await haDevice(el, 'Twin');
-    expect($(el, '.props [data-notice="fill"]').textContent!.trim()).toBe('Nothing to fill: no empty role matches an entity of this device.');
-    expect(el.history!.canUndo).toBe(true);
-  });
-
   it('Next unbound device in the properties panel moves the selection; the footer counts not-bound devices', async () => {
     const { el } = await open();
     expect($(el, '.props').textContent).toContain('Pick a device on the plan or in the list, or press Next unbound device.');
@@ -447,7 +352,6 @@ describe('dev harness mock', () => {
     const hass = createMockHass({ demo: true });
     const meta = mergeMeta(metaFromStates(hass.states), await loadRegistries(hass));
     for (const kind of Object.keys(ROLE_SPECS) as DeviceKind[]) {
-      expect(haDevicesFor(meta, kind).length, kind).toBeGreaterThan(0);
       for (const spec of ROLE_SPECS[kind]) expect(candidates(meta, spec, false).length, `${kind}.${spec.role}`).toBeGreaterThan(0);
     }
   });
