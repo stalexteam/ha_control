@@ -41,6 +41,7 @@ import { EditorInput } from './input';
 import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
+import { PowerFeed, powerPayload } from '../live/power-feed';
 
 export class PlanStudioPanel extends LitElement {
   static styles = panelStyles;
@@ -112,6 +113,8 @@ export class PlanStudioPanel extends LitElement {
   readonly haMeta = new MetaSource(this);
   /** Live state of the open plan's input containers (subscribed while the panel is attached). */
   readonly feed = new ContainerFeed(this, () => this.hass?.connection);
+  /** Live values of the schematic draft (subscribed only in the Power step of an attached panel). */
+  readonly powerFeed = new PowerFeed(this, () => this.hass?.connection);
 
   /** Binding status of a device, from live states. Until the registries are loaded no entity is Missing (its presence is unknown). */
   readonly bindStatus = (d: Device): BindStatus => bindingStatus(d, eid => presence(this.haMeta.get(), eid, this.hass?.states));
@@ -154,6 +157,7 @@ export class PlanStudioPanel extends LitElement {
     window.addEventListener('beforeunload', this.onBeforeUnload);
     window.addEventListener('pagehide', this.onPageHide);
     this.feed.watch(this.plan?.id ?? null); // re-attached: subscribe again (no-op before the first load)
+    this.watchPower();
   }
 
   disconnectedCallback(): void {
@@ -169,6 +173,7 @@ export class PlanStudioPanel extends LitElement {
     this.resizeObs?.disconnect();
     this.resizeObs = null;
     this.feed.stop();
+    this.powerFeed.stop();
   }
 
   protected willUpdate(changed: PropertyValues): void {
@@ -178,6 +183,13 @@ export class PlanStudioPanel extends LitElement {
     if (this.needPowerFit && sized && this.mode === 'power') { this.needPowerFit = false; this.fitPower(); }
     // A detached panel still updates when handed a new hass: it keeps no subscription until it is attached again.
     this.feed.watch(this.isConnected ? this.plan?.id ?? null : null);
+    this.watchPower();
+  }
+
+  /** The power feed carries the draft schematic; it is idle outside the Power step and while detached. */
+  private watchPower(): void {
+    const level = this.isConnected && this.mode === 'power' ? this.level : null;
+    this.powerFeed.watch(level && this.plan ? this.plan.id : null, level ? powerPayload(this.power, level) : null);
   }
 
   protected updated(): void {
@@ -251,10 +263,7 @@ export class PlanStudioPanel extends LitElement {
 
   /** Sets a transfer switch position live on the server (not saved with the plan); a failure shows as the notice. */
   setPowerPosition(blockId: Id, p: Position): void {
-    const conn = this.hass?.connection;
-    if (!conn || !this.plan) return;
-    conn.sendMessagePromise({ type: 'plan_studio/power/set_position', plan_id: this.plan.id, block_id: blockId, position: p })
-      .catch((err: unknown) => { this.notice = messageOf(err); });
+    this.powerFeed.setPosition(blockId, p).catch((err: unknown) => { this.notice = messageOf(err); });
   }
 
   undo(): void { this.step(() => this.history?.undo() ?? null); }
@@ -427,7 +436,7 @@ export class PlanStudioPanel extends LitElement {
             @lostpointercapture=${this.input.pointerAbort} @wheel=${this.input.wheel} @contextmenu=${(e: Event) => e.preventDefault()}>
             ${this.grid ? renderGrid(this.view, w, h, pal, power ? 0.1 : 1) : nothing}
             ${this.mode === 'power' ? renderPower(this.power, {
-              palette: pal, selection: this.selection, preview, scale, frame: null, geo: this.ctx.geo(),
+              palette: pal, selection: this.selection, preview, scale, frame: this.powerFeed.frame, geo: this.ctx.geo(),
             }) : renderLevel(level, {
               palette: pal, selection: this.selection, preview, scale, mode: this.mode, showCones: this.cones,
               bindingStatus: this.bindStatus,

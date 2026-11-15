@@ -45,7 +45,7 @@ export function renderSide(h: PlanStudioPanel, level: Level): TemplateResult {
   if (h.mode === 'binding') return bindingSide(h, level);
   if (h.mode === 'power') {
     return renderPowerProps({
-      power: h.power, level, selection: h.selection, meta: h.haMeta.get(), states: h.hass?.states, frame: null,
+      power: h.power, level, selection: h.selection, meta: h.haMeta.get(), states: h.hass?.states, frame: h.powerFeed.frame,
       notice: h.notice, toolId: h.toolId, placeDeviceId: h.placeDeviceId, onPlaceDevice: id => h.armDevice(id),
       commitPower: next => h.commitPower(next), setPosition: (id, p) => h.setPowerPosition(id, p),
     });
