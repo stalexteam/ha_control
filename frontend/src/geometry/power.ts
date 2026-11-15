@@ -143,9 +143,16 @@ function busAxis(bus: Bus, at: number): Pt {
     : { x: bus.x + bus.w / 2, y: bus.y + at * bus.h };
 }
 
-/** Where a wire meets a bus: at `at` along the long axis, on the edge facing `toward` (a tie goes bottom or right). */
+/**
+ * Where a wire meets a bus: at `at` along the long axis, on the edge facing `toward` (a tie goes bottom or right).
+ * At exactly 0 or 1 (a drop on a bus end) it meets the centre of that end face instead.
+ */
 export function busAttach(bus: Bus, at: number, toward: Pt): { pt: Pt; side: PortSide } {
   const r = { x: bus.x, y: bus.y, w: bus.w, h: bus.h };
+  if (at === 0 || at === 1) {
+    const side: PortSide = isHorizontal(bus) ? (at === 0 ? 'left' : 'right') : (at === 0 ? 'top' : 'bottom');
+    return { pt: sidePoint(r, side, 0.5), side };
+  }
   const c = centre(r);
   const side: PortSide = isHorizontal(bus)
     ? (toward.y < c.y ? 'top' : 'bottom')

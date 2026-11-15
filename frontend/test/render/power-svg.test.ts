@@ -133,6 +133,30 @@ describe('renderPower wires', () => {
   });
 });
 
+describe('renderPower bus name', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+  const nameOf = (h: number) => {
+    const bus: PowerBlock = { id: 'b', kind: 'bus', name: 'Main', x: 0, y: 100, w: 240, h };
+    return draw({ blocks: [bus], wires: [] }).querySelector('text.bus-name')!;
+  };
+
+  it('a 12-thick bus has its name inside, scaled to fit', () => {
+    const t = nameOf(12);
+    expect(t.getAttribute('font-size')).toBe('8');
+    expect(Number(t.getAttribute('y'))).toBe(106);
+  });
+
+  it('a 20-thick bus keeps the normal font', () => {
+    const t = nameOf(20);
+    expect(t.getAttribute('font-size')).toBe('10.5');
+    expect(Number(t.getAttribute('y'))).toBe(110);
+  });
+
+  it('a 7-thick bus is drawn beside', () => {
+    expect(Number(nameOf(7).getAttribute('y'))).toBe(93);
+  });
+});
+
 describe('renderPower blocks', () => {
   beforeEach(() => { document.body.innerHTML = ''; });
 

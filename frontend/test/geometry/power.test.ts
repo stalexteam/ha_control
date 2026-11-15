@@ -391,6 +391,13 @@ describe('busAttach', () => {
     expect(busAttach(vbus, 0.5, { x: 300, y: 0 })).toEqual({ pt: { x: 12, y: 100 }, side: 'right' });
     expect(busAttach(vbus, 0.1, { x: -300, y: 0 })).toEqual({ pt: { x: 0, y: 20 }, side: 'left' });
   });
+
+  it('meets the centre of the end face when at is 0 or 1', () => {
+    expect(busAttach(hbus, 0, { x: -50, y: 300 })).toEqual({ pt: { x: 0, y: 106 }, side: 'left' });
+    expect(busAttach(hbus, 1, { x: 50, y: -300 })).toEqual({ pt: { x: 240, y: 106 }, side: 'right' });
+    expect(busAttach(vbus, 0, { x: 300, y: 500 })).toEqual({ pt: { x: 6, y: 0 }, side: 'top' });
+    expect(busAttach(vbus, 1, { x: -300, y: -500 })).toEqual({ pt: { x: 6, y: 200 }, side: 'bottom' });
+  });
 });
 
 describe('wireEnds', () => {
@@ -407,6 +414,16 @@ describe('wireEnds', () => {
     expect(e.a.side).toBe('bottom');
     expect(e.b.pt).toEqual({ x: 0, y: 200 });
     expect(e.b.side).toBe('top');
+  });
+
+  it('a wire to a bus end meets the end face; a port level with it routes straight', () => {
+    const left: PowerBlock = { id: 'l', kind: 'grid', name: 'Grid', x: -400, y: 0 };
+    const w = wire('w', { block: 'l', port: 'OUT' }, { bus: 'b', at: 0 });
+    const s = schema([left, bus], [w]);
+    const e = wireEnds(s, w, G)!;
+    expect(e.b).toMatchObject({ pt: { x: -100, y: 206 }, side: 'left' });
+    const level = { a: { ...e.a, pt: { x: e.a.pt.x, y: 206 }, side: 'right' as const }, b: e.b };
+    expect(routeWire(level.a, level.b)).toEqual([{ x: e.a.pt.x, y: 206 }, { x: -100, y: 206 }]);
   });
 
   it('joins two buses', () => {

@@ -47,8 +47,8 @@ const ARROW_W = 4.5;
 const NAME_PX = 12;
 const VALUE_PX = 11.5;
 const BUS_PX = 10.5;
-/** A bus at least this thick carries its name inside. */
-const BUS_INSIDE = 15;
+/** Smallest font a bus name is shrunk to inside the bar; thinner buses carry it beside. */
+const BUS_MIN_PX = 6;
 
 const PORT_ICONS: Partial<Record<PortName, string>> = {
   IN: mdiPowerPlug, OUT: mdiPowerSocketEu, BAT: mdiPowerPlugBattery, PV: mdiSolarPowerVariant,
@@ -281,7 +281,8 @@ function renderBlock(s: PowerSchema, b: PowerBlock, o: PowerRenderOpts,
 
 /**
  * A bus: a bar outlined in the colour of its liveliest wire. Its name sits in the longest stretch free of terminals,
- * inside the bar when it is thick enough, else beside it (above a horizontal bus, left of a vertical one).
+ * inside the bar, its font scaled to the thickness (BUS_PX at most, 4 px of padding), else beside it (above a
+ * horizontal bus, left of a vertical one) when that font would be below BUS_MIN_PX.
  */
 function renderBus(b: Bus, terminals: Pt[], style: WireStyle | undefined, o: PowerRenderOpts) {
   const p = o.palette;
@@ -291,7 +292,9 @@ function renderBus(b: Bus, terminals: Pt[], style: WireStyle | undefined, o: Pow
   const thick = horiz ? b.h : b.w;
   let label: SVGTemplateResult | typeof nothing = nothing;
   const name = b.name ?? '';
-  const need = name.length * BUS_PX * 0.58 + 12;
+  const font = Math.min(BUS_PX, thick - 4);
+  const inside = font >= BUS_MIN_PX;
+  const need = name.length * (inside ? font : BUS_PX) * 0.58 + 12;
   if (name) {
     const taken = terminals.map((q) => (horiz ? q.x : q.y)).sort((u, v) => u - v);
     let gap = { lo: 0, hi: -1 };
@@ -303,12 +306,11 @@ function renderBus(b: Bus, terminals: Pt[], style: WireStyle | undefined, o: Pow
     }
     if (gap.hi - gap.lo >= need) {
       const mid = (gap.lo + gap.hi) / 2;
-      const inside = thick >= BUS_INSIDE;
       const at = horiz
         ? { x: mid, y: inside ? b.y + b.h / 2 : b.y - 7 }
         : { x: inside ? b.x + b.w / 2 : b.x - 7, y: mid };
       label = svg`<text class="bus-name" x=${at.x} y=${at.y} text-anchor="middle" dominant-baseline="central"
-        font-size=${BUS_PX} fill=${p.blockValue} font-family=${FONT}
+        font-size=${inside ? font : BUS_PX} fill=${p.blockValue} font-family=${FONT}
         transform=${horiz ? nothing : `rotate(-90 ${at.x} ${at.y})`}>${name}</text>`;
     }
   }
