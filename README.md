@@ -1,6 +1,6 @@
 # Plan Studio
 
-Home Assistant custom integration that adds a "Plan Studio" sidebar panel: a 2D floor-plan editor in three steps. Plan: draw walls, openings and rooms. Equipment: place lights, sensors, switches and other devices. Binding: link each device to Home Assistant entities. Plans are saved to Home Assistant storage, and wall switches and smart buttons report button and switch events. Automation zones are not built yet.
+Home Assistant custom integration that adds a "Plan Studio" sidebar panel: a 2D floor-plan editor in four steps. Plan: draw walls, openings and rooms. Equipment: place lights, sensors, switches and other devices. Binding: link each device to Home Assistant entities. Zones: mark automation zones, from rooms or drawn by hand, and see which devices each one contains. Plans are saved to Home Assistant storage, and wall switches and smart buttons report button and switch events. Zones are a layer of the plan only: no automation uses them yet, and they create no Home Assistant entities.
 
 ## Install
 
@@ -12,7 +12,7 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 
 ## Usage
 
-- Tools: Select, Box, Wall, Door, Window, Opening and Zone (a room); pick from the toolbar.
+- Tools: Select, Box, Wall, Door, Window, Opening and Room; pick from the toolbar.
 - Trim: Ctrl+click (Cmd+click on macOS) a wall with the Select tool to remove the piece around the click, between the nearest intersections on either side (T-junctions or crossing walls), or up to the wall's end on a side without one. A wall with no intersections is deleted. One Undo step brings it back.
 - Wall type (bearing / partition / railing) is only a visual style; thickness is a separate field and never changes when you pick a type. Both live in the left properties panel.
 - With a placement tool active and nothing selected, the left panel shows the parameters of the next object (door: width, hinge, swing; window: width, outside side; opening: width; room: name, default "Room N"). Values are remembered per tool for the session; a custom room name is used once, then the default returns to the smallest unused "Room N".
@@ -21,7 +21,7 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 - Hold Shift while drawing to snap to 90 degrees.
 - Type a length in millimetres and press Enter to set the exact segment length.
 - Tab switches to angle input.
-- Esc works in two stages. The first Esc cancels the action in progress (a typed length, a wall chain, the first corner of a box, an aim drag). The next Esc switches to Select (Plan step) or the device Select (Equipment step). In Select, Esc cancels a drag, then clears the selection.
+- Esc works in two stages. The first Esc cancels the action in progress (a typed length, a wall chain, the first corner of a box, an aim drag). The next Esc switches to Select (Plan step) or the device Select (Equipment step). In the Zones step the first Esc drops the custom zone being drawn, and the next returns to the zone Select. In Select, Esc cancels a drag, then clears the selection.
 - Ctrl+Z / Ctrl+Y: undo / redo.
 - Grid toggle in the status bar turns the grid display and grid snapping (100 mm) on or off together.
 - Save: the indicator shows the saved/unsaved state. If the plan changed elsewhere, a conflict dialog offers to overwrite or "Save as new".
@@ -31,25 +31,27 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 
 ### Equipment tab
 
-- The steps Plan, Equipment and Binding sit in the title block under the top bar: click any step, or use Back / Next. Walls, openings and rooms are dimmed and locked in the Equipment step; devices are dimmed and locked in the Plan step.
+- The steps Plan, Equipment, Binding and Zones sit in the title block under the top bar: click any step, or use Back / Next. Walls, openings and rooms are dimmed and locked in the Equipment step; devices are dimmed and locked in the Plan step.
 - Tools: Select, Ceiling light, Wall light, Motion sensor, Illuminance sensor, Climate sensor, Wall switch, Smart button, Socket, Exhaust fan, Equipment. One click places one device.
 - Wall switches and sockets snap to the nearest wall face (wall only). Wall lights, sensors and smart buttons go on a wall face near the cursor, otherwise at a free grid point (wall or free). Ceiling lights and equipment blocks are always free.
 - Wall switch (a square) and smart button (a rounded square with a dot) are input containers: see "Wall switches and smart buttons" below. Their properties show a Type select that turns one into the other; it keeps the id, name and placement, resets the settings to the new type's defaults and drops bindings the new type does not have. A free smart button cannot become a wall switch until it is moved onto a wall. Plans with the former Switch device are migrated on load: a switch with a button-events binding becomes a smart button, any other becomes a wall switch.
-- Climate sensor (wall or free): temperature and humidity; checks the rooms it applies to, none checked means the room it stands in.
+- Climate sensor (wall or free): temperature and humidity. Its reading applies to the automation zones that contain it (see "Zones"); the room checkboxes are gone.
+- Changed in 0.6.0: the climate sensor room list (zoneIds) is removed; stored values are dropped on load and leave the plan on the next save.
+- Every device's properties show a "Zones" list: each automation zone that contains the device, with a "Participates" checkbox (see "Zones"), or "Not in any zone.".
 - Exhaust fan (wall only): diameter 100, 125 or 150 mm; no cone and no aim.
 - Select: click a device to select it, drag to move it (Shift locks the axis). A wall device slides along its wall, can be dragged onto another wall, or into open space if its kind allows. Delete removes it. A selected wall light or sensor shows a direction handle (a segment ending in a round knob): drag the knob to set the aim (wall device) or rotation (free device), Shift snaps to 15 degrees, Esc cancels.
 - Left panel (between the tool rail and the plan): properties of the selected device (name, kind settings, rotation for free devices, side, offset and aim, -90 to 90 degrees off the wall normal, for wall lights and sensors). With a placement tool active and nothing selected, it edits the defaults of the next device.
 - A newly placed device is selected, so the left panel shows its properties. Esc then switches to the device Select tool; pick the placement tool again to see the next-device defaults.
 - Deleting a wall also deletes the devices on it; Ctrl+Z brings both back.
-- "Cones & zones" in the status bar shows or hides light pools, wall-light cones and motion zones. Each is clipped to what its device sees: every wall type blocks it, for outdoor devices too. Light passes openings with "Passes light"; motion zones pass openings with "Passes PIR" (on by default for plain openings only). Motion zones are violet; light cones and pools are amber.
+- "Cones & zones" in the status bar shows or hides light pools, wall-light cones and motion zones. Each is clipped to what its device sees: every wall type blocks it, for outdoor devices too. Light passes openings with "Passes light"; motion zones pass openings with "Passes PIR" (on by default for plain openings only). Motion zones are violet; light cones and pools are amber. "Cones & zones" means these device cones and motion zones, not the automation zones of the Zones step.
 
 ### Binding
 
 Binding links every device on the plan to Home Assistant entities, one field per role.
 
-- Layout: device list | properties | plan. The list filters Not bound / Bound / All and by text; its arrow button folds it to a narrow strip.
+- Layout: device list | properties | plan. The list filters Not bound / Bound / All and by text; its arrow button folds it to a narrow strip. Next in the step header goes on to Zones.
 - Steps:
-  1. Select a device on the plan or in the list, or press "Next unbound device".
+  1. Select a device on the plan or in the list, or press "Next unbound device" in the footer of the properties panel, next to the count of devices not bound.
   2. Fill or change each role in its search field (for example Control and Power for a socket, Temperature and Humidity for a climate sensor). The clear button empties a role; Ctrl+Z undoes.
 - Filter rules: candidates are chosen only by domain, device class and unit, never by guessing from entity ids or names. The strict list needs the role's domain and a matching device class; an entity without a device class matches by unit, and a conflicting device class excludes it (a battery % sensor is never a humidity candidate). Hidden, disabled, config and diagnostic entities are left out. "Show all" keeps only the domain filter.
 - Status:
@@ -88,6 +90,36 @@ Wall switches and smart buttons are input containers: virtual objects that repor
   - A dashed outline when there is no live data. When the connection drops, the reconnect is retried every 5 s for up to 1 minute; reopen the panel if Home Assistant took longer.
 - Upgrade note: reload any open Plan Studio tab after updating.
 
+### Zones
+
+Automation zones are named areas for future automations: a room zone covers a room, a custom zone is a polygon you draw. For now they are a layer of the plan only: no automation uses them and no Home Assistant entities are created.
+
+- Layout: tools and zone list | properties | plan.
+  - The rail holds the tools Select, Zone from room and Custom zone, then the zone list with a text filter. Each row shows the name, the kind (Room or Custom), the number of participating devices and a marker when the zone is invalid. A click on a row selects the zone and pans the plan to it.
+  - Zones are drawn only in this step: a translucent fill in its own colour, an outline and the name. Walls, openings and rooms are dimmed, and room labels are hidden (the room zone carries the name).
+- Zone from room: click inside a room to add a zone named after the room. Clicking a room that already has a zone selects that zone.
+- Custom zone: each click adds a vertex.
+  - Snapping, in order: node, then wall, then grid, with a visible snap marker. A node vertex sits at the wall's axis corner. A wall vertex sits on the face of the side you point at, and the marker shows that face point.
+  - Alt places a free vertex at the pointer. Shift keeps 90 degrees to the previous vertex.
+  - With 3 vertices or more, close the zone with Enter, a click on the first vertex or a second click on the last vertex. It is named "Zone N" and selected.
+  - Backspace or Delete removes the last vertex. Esc cancels the zone. A vertex whose edge would cross the outline is refused, and the preview turns red.
+- Select: click a zone to select it. Where zones overlap, repeated clicks cycle through them, smallest first. Drag a vertex of the selected custom zone to move it: it re-snaps like a new vertex, Alt places it free, Shift keeps 90 degrees to the previous vertex. Vertices cannot be added or removed yet.
+- Membership: a device belongs to every zone that contains its position (for a wall device, its point on the wall face). A device on the edge counts. Zones may overlap and may lie outdoors.
+- Participates: the zone's properties list its devices, each with a "Participates" checkbox; the Equipment step shows the same choice in each device's "Zones" list. An opt-out is kept when the device leaves the zone, and it is removed only when the zone is deleted.
+- Delete or Backspace (with no custom zone being drawn) and the "Delete zone" button delete only the selected zone, never a device or a wall. Ctrl+Z restores it.
+- Wall edits:
+  - Anchored vertices follow their walls and corners.
+  - Deleting a wall or a corner makes its vertices lost, at their last position: drag a lost vertex to place it again.
+  - A vertex beyond the end of a shortened wall makes the zone invalid; lengthening the wall heals it.
+  - Deleting a room turns its room zone into a custom zone with all vertices lost.
+  - Room zones follow their rooms when the rooms are re-detected.
+- After editing the plan, check the Zones step. An invalid zone is hatched and marked in the list, and its properties give the reason:
+  - "The room is broken: fix its walls."
+  - "A vertex lost its wall or corner: drag it to place it again."
+  - "A vertex lies beyond the end of its wall."
+  - "The outline crosses itself: move a vertex." (also for an outline collapsed to no area)
+- Tip: adjacent custom zones do not snap to each other yet. Place their shared vertices on the same wall points (a corner, a wall midpoint) so that their edges meet.
+
 ## Development
 
 ```
@@ -115,6 +147,7 @@ Expected output: `SMOKE OK`.
 
 Manual scenario on a live instance.
 
-1. Open Plan Studio. Draw a box 6000 x 4000 mm measured by inner face. Draw a balcony with a railing outside (wall chain using Shift and typed lengths). Add two partitions joined with T-nodes. Add doors in the partitions and windows in the load-bearing walls. Create three named zones. Save. Expected: walls join without gaps, zone areas are plausible, the indicator says "saved".
+1. Open Plan Studio. Draw a box 6000 x 4000 mm measured by inner face. Draw a balcony with a railing outside (wall chain using Shift and typed lengths). Add two partitions joined with T-nodes. Add doors in the partitions and windows in the load-bearing walls. Create three named rooms. Save. Expected: walls join without gaps, room areas are plausible, the indicator says "saved".
 2. Restart Home Assistant core and reopen the panel. Expected: the plan is intact and looks the same; edit and save still work and the revision increases.
 3. Open the panel in two tabs. Save in the second, then save in the first. Expected: a conflict dialog; "Save as new" creates a second plan and leaves the first untouched.
+4. Zones. On a plan with the rooms kitchen, entrance, WC and main, add a room zone for each with Zone from room. Draw the custom zones "door" (at the entrance door) and "middle" (in the middle of the main room), renaming them in the properties, and one zone outdoors. Expected: every device is listed in each zone that contains it (member lists, list counts and the Equipment "Zones" list). Uncheck Participates for one device, move the device out of the zone and back: the opt-out stays. Delete a wall under a custom zone vertex: the zone turns invalid with "A vertex lost its wall or corner: drag it to place it again."; Ctrl+Z restores the wall and the zone is valid again. Save and reopen: the zones, memberships and opt-outs are intact.
