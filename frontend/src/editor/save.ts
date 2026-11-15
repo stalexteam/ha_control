@@ -1,24 +1,9 @@
 import { savePlan, RevisionConflictError, type HassLike } from '../api';
 import type { Plan } from '../model/types';
 import { newId } from '../model/ids';
+import { messageOf } from '../errors';
 
 export type SaveState = 'idle' | 'saving' | 'saved' | 'conflict' | 'error';
-
-const ERR_CONNECTION_LOST = 3;
-
-function messageOf(err: unknown): string {
-  if (typeof err === 'number') {
-    return err === ERR_CONNECTION_LOST ? 'Connection lost' : `Connection error ${err}`;
-  }
-  if (typeof err === 'string') return err;
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'object' && err !== null) {
-    const e = err as { message?: unknown; code?: unknown };
-    if (typeof e.message === 'string' && e.message) return e.message;
-    if (e.code !== undefined) return String(e.code);
-  }
-  return String(err);
-}
 
 export class SaveController {
   state: SaveState = 'idle';

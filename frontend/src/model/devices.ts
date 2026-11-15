@@ -1,10 +1,8 @@
 import { newId } from './ids';
-import { DEVICE_PLACEMENTS, deviceDefaults, type Device, type DevicePlacement, type DeviceProps, type Id, type Level } from './types';
+import { AIM_MAX, DEVICE_PLACEMENTS, deviceDefaults, type Device, type DevicePlacement, type DeviceProps, type Id, type Level } from './types';
 import { wallLen } from '../geometry/walls';
 
 const EPS = 1e-6; // mm
-/** Largest aim of a wall device, degrees either way. */
-export const AIM_MAX = 90;
 
 function allowed(props: DeviceProps, placement: DevicePlacement): boolean {
   return DEVICE_PLACEMENTS[props.kind].includes(placement.mode);

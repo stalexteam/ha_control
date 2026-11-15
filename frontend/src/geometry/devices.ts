@@ -1,6 +1,5 @@
 import polygonClipping from 'polygon-clipping';
-import { AIM_KINDS, type Device, type DevicePlacement, type Id, type Level, type Pt } from '../model/types';
-import { AIM_MAX } from '../model/devices';
+import { AIM_KINDS, AIM_MAX, type Device, type DevicePlacement, type Id, type Level, type Pt } from '../model/types';
 import { add, dist, dot, perpLeft, pointInPolygon, polygonArea, scale, sub } from './vec';
 import { fromRing, toPoly, wallFrame } from './walls';
 import { outlineFromHoles, roomHoles } from './rooms';

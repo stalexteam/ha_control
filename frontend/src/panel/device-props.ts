@@ -1,8 +1,8 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
 import type { Device, DeviceKind, DevicePlacement, DeviceProps, Level, Side } from '../model/types';
-import { AIM_KINDS, DEVICE_PLACEMENTS, FAN_DIAMETERS, deviceDefaults, type FanDiameter } from '../model/types';
-import { AIM_MAX, deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
+import { AIM_KINDS, AIM_MAX, DEVICE_PLACEMENTS, FAN_DIAMETERS, deviceDefaults, type FanDiameter } from '../model/types';
+import { deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
 import type { Selection } from '../editor/tools/types';
 import { deviceRoomId, withAim } from '../geometry/devices';
 import { t } from '../i18n';

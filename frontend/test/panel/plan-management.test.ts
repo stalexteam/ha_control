@@ -90,6 +90,28 @@ describe('plan management', () => {
     expect($(el, '.save-state').textContent).toContain('Admin only');
   });
 
+  it('load failure shows the message of a numeric WebSocket error', async () => {
+    const { createMockHass } = await import('../../dev/mock-hass');
+    const el = document.createElement('plan-studio-panel');
+    el.hass = { ...createMockHass(), connection: { sendMessagePromise: () => Promise.reject(3) } };
+    document.body.appendChild(el);
+    await vi.waitFor(() => expect(el.loadError).toBe('Connection lost'));
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.center')!.textContent).toContain('Failed to load the plan: Connection lost');
+  });
+
+  it('delete failure shows the message of a numeric WebSocket error', async () => {
+    seed('First', 'Second');
+    const el = await mount();
+    el.hass = { ...el.hass!, connection: { sendMessagePromise: () => Promise.reject(3) } };
+    btn(el, 'delete-plan').click();
+    await el.updateComplete;
+    btn(el, 'delete-confirm').click();
+    await vi.waitFor(() => expect(el.save.state).toBe('error'));
+    await el.updateComplete;
+    expect($(el, '.save-state').textContent).toContain('Connection lost');
+  });
+
   it('deleting a never-saved plan only discards it locally', async () => {
     const el = await mount();
     const id = el.plan!.id;

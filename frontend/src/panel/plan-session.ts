@@ -2,8 +2,9 @@ import type { Id, Level, Plan } from '../model/types';
 import { emptyPlan, normalizeLevel } from '../model/types';
 import { History } from '../editor/history';
 import type { Draft } from '../editor/draft';
-import { deletePlan, errorText, getPlan, listPlans, type PlanSummary } from '../api';
+import { deletePlan, getPlan, listPlans, type PlanSummary } from '../api';
 import { t } from '../i18n';
+import { messageOf } from '../errors';
 import type { Dialog } from './dialogs';
 import { createTool, toolIdsFor } from './tool-factory';
 import type { PlanStudioPanel } from './plan-studio-panel';
@@ -29,7 +30,7 @@ export class PlanSession {
         await this.openPlan(list.some(p => p.id === last) ? last! : list[0].id);
       }
     } catch (err) {
-      this.h.loadError = errorText(err);
+      this.h.loadError = messageOf(err);
     } finally {
       this.h.loading = false;
     }
@@ -78,7 +79,7 @@ export class PlanSession {
     try {
       await this.openPlan(id);
     } catch (err) {
-      this.h.notice = errorText(err);
+      this.h.notice = messageOf(err);
     }
   }
 
@@ -132,7 +133,7 @@ export class PlanSession {
           await deletePlan(this.h.hass, plan.id);
         } catch (err) {
           this.h.save.state = 'error';
-          this.h.save.errorMessage = errorText(err);
+          this.h.save.errorMessage = messageOf(err);
           return;
         }
       }
@@ -144,7 +145,7 @@ export class PlanSession {
       try { list = await listPlans(this.h.hass); this.h.plans = list; } catch { list = []; }
       const next = list.find(x => x.id !== plan.id);
       if (next) {
-        try { await this.openPlan(next.id); return; } catch (err) { this.h.notice = errorText(err); }
+        try { await this.openPlan(next.id); return; } catch (err) { this.h.notice = messageOf(err); }
       }
       this.openFresh();
     } finally {
