@@ -45,7 +45,7 @@ export interface OpeningDefaults {
   outside?: "left" | "right";
 }
 
-export type Selection = { kind: "wall" | "node" | "opening" | "zone" | "device"; id: Id };
+export type Selection = { kind: "wall" | "node" | "opening" | "zone" | "automationZone" | "device"; id: Id };
 
 /** Transient overlay a tool asks the renderer to draw. */
 export interface Preview {
@@ -59,6 +59,8 @@ export interface Preview {
   anchor?: Pt;
   /** Working copy of the level during a drag; the renderer draws it instead of the committed level. */
   level?: Level;
+  /** The custom automation zone being drawn: fixed points, the cursor (null while off the plan) and whether closing now is invalid. */
+  zoneDraft?: { points: Pt[]; cursor: Pt | null; invalid: boolean };
   device?: { placement: DevicePlacement; props: DeviceProps; invalid: boolean };
 }
 

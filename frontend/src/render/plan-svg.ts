@@ -10,6 +10,7 @@ import { add, cross, dist, perpLeft, pointInPolygon, scale as mul, sub } from '.
 import { t } from '../i18n';
 import type { PlanPalette } from './theme';
 import { renderDevices } from './devices-svg';
+import { renderZones } from './zones-svg';
 import { cached, ringD } from './shared';
 
 export interface RenderOpts {
@@ -18,8 +19,8 @@ export interface RenderOpts {
   preview: Preview;
   /** Screen pixels per millimetre; used to keep strokes, text and handles a constant on-screen size. */
   scale: number;
-  /** plan: devices dimmed; equipment and binding: walls, openings and rooms dimmed. Default plan. */
-  mode?: 'plan' | 'equipment' | 'binding';
+  /** plan: devices dimmed; equipment, binding and zones: walls, openings and rooms dimmed. Default plan. */
+  mode?: 'plan' | 'equipment' | 'binding' | 'zones';
   /** Binding status per device; drawn as rings in the binding mode only. */
   bindingStatus?: (d: Device) => BindStatus;
   /** Live state of an input container; drawn in every mode. */
@@ -338,6 +339,9 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
       svg`<path d=${ringD(r)} fill=${p.railing}></path>`))}</g>` : nothing}
     <g class="openings" opacity=${dimOp}>${lv.openings.map(op => renderOpening(lv, op, o))}</g>
     <g class="wall-breaks" opacity=${dimOp}>${renderWallBreaks(lv, o)}</g>
+    ${o.mode === 'zones' ? renderZones(lv, {
+      palette: p, scale: o.scale, selectedId: sel?.kind === 'automationZone' ? sel.id : null, draft: o.preview.zoneDraft,
+    }) : nothing}
     <g class="devices-layer">${renderDevices(lv, {
       palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: plan, preview: o.preview.device,
       bindingStatus: o.mode === 'binding' ? o.bindingStatus : undefined,

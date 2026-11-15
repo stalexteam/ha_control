@@ -7,7 +7,7 @@ import { createDeviceTool } from '../editor/tools/device-tool';
 import { createDeviceSelectTool } from '../editor/tools/device-select-tool';
 import { createBindingSelectTool } from '../editor/tools/binding-select-tool';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
-import type { Level } from '../model/types';
+import { levelZones, type Level } from '../model/types';
 
 export type ToolId = Tool['id'];
 export type EditorMode = 'plan' | 'equipment' | 'binding';
@@ -37,6 +37,7 @@ export function createTool(id: ToolId, ctx: ToolContext): Tool {
 
 /** The selected element still exists in the level. */
 export function selectionExists(level: Level, s: Selection): boolean {
+  if (s.kind === 'automationZone') return levelZones(level).some(x => x.id === s.id);
   const list = s.kind === 'wall' ? level.walls : s.kind === 'node' ? level.nodes
     : s.kind === 'opening' ? level.openings : s.kind === 'device' ? level.devices : level.zones;
   return list.some(x => x.id === s.id);
