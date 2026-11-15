@@ -6,6 +6,9 @@ import { t } from '../i18n';
 /** The last intent of a container: `value` only for `set`; `at` is an ISO 8601 UTC string. */
 export interface ContainerIntent { action: 'toggle' | 'set' | 'auto'; value?: 'on' | 'off'; at: string }
 
+/** An intent being shown on the plan: its action and, for `set`, its value. */
+export type ContainerFlash = Pick<ContainerIntent, 'action' | 'value'>;
+
 /** Live state of one input container, as the integration reports it. */
 export interface ContainerState {
   /** The kind of the saved container; a device of another kind (an unsaved Type change) is not that container. */
@@ -31,6 +34,8 @@ interface Sub { live: boolean; unsub: Unsubscribe | null }
 /** A failed subscription is tried again every RETRY_MS, at most RETRY_MAX times, while the same plan is watched. */
 export const RETRY_MS = 5000;
 export const RETRY_MAX = 12;
+/** How long a new intent shows on the plan. */
+export const FLASH_MS = 3000;
 
 /** Ends a subscription; a closed connection may reject the unsubscribe, which is harmless. */
 function release(unsub: Unsubscribe): void {
@@ -38,9 +43,12 @@ function release(unsub: Unsubscribe): void {
 }
 
 /**
- * Live outputs of the input containers of the open plan, from `plan_studio/containers/subscribe`.
+ * Live state (status and last intent) of the input containers of the open plan, from `plan_studio/containers/subscribe`.
  * - `watch(planId)` subscribes for that plan and ends the previous subscription; the same id is a no-op.
  * - Every message re-renders the host.
+ * - A partial message that changes a container's `last.at` makes `flash` give that intent for FLASH_MS (a newer one
+ *   starts the time again); its end re-renders the host once. A full message (the first snapshot, a reload) never
+ *   flashes, so an intent from before the panel opened is not shown as new.
  * - A connection without subscriptions sets `error`: the plan stays usable and the symbols stay neutral.
  * - A rejected subscription sets `error` and is tried again every RETRY_MS, at most RETRY_MAX times; a success
  *   clears the error.
@@ -59,6 +67,8 @@ export class ContainerFeed {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
   /** Retries made since the last success, `ready` or watch. */
   private retries = 0;
+  /** The intents being shown, by container id, each with the timer that ends it. */
+  private flashes = new Map<string, { intent: ContainerFlash; timer: ReturnType<typeof setTimeout> }>();
 
   constructor(
     private readonly host: { requestUpdate(): void },
@@ -72,6 +82,9 @@ export class ContainerFeed {
   get error(): string | null { return this.failure; }
 
   get(deviceId: string): ContainerState | undefined { return this.map.get(deviceId); }
+
+  /** The intent the container's badge shows now (for FLASH_MS after it arrived), else null. */
+  flash(deviceId: string): ContainerFlash | null { return this.flashes.get(deviceId)?.intent ?? null; }
 
   /** The device's live state; undefined when the saved plan has no such container or has it as another kind. */
   stateOf(d: Device): ContainerState | undefined {
@@ -87,12 +100,13 @@ export class ContainerFeed {
   }
 
   /**
-   * Ends the subscription (also one still being set up), cancels the retries, stops listening to the connection
-   * and forgets the outputs; any plan can be watched again.
+   * Ends the subscription (also one still being set up), cancels the retries and the flashes, stops listening to the
+   * connection and forgets the states; any plan can be watched again.
    */
   stop(): void {
     this.unlisten();
     this.cancelRetry();
+    this.clearFlashes();
     this.retries = 0;
     this.drop(true);
     this.planId = null;
@@ -117,9 +131,10 @@ export class ContainerFeed {
     conn?.removeEventListener?.('ready', this.onReady);
   }
 
-  /** The socket closed: the outputs are forgotten at once; `ready` subscribes again. */
+  /** The socket closed: the states and flashes are forgotten at once; `ready` subscribes again. */
   private readonly onDisconnected = (): void => {
     this.cancelRetry();
+    this.clearFlashes();
     // The subscription ended with the socket. No unsubscribe goes out: after the reconnect its command id may
     // belong to another command.
     this.drop(false);
@@ -191,9 +206,30 @@ export class ContainerFeed {
       this.map = new Map(changed);
       this.gotFull = true;
     } else {
-      for (const [id, s] of changed) this.map.set(id, s);
+      for (const [id, s] of changed) {
+        const before = this.map.get(id)?.last?.at;
+        this.map.set(id, s);
+        if (s.last && s.last.at !== before) this.startFlash(id, s.last);
+      }
     }
     this.host.requestUpdate();
+  }
+
+  /** Shows `last` on the container's badge for FLASH_MS, replacing (and restarting) any intent shown there. */
+  private startFlash(id: string, last: ContainerIntent): void {
+    const old = this.flashes.get(id);
+    if (old) clearTimeout(old.timer);
+    const timer = setTimeout(() => {
+      this.flashes.delete(id);
+      this.host.requestUpdate();
+    }, FLASH_MS);
+    const intent: ContainerFlash = last.value === undefined ? { action: last.action } : { action: last.action, value: last.value };
+    this.flashes.set(id, { intent, timer });
+  }
+
+  private clearFlashes(): void {
+    for (const f of this.flashes.values()) clearTimeout(f.timer);
+    this.flashes.clear();
   }
 
   private setFailure(msg: string | null): void {

@@ -52,10 +52,10 @@ function level(): Level {
   };
 }
 
-/** Opens the plan above with the HA mock and enters the Binding step; resolves once the registries are loaded. */
-async function open(hass: HassLike = registryHass(STATES, REGISTRY).hass): Promise<PlanStudioPanel> {
+/** Opens the plan above (or `lv`) with the HA mock and enters the Binding step; resolves once the registries are loaded. */
+async function open(hass: HassLike = registryHass(STATES, REGISTRY).hass, lv: unknown = level()): Promise<PlanStudioPanel> {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    plans: { P1: { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level()] } },
+    plans: { P1: { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [lv] } },
   }));
   const el = await mount(hass);
   $<HTMLButtonElement>(el, '[data-mode="binding"]').click();
@@ -367,6 +367,27 @@ describe('binding step: container sections', () => {
     expect(roles(el)).toEqual(['on']);
   });
 
+  it('no Final state field and no Default output select, also for a v0.4 plan that stored them', async () => {
+    const v04 = level();
+    // The v0.4 fields are not in today's types: the stored JSON carries them anyway.
+    const withOld = (d: Device, role: 'state' | 'on', eid: string): Device => ({
+      ...d, props: { ...d.props, defaultOutput: 'on' } as unknown as DeviceProps,
+      bindings: { ...d.bindings, [role]: eid, final: 'light.wc' } as Device['bindings'],
+    });
+    v04.devices = [withOld(v04.devices[0], 'state', 'switch.hall'), withOld(v04.devices[1], 'on', 'sensor.wc_action'), ...v04.devices.slice(2)];
+    const el = await open(undefined, v04);
+    for (const id of ['w', 'b']) {
+      await pick(el, id);
+      expect(roles(el)).not.toContain('final');
+      expect(q(el, '.props [data-role="final"]')).toBeNull();
+      expect(q(el, '.props [data-field="defaultOutput"]')).toBeNull();
+      expect(q(el, '.props select[data-field="defaultOutput"]')).toBeNull();
+      expect($(el, '.props').textContent).not.toMatch(/Final state|Default output/);
+    }
+    expect('defaultOutput' in props(el, 'w')).toBe(false);
+    expect('defaultOutput' in props(el, 'b')).toBe(false);
+  });
+
   it('sections follow the spec order: each checkbox after the section above it and before the section it reveals', async () => {
     const el = await open();
     /** Role sections, container fields and the duplicate warning in document order. */
@@ -451,6 +472,9 @@ describe('binding step: output line', () => {
   const line = (el: PlanStudioPanel) => $(el, '.props [data-field="output"]').textContent!.trim();
   const coloured = (el: PlanStudioPanel) => [...el.shadowRoot!.querySelectorAll('svg.plan g.device')]
     .filter(g => /device-(wall_switch|smart_button)/.test(g.getAttribute('class')!) && !g.classList.contains('no-data')).map(g => g.getAttribute('data-id'));
+  /** The plan badges by device id. */
+  const badges = (el: PlanStudioPanel) => Object.fromEntries([...el.shadowRoot!.querySelectorAll('svg.plan g.device')]
+    .filter(g => g.querySelector('g.badge')).map(g => [g.getAttribute('data-id'), g.querySelector('g.badge')!.getAttribute('data-badge')]));
 
   /** Sends a containers event on a subscription and waits for the panel to re-render. */
   async function push(el: PlanStudioPanel, sub: Sub, ev: unknown): Promise<void> {
@@ -458,7 +482,7 @@ describe('binding step: output line', () => {
     await el.updateComplete;
   }
 
-  it('with live state the Binding output line is empty for now (Task 4 builds it); symbols are live and errors get the mark', async () => {
+  it('the output line shows No events yet, the status error or Not saved yet; symbols are live and errors get the alert', async () => {
     const live = liveHass();
     const el = await open(live.hass);
     expect(live.subs.map(s => s.msg)).toEqual([{ type: 'plan_studio/containers/subscribe', plan_id: 'P1' }]);
@@ -469,27 +493,79 @@ describe('binding step: output line', () => {
     await push(el, live.subs[0], { full: true, containers: {
       b: { kind: 'smart_button', status: 'ok' },
       w: { kind: 'wall_switch', status: 'error', reason: 'not_configured' },
-      k1: { kind: 'smart_button', status: 'error', reason: 'unavailable', entities: ['sensor.x', 'light.y'] },
+      k1: { kind: 'smart_button', status: 'error', reason: 'unavailable', entities: ['light.y', 'sensor.x'] },
     } });
-    expect(q(el, '.props [data-field="output"]')).toBeNull();
+    expect(line(el)).toBe('No events yet');
     expect(coloured(el)).toEqual(['w', 'b', 'k1']);
-    expect(el.shadowRoot!.querySelectorAll('svg.plan .fault-mark')).toHaveLength(2);
+    expect(badges(el)).toEqual({ w: 'alert', k1: 'alert' });
 
     await pick(el, 'w');
-    expect(q(el, '.props [data-field="output"]')).toBeNull();
+    expect(line(el)).toBe('Status: error, not configured');
     await pick(el, 'k1');
-    expect(q(el, '.props [data-field="output"]')).toBeNull();
+    expect(line(el)).toBe('Status: error, unavailable (light.y, sensor.x)');
     await pick(el, 'k2');
     expect(line(el)).toBe('Not saved yet');
 
     // A change re-renders the line and the symbol at once.
     await push(el, live.subs[0], { full: false, containers: { k2: { kind: 'smart_button', status: 'ok' } } });
+    expect(line(el)).toBe('No events yet');
     expect(coloured(el)).toContain('k2');
     // A full snapshot (after a plan save) drops the containers it does not list.
     await push(el, live.subs[0], { full: true, containers: { b: { kind: 'smart_button', status: 'ok' } } });
     expect(line(el)).toBe('Not saved yet');
     expect(coloured(el)).toEqual(['b']);
+    expect(badges(el)).toEqual({});
     expect(live.subs).toHaveLength(1);
+  });
+
+  it('the output line shows the last event (toggle, set on, set off, auto) at its local time; an error replaces it', async () => {
+    const live = liveHass();
+    const el = await open(live.hass);
+    /** An ISO UTC instant whose local time is h:m:s today. */
+    const local = (h: number, m: number, s: number) => new Date(2026, 10, 15, h, m, s).toISOString();
+    const b = (last: Record<string, string>, more: Record<string, unknown> = {}) =>
+      ({ b: { kind: 'smart_button', status: 'ok', last, ...more } });
+    await push(el, live.subs[0], { full: true, containers: b({ action: 'toggle', at: local(12, 3, 15) }) });
+    await pick(el, 'b');
+    expect(line(el)).toBe('Last event: toggle, 12:03:15');
+
+    await push(el, live.subs[0], { full: false, containers: b({ action: 'set', value: 'on', at: local(9, 5, 7) }) });
+    expect(line(el)).toBe('Last event: set on, 09:05:07');
+    await push(el, live.subs[0], { full: false, containers: b({ action: 'set', value: 'off', at: local(0, 0, 5) }) });
+    expect(line(el)).toBe('Last event: set off, 00:00:05');
+    await push(el, live.subs[0], { full: false, containers: b({ action: 'auto', at: local(23, 59, 59) }) });
+    expect(line(el)).toBe('Last event: auto, 23:59:59');
+
+    // While the status is error the line shows it instead of the last event.
+    await push(el, live.subs[0], { full: false, containers: b({ action: 'auto', at: local(23, 59, 59) },
+      { status: 'error', reason: 'unavailable', entities: ['sensor.wc_action'] }) });
+    expect(line(el)).toBe('Status: error, unavailable (sensor.wc_action)');
+    await push(el, live.subs[0], { full: false, containers: b({ action: 'auto', at: local(23, 59, 59) }) });
+    expect(line(el)).toBe('Last event: auto, 23:59:59');
+  });
+
+  it('the plan badge flashes a partial-frame intent for 3 s; the snapshot does not flash', async () => {
+    const live = liveHass();
+    const el = await open(live.hass);
+    await push(el, live.subs[0], { full: true, containers: {
+      b: { kind: 'smart_button', status: 'ok', last: { action: 'toggle', at: '2026-11-15T10:00:00+00:00' } },
+    } });
+    expect(badges(el)).toEqual({});
+    vi.useFakeTimers();
+    try {
+      await push(el, live.subs[0], { full: false, containers: {
+        b: { kind: 'smart_button', status: 'ok', last: { action: 'set', value: 'on', at: '2026-11-15T10:00:01+00:00' } },
+      } });
+      expect(badges(el)).toEqual({ b: 'set-on' });
+      await vi.advanceTimersByTimeAsync(2999);
+      await el.updateComplete;
+      expect(badges(el)).toEqual({ b: 'set-on' });
+      await vi.advanceTimersByTimeAsync(1);
+      await el.updateComplete;
+      expect(badges(el)).toEqual({});
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('HA restart: the outputs go neutral at the disconnect and come back after the reconnect', async () => {
@@ -497,7 +573,7 @@ describe('binding step: output line', () => {
     const el = await open(live.hass);
     await push(el, live.subs[0], { full: true, containers: { b: { kind: 'smart_button', status: 'ok' } } });
     await pick(el, 'b');
-    expect(q(el, '.props [data-field="output"]')).toBeNull();
+    expect(line(el)).toBe('No events yet');
     expect(coloured(el)).toEqual(['b']);
     const noData = () => [...el.shadowRoot!.querySelectorAll('svg.plan g.device.no-data')].map(g => g.getAttribute('data-id'));
     expect(noData()).toEqual(['w', 'k1', 'k2']);
@@ -510,10 +586,13 @@ describe('binding step: output line', () => {
 
     live.fire('ready');
     expect(live.subs.map(s => s.msg)).toEqual([0, 1].map(() => ({ type: 'plan_studio/containers/subscribe', plan_id: 'P1' })));
-    await push(el, live.subs[1], { full: true, containers: { b: { kind: 'smart_button', status: 'ok' } } });
-    expect(q(el, '.props [data-field="output"]')).toBeNull();
+    await push(el, live.subs[1], { full: true, containers: {
+      b: { kind: 'smart_button', status: 'ok', last: { action: 'toggle', at: '2026-11-15T10:00:00+00:00' } },
+    } });
+    expect(line(el)).toMatch(/^Last event: toggle, \d\d:\d\d:\d\d$/);
     expect(coloured(el)).toEqual(['b']);
     expect(noData()).toEqual(['w', 'k1', 'k2']);
+    expect(badges(el)).toEqual({}); // the reconnect snapshot does not flash
   });
 
   it('a saved container of another kind (an unsaved Type change) reads as not saved and stays neutral', async () => {
@@ -526,9 +605,9 @@ describe('binding step: output line', () => {
     await pick(el, 'w');
     expect(line(el)).toBe('Not saved yet');
     expect(coloured(el)).toEqual(['b']);
-    expect(el.shadowRoot!.querySelectorAll('svg.plan .fault-mark')).toHaveLength(0);
+    expect(badges(el)).toEqual({});
     await pick(el, 'b');
-    expect(q(el, '.props [data-field="output"]')).toBeNull();
+    expect(line(el)).toBe('No events yet');
   });
 
   it('shows the feed error and keeps the plan neutral when the subscription fails', async () => {
@@ -537,6 +616,7 @@ describe('binding step: output line', () => {
     await pick(el, 'b');
     expect(line(el)).toBe('Unknown command');
     expect(coloured(el)).toEqual([]);
+    expect(badges(el)).toEqual({});
     // The plan is still editable.
     await toggle(el, 'autoEnabled');
     expect(props(el, 'b').autoEnabled).toBe(true);

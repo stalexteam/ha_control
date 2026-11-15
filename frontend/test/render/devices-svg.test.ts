@@ -1,11 +1,15 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { html, render } from 'lit';
 import { renderLevel } from '../../src/render/plan-svg';
 import { paletteFor } from '../../src/render/theme';
 import { renderDevices, ICON_PX } from '../../src/render/devices-svg';
 import { deviceDefaults, type ContainerKind, type Device, type DeviceKind, type Level } from '../../src/model/types';
-import type { ContainerState } from '../../src/live/container-feed';
+import { mdiAlert, mdiPower, mdiPowerOff, mdiRefreshAuto, mdiToggleSwitch } from '@mdi/js';
+import type { HassLike } from '../../src/api';
+import {
+  ContainerFeed, FLASH_MS, type ContainerFlash, type ContainerIntent, type ContainerState,
+} from '../../src/live/container-feed';
 import { rectRoomLevel } from '../fixtures';
 
 const free = (id: string, kind: DeviceKind, x: number, y: number, over: Partial<Device['props']> = {}, invalid = false): Device =>
@@ -228,9 +232,27 @@ describe('input container symbols', () => {
   });
 });
 
-describe('container outputs on the plan', () => {
+/** A feed on a fake connection, subscribed to P1 (call under fake timers); `push` delivers a frame on its subscription. */
+async function liveFeed() {
+  let deliver: ((ev: unknown) => void) | null = null;
+  const connection: HassLike['connection'] = {
+    sendMessagePromise: () => Promise.reject(new Error('not used')),
+    subscribeMessage<T>(cb: (msg: T) => void) {
+      deliver = ev => cb(ev as T);
+      return Promise.resolve(() => Promise.resolve());
+    },
+  };
+  const feed = new ContainerFeed({ requestUpdate: () => undefined }, () => connection);
+  feed.watch('P1');
+  await vi.advanceTimersByTimeAsync(0);
+  return { feed, push: (full: boolean, containers: Record<string, ContainerState>) => deliver!({ full, containers }) };
+}
+
+describe('container badges on the plan', () => {
   beforeEach(() => { document.body.innerHTML = ''; });
+  afterEach(() => { vi.useRealTimers(); });
   const pal = paletteFor(true);
+  const ALERT = '#f43f5e';
   const containers = (): Level => ({
     ...rectRoomLevel(6000, 5000, 200),
     devices: [
@@ -243,42 +265,190 @@ describe('container outputs on the plan', () => {
   const fill = (root: SVGSVGElement, kind: string) => root.querySelector(`g.device-${kind} rect.icon`)!.getAttribute('fill');
   /** The saved container kind a state carries: here always the device's own. */
   const kindOf = (d: Device) => d.props.kind as ContainerKind;
-  const ok = (kind: ContainerKind): ContainerState => ({ kind, status: 'ok' });
-  const bad = (kind: ContainerKind, reason: 'not_configured' | 'unavailable'): ContainerState => ({ kind, status: 'error', reason });
+  const ok = (kind: ContainerKind, last?: ContainerIntent): ContainerState => ({ kind, status: 'ok', ...(last ? { last } : {}) });
+  const bad = (kind: ContainerKind, reason: 'not_configured' | 'unavailable', last?: ContainerIntent): ContainerState =>
+    ({ kind, status: 'error', reason, ...(reason === 'unavailable' ? { entities: ['switch.x'] } : {}), ...(last ? { last } : {}) });
+  const at = (s: number) => `2026-11-15T10:00:${String(s).padStart(2, '0')}+00:00`;
+  const badge = (root: SVGSVGElement, id: string) => root.querySelector(`g.device[data-id="${id}"] g.badge`);
+  const badgeKind = (root: SVGSVGElement, id: string) => badge(root, id)?.getAttribute('data-badge') ?? null;
+  const icon = (root: SVGSVGElement, id: string) => badge(root, id)!.querySelector('path')!.getAttribute('d');
+  /** The badge's ink: its ring stroke and its icon fill. */
+  const ink = (root: SVGSVGElement, id: string) => {
+    const b = badge(root, id)!;
+    return [b.querySelector('circle')!.getAttribute('stroke'), b.querySelector('path')!.getAttribute('fill')];
+  };
+  /** Draws the plan from the feed (scale 1: screen pixels are user units). */
+  const draw = (feed: ContainerFeed, scale = 1) =>
+    drawDevs(containers(), { containerState: (d: Device) => feed.stateOf(d), containerFlash: (d: Device) => feed.flash(d.id) }, scale);
 
-  it('a live container keeps the neutral fill and has no mark while ok', () => {
-    const st: Record<string, ContainerState> = { sb: ok('smart_button') };
-    const root = drawDevs(containers(), { containerState: (d: Device) => st[d.id] });
-    expect(fill(root, 'smart_button')).toBe(pal.deviceFill);
-    expect(fill(root, 'wall_switch')).toBe(pal.deviceFill);
-    expect(root.querySelector('.fault-mark')).toBeNull();
-    expect(root.querySelector('g.device[class*="out-"]')).toBeNull();
-  });
-
-  it('an error status adds a red mark and keeps the neutral fill', () => {
-    const st: Record<string, ContainerState> = {
-      sb: bad('smart_button', 'not_configured'),
-      ws: { ...bad('wall_switch', 'unavailable'), entities: ['switch.x'] },
-    };
-    const root = drawDevs(containers(), { containerState: (d: Device) => st[d.id] });
-    for (const kind of ['smart_button', 'wall_switch']) {
-      const marks = root.querySelectorAll(`g.device-${kind} circle.fault-mark`);
-      expect(marks).toHaveLength(1);
-      expect(marks[0].getAttribute('fill')).toBe('#f43f5e');
+  it('status error shows the alert badge permanently', async () => {
+    vi.useFakeTimers();
+    const { feed, push } = await liveFeed();
+    push(true, { sb: bad('smart_button', 'not_configured'), ws: bad('wall_switch', 'unavailable') });
+    for (const wait of [0, FLASH_MS, 10 * 60_000]) {
+      await vi.advanceTimersByTimeAsync(wait);
+      const root = draw(feed);
+      for (const id of ['sb', 'ws']) {
+        expect(badgeKind(root, id)).toBe('alert');
+        expect(icon(root, id)).toBe(mdiAlert);
+        expect(ink(root, id)).toEqual([ALERT, ALERT]);
+      }
+      expect(badge(root, 'ms')).toBeNull();
+      expect(root.querySelectorAll('g.badge')).toHaveLength(2);
     }
-    expect(fill(root, 'smart_button')).toBe(pal.deviceFill);
+    // Back to ok: the alert clears.
+    push(false, { sb: ok('smart_button') });
+    expect(badge(draw(feed), 'sb')).toBeNull();
   });
 
-  it('no state: neutral fill, no mark; other kinds never get a mark', () => {
-    const plain = drawDevs(containers());
-    expect(fill(plain, 'smart_button')).toBe(pal.deviceFill);
-    expect(plain.querySelector('.fault-mark')).toBeNull();
-    const all = drawDevs(containers(), { containerState: (d: Device) => bad(kindOf(d), 'not_configured') });
-    expect(all.querySelectorAll('.fault-mark')).toHaveLength(2);
-    expect(all.querySelector('g.device-motion_sensor .fault-mark')).toBeNull();
+  it('the badge is a 7 px circle at the icon top-right, in the background colour, with a 10 px icon, at any zoom', () => {
+    for (const scale of [1, 0.1, 0.37]) {
+      const root = drawDevs(containers(), { containerState: (d: Device) => bad(kindOf(d), 'not_configured') }, scale);
+      const R = ICON_PX / scale;
+      const ring = badge(root, 'sb')!.querySelector('circle')!;
+      expect(Number(ring.getAttribute('r'))).toBeCloseTo(7 / scale);
+      expect(Number(ring.getAttribute('cx'))).toBeCloseTo(R * 0.9);
+      expect(Number(ring.getAttribute('cy'))).toBeCloseTo(-R * 0.9);
+      expect(ring.getAttribute('fill')).toBe(pal.background);
+      expect(ring.getAttribute('stroke-width')).toBe('1.5');
+      expect(ring.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+      // The 24-unit MDI path is scaled to 10 px and centred on the ring.
+      const tf = badge(root, 'sb')!.querySelector('path')!.getAttribute('transform')!;
+      const m = /translate\(([-\d.e]+)[ ,]([-\d.e]+)\)\s*scale\(([-\d.e]+)\)/.exec(tf)!;
+      const [tx, ty, k] = m.slice(1).map(Number);
+      expect(k * 24).toBeCloseTo(10 / scale);
+      expect(tx + 12 * k).toBeCloseTo(R * 0.9);
+      expect(ty + 12 * k).toBeCloseTo(-R * 0.9);
+    }
+    // The light palette has its own background.
+    const light = drawDevs(containers(), { palette: paletteFor(false), containerState: (d: Device) => bad(kindOf(d), 'not_configured') });
+    expect(badge(light, 'sb')!.querySelector('circle')!.getAttribute('fill')).toBe(paletteFor(false).background);
   });
 
-  it('a container with no state is dashed; a live off is solid', () => {
+  it('a partial-frame intent shows its icon for 3 s, then nothing (or the alert if error)', async () => {
+    vi.useFakeTimers();
+    const { feed, push } = await liveFeed();
+    push(true, { sb: ok('smart_button'), ws: ok('wall_switch') });
+    expect(draw(feed).querySelectorAll('g.badge')).toHaveLength(0);
+
+    push(false, { sb: ok('smart_button', { action: 'toggle', at: at(1) }) });
+    let root = draw(feed);
+    expect(badgeKind(root, 'sb')).toBe('toggle');
+    expect(icon(root, 'sb')).toBe(mdiToggleSwitch);
+    expect(ink(root, 'sb')).toEqual([pal.selection, pal.selection]);
+    expect(badge(root, 'ws')).toBeNull();
+    await vi.advanceTimersByTimeAsync(FLASH_MS - 1);
+    expect(badgeKind(draw(feed), 'sb')).toBe('toggle');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(badge(draw(feed), 'sb')).toBeNull();
+
+    // An intent shown just before an error appears finishes its 3 s, then the badge shows the alert.
+    const last: ContainerIntent = { action: 'auto', at: at(2) };
+    push(false, { ws: ok('wall_switch', last) });
+    await vi.advanceTimersByTimeAsync(1000);
+    push(false, { ws: bad('wall_switch', 'unavailable', last) });
+    root = draw(feed);
+    expect(badgeKind(root, 'ws')).toBe('auto');
+    expect(icon(root, 'ws')).toBe(mdiRefreshAuto);
+    await vi.advanceTimersByTimeAsync(FLASH_MS - 1000);
+    root = draw(feed);
+    expect(badgeKind(root, 'ws')).toBe('alert');
+    expect(icon(root, 'ws')).toBe(mdiAlert);
+  });
+
+  it('full frame does not flash', async () => {
+    vi.useFakeTimers();
+    const { feed, push } = await liveFeed();
+    // The snapshot carries intents from before the panel opened: none flashes.
+    push(true, {
+      sb: ok('smart_button', { action: 'toggle', at: at(1) }),
+      ws: bad('wall_switch', 'not_configured', { action: 'set', value: 'on', at: at(2) }),
+    });
+    let root = draw(feed);
+    expect(badge(root, 'sb')).toBeNull();
+    expect(badgeKind(root, 'ws')).toBe('alert');
+    // A reload (plan save) with newer intents is a full frame too.
+    push(true, {
+      sb: ok('smart_button', { action: 'auto', at: at(3) }),
+      ws: ok('wall_switch', { action: 'set', value: 'off', at: at(4) }),
+    });
+    root = draw(feed);
+    expect(root.querySelectorAll('g.badge')).toHaveLength(0);
+  });
+
+  it('newer intent restarts the flash', async () => {
+    vi.useFakeTimers();
+    const { feed, push } = await liveFeed();
+    push(true, { sb: ok('smart_button') });
+    push(false, { sb: ok('smart_button', { action: 'set', value: 'on', at: at(1) }) });
+    expect(icon(draw(feed), 'sb')).toBe(mdiPower);
+    await vi.advanceTimersByTimeAsync(2000);
+    push(false, { sb: ok('smart_button', { action: 'set', value: 'off', at: at(3) }) });
+    expect(icon(draw(feed), 'sb')).toBe(mdiPowerOff);
+    await vi.advanceTimersByTimeAsync(FLASH_MS - 1);
+    expect(badgeKind(draw(feed), 'sb')).toBe('set-off');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(badge(draw(feed), 'sb')).toBeNull();
+  });
+
+  it('set on and set off use mdiPower and mdiPowerOff', () => {
+    const cases: [ContainerFlash, string, string][] = [
+      [{ action: 'set', value: 'on' }, 'set-on', mdiPower],
+      [{ action: 'set', value: 'off' }, 'set-off', mdiPowerOff],
+      [{ action: 'toggle' }, 'toggle', mdiToggleSwitch],
+      [{ action: 'auto' }, 'auto', mdiRefreshAuto],
+    ];
+    for (const [flash, kind, d] of cases) {
+      const root = drawDevs(containers(), { containerState: (x: Device) => ok(kindOf(x)), containerFlash: () => flash });
+      for (const id of ['sb', 'ws']) {
+        expect(badgeKind(root, id)).toBe(kind);
+        expect(icon(root, id)).toBe(d);
+        expect(ink(root, id)).toEqual([pal.selection, pal.selection]);
+      }
+      // A flashing intent wins over the alert until it ends.
+      const err = drawDevs(containers(), { containerState: (x: Device) => bad(kindOf(x), 'not_configured'), containerFlash: () => flash });
+      expect(badgeKind(err, 'sb')).toBe(kind);
+    }
+  });
+
+  it('no output fills remain', () => {
+    const states: ((d: Device) => ContainerState | undefined)[] = [
+      () => undefined,
+      d => ok(kindOf(d)),
+      d => bad(kindOf(d), 'unavailable'),
+      d => ok(kindOf(d), { action: 'set', value: 'on', at: at(1) }),
+      d => ok(kindOf(d), { action: 'set', value: 'off', at: at(1) }),
+      d => ok(kindOf(d), { action: 'auto', at: at(1) }),
+    ];
+    const flashes: (ContainerFlash | null)[] = [null, { action: 'set', value: 'on' }, { action: 'set', value: 'off' }, { action: 'auto' }];
+    for (const containerState of states) {
+      for (const flash of flashes) {
+        const root = drawDevs(containers(), { containerState, containerFlash: () => flash });
+        expect(fill(root, 'smart_button')).toBe(pal.deviceFill);
+        expect(fill(root, 'wall_switch')).toBe(pal.deviceFill);
+        expect(root.querySelector('g.device-smart_button circle.dot')!.getAttribute('fill')).toBe(pal.device);
+        expect(root.querySelector('[class*="out-"], .fault-mark')).toBeNull();
+      }
+    }
+    expect(Object.keys(pal).filter(k => /^out/i.test(k))).toEqual([]);
+  });
+
+  it('no badge for other kinds, the placement preview, or a saved container of another kind', () => {
+    const flash = () => ({ action: 'toggle' as const });
+    const root = drawDevs(containers(), {
+      containerState: (d: Device) => bad(d.props.kind === 'motion_sensor' ? 'smart_button' : kindOf(d), 'not_configured'),
+      containerFlash: flash,
+      preview: { placement: { mode: 'free', x: 1000, y: 1000, rotation: 0 }, props: deviceDefaults('smart_button', 'free'), invalid: false },
+    });
+    expect(badge(root, 'ms')).toBeNull();
+    expect(root.querySelector('g.device-preview g.badge')).toBeNull();
+    expect(root.querySelectorAll('g.badge')).toHaveLength(2);
+    // An unsaved Type change: the feed has no state for the device, so its flash is not shown either.
+    const other = drawDevs(containers(), { containerState: () => undefined, containerFlash: flash });
+    expect(other.querySelectorAll('g.badge')).toHaveLength(0);
+  });
+
+  it('a container with no state is dashed; a live one is solid', () => {
     const st: Record<string, ContainerState> = { sb: ok('smart_button') };
     const root = drawDevs(containers(), { containerState: (d: Device) => st[d.id] });
     const g = (kind: string) => root.querySelector(`g.device-${kind}`)!;
@@ -290,20 +460,25 @@ describe('container outputs on the plan', () => {
     // Containers only: a motion sensor never reads as "no data".
     expect(g('motion_sensor').classList.contains('no-data')).toBe(false);
     expect(root.querySelector('g.device-motion_sensor [stroke-dasharray]')).toBeNull();
-    // Without any state both containers are dashed, the smart button too.
+    // Without any state both containers are dashed, the smart button too, and have no badge.
     const none = drawDevs(containers(), { containerState: () => undefined });
     expect(none.querySelectorAll('g.no-data')).toHaveLength(2);
     expect(none.querySelector('g.device-smart_button rect.icon')!.getAttribute('stroke-dasharray')).toBe('3 2');
-    // A fault is live data: solid, with its mark.
+    expect(none.querySelector('g.badge')).toBeNull();
+    // An error is live data: solid, with its alert.
     const fault = drawDevs(containers(), { containerState: (d: Device) => bad(kindOf(d), 'unavailable') });
     expect(fault.querySelectorAll('g.no-data')).toHaveLength(0);
     expect(fault.querySelector('rect.icon[stroke-dasharray]')).toBeNull();
   });
 
-  it('renderLevel passes the state through in every mode', () => {
+  it('renderLevel passes the state and the flash through in every mode', () => {
     for (const mode of ['plan', 'equipment', 'binding'] as const) {
-      const root = drawLevel(containers(), { mode, containerState: (d: Device) => bad(kindOf(d), 'not_configured') });
-      expect(root.querySelectorAll('g.device-smart_button .fault-mark')).toHaveLength(1);
+      const root = drawLevel(containers(), {
+        mode, containerState: (d: Device) => bad(kindOf(d), 'not_configured'),
+        containerFlash: (d: Device) => (d.id === 'ws' ? { action: 'auto' } : null),
+      });
+      expect(badgeKind(root, 'sb')).toBe('alert');
+      expect(badgeKind(root, 'ws')).toBe('auto');
     }
   });
 });

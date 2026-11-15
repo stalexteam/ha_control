@@ -94,7 +94,7 @@ export class PlanStudioPanel extends LitElement {
   readonly session = new PlanSession(this);
   /** HA states merged with the registries (loaded on the first entry to the Binding step). */
   readonly haMeta = new MetaSource(this);
-  /** Live outputs of the open plan's input containers (subscribed while the panel is attached). */
+  /** Live state of the open plan's input containers (subscribed while the panel is attached). */
   readonly feed = new ContainerFeed(this, () => this.hass?.connection);
 
   /** Binding status of a device, from live states. Until the registries are loaded no entity is Missing (its presence is unknown). */
@@ -335,7 +335,8 @@ export class PlanStudioPanel extends LitElement {
             ${this.grid ? renderGrid(this.view, w, h, pal) : nothing}
             ${renderLevel(level, {
               palette: pal, selection: this.selection, preview, scale, mode: this.mode, showCones: this.cones,
-              bindingStatus: this.bindStatus, containerState: d => this.feed.stateOf(d),
+              bindingStatus: this.bindStatus,
+              containerState: d => this.feed.stateOf(d), containerFlash: d => this.feed.flash(d.id),
             })}
             ${preview.tracker ? renderTracker(preview.tracker, {
               palette: pal, scale, mode: this.toolId === 'box' ? 'box' : 'wall',

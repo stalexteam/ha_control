@@ -65,6 +65,12 @@ describe('i18n', () => {
     expect(bad).toEqual(['prps.badAim']);
   });
 
+  it('the output keys are the Binding output line texts only (the v0.4 output keys are gone)', () => {
+    expect(I18N_KEYS.filter(k => k.startsWith('output.')).sort()).toEqual([
+      'output.errorNotConfigured', 'output.errorUnavailable', 'output.last', 'output.noLive', 'output.none', 'output.notSaved',
+    ]);
+  });
+
   it('dynamic key prefixes have an entry for every member of their source-of-truth set', () => {
     const sets: Record<string, readonly string[]> = {
       device: Object.keys(DEVICE_PLACEMENTS),
@@ -78,7 +84,6 @@ describe('i18n', () => {
       'binding.filter': LIST_FILTERS,
       bindstatus: ['bound', 'partial', 'unbound', 'missing'],
       role: [...new Set(Object.values(ROLE_SPECS).flat().map(s => s.role))],
-      output: ['on', 'off', 'auto', 'error'],
     };
     const missing = Object.entries(sets).flatMap(([pre, members]) => members.map(m => `${pre}.${m}`)).filter(k => !keys.has(k));
     expect(missing).toEqual([]);

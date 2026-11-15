@@ -25,7 +25,7 @@ function write(storage: Storage, data: Stored): void {
 const fail = (code: string, message: string) => Promise.reject({ code, message });
 
 /** Every input container of a stored plan as error, not configured (the mock has no runtime). */
-function defaultOutputs(plan: Plan | undefined): Record<string, ContainerState> {
+function notConfiguredStates(plan: Plan | undefined): Record<string, ContainerState> {
   const out: Record<string, ContainerState> = {};
   for (const d of plan?.levels.flatMap(l => l.devices ?? []) ?? []) { // stage-1 plans have no devices
     const p = d.props;
@@ -98,7 +98,7 @@ export function createMockHass(opts: { darkMode?: boolean; storage?: Storage; de
       },
       subscribeMessage<T>(callback: (msg: T) => void, msg: Record<string, unknown>): Promise<() => Promise<void>> {
         if (msg.type !== 'plan_studio/containers/subscribe') return fail('unknown_command', `Unknown command ${String(msg.type)}`);
-        const containers = defaultOutputs(read(storage).plans[msg.plan_id as string]);
+        const containers = notConfiguredStates(read(storage).plans[msg.plan_id as string]);
         let open = true;
         const subscribed = Promise.resolve(() => { open = false; return Promise.resolve(); });
         // Like HA: the result first, then the first event.

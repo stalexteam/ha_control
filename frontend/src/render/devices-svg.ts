@@ -1,7 +1,8 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
+import { mdiAlert, mdiPower, mdiPowerOff, mdiRefreshAuto, mdiToggleSwitch } from '@mdi/js';
 import { isContainerKind, type Device, type Level, type Pt } from '../model/types';
 import type { BindStatus } from '../model/bindings';
-import type { ContainerState } from '../live/container-feed';
+import type { ContainerFlash, ContainerState } from '../live/container-feed';
 import type { Preview, Selection } from '../editor/tools/types';
 import { clippedCone, coneMedium, devicePose, directionHandle, type DevicePose } from '../geometry/devices';
 import { lineOfSightObstacles, type Medium, type Segment } from '../geometry/visibility';
@@ -25,15 +26,19 @@ export interface DeviceRenderOpts {
    */
   bindingStatus?: (d: Device) => BindStatus;
   /**
-   * Live output of an input container, or undefined (no data: neutral fill, dashed outline). It colours the symbol;
-   * a fault adds a mark.
+   * Live state of an input container, or undefined (no data: dashed outline). An `error` status shows the alert badge.
    */
   containerState?: (d: Device) => ContainerState | undefined;
+  /** The intent a live container's badge shows now (it wins over the alert while it lasts), or null. */
+  containerFlash?: (d: Device) => ContainerFlash | null;
 }
 
 const NS = 'non-scaling-stroke';
-/** Fault mark colour: a dot on the container symbol. */
-const FAULT_MARK = '#f43f5e';
+/** Badge of an input container, in screen pixels: the circle radius and the icon size. */
+const BADGE_R_PX = 7;
+const BADGE_ICON_PX = 10;
+/** Colour of the alert badge (status error). */
+const ALERT = '#f43f5e';
 /** Outline dash of a container with no live state (screen pixels). */
 const NO_DATA_DASH = '3 2';
 /** MDI `cube-outline` (24x24), the bundled fallback when `ha-icon` is not registered. */
@@ -81,11 +86,8 @@ function coneRings(level: Level, d: Device): Pt[][] {
   return rings;
 }
 
-/**
- * `dot`: the smart button's centre dot (the device colour unless a live output fill needs another ink).
- * `dash`: the outline dash of an input container with no live state.
- */
-function iconShape(d: Device, R: number, color: string, fill: string, dot = color, dash?: string): SVGTemplateResult {
+/** `dash`: the outline dash of an input container with no live state. */
+function iconShape(d: Device, R: number, color: string, fill: string, dash?: string): SVGTemplateResult {
   const pr = d.props;
   const common = { stroke: color, fill };
   switch (pr.kind) {
@@ -122,7 +124,7 @@ function iconShape(d: Device, R: number, color: string, fill: string, dot = colo
       return svg`<rect class="icon" x=${-R * 0.6} y=${-R * 0.6} width=${R * 1.2} height=${R * 1.2} rx=${R * 0.35}
         fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${dash ?? nothing}
         vector-effect=${NS}></rect>
-        <circle class="dot" r=${R * 0.18} fill=${dot}></circle>`;
+        <circle class="dot" r=${R * 0.18} fill=${color}></circle>`;
     case 'socket':
       return svg`<circle class="icon" r=${R} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
         <circle class="dot" cx=${-R * 0.4} r=${R * 0.15} fill=${color}></circle>
@@ -168,10 +170,31 @@ function bindRing(st: BindStatus, scale: number): SVGTemplateResult | typeof not
     stroke-width="2" stroke-dasharray=${st === 'unbound' ? '4 3' : nothing} vector-effect=${NS}></circle>`;
 }
 
-/** A container in fault: a red dot on the top-right corner of its symbol (unrotated), haloed in the background colour. */
-function faultMark(R: number, p: PlanPalette): SVGTemplateResult {
-  return svg`<circle class="fault-mark" cx=${R * 0.6} cy=${-R * 0.6} r=${R * 0.3} fill=${FAULT_MARK} stroke=${p.background}
-    stroke-width="1.5" vector-effect=${NS}></circle>`;
+/** Badge name (`data-badge`) and MDI path of an intent. */
+function intentIcon(f: ContainerFlash): [string, string] {
+  if (f.action === 'toggle') return ['toggle', mdiToggleSwitch];
+  if (f.action === 'auto') return ['auto', mdiRefreshAuto];
+  return f.value === 'off' ? ['set-off', mdiPowerOff] : ['set-on', mdiPower];
+}
+
+/**
+ * The badge of a live input container, at the top-right of its symbol (unrotated): a circle of BADGE_R_PX in the
+ * background colour, ringed in the icon colour, around a BADGE_ICON_PX MDI icon. An intent being shown wins (in the
+ * selection colour); otherwise an `error` status shows the alert; otherwise there is none.
+ */
+function badge(live: ContainerState, flash: ContainerFlash | null, R: number, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
+  const icon = flash ? intentIcon(flash) : live.status === 'error' ? ['alert', mdiAlert] : null;
+  if (!icon) return nothing;
+  const [name, d] = icon;
+  const ink = flash ? o.palette.selection : ALERT;
+  const cx = R * 0.9;
+  const cy = -R * 0.9;
+  const size = BADGE_ICON_PX / o.scale;
+  return svg`<g class="badge" data-badge=${name}>
+    <circle cx=${cx} cy=${cy} r=${BADGE_R_PX / o.scale} fill=${o.palette.background} stroke=${ink} stroke-width="1.5"
+      vector-effect=${NS}></circle>
+    <path d=${d} fill=${ink} transform=${`translate(${cx - size / 2} ${cy - size / 2}) scale(${size / 24})`}></path>
+  </g>`;
 }
 
 function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview: boolean): SVGTemplateResult {
@@ -184,7 +207,6 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
   const container = !preview && isContainerKind(d.props.kind);
   const live = container ? o.containerState?.(d) : undefined;
   const noData = container && !live;
-  const fill = p.deviceFill;
   const cls = `device device-${d.props.kind}${selected ? ' selected' : ''}${d.invalid ? ' invalid' : ''}${preview ? ' device-preview' : ''}`
     + (noData ? ' no-data' : '');
   const opacity = preview ? '0.5' : o.dim ? String(p.dimOpacity) : nothing;
@@ -197,10 +219,10 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
         stroke-width="2" stroke-dasharray="4 3" vector-effect=${NS}></circle>` : nothing}
       ${d.props.kind === 'equipment'
         ? equipmentBlock(d, o, color, deg)
-        : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, fill, color,
+        : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, p.deviceFill,
           noData ? NO_DATA_DASH : undefined)}</g>`}
-      ${live?.status === 'error' ? faultMark(R, p) : nothing}
       ${o.bindingStatus && !preview ? bindRing(o.bindingStatus(d), o.scale) : nothing}
+      ${live ? badge(live, o.containerFlash?.(d) ?? null, R, o) : nothing}
     </g>`;
 }
 

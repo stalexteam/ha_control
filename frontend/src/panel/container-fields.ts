@@ -140,7 +140,7 @@ export function containerFlags(o: BindingPropsOpts, d: Device, role: BindingRole
 }
 
 /** Container settings after all the roles: for a smart button, the duplicate-trigger warning. */
-export function containerFields(_o: BindingPropsOpts, d: Device): TemplateResult {
+export function containerFields(d: Device): TemplateResult {
   const p = d.props;
   if (p.kind !== 'wall_switch' && p.kind !== 'smart_button') return html`${nothing}`;
   return html`<div class="cfields">

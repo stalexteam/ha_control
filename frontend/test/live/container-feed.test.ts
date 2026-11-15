@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { ContainerFeed, type ContainerState } from '../../src/live/container-feed';
+import { ContainerFeed, FLASH_MS, type ContainerState } from '../../src/live/container-feed';
 import type { HassLike } from '../../src/api';
 import { deviceDefaults, type ContainerKind, type Device } from '../../src/model/types';
 
@@ -374,5 +374,128 @@ describe('ContainerFeed: connection loss', () => {
     c.fire('disconnected');
     expect(c.subs).toHaveLength(3);
     expect(feed.error).toBeNull();
+  });
+});
+
+describe('ContainerFeed: intent flash', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  const at = (s: number) => `2026-11-15T10:00:${String(s).padStart(2, '0')}+00:00`;
+  const btn = (last?: ContainerState['last'], status: ContainerState['status'] = 'ok'): ContainerState =>
+    ({ kind: 'smart_button', status, ...(last ? { last } : {}) });
+
+  /** A feed watching P1 with its first (full) frame applied, under fake timers. */
+  async function subscribed(first: Record<string, ContainerState> = { a: btn() }) {
+    vi.useFakeTimers();
+    const h = host();
+    const c = fakeConnection();
+    const feed = new ContainerFeed(h, () => c.connection);
+    feed.watch('P1');
+    await c.settleNow();
+    c.subs[0].push({ full: true, containers: first });
+    h.requestUpdate.mockClear();
+    return { h, c, feed, push: (ev: Event) => c.subs[c.subs.length - 1].push(ev) };
+  }
+
+  it('FLASH_MS is 3000', () => {
+    expect(FLASH_MS).toBe(3000);
+  });
+
+  it('a partial frame with a new last.at flashes for 3 s, then re-renders once', async () => {
+    const { h, feed, push } = await subscribed();
+    expect(feed.flash('a')).toBeNull();
+    push({ full: false, containers: { a: btn({ action: 'set', value: 'on', at: at(1) }) } });
+    expect(feed.flash('a')).toEqual({ action: 'set', value: 'on' });
+    expect(h.requestUpdate).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(FLASH_MS - 1);
+    expect(feed.flash('a')).toEqual({ action: 'set', value: 'on' });
+    expect(h.requestUpdate).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(feed.flash('a')).toBeNull();
+    expect(h.requestUpdate).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.requestUpdate).toHaveBeenCalledTimes(2);
+    // The intent stays the container's last one: only the flash ends.
+    expect(feed.get('a')?.last).toEqual({ action: 'set', value: 'on', at: at(1) });
+  });
+
+  it('toggle and auto flash without a value; the flash is per container', async () => {
+    const { feed, push } = await subscribed({ a: btn(), b: btn() });
+    push({ full: false, containers: { a: btn({ action: 'toggle', at: at(1) }) } });
+    expect(feed.flash('a')).toStrictEqual({ action: 'toggle' });
+    expect(feed.flash('b')).toBeNull();
+    push({ full: false, containers: { b: btn({ action: 'auto', at: at(2) }) } });
+    expect(feed.flash('b')).toStrictEqual({ action: 'auto' });
+    expect(feed.flash('a')).toStrictEqual({ action: 'toggle' });
+  });
+
+  it('full frame does not flash: neither the snapshot nor a reload', async () => {
+    const { h, feed, push } = await subscribed({ a: btn({ action: 'toggle', at: at(1) }) });
+    expect(feed.get('a')?.last?.at).toBe(at(1));
+    expect(feed.flash('a')).toBeNull();
+    // A reload (plan save) carrying a newer intent is still a full frame.
+    push({ full: true, containers: { a: btn({ action: 'auto', at: at(2) }), b: btn({ action: 'toggle', at: at(3) }) } });
+    expect(feed.flash('a')).toBeNull();
+    expect(feed.flash('b')).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(h.requestUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('a partial frame that keeps last.at (a status change) does not flash', async () => {
+    const last = { action: 'toggle' as const, at: at(1) };
+    const { feed, push } = await subscribed({ a: btn(last) });
+    push({ full: false, containers: { a: { ...btn(last, 'error'), reason: 'unavailable', entities: ['sensor.x'] } } });
+    expect(feed.flash('a')).toBeNull();
+    push({ full: false, containers: { a: btn(last) } });
+    expect(feed.flash('a')).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('newer intent restarts the flash', async () => {
+    const { h, feed, push } = await subscribed();
+    push({ full: false, containers: { a: btn({ action: 'set', value: 'on', at: at(1) }) } });
+    await vi.advanceTimersByTimeAsync(2000);
+    push({ full: false, containers: { a: btn({ action: 'set', value: 'off', at: at(3) }) } });
+    expect(feed.flash('a')).toEqual({ action: 'set', value: 'off' });
+    h.requestUpdate.mockClear();
+    await vi.advanceTimersByTimeAsync(FLASH_MS - 1); // 4999 ms after the first intent
+    expect(feed.flash('a')).toEqual({ action: 'set', value: 'off' });
+    expect(h.requestUpdate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(feed.flash('a')).toBeNull();
+    expect(h.requestUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('an intent flashing when an error arrives finishes its 3 s', async () => {
+    const { feed, push } = await subscribed();
+    const last = { action: 'toggle' as const, at: at(1) };
+    push({ full: false, containers: { a: btn(last) } });
+    await vi.advanceTimersByTimeAsync(1000);
+    push({ full: false, containers: { a: { ...btn(last, 'error'), reason: 'unavailable', entities: ['sensor.x'] } } });
+    expect(feed.flash('a')).toEqual({ action: 'toggle' });
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(feed.flash('a')).toEqual({ action: 'toggle' });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(feed.flash('a')).toBeNull();
+    expect(feed.get('a')?.status).toBe('error');
+  });
+
+  it('stop, a plan change and a disconnect clear the flash timers', async () => {
+    for (const end of ['stop', 'plan', 'disconnect'] as const) {
+      const { h, c, feed, push } = await subscribed();
+      push({ full: false, containers: { a: btn({ action: 'toggle', at: at(1) }) } });
+      expect(vi.getTimerCount()).toBe(1);
+      if (end === 'stop') feed.stop();
+      else if (end === 'plan') feed.watch('P2');
+      else c.fire('disconnected');
+      expect(feed.flash('a')).toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+      h.requestUpdate.mockClear();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(h.requestUpdate).not.toHaveBeenCalled();
+      feed.stop();
+      vi.useRealTimers();
+    }
   });
 });

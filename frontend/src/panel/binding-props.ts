@@ -9,7 +9,7 @@ import '../binding/entity-combo';
 import { setDeviceProps } from '../model/devices';
 import { deviceNameRow } from './device-props';
 import { containerFields, containerFlags, triggerFields } from './container-fields';
-import type { ContainerFeed } from '../live/container-feed';
+import type { ContainerFeed, ContainerIntent, ContainerState } from '../live/container-feed';
 import { t } from '../i18n';
 
 export interface BindingPropsOpts {
@@ -37,7 +37,7 @@ export interface BindingPropsOpts {
   /** A registry load is running: Retry shows "Loading…" and is disabled. */
   registryLoading: boolean;
   onRetry(): void;
-  /** Live container outputs of the open plan, for the output line. */
+  /** Live container states of the open plan, for the output line. */
   feed: Pick<ContainerFeed, 'ready' | 'error' | 'stateOf'>;
 }
 
@@ -46,15 +46,37 @@ function roleLabel(d: Device, r: BindingRole): string {
   return r === 'on' && d.props.kind === 'smart_button' && !d.props.separateOff ? t('binding.onOff') : t(`role.${r}`);
 }
 
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+
+/** Local `HH:MM:SS` of an ISO instant; the text itself when it is not a valid time. */
+function clock(iso: string): string {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? iso : `${pad2(at.getHours())}:${pad2(at.getMinutes())}:${pad2(at.getSeconds())}`;
+}
+
+/** An intent as the output line names it: `toggle`, `auto`, `set on` or `set off`. */
+const intentName = (i: ContainerIntent): string => (i.action === 'set' ? `set ${i.value ?? ''}`.trim() : i.action);
+
+/** A live container's line: its error status, else its last event, else "No events yet". */
+function stateLine(s: ContainerState): string {
+  if (s.status === 'error') {
+    return s.reason === 'unavailable'
+      ? t('output.errorUnavailable').replace('{entities}', (s.entities ?? []).join(', '))
+      : t('output.errorNotConfigured');
+  }
+  if (!s.last) return t('output.none');
+  return t('output.last').replace('{event}', intentName(s.last)).replace('{time}', clock(s.last.at));
+}
+
 /**
- * Output line of an input container: its live output; "Not saved yet" when the saved plan has no such container (or
- * has it as the other kind, after an unsaved Type change); the feed error when there are no live outputs. Nothing
- * until the runtime first answers, or for other kinds.
+ * Output line of an input container: its live status and last event; "Not saved yet" when the saved plan has no such
+ * container (or has it as the other kind, after an unsaved Type change); the feed error when there is no live state.
+ * Nothing until the runtime first answers, or for other kinds.
  */
 function outputLine(o: BindingPropsOpts, d: Device): TemplateResult | typeof nothing {
   if (!isContainerKind(d.props.kind)) return nothing;
   const s = o.feed.stateOf(d);
-  const text = s ? null : o.feed.error ?? (o.feed.ready ? t('output.notSaved') : null);
+  const text = s ? stateLine(s) : o.feed.error ?? (o.feed.ready ? t('output.notSaved') : null);
   return text === null ? nothing : html`<p class="note" data-field="output">${text}</p>`;
 }
 
@@ -116,7 +138,7 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
       ${deviceNameRow(d, name => o.commit(setDeviceProps(o.level, d.id, {}, name)))}
       ${outputLine(o, d)}
       ${activeRoleSpecs(d).map(spec => html`${roleField(o, d, spec)}${containerFlags(o, d, spec.role)}`)}
-      ${containerFields(o, d)}`
+      ${containerFields(d)}`
     : html`<p class="muted">${t('binding.pick')}</p>`}
     <div class="bfoot">
       <span>${t('binding.notBound').replace('{n}', String(open))}</span>
