@@ -1,9 +1,11 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
-import type { ContainerKind, Device, DeviceKind, DevicePlacement, DeviceProps, Level, Side } from '../model/types';
+import type { ContainerKind, Device, DeviceKind, DevicePlacement, DeviceProps, Id, Level, Side } from '../model/types';
 import { AIM_KINDS, AIM_MAX, DEVICE_PLACEMENTS, FAN_DIAMETERS, deviceDefaults, isContainerKind, type FanDiameter } from '../model/types';
-import { changeDeviceKind, deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
+import { changeDeviceKind, moveDevice, setDeviceControllable, setDeviceProps } from '../model/devices';
+import { deleteDeviceDoc, setDeviceInverterDoc, type DocEdit, type PowerSchema } from '../model/power';
 import type { Selection } from '../editor/tools/types';
+import { wallMountPlacement } from '../editor/tools/device-tool';
 import { withAim } from '../geometry/devices';
 import { deviceZones } from '../geometry/zones';
 import { setZoneParticipation } from '../model/automation-zones';
@@ -11,6 +13,7 @@ import { t } from '../i18n';
 import { numField, row, select } from './fields';
 import type { WholeRule } from '../geometry/parse';
 import type { ToolId } from './tool-factory';
+import { deviceTitle, newUnplacedDevice, renderUnplacedDevices } from './unplaced-devices';
 
 const DEVICE_KINDS = Object.keys(DEVICE_PLACEMENTS) as DeviceKind[];
 const isDeviceKind = (id: ToolId): id is DeviceKind => (DEVICE_KINDS as string[]).includes(id);
@@ -38,6 +41,15 @@ export interface DevicePropsOpts {
   onKind?(kind: ContainerKind): boolean;
   /** Sets whether the device takes part in an automation zone (returns false when refused). */
   onZone?(zoneId: string, participates: boolean): boolean;
+  /** Equipment: Wall mount on (onto the nearest wall face) or off (free in place); false when refused. */
+  onWallMount?(on: boolean): boolean;
+  /** Equipment: the Inverter flag (Power becomes Input / Output power); false when refused. */
+  onInverter?(on: boolean): boolean;
+  /** Equipment: the Controllable flag of its switch; false when refused. */
+  onControllable?(on: boolean): boolean;
+  /** The Device tool's Wall mount for the next equipment device (shown with the next-device defaults). */
+  nextWallMount?: boolean;
+  onNextWallMount?(on: boolean): void;
   onDelete(): void;
   /** Validation message for a rejected field (null clears it). */
   onNotice?(msg: string | null): void;
@@ -133,6 +145,31 @@ function iconField(o: DevicePropsOpts, value: string, field: string, set: (patch
     }} />`;
 }
 
+/** A labelled checkbox; a refused change puts it back on the model value. */
+function checkRow(field: string, label: string, value: boolean, on: (v: boolean) => boolean): TemplateResult {
+  return row(label, html`<input type="checkbox" data-field=${field} .checked=${fieldValue(value)} @change=${(e: Event) => {
+    const el = e.target as HTMLInputElement;
+    if (!on(el.checked)) el.checked = value;
+  }} />`);
+}
+
+/** Wall mount of a placed equipment device: its placement mode is wall. Nothing for any other device. */
+function wallMountRow(o: DevicePropsOpts, d: Device): TemplateResult | typeof nothing {
+  if (d.props.kind !== 'equipment' || d.placement.mode === 'none') return nothing;
+  return checkRow('wallMount', t('props.wallMount'), d.placement.mode === 'wall', on => o.onWallMount?.(on) ?? false);
+}
+
+/** The equipment flags, on the plan or not: Inverter, and Controllable while a switch is bound (otherwise a hint). */
+function equipmentFlags(o: DevicePropsOpts, d: Device): TemplateResult | typeof nothing {
+  const p = d.props;
+  if (p.kind !== 'equipment') return nothing;
+  return html`
+    ${checkRow('inverter', t('props.inverter'), !!p.inverter, on => o.onInverter?.(on) ?? false)}
+    ${d.bindings?.control
+      ? checkRow('controllable', t('props.controllable'), !!p.controllable, on => o.onControllable?.(on) ?? false)
+      : html`<p class="muted" data-note="bind-switch">${t('props.bindSwitchHint')}</p>`}`;
+}
+
 /** Rotation of a free device; side, offset (and aim) of a wall device; nothing for a device not on the plan. */
 function placementFields(o: DevicePropsOpts, d: Device): TemplateResult | typeof nothing {
   const pl = d.placement;
@@ -185,14 +222,21 @@ function zoneList(o: DevicePropsOpts, d: Device): TemplateResult {
   </fieldset>`;
 }
 
+/**
+ * A device's fields. One that is not on the plan has only its base fields (Name, the equipment flags, Delete): no shape,
+ * size, icon, label, placement or zones, since it is not drawn.
+ */
 function deviceProps(o: DevicePropsOpts, d: Device): TemplateResult {
+  const placed = d.placement.mode !== 'none';
   return html`
-    <h4>${t(`device.${d.props.kind}`)}</h4>
+    <h4>${deviceTitle(d)}</h4>
     ${deviceNameRow(d, name => o.onDevice({}, name))}
     ${typeRow(o, d)}
-    ${kindFields(o, d.props, '', patch => o.onDevice(patch))}
+    ${placed ? kindFields(o, d.props, '', patch => o.onDevice(patch)) : nothing}
+    ${wallMountRow(o, d)}
     ${placementFields(o, d)}
-    ${zoneList(o, d)}
+    ${equipmentFlags(o, d)}
+    ${placed ? zoneList(o, d) : nothing}
     ${d.invalid ? html`<p class="warn">${t('props.invalidDevice')}</p>` : nothing}
     <button class="btn danger" data-action="delete-device" @click=${() => o.onDelete()}>${t('action.delete')}</button>`;
 }
@@ -203,24 +247,36 @@ export function renderDeviceProps(o: DevicePropsOpts): TemplateResult {
   if (o.nextKind && o.nextProps) {
     return html`
       <h4>${t('props.nextDevice')}: ${t(`device.${o.nextKind}`)}</h4>
-      ${kindFields(o, o.nextProps, 'next-', patch => { o.onNext(patch); return true; })}`;
+      ${kindFields(o, o.nextProps, 'next-', patch => { o.onNext(patch); return true; })}
+      ${o.nextKind === 'equipment' ? checkRow('next-wallMount', t('props.wallMount'), !!o.nextWallMount,
+        on => { o.onNextWallMount?.(on); return true; }) : nothing}`;
   }
   return html`<p class="muted">${t('props.none')}</p>`;
 }
 
 export interface EquipmentPropsOpts {
   level: Level;
+  /** The schematic: deleting a device not on the plan and turning an inverter off edit it too. */
+  power: PowerSchema;
   selection: Selection | null;
   toolId: ToolId;
   nextProps: Record<DeviceKind, DeviceProps>;
   notice: string | null;
-  commit(next: Level): void;
-  /** Commits a level in which the selected device was deleted. */
+  /** Commits a level edit; `power` when the edit changed the schematic too, in the same undo step. */
+  commit(next: Level, power?: PowerSchema): void;
   setNextProps(next: Record<DeviceKind, DeviceProps>): void;
+  /** The Device tool's Wall mount for the next equipment device. */
+  nextWallMount: boolean;
+  setNextWallMount(on: boolean): void;
+  /** Selects a device (a row of the Not on the plan list, a new device). */
+  pickDevice(id: Id): void;
   setNotice(msg: string | null): void;
 }
 
-/** The whole right panel of the Equipment tab, wired to the level and the panel's next-device state. */
+/**
+ * The whole right panel of the Equipment tab, wired to the level and the panel's next-device state; with nothing
+ * selected it lists the devices that are not on the plan.
+ */
 export function renderEquipmentProps(o: EquipmentPropsOpts): TemplateResult {
   const { level, selection: s } = o;
   const device = s?.kind === 'device' ? level.devices.find(d => d.id === s.id) ?? null : null;
@@ -232,6 +288,17 @@ export function renderEquipmentProps(o: EquipmentPropsOpts): TemplateResult {
     o.commit(next);
     return true;
   };
+  /** Commits a level edit with its schematic edit; refused (false) when the level did not change. */
+  const editDoc = (e: DocEdit): boolean => {
+    if (e.level === level) return false;
+    o.setNotice(null);
+    o.commit(e.level, e.power);
+    return true;
+  };
+  const wallMount = (d: Device, on: boolean): boolean => {
+    const placement = wallMountPlacement(level, d, on);
+    return edit(placement ? moveDevice(level, d.id, placement) : level);
+  };
   return html`<div class="props">
     ${renderDeviceProps({
       device, level, nextKind, nextProps: nextKind ? o.nextProps[nextKind] : null,
@@ -239,13 +306,26 @@ export function renderEquipmentProps(o: EquipmentPropsOpts): TemplateResult {
       onKind: kind => !!device && edit(changeDeviceKind(level, device.id, kind)),
       onPlacement: p => !!device && edit(moveDevice(level, device.id, p)),
       onZone: (zoneId, on) => !!device && edit(setZoneParticipation(level, device.id, zoneId, on)),
+      onWallMount: on => !!device && wallMount(device, on),
+      onInverter: on => !!device && editDoc(setDeviceInverterDoc(level, o.power, device.id, on)),
+      onControllable: on => !!device && edit(setDeviceControllable(level, device.id, on)),
+      nextWallMount: o.nextWallMount,
+      onNextWallMount: on => o.setNextWallMount(on),
       onNext: patch => {
         if (!nextKind) return;
         o.setNextProps({ ...o.nextProps, [nextKind]: { ...o.nextProps[nextKind], ...patch, kind: nextKind } as DeviceProps });
       },
-      onDelete: () => { if (device) o.commit(deleteDevice(level, device.id)); },
+      onDelete: () => { if (device) editDoc(deleteDeviceDoc(level, o.power, device.id)); },
       onNotice: msg => o.setNotice(msg),
     })}
     ${o.notice ? html`<p class="warn">${o.notice}</p>` : nothing}
+    ${device ? nothing : renderUnplacedDevices({
+      level, onPick: id => o.pickDevice(id),
+      onNew: () => {
+        const made = newUnplacedDevice(level);
+        o.commit(made.level);
+        o.pickDevice(made.id);
+      },
+    })}
   </div>`;
 }

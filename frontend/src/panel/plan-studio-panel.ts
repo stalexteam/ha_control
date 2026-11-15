@@ -4,7 +4,6 @@ import type { BindingRole, Device, Id, Level, Plan, Pt, WallType } from '../mode
 import { WALL_PRESETS, levelZones } from '../model/types';
 import { deleteWall } from '../model/ops';
 import { deleteOpening } from '../model/openings';
-import { deleteDevice } from '../model/devices';
 import { deleteZone } from '../model/zones';
 import { deleteAutomationZone } from '../model/automation-zones';
 import { zoneLabelPoint, zoneOutline } from '../geometry/zones';
@@ -12,7 +11,9 @@ import { bindingStatus, type BindStatus } from '../model/bindings';
 import { presence } from '../binding/ha-meta';
 import { devicePose } from '../geometry/devices';
 import { History } from '../editor/history';
-import { defaultPower, deleteBlock, deleteWire, type PlanDoc, type Position, type PowerSchema } from '../model/power';
+import {
+  defaultPower, deleteBlock, deleteDeviceDoc, deleteWire, type PlanDoc, type Position, type PowerSchema,
+} from '../model/power';
 import { schemaBounds } from '../geometry/power';
 import { SaveController } from '../editor/save';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
@@ -209,9 +210,10 @@ export class PlanStudioPanel extends LitElement {
 
   get power(): PowerSchema { return this.history?.current.power ?? this.lazyPower; }
 
-  commit(next: Level): void {
+  /** Pushes a level edit; `power` joins the same undo step when the edit changed the schematic too. */
+  commit(next: Level, power?: PowerSchema): void {
     if (!this.history) return;
-    this.history.push({ ...this.history.current, level: next });
+    this.history.push({ ...this.history.current, level: next, ...(power && power !== this.power ? { power } : {}) });
     this.save.markDirty();
     this.dropStaleSelection();
     this.requestUpdate();
@@ -245,9 +247,13 @@ export class PlanStudioPanel extends LitElement {
     if (this.mode === 'power') return this.deletePower(s);
     if (s.kind === 'powerBlock' || s.kind === 'powerWire') return false;
     if ((this.mode === 'zones') !== (s.kind === 'automationZone')) return false;
+    if (s.kind === 'device') {
+      const edit = deleteDeviceDoc(level, this.power, s.id);
+      this.commit(edit.level, edit.power);
+      return true;
+    }
     this.commit(s.kind === 'wall' ? deleteWall(level, s.id) : s.kind === 'opening' ? deleteOpening(level, s.id)
-      : s.kind === 'device' ? deleteDevice(level, s.id) : s.kind === 'automationZone' ? deleteAutomationZone(level, s.id)
-      : deleteZone(level, s.id));
+      : s.kind === 'automationZone' ? deleteAutomationZone(level, s.id) : deleteZone(level, s.id));
     return true;
   }
 

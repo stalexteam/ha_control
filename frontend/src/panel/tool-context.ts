@@ -47,6 +47,7 @@ export function createToolContext(h: ToolHost): ToolContext {
     select: s => { h.selection = s; h.fieldNotice = null; if (h.mode !== 'binding') h.notice = null; },
     selection: () => h.selection,
     deviceDefaults: k => h.nextProps[k],
+    wallMount: () => h.nextObj.wallMount,
     openingDefaults: (k: OpeningKind) => openingDefaults(h.nextObj, k),
     zoneName: () => h.nextObj.zoneName ?? defaultZoneName(h.history?.current.level ?? EMPTY_LEVEL),
     /** A custom zone name is single-use: the next default is "Room N" again. */

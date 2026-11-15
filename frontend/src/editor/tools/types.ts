@@ -38,6 +38,8 @@ export interface ToolContext {
   selection(): Selection | null;
   /** The panel's "next device" props for the free mode. */
   deviceDefaults(kind: DeviceKind): DeviceProps;
+  /** The Device tool's Wall mount: the next equipment device goes on a wall, like a socket. */
+  wallMount(): boolean;
   /** The panel's "next opening" values for the door / window / opening tool. */
   openingDefaults(kind: OpeningKind): OpeningDefaults;
   /** Name the zone tool gives the next room. */

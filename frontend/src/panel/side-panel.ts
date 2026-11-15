@@ -57,7 +57,12 @@ export function renderSide(h: PlanStudioPanel, level: Level): TemplateResult {
     setNotice: (msg: string | null) => { h.notice = msg; },
   };
   if (h.mode === 'equipment') {
-    return renderEquipmentProps({ ...common, toolId: h.toolId, nextProps: h.nextProps, setNextProps: np => { h.nextProps = np; } });
+    return renderEquipmentProps({
+      ...common, power: h.power, commit: (next, power) => h.commit(next, power),
+      toolId: h.toolId, nextProps: h.nextProps, setNextProps: np => { h.nextProps = np; },
+      nextWallMount: h.nextObj.wallMount, setNextWallMount: on => { h.nextObj = { ...h.nextObj, wallMount: on }; },
+      pickDevice: id => h.pickDevice(id),
+    });
   }
   return renderProps({
     ...common, tool: h.toolId, boxMeasure: h.boxMeasure, wallType: h.wallType, thickness: h.thickness,

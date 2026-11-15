@@ -9,13 +9,15 @@ import { numField, row, select } from './fields';
 
 export type NextOpeningKind = 'door' | 'window' | 'opening';
 
-/** Parameters of the next door / window / opening / zone, remembered per tool for the session. */
+/** Parameters of the next door / window / opening / zone / equipment device, remembered per tool for the session. */
 export interface NextObjects {
   door: { width: number; hinge: 'start' | 'end'; swing: Side };
   window: { width: number; outside: Side };
   opening: { width: number };
   /** Name typed for the next zone; null means the automatic "Room N". */
   zoneName: string | null;
+  /** The Device tool places the next equipment device on a wall (Wall mount), like a socket. */
+  wallMount: boolean;
 }
 
 export function initialNext(): NextObjects {
@@ -24,6 +26,7 @@ export function initialNext(): NextObjects {
     window: { width: OPENING_DEFAULT_WIDTH.window, outside: 'left' },
     opening: { width: OPENING_DEFAULT_WIDTH.opening },
     zoneName: null,
+    wallMount: false,
   };
 }
 

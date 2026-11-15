@@ -1,6 +1,6 @@
 import { t } from '../i18n';
 import { newId } from './ids';
-import { isInverter } from './devices';
+import { deleteDevice, isInverter, setDeviceInverter } from './devices';
 import type { Device, Id, Level, Pt } from './types';
 import type { GeoCtx } from '../geometry/power';
 
@@ -54,7 +54,6 @@ export type WireError =
   | 'missing' | 'same-block' | 'direction' | 'port-taken' | 'dc-mismatch' | 'second-remainder' | 'loop';
 
 const KINDS: PowerKind[] = ['grid', 'device', 'bus', 'battery', 'pv', 'transfer', 'remainder'];
-const PORT_NAMES: PortName[] = ['IN', 'OUT', 'PV', 'BAT', 'A', 'B'];
 const LOOP_TRANSFER_CAP = 10;
 
 /** A block's ports; a device block has PV and BAT while its device is an inverter (see isInverter). */
@@ -130,6 +129,62 @@ export function deleteBlock(s: PowerSchema, id: Id): PowerSchema {
   const b = s.blocks.find((x) => x.id === id);
   if (!b || b.kind === 'grid') return s;
   return { blocks: s.blocks.filter((x) => x.id !== id), wires: s.wires.filter((w) => !touches(w, id)) };
+}
+
+/** The ids of the device blocks of `deviceId`. */
+const blocksOf = (s: PowerSchema, deviceId: Id): Set<Id> =>
+  new Set(s.blocks.flatMap((b) => (b.kind === 'device' && b.deviceId === deviceId ? [b.id] : [])));
+
+/**
+ * The device blocks of `deviceId` after its device changed (with the devices of `g`): wires and pins on ports they no
+ * longer have are dropped, as updateBlock does (an inverter turned off loses PV and BAT). The same schema when nothing
+ * is stale.
+ */
+export function pruneDeviceBlocks(s: PowerSchema, deviceId: Id, g: GeoCtx): PowerSchema {
+  const ids = blocksOf(s, deviceId);
+  if (ids.size === 0) return s;
+  const ports = new Map(s.blocks.filter((b) => ids.has(b.id))
+    .map((b) => [b.id, new Set(blockPorts(b, g).map((p) => p.name))]));
+  const stale = (e: WireEnd) => 'block' in e && !!ports.get(e.block) && !ports.get(e.block)!.has(e.port);
+  const wires = s.wires.filter((w) => !stale(w.from) && !stale(w.to));
+  let pinsChanged = false;
+  const blocks = s.blocks.map((b) => {
+    const has = ports.get(b.id);
+    if (!has || !b.portPins || Object.keys(b.portPins).every((p) => has.has(p as PortName))) return b;
+    pinsChanged = true;
+    const pins = Object.fromEntries(Object.entries(b.portPins).filter(([p]) => has.has(p as PortName)));
+    const { portPins: _drop, ...rest } = b;
+    return (Object.keys(pins).length ? { ...rest, portPins: pins } : rest) as PowerBlock;
+  });
+  if (wires.length === s.wires.length && !pinsChanged) return s;
+  return { ...s, blocks, wires };
+}
+
+/** Removes every device block of `deviceId` with its wires (the same schema when it has none). */
+export function deleteDeviceBlocks(s: PowerSchema, deviceId: Id): PowerSchema {
+  const ids = blocksOf(s, deviceId);
+  if (ids.size === 0) return s;
+  const gone = (e: WireEnd) => ids.has(endId(e));
+  return {
+    ...s, blocks: s.blocks.filter((b) => !ids.has(b.id)), wires: s.wires.filter((w) => !gone(w.from) && !gone(w.to)),
+  };
+}
+
+/** A level edit together with the schematic edit it implies, committed as one undo step. */
+export interface DocEdit { level: Level; power: PowerSchema }
+
+const geoOf = (level: Level): GeoCtx => ({ device: (id) => level.devices.find((d) => d.id === id) });
+
+/** Deletes a device; one not on the plan also takes its device blocks and their wires out of the schematic. */
+export function deleteDeviceDoc(level: Level, power: PowerSchema, id: Id): DocEdit {
+  const unplaced = level.devices.find((d) => d.id === id)?.placement.mode === 'none';
+  return { level: deleteDevice(level, id), power: unplaced ? deleteDeviceBlocks(power, id) : power };
+}
+
+/** Sets a device's inverter flag (setDeviceInverter); its blocks lose their PV and BAT wires when it stops being one. */
+export function setDeviceInverterDoc(level: Level, power: PowerSchema, id: Id, on: boolean): DocEdit {
+  const next = setDeviceInverter(level, id, on);
+  return { level: next, power: next === level ? power : pruneDeviceBlocks(power, id, geoOf(next)) };
 }
 
 export function deleteWire(s: PowerSchema, id: Id): PowerSchema {
@@ -291,8 +346,9 @@ function fixBlock(b: PowerBlock, g: GeoCtx): PowerBlock {
 
 /**
  * Drops malformed blocks and wires and repairs block fields (see fixBlock; a device block's ports come from its device
- * in `g`); a transfer whose form was reset loses its wires. A v0.7 `meter` block is an unknown kind here: migrateDevices
- * converts it first. The same object comes back when nothing changed.
+ * in `g`); a wire with an end on a port its block lacks is dropped, and so are the wires of a transfer whose form was
+ * reset. A v0.7 `meter` block is an unknown kind here: migrateDevices converts it first. The same object comes back when
+ * nothing changed.
  */
 export function normalizePower(raw: unknown, g: GeoCtx): PowerSchema | undefined {
   if (!isObj(raw)) return undefined;
@@ -320,9 +376,9 @@ export function normalizePower(raw: unknown, g: GeoCtx): PowerSchema | undefined
       const at = Math.min(1, Math.max(0, e.at));
       return at === e.at ? (e as unknown as WireEnd) : { bus: e.bus, at };
     }
-    if (typeof e.block === 'string' && PORT_NAMES.includes(e.port as PortName) && byId.has(e.block) && !reset.has(e.block)) {
-      return e as unknown as WireEnd;
-    }
+    // A port the block lacks (PV / BAT of a device that is not an inverter) would leave an invisible wire on it.
+    const b = typeof e.block === 'string' ? byId.get(e.block) : undefined;
+    if (b && !reset.has(b.id) && blockPorts(b, g).some((p) => p.name === e.port)) return e as unknown as WireEnd;
     return null;
   };
   const wires: PowerWire[] = [];

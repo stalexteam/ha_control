@@ -1,8 +1,10 @@
-import type { DeviceKind, DevicePlacement, DeviceProps, Level, Pt } from '../../model/types';
+import type { Device, DeviceKind, DevicePlacement, DeviceProps, Level, Pt } from '../../model/types';
 import { DEVICE_PLACEMENTS } from '../../model/types';
 import { addDevice, retargetZoneAngle } from '../../model/devices';
 import { nextFreeName } from '../../model/ids';
 import { snap } from '../../geometry/snap';
+import { angleOf, devicePose, facePoint, wrap360 } from '../../geometry/devices';
+import { dist } from '../../geometry/vec';
 import { wallFrame, wallLocal } from '../../geometry/walls';
 import { t } from '../../i18n';
 import { createAimDrag } from './aim-drag';
@@ -23,7 +25,7 @@ export function freePoint(ctx: ToolContext, p: Pt): Pt {
 
 /**
  * The placement modes a placed or dragged device of `kind` may take: equipment keeps `mode` (a wall mount is chosen,
- * not snapped to; a new one is free), any other kind every mode of DEVICE_PLACEMENTS.
+ * not snapped to; a new one follows the Device tool's Wall mount), any other kind every mode of DEVICE_PLACEMENTS.
  */
 export function candidateModes(kind: DeviceKind, mode: 'wall' | 'free' = 'free'): readonly ('wall' | 'free')[] {
   return kind === 'equipment' ? [mode] : DEVICE_PLACEMENTS[kind];
@@ -61,6 +63,34 @@ export function deviceCandidate(
 }
 
 /**
+ * The placement the Wall mount checkbox gives a placed device. On: the wall face nearest to its centre (any distance,
+ * not only within the pick tolerance), at the centre's position along that wall clamped to the wall, on the centre's
+ * side, as the select tool hosts a wall device. Off: free where it is drawn, rotated to the wall tangent, so the body
+ * does not move. Null when the device is not on the plan or has no wall to go to.
+ */
+export function wallMountPlacement(level: Level, d: Device, on: boolean): DevicePlacement | null {
+  const pose = devicePose(level, d);
+  if (!pose) return null;
+  if (!on) {
+    const rotation = wrap360(Math.round(angleOf(pose.dir)));
+    return { mode: 'free', x: Math.round(pose.pt.x), y: Math.round(pose.pt.y), rotation };
+  }
+  let best: { placement: DevicePlacement; d: number } | null = null;
+  for (const w of level.walls) {
+    let f;
+    try { f = wallFrame(level, w); } catch { continue; } // a node is missing
+    if (f.len <= 1e-9) continue;
+    const loc = wallLocal(f, pose.pt);
+    const side = loc.side > 0 ? 'left' : 'right';
+    const offset = Math.min(f.len, Math.max(0, Math.round(loc.t)));
+    const face = facePoint(level, w.id, side, offset);
+    const gap = face ? dist(face, pose.pt) : Infinity;
+    if (!best || gap < best.d) best = { placement: { mode: 'wall', wallId: w.id, side, offset }, d: gap };
+  }
+  return best && best.d < Infinity ? best.placement : null;
+}
+
+/**
  * Props for a new device: panel defaults (free mode), with the wall zone angle for a wall motion sensor.
  * Only the untouched free default becomes the wall default; a user-set angle stays.
  */
@@ -77,7 +107,8 @@ export function createDeviceTool(ctx: ToolContext, kind: DeviceKind): Tool {
   function probe(): { placement: DevicePlacement; props: DeviceProps; invalid: boolean } | null {
     if (!cursor) return null;
     const level = ctx.level();
-    const placement = deviceCandidate(ctx, level, kind, cursor);
+    const modes = candidateModes(kind, ctx.wallMount() ? 'wall' : 'free');
+    const placement = deviceCandidate(ctx, level, kind, cursor, 0, modes);
     if (!placement) {
       const fp = freePoint(ctx, cursor);
       return { placement: { mode: 'free', ...fp, rotation: 0 }, props: ctx.deviceDefaults(kind), invalid: true };

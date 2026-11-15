@@ -70,6 +70,16 @@ describe('device select tool', () => {
     expect(ctx.level().devices.find(d => d.id === id)!.placement).toMatchObject({ mode: 'wall', offset: 2000 });
   });
 
+  it('a deep wall-mounted body grabbed near its far edge slides along its wall', () => {
+    const { lv, id } = withDevice('equipment', onTop(1500));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    // The 600 deep body spans y 50..650: the grab is 590 off the face, far outside the wall snap.
+    t.down(ev(1500, 640)); t.move(ev(1800, 640)); t.move(ev(2000, 640)); t.up(ev(2000, 640));
+    expect(ctx.commits).toHaveLength(1);
+    expect(ctx.level().devices.find(d => d.id === id)!.placement).toMatchObject({ mode: 'wall', side: 'right', offset: 2000 });
+  });
+
   it('drag a wall switch into the room centre: unchanged, no commit', () => {
     const { lv } = withDevice('wall_switch', onTop(1500));
     const ctx = fakeContext(lv);

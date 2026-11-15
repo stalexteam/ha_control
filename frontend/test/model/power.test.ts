@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addBlock, blockPorts, clearPins, connect, defaultPower, deleteBlock, deleteWire, moveBlock, newBlock, normalizePower,
-  placeableDevices, setPin, stepDone, updateBlock, type PortName, type PowerBlock, type PowerSchema, type WireEnd,
-  type WireError,
+  addBlock, blockPorts, clearPins, connect, defaultPower, deleteBlock, deleteDeviceBlocks, deleteWire, moveBlock, newBlock,
+  normalizePower, placeableDevices, pruneDeviceBlocks, setPin, stepDone, updateBlock, type PortName, type PowerBlock,
+  type PowerSchema, type WireEnd, type WireError,
 } from '../../src/model/power';
 import type { GeoCtx } from '../../src/geometry/power';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type DeviceProps } from '../../src/model/types';
@@ -371,6 +371,25 @@ describe('normalizePower', () => {
     expect(n.blocks[6]).toBe(raw.blocks[6]);
     expect(n.blocks.map((b) => b.id)).toEqual(['g', 'm', 'd', 'p', 'b', 'ts', 'i']);
   });
+
+  it('drops a wire on a port the block lacks: PV on a device that is not an inverter, IN on the grid', () => {
+    const raw = {
+      blocks: [
+        { id: 'g', kind: 'grid', x: 0, y: 0 },
+        { id: 's', kind: 'device', x: 0, y: 0, deviceId: 's' },
+        { id: 'i', kind: 'device', x: 0, y: 0, deviceId: 'i' },
+        { id: 'p', kind: 'pv', x: 0, y: 0 },
+        { id: 'q', kind: 'pv', x: 0, y: 0 },
+      ],
+      wires: [
+        { id: 'w-s', from: { block: 'p', port: 'OUT' }, to: { block: 's', port: 'PV' } },
+        { id: 'w-i', from: { block: 'q', port: 'OUT' }, to: { block: 'i', port: 'PV' } },
+        { id: 'w-g', from: { block: 'p', port: 'OUT' }, to: { block: 'g', port: 'IN' } },
+      ],
+    };
+    const n = normalizePower(raw, geo(device('s', 'socket'), device('i', 'equipment', { inverter: true })))!;
+    expect(n.wires.map((w) => w.id)).toEqual(['w-i']);
+  });
 });
 
 function owner0(): PowerSchema {
@@ -379,6 +398,38 @@ function owner0(): PowerSchema {
     wires: [{ id: 'w', from: { block: 'g', port: 'OUT' }, to: { block: 'd', port: 'IN' } }],
   };
 }
+
+describe('device blocks of one device', () => {
+  const s = () => schema(
+    [{ id: 'g', kind: 'grid' }, { id: 'a', kind: 'device', deviceId: 'i' }, { id: 'p', kind: 'pv' },
+      { id: 'b', kind: 'battery' }, { id: 'x', kind: 'device', deviceId: 'x', portPins: { IN: { side: 'top', at: 0.5 } } }],
+    [
+      { id: 'w-in', from: P('g', 'OUT'), to: P('a', 'IN') },
+      { id: 'w-pv', from: P('p', 'OUT'), to: P('a', 'PV') },
+      { id: 'w-bat', from: P('a', 'BAT'), to: P('b', 'BAT') },
+      { id: 'w-x', from: P('a', 'OUT'), to: P('x', 'IN') },
+    ],
+  );
+
+  it('pruneDeviceBlocks drops the wires and pins of ports the device no longer has; the same schema otherwise', () => {
+    const inv = s();
+    expect(pruneDeviceBlocks(inv, 'i', G)).toBe(inv);
+    expect(pruneDeviceBlocks(inv, 'nobody', G)).toBe(inv);
+    const pinned = setPin(inv, 'a', 'PV', { side: 'left', at: 0.5 });
+    const plain = pruneDeviceBlocks(pinned, 'i', geo(device('i')));
+    expect(plain.wires.map((w) => w.id)).toEqual(['w-in', 'w-x']);
+    expect('portPins' in plain.blocks[1]).toBe(false);
+  });
+
+  it('deleteDeviceBlocks removes every block of the device with its wires', () => {
+    const inv = s();
+    const twice = addBlock(inv, blk({ id: 'a2', kind: 'device', deviceId: 'i' }));
+    const out = deleteDeviceBlocks(twice, 'i');
+    expect(out.blocks.map((b) => b.id)).toEqual(['g', 'p', 'b', 'x']);
+    expect(out.wires).toEqual([]);
+    expect(deleteDeviceBlocks(inv, 'nobody')).toBe(inv);
+  });
+});
 
 describe('stepDone', () => {
   it('needs a grid power entity and a wire', () => {

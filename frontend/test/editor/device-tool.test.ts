@@ -46,6 +46,20 @@ describe('device place tool', () => {
     expect(ctx.level().devices[0].placement).toMatchObject({ mode: 'free' });
   });
 
+  it('equipment with Wall mount on is placed on a wall like a socket; away from walls it is invalid', () => {
+    const ctx = fakeContext(box());
+    ctx.wallMount = () => true;
+    const t = createDeviceTool(ctx, 'equipment');
+    t.move(ev(1500, 2000));
+    expect(t.preview().device!.invalid).toBe(true);
+    t.down(ev(1500, 2000));
+    expect(ctx.level().devices).toHaveLength(0);
+    t.move(ev(1500, 10));
+    expect(t.preview().device!.placement).toMatchObject({ mode: 'wall', side: 'right', offset: 1500 });
+    t.down(ev(1500, 10));
+    expect(ctx.level().devices[0].placement).toMatchObject({ mode: 'wall', side: 'right', offset: 1500 });
+  });
+
   it('ceiling light snaps to the grid', () => {
     const ctx = fakeContext(box());
     const t = createDeviceTool(ctx, 'ceiling_light');

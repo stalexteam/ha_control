@@ -6,6 +6,7 @@ import { addBox } from '../../src/model/ops';
 import { addZone } from '../../src/model/zones';
 import { addDevice } from '../../src/model/devices';
 import { deviceDefaults } from '../../src/model/types';
+import { defaultPower } from '../../src/model/power';
 import { initialNextProps as initialNext } from '../../src/panel/device-props';
 import type { Level } from '../../src/model/types';
 
@@ -24,8 +25,9 @@ function twoRooms(): { level: Level; dev: string } {
 function mountProps(level: Level, id: string, commits: Level[]): HTMLElement {
   const host = document.createElement('div');
   render(renderEquipmentProps({
-    level, selection: { kind: 'device', id }, toolId: 'device-select', nextProps: initialNext(), notice: null,
+    level, power: defaultPower(), selection: { kind: 'device', id }, toolId: 'device-select', nextProps: initialNext(), notice: null,
     commit: n => commits.push(n), setNextProps: () => {}, setNotice: () => {},
+    nextWallMount: false, setNextWallMount: () => {}, pickDevice: () => {},
   }), host);
   return host;
 }
