@@ -1,8 +1,8 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
-import type { Device, DeviceKind, DevicePlacement, DeviceProps, Level, Side } from '../model/types';
-import { AIM_KINDS, AIM_MAX, DEVICE_PLACEMENTS, FAN_DIAMETERS, deviceDefaults, type FanDiameter } from '../model/types';
-import { deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
+import type { ContainerKind, Device, DeviceKind, DevicePlacement, DeviceProps, Level, Side } from '../model/types';
+import { AIM_KINDS, AIM_MAX, DEVICE_PLACEMENTS, FAN_DIAMETERS, deviceDefaults, isContainerKind, type FanDiameter } from '../model/types';
+import { changeDeviceKind, deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
 import type { Selection } from '../editor/tools/types';
 import { deviceRoomId, withAim } from '../geometry/devices';
 import { t } from '../i18n';
@@ -32,6 +32,8 @@ export interface DevicePropsOpts {
   /** Returns false when the placement was rejected (e.g. the offset is outside the wall). */
   onPlacement(p: DevicePlacement): boolean;
   onNext(patch: Partial<DeviceProps>): void;
+  /** Turns the selected input container into the other kind (returns false when refused). */
+  onKind?(kind: ContainerKind): boolean;
   onDelete(): void;
   /** Validation message for a rejected field (null clears it). */
   onNotice?(msg: string | null): void;
@@ -171,10 +173,22 @@ export function deviceNameRow(d: Device, onName: (name: string) => void): Templa
     }} />`);
 }
 
+/** Container type select; a free smart button cannot change type, so it gets a hint instead. */
+function typeRow(o: DevicePropsOpts, d: Device): TemplateResult | typeof nothing {
+  const kind = d.props.kind;
+  if (!isContainerKind(kind)) return nothing;
+  if (kind === 'smart_button' && d.placement.mode === 'free') {
+    return html`<p class="muted" data-note="type-free">${t('props.typeFreeHint')}</p>`;
+  }
+  return row(t('props.type'), select<ContainerKind>(kind, labelled<ContainerKind>(['wall_switch', 'smart_button'], 'device'),
+    v => o.onKind?.(v), 'kind'));
+}
+
 function deviceProps(o: DevicePropsOpts, d: Device): TemplateResult {
   return html`
     <h4>${t(`device.${d.props.kind}`)}</h4>
     ${deviceNameRow(d, name => o.onDevice({}, name))}
+    ${typeRow(o, d)}
     ${kindFields(o, d.props, '', patch => o.onDevice(patch))}
     ${placementFields(o, d)}
     ${d.invalid ? html`<p class="warn">${t('props.invalidDevice')}</p>` : nothing}
@@ -220,6 +234,7 @@ export function renderEquipmentProps(o: EquipmentPropsOpts): TemplateResult {
     ${renderDeviceProps({
       device, level, nextKind, nextProps: nextKind ? o.nextProps[nextKind] : null,
       onDevice: (patch, name) => !!device && edit(setDeviceProps(level, device.id, patch, name)),
+      onKind: kind => !!device && edit(changeDeviceKind(level, device.id, kind)),
       onPlacement: p => !!device && edit(moveDevice(level, device.id, p)),
       onNext: patch => {
         if (!nextKind) return;

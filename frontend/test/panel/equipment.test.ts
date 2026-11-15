@@ -209,6 +209,67 @@ describe('Equipment tab', () => {
   });
 });
 
+describe('Equipment tab: container type', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+  });
+
+  it('type select turns a wall switch into a smart button; undo restores it', async () => {
+    const el = await mount();
+    await drawBox(el);
+    await tab(el, 'equipment');
+    await tool(el, 'wall_switch');
+    click(el, 100, -100);
+    await el.updateComplete;
+    const lvl = el.history!.current;
+    const d0 = lvl.devices[0];
+    el.history!.push({ ...lvl, devices: [{ ...d0, bindings: { state: 'switch.lamp' } }] });
+    el.requestUpdate();
+    await el.updateComplete;
+    const sel = $<HTMLSelectElement>(el, '.props select[data-field="kind"]');
+    expect(sel.value).toBe('wall_switch');
+    sel.value = 'smart_button';
+    sel.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    const d = el.history!.current.devices[0];
+    expect(d.props.kind).toBe('smart_button');
+    expect(d.name).toBe(d0.name);
+    expect(d.placement).toEqual(d0.placement);
+    expect(d.bindings?.state).toBeUndefined();
+    key(el, 'keydown', 'z', { ctrlKey: true, code: 'KeyZ' });
+    await el.updateComplete;
+    const back = el.history!.current.devices[0];
+    expect(back.props.kind).toBe('wall_switch');
+    expect(back.bindings).toEqual({ state: 'switch.lamp' });
+  });
+
+  it('a free smart button has no type select and shows the hint', async () => {
+    const el = await mount();
+    await tab(el, 'equipment');
+    await tool(el, 'smart_button');
+    click(el, 1000, 1000);
+    await el.updateComplete;
+    const d = el.history!.current.devices[0];
+    expect(d.props.kind).toBe('smart_button');
+    expect(d.placement.mode).toBe('free');
+    expect(el.shadowRoot!.querySelector('.props select[data-field="kind"]')).toBeNull();
+    expect($(el, '.props [data-note="type-free"]').textContent).toContain('cannot become a wall switch');
+  });
+
+  it('placing the new tools', async () => {
+    const el = await mount();
+    await tab(el, 'equipment');
+    expect(el.shadowRoot!.querySelector('button[data-tool="wall_switch"]')).not.toBeNull();
+    expect(el.shadowRoot!.querySelector('button[data-tool="smart_button"]')).not.toBeNull();
+    await tool(el, 'smart_button');
+    click(el, 1000, 1000);
+    await el.updateComplete;
+    expect(el.history!.current.devices[0].props.kind).toBe('smart_button');
+    expect(el.history!.current.devices[0].placement.mode).toBe('free');
+  });
+});
+
 describe('Equipment tab: rejected edits', () => {
   beforeEach(() => {
     document.body.innerHTML = '';

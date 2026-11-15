@@ -1,7 +1,7 @@
 import { newId } from './ids';
 import {
-  AIM_MAX, DEVICE_PLACEMENTS, allowedOutputs, deviceDefaults,
-  type ContainerKind, type Device, type DeviceKind, type DevicePlacement, type DeviceProps, type Id, type Level,
+  AIM_MAX, DEVICE_PLACEMENTS, allowedOutputs, deviceDefaults, isContainerKind,
+  type ContainerKind, type Device, type DevicePlacement, type DeviceProps, type Id, type Level,
 } from './types';
 import { sanitizeBindings } from './bindings';
 import { wallLen } from '../geometry/walls';
@@ -57,8 +57,6 @@ export function moveDevice(level: Level, id: Id, placement: DevicePlacement): Le
   return refreshDevices(withDevices(level, devices.map(x => (x.id === id ? { ...x, placement, props } : x))));
 }
 
-const isContainer = (kind: DeviceKind): kind is ContainerKind => kind === 'wall_switch' || kind === 'smart_button';
-
 /** A container default output that is no longer allowed (`auto` with auto disabled) reads as `off`. */
 function normalizeDefaultOutput(p: DeviceProps): DeviceProps {
   if (p.kind !== 'wall_switch' && p.kind !== 'smart_button') return p;
@@ -86,7 +84,7 @@ export function setDeviceProps(level: Level, id: Id, patch: Partial<DeviceProps>
  */
 export function changeDeviceKind(level: Level, id: Id, kind: ContainerKind): Level {
   const d = level.devices.find(x => x.id === id);
-  if (!d || !isContainer(d.props.kind) || d.props.kind === kind) return level;
+  if (!d || !isContainerKind(d.props.kind) || d.props.kind === kind) return level;
   const props = deviceDefaults(kind, d.placement.mode);
   if (!allowed(props, d.placement)) return level;
   const next = sanitizeBindings({ ...d, props });

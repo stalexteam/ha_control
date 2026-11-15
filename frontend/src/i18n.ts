@@ -150,6 +150,7 @@ const en: Dict = {
   'props.none': 'Nothing selected',
   'props.wall': 'Wall',
   'props.type': 'Type',
+  'props.typeFreeHint': 'A free-placed smart button cannot become a wall switch; move it onto a wall first.',
   'props.thickness': 'Thickness',
   'props.baseline': 'Baseline',
   'props.length': 'Length',

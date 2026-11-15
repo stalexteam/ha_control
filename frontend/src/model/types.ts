@@ -54,6 +54,8 @@ export type ContainerOutput = 'on' | 'off' | 'auto' | 'error';
 export interface Trigger { slot: number; event: string }
 /** Input containers: kinds with a live output. */
 export type ContainerKind = 'wall_switch' | 'smart_button';
+/** True for the input-container kinds. */
+export const isContainerKind = (kind: DeviceKind): kind is ContainerKind => kind === 'wall_switch' || kind === 'smart_button';
 export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | ContainerKind | 'socket' | 'equipment' | 'climate_sensor' | 'exhaust_fan';
 export type DevicePlacement =
   | { mode: 'wall'; wallId: Id; side: Side; offset: number; aim?: number } // offset: along axis from node A to device centre; aim: degrees off the face normal, counter-clockwise on screen, integer -90..90 (default 0)
