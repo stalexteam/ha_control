@@ -6,10 +6,10 @@
 
 **Architecture:**
 - Bindings live in the plan (`Device.bindings`). Pure model ops sit in `model/bindings.ts`.
-- HA metadata (states, entity, device and area registries) is read through one adapter, `binding/ha-meta.ts`. It reads the panel's `hass` and falls back to websocket calls.
+- HA metadata goes through one adapter, `binding/ha-meta.ts`. States come from `hass.states`; the entity, device and area registries are loaded once over websocket when the Binding step opens. There is one path, with no `hass.entities` branching.
 - Candidate filtering is pure (`binding/candidates.ts`) and works only by domain, `device_class` and unit, never by names.
 - The panel gains a third step, `binding`, with the same left-to-right layout: device list | properties | plan.
-- The entity field uses HA's `ha-entity-picker` when it is registered, and otherwise a self-contained Lit combobox with the same layout.
+- The entity field is a self-contained Lit combobox laid out like HA's entity picker. There is one path: HA's internal `ha-entity-picker` is not used because its availability and API in custom panels are not guaranteed (simplicity review 2026-11-15).
 
 **Tech Stack:** TypeScript 5, Lit 3, Vite, vitest + happy-dom.
 
@@ -49,7 +49,7 @@
 ## Review Focus
 
 1. **Entity with a conflicting `device_class`:** a battery `%` sensor must never be a humidity candidate. Test in Task 2.
-2. **`hass.entities` / `hass.devices` undefined on the panel `hass`:** the websocket fallback loads them and binding still works. Tests in Task 2 (adapter) and Task 6 (panel with a stripped hass).
+2. **Registries not loaded yet, or the registry fetch fails:** binding fields still work from `hass.states`, nothing is flagged Missing, and a notice explains the failure. Tests in Task 2 and Task 6.
 3. **A bound entity deleted from HA:** Missing, kept, never auto-removed. A disabled or unavailable entity is "unavailable", not Missing. Tests in Task 1 and Task 2.
 4. **Registry not loaded yet** (first render): no device is flagged Missing. Test in Task 2 (`presence` returns `'unknown'`).
 5. **A large HA instance** (3000 entities): the combobox renders at most 100 rows and filters by search; candidate lists are memoised. Test in Task 5.
@@ -63,7 +63,7 @@ frontend/src/model/types.ts            + BindingRole, Device.bindings, equipment
 frontend/src/model/bindings.ts         NEW ROLE_SPECS, setBinding, bindingStatus, roleCount, alsoBoundTo, sanitizeBindings
 frontend/src/binding/ha-meta.ts        NEW HA metadata adapter (hass.* or websocket fallback), presence()
 frontend/src/binding/candidates.ts     NEW candidates(), haDevicesFor(), autoFill(), entityLabel()
-frontend/src/binding/entity-combo.ts   NEW <ps-entity-combo> (wraps ha-entity-picker or own combobox)
+frontend/src/binding/entity-combo.ts   NEW <ps-entity-combo> (self-contained, HA-entity-picker layout)
 frontend/src/panel/steps.ts            NEW title-block wizard header (renderSteps), step status, Back/Next targets
 frontend/src/panel/binding-list.ts     NEW device list rail: Not bound / Bound / All + search
 frontend/src/panel/binding-props.ts    NEW binding properties panel
@@ -145,7 +145,7 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
 
 **Files:**
 - Create: `frontend/src/binding/ha-meta.ts`, `frontend/src/binding/candidates.ts`
-- Modify: `frontend/src/api.ts` (extend `HassLike` with optional `states`, `entities`, `devices`, `areas`)
+- Modify: `frontend/src/api.ts` (extend `HassLike` with optional `states`)
 - Test: `frontend/test/binding/ha-meta.test.ts`, `frontend/test/binding/candidates.test.ts`, `frontend/test/binding/fixtures.ts`
 
 **Interfaces:**
@@ -155,8 +155,8 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
     deviceId: string | null; areaId: string | null; hidden: boolean; disabled: boolean; category: string | null; icon: string | null }
   export interface DeviceMeta { id: string; name: string; model: string | null; areaId: string | null }
   export interface HaMeta { entities: Map<string, EntityMeta>; devices: Map<string, DeviceMeta>; areas: Map<string, string>; registryLoaded: boolean }
-  export function metaFromHass(hass: HassLike): HaMeta;            // uses hass.states (+ hass.entities/devices/areas if present; registryLoaded = both present)
-  export async function loadRegistries(hass: HassLike): Promise<Pick<HaMeta, 'entities' | 'devices' | 'areas'>>;  // websocket fallback
+  export function metaFromStates(states: Record<string, unknown> | undefined): HaMeta;   // from hass.states; registryLoaded = false
+  export async function loadRegistries(hass: HassLike): Promise<Pick<HaMeta, 'entities' | 'devices' | 'areas'>>;  // one websocket load
   export function mergeMeta(states: HaMeta, regs: Pick<HaMeta, 'entities' | 'devices' | 'areas'>): HaMeta;   // registryLoaded = true
   export function presence(meta: HaMeta, eid: string): Presence;   // unknown if !registryLoaded and no state
   // candidates.ts
@@ -165,7 +165,7 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
   export function autoFill(level: Level, deviceId: Id, haDeviceId: string, meta: HaMeta): { level: Level; filled: BindingRole[]; ambiguous: BindingRole[] };
   export function entityLabel(meta: HaMeta, eid: string): { name: string; context: string };  // context "Area ▸ Device" (area from entity, else device)
   ```
-- The fallback calls the admin websocket commands `get_states`, `config/entity_registry/list`, `config/device_registry/list` and `config/area_registry/list`. The panel is admin-only, so these are allowed. Registry entries map to: `hidden_by` → hidden, `disabled_by` → disabled, `entity_category` → category, `icon ?? original_icon` → icon.
+- `loadRegistries` calls the admin websocket commands `get_states`, `config/entity_registry/list`, `config/device_registry/list` and `config/area_registry/list`. The panel is admin-only, so these are allowed. Registry entries map to: `hidden_by` → hidden, `disabled_by` → disabled, `entity_category` → category, `icon ?? original_icon` → icon.
 - Presence:
   - `present`: a state exists and is not `unavailable`.
   - `unavailable`: the state is `unavailable`, or the entity is in the registry (disabled or without a state).
@@ -186,7 +186,7 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
     - registry-only → unavailable;
     - unknown id with the registry loaded → missing;
     - unknown id without the registry → unknown (Review Focus 4);
-  - `metaFromHass` with `entities` and `devices` undefined → `registryLoaded false`. `mergeMeta` with registries → true (Review Focus 2);
+  - `metaFromStates` → `registryLoaded false`, and states-only candidates still work. `mergeMeta` with registries → true (Review Focus 2);
   - `loadRegistries` with a fake `sendMessagePromise` maps the fields as specified.
 - [ ] **Step 2:** Run → FAIL. **Step 3:** Implement. **Step 4:** Run `npm test` and tsc → PASS.
 - [ ] **Step 5:** Commit `feat: HA metadata adapter and binding candidate engine`.
@@ -228,7 +228,6 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
 - Chrome (styles.ts):
   - The top bar, rail, properties panel, buttons and inputs use the HA variables listed under Global Constraints with fallbacks.
   - The steps are styled as a title block: cells separated by `--divider-color` rules, tabular numerals, sentence case, no all-caps.
-  - On narrow screens, an `<ha-menu-button>` is rendered when `customElements.get('ha-menu-button')`, with `.hass` and `.narrow`.
 - The left rail in binding mode = `renderBindingList`. The properties panel shows a placeholder text until Task 6.
 - Delete in binding mode does nothing.
 
@@ -260,7 +259,7 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
 
 ---
 
-### Task 5: Entity combobox
+### Task 5: Entity combobox (single self-contained implementation)
 
 **Files:**
 - Create: `frontend/src/binding/entity-combo.ts`
@@ -271,12 +270,9 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
   - `meta: HaMeta`
   - `items: EntityMeta[]`: already filtered candidates
   - `value: string | null`
-  - `hass: unknown`
-  - `useNative: boolean`: default `!!customElements.get('ha-entity-picker')`
   - `label: string`
 - It fires `value-changed` with `{ value: string | null }`.
-- **Native mode** renders `<ha-entity-picker .hass .value .entityFilter=${(s) => itemIds.has(s.entity_id)} allow-custom-entity=false>` and re-emits its `value-changed`.
-- **Own mode**, closed:
+- **Closed:**
   - a domain or device-class icon (bundled MDI paths for power, temperature, humidity, motion, illuminance, light, switch, event, fan, generic);
   - the name, plus `entityLabel().context` underneath;
   - a ✕ that clears;
@@ -291,7 +287,7 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
 
   A value not in `items` (for example missing) still shows its id in the closed box.
 
-- [ ] **Step 1: Failing tests** (happy-dom, own mode):
+- [ ] **Step 1: Failing tests** (happy-dom):
   - the closed box shows name and context;
   - opening shows a search field and rows;
   - typing "wc" filters;
@@ -299,8 +295,7 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
   - ✕ fires `null`;
   - Esc closes;
   - with 3000 items, at most 100 `.opt` rows render (Review Focus 5);
-  - a missing value shows its id;
-  - native mode with a stub `ha-entity-picker` registered renders it and passes the filter.
+  - a missing value shows its id.
 - [ ] **Step 2:** Run → FAIL. **Step 3:** Implement. **Step 4:** Run `npm test` and tsc → PASS.
 - [ ] **Step 5:** Commit `feat: entity combobox with native HA picker support`.
 
@@ -325,11 +320,11 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
     - for an unavailable one: "Unavailable in Home Assistant";
     - "Also bound to: A, B" when it applies;
   - a footer: "N not bound" and "Next unbound device".
-- **Panel:** builds `meta` with `metaFromHass(hass)`. On entering the binding step, if `registryLoaded` is false it calls `loadRegistries` once and merges the result, with a request-update on completion. Meta is memoised on the identities of the `hass.states`, `hass.entities` and `hass.devices` objects. The status function passed to the renderer and the list is `d => bindingStatus(d, eid => presence(meta, eid))`.
+- **Panel:** builds `meta` with `metaFromStates(hass.states)`. On first entry to the binding step it calls `loadRegistries` once (failure → the notice "Couldn't load the Home Assistant registries: <error>" with a Retry button), merges the result, and requests an update. Meta is memoised on the identity of `hass.states` and the loaded registries. The status function passed to the renderer and the list is `d => bindingStatus(d, eid => presence(meta, eid))`.
 - **README:** a short "Binding" section with the steps, the filter rules (no name guessing) and what "bound" means.
 
-- [ ] **Step 1: Failing tests** (happy-dom, mock hass with `states` and without `entities`/`devices`; mock `sendMessagePromise` answers the registry commands):
-  - opening the binding step triggers exactly one registry fetch (Review Focus 2);
+- [ ] **Step 1: Failing tests** (happy-dom, mock hass with `states`; mock `sendMessagePromise` answers the registry commands):
+  - opening the binding step triggers exactly one registry fetch; a rejected fetch shows the notice with Retry and flags nothing as Missing (Review Focus 2);
   - selecting a socket shows Control and Power fields;
   - picking an entity stores `bindings.control` and the status turns bound;
   - the plan saves and reloads with the binding;
