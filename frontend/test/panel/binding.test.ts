@@ -2,7 +2,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createMockHass, STORAGE_KEY } from '../../dev/mock-hass';
 import type { HassLike } from '../../src/api';
-import type { EntityCombo } from '../../src/binding/entity-combo';
 import type { DeviceCombo } from '../../src/binding/device-combo';
 import { candidates, haDevicesFor } from '../../src/binding/candidates';
 import { loadRegistries, mergeMeta, metaFromStates } from '../../src/binding/ha-meta';
@@ -10,7 +9,9 @@ import { ROLE_SPECS } from '../../src/model/bindings';
 import { deviceDefaults, type Device, type DeviceKind, type DevicePlacement, type Level } from '../../src/model/types';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 import { rectRoomLevel } from '../fixtures';
-import { $, key, mount, pressSave, stored } from './helpers';
+import {
+  $, choose, combo, device, mount, pick, press, pressSave, redo, registryHass, stored, undo, type Fail,
+} from './helpers';
 
 const st = (state: string, attributes: Record<string, string> = {}) => ({ state, attributes });
 
@@ -50,29 +51,8 @@ const REGISTRY: Record<string, unknown> = {
   'config/area_registry/list': [{ area_id: 'wc', name: 'WC' }],
 };
 
-/** Registry answers: rejected while `on`; held until `gate` resolves when one is set. */
-interface Fail { on: boolean; gate?: Promise<void> }
-
-/** Mock hass with live states; the registry commands are counted and answered, or rejected while `fail.on`. */
-function haHass(fail: Fail = { on: false }): { hass: HassLike; calls: string[] } {
-  const base = createMockHass();
-  const calls: string[] = [];
-  const hass: HassLike = {
-    ...base,
-    states: STATES,
-    connection: {
-      async sendMessagePromise<T>(msg: Record<string, unknown>): Promise<T> {
-        const type = String(msg.type);
-        if (!(type in REGISTRY)) return base.connection.sendMessagePromise<T>(msg);
-        calls.push(type);
-        await fail.gate;
-        if (fail.on) throw { code: 'unauthorized', message: 'Unauthorized' };
-        return structuredClone(REGISTRY[type]) as T;
-      },
-    },
-  };
-  return { hass, calls };
-}
+/** Mock hass with the live states above; the registry commands are counted and answered, or rejected while `fail.on`. */
+const haHass = (fail: Fail = { on: false }): { hass: HassLike; calls: string[] } => registryHass(STATES, REGISTRY, fail);
 
 const free = (x: number, y: number): DevicePlacement => ({ mode: 'free', x, y, rotation: 0 });
 const dev = (id: string, name: string, kind: DeviceKind, placement: DevicePlacement, bindings?: Device['bindings']): Device =>
@@ -96,15 +76,8 @@ function level(): Level {
   };
 }
 
-async function press(el: PlanStudioPanel, sel: string): Promise<void> {
-  $<HTMLButtonElement>(el, sel).click();
-  await el.updateComplete;
-}
-
 const notice = (el: PlanStudioPanel) => el.shadowRoot!.querySelector('[data-notice="registry"]');
 const dot = (el: PlanStudioPanel, id: string) => [...$(el, `.blist .brow[data-id="${id}"] .dot`).classList];
-const device = (el: PlanStudioPanel, id: string) => el.history!.current.devices.find(d => d.id === id)!;
-const combo = (el: PlanStudioPanel, role: string) => $<EntityCombo>(el, `.props ps-entity-combo[data-role="${role}"]`);
 
 /** Opens the stored plan with the HA mock and enters the Binding step; resolves once the registry load settled. */
 async function open(fail: Fail = { on: false }): Promise<{ el: PlanStudioPanel; calls: string[] }> {
@@ -119,25 +92,6 @@ async function open(fail: Fail = { on: false }): Promise<{ el: PlanStudioPanel; 
   if (fail.on) await vi.waitFor(() => expect(notice(el)).not.toBeNull());
   else await vi.waitFor(() => expect(dot(el, 'g')).toContain('missing'));
   return { el, calls };
-}
-
-/** Selects a device through the list (All filter). */
-async function pick(el: PlanStudioPanel, id: string): Promise<void> {
-  await press(el, '.blist [data-filter="all"]');
-  await press(el, `.blist .brow[data-id="${id}"]`);
-  expect(el.selection).toEqual({ kind: 'device', id });
-}
-
-/** Opens a role's combobox and clicks the row of `eid`. */
-async function choose(el: PlanStudioPanel, role: string, eid: string): Promise<void> {
-  const c = combo(el, role);
-  c.shadowRoot!.querySelector<HTMLElement>('.cbox')!.click();
-  await c.updateComplete;
-  const row = c.shadowRoot!.querySelector<HTMLElement>(`.opt[data-id="${eid}"]`);
-  if (!row) throw new Error(`no row ${eid}`);
-  row.click();
-  await c.updateComplete;
-  await el.updateComplete;
 }
 
 const deviceCombo = (el: PlanStudioPanel) => $<DeviceCombo>(el, '.props ps-device-combo[data-field="ha-device"]');
@@ -164,15 +118,6 @@ async function haDevice(el: PlanStudioPanel, query: string): Promise<void> {
   await c.updateComplete;
   await el.updateComplete;
 }
-
-const undo = async (el: PlanStudioPanel) => {
-  key(el, 'keydown', 'z', { ctrlKey: true, code: 'KeyZ' });
-  await el.updateComplete;
-};
-const redo = async (el: PlanStudioPanel) => {
-  key(el, 'keydown', 'y', { ctrlKey: true, code: 'KeyY' });
-  await el.updateComplete;
-};
 
 describe('binding step', () => {
   beforeEach(() => {

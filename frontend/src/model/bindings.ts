@@ -13,8 +13,8 @@ export interface RoleSpec {
 const POWER: RoleSpec = { role: 'power', domains: ['sensor'], deviceClasses: ['power'], units: ['W', 'kW'], primary: false };
 /** Smart button roles whose binding is a trigger (entity, slot and event). */
 const TRIGGER_ROLES = ['on', 'off', 'auto'] as const;
-type TriggerRole = typeof TRIGGER_ROLES[number];
-const isTriggerRole = (r: BindingRole): r is TriggerRole => (TRIGGER_ROLES as readonly string[]).includes(r);
+export type TriggerRole = typeof TRIGGER_ROLES[number];
+export const isTriggerRole = (r: BindingRole): r is TriggerRole => (TRIGGER_ROLES as readonly string[]).includes(r);
 /** A trigger role: events, or plain sensors. Zigbee2MQTT registers its action sensors as diagnostic, with no class and no unit. */
 const trigger = (role: TriggerRole, autoFill?: false): RoleSpec => ({
   role, domains: ['event', 'sensor'], plainDomains: ['sensor'], categories: ['diagnostic'], primary: true,

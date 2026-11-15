@@ -125,6 +125,15 @@ describe('setDeviceProps on a container', () => {
     // The trigger settings stay in props, so turning auto on again restores them.
     expect(off.devices[0].props).toMatchObject({ autoEnabled: false, defaultOutput: 'off', auto: { slot: 0, event: 'double' } });
   });
+  it('turning separateOff off drops the off binding and keeps the off trigger in props', () => {
+    const { level, id } = withDevice('smart_button');
+    let l = setDeviceProps(level, id, { separateOff: true, off: { slot: 2, event: 'hold' } });
+    l = setBinding(setBinding(l, id, 'on', 'sensor.a'), id, 'off', 'sensor.a');
+    expect(l.devices[0].bindings).toEqual({ on: 'sensor.a', off: 'sensor.a' });
+    const off = setDeviceProps(l, id, { separateOff: false });
+    expect(off.devices[0].bindings).toEqual({ on: 'sensor.a' });
+    expect(off.devices[0].props).toMatchObject({ separateOff: false, off: { slot: 2, event: 'hold' } });
+  });
   it('turning separateOff on drops final (it matters only in toggle mode)', () => {
     const { level, id } = withDevice('smart_button');
     let l = setDeviceProps(level, id, { autoEnabled: true });

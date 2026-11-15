@@ -25,7 +25,8 @@ function bindingSide(h: PlanStudioPanel, level: Level): TemplateResult {
     meta: h.haMeta.get(), states: h.hass?.states, status: h.bindStatus,
     showAll: h.showAll, onShowAll: role => { h.showAll = { ...h.showAll, [role]: !h.showAll[role] }; },
     commit: next => h.commit(next), onNextUnbound: () => h.nextUnboundDevice(),
-    notice: h.notice, fillNotice: h.fillNotice, setFillNotice: msg => { h.fillNotice = msg; },
+    notice: h.notice, setNotice: msg => { h.notice = msg; },
+    fillNotice: h.fillNotice, setFillNotice: msg => { h.fillNotice = msg; },
     registryError: h.haMeta.error, registryLoading: h.haMeta.loading, onRetry: () => h.haMeta.retry(),
   });
 }

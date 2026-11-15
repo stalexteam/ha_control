@@ -77,6 +77,23 @@ describe("normalizeLevel: switch migration", () => {
     expect("bindings" in k).toBe(false);
   });
 
+  it("reads a stored default output auto as off while auto is disabled", () => {
+    const placement = { mode: "wall", wallId: "w0", side: "right", offset: 500 } as const;
+    const ws = { id: "w", name: "W", invalid: false, placement,
+      props: { ...deviceDefaults("wall_switch", "wall"), defaultOutput: "auto" } as DeviceProps };
+    const sb = { id: "b", name: "B", invalid: false, placement,
+      props: { ...deviceDefaults("smart_button", "wall"), defaultOutput: "auto" } as DeviceProps };
+    const l = normalizeLevel({ ...room(), devices: [ws, sb] });
+    expect(l.devices.map(d => (d.props as { defaultOutput: string }).defaultOutput)).toEqual(["off", "off"]);
+    expect(l.devices[0].props).toEqual(deviceDefaults("wall_switch", "wall"));
+    // Allowed with auto enabled: kept, and the level stays the same object.
+    const ok: Level = { ...room(), devices: [
+      { ...ws, props: { ...ws.props, autoByDoubleToggle: true } as DeviceProps },
+      { ...sb, props: { ...sb.props, autoEnabled: true } as DeviceProps },
+    ] };
+    expect(normalizeLevel(ok)).toBe(ok);
+  });
+
   it("is a no-op (same object) for a level without switch devices", () => {
     let l = addDevice(room(), deviceDefaults("wall_switch", "wall"), { mode: "wall", wallId: "w0", side: "right", offset: 500 }, "W").level;
     l = addDevice(l, deviceDefaults("smart_button", "free"), { mode: "free", x: 100, y: 100, rotation: 0 }, "B").level;

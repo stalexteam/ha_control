@@ -165,6 +165,10 @@ export const panelStyles = css`
   .note { margin: 4px 0 0; color: var(--ch-muted); font-size: 12px; }
   .bprops .warn { margin: 4px 0 0; }
   .bprops .reload { margin-top: 12px; }
+  /* Input containers: a trigger's slot and event under its entity; the container settings after the roles. */
+  .trigger .row { margin: 4px 0; }
+  .cfields { margin-top: 14px; padding-top: 8px; border-top: 1px solid var(--ch-divider); }
+  .cfields input[type="checkbox"] { margin: 0; }
   .reg-error { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 8px;
     border: 1px solid var(--ch-error); border-radius: 8px; }
   .reg-error .warn { flex: 1; margin: 0; }

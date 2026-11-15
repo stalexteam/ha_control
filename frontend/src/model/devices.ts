@@ -1,6 +1,6 @@
 import { newId } from './ids';
 import {
-  AIM_MAX, DEVICE_PLACEMENTS, allowedOutputs, deviceDefaults, isContainerKind,
+  AIM_MAX, DEVICE_PLACEMENTS, deviceDefaults, isContainerKind, normalizeDefaultOutput,
   type ContainerKind, type Device, type DevicePlacement, type DeviceProps, type Id, type Level,
 } from './types';
 import { sanitizeBindings } from './bindings';
@@ -55,12 +55,6 @@ export function moveDevice(level: Level, id: Id, placement: DevicePlacement): Le
   if (!d || !fits(level, d.props, placement)) return level;
   const props = retargetZoneAngle(d.props, d.placement.mode, placement.mode);
   return refreshDevices(withDevices(level, devices.map(x => (x.id === id ? { ...x, placement, props } : x))));
-}
-
-/** A container default output that is no longer allowed (`auto` with auto disabled) reads as `off`. */
-function normalizeDefaultOutput(p: DeviceProps): DeviceProps {
-  if (p.kind !== 'wall_switch' && p.kind !== 'smart_button') return p;
-  return allowedOutputs(p).includes(p.defaultOutput) ? p : { ...p, defaultOutput: 'off' };
 }
 
 /**

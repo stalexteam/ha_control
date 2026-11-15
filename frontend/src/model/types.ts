@@ -90,6 +90,12 @@ export function allowedOutputs(p: DeviceProps): ContainerOutput[] {
   return auto ? ['off', 'on', 'auto', 'error'] : ['off', 'on', 'error'];
 }
 
+/** A container default output that is not allowed (`auto` with auto disabled, or unknown) reads as `off`. Same props otherwise. */
+export function normalizeDefaultOutput(p: DeviceProps): DeviceProps {
+  if (p.kind !== 'wall_switch' && p.kind !== 'smart_button') return p;
+  return allowedOutputs(p).includes(p.defaultOutput) ? p : { ...p, defaultOutput: 'off' };
+}
+
 export type BindingRole = 'control' | 'motion' | 'illuminance' | 'temperature' | 'humidity' | 'state' | 'power'
   | 'on' | 'off' | 'auto' | 'final';
 
@@ -216,12 +222,18 @@ function migrateSwitch(d: Device): Device {
   return { ...d, props: deviceDefaults('wall_switch', d.placement.mode) };
 }
 
+/** A container whose stored default output is not allowed gets `off` (see normalizeDefaultOutput); same device otherwise. */
+function allowedDefault(d: Device): Device {
+  const props = normalizeDefaultOutput(d.props);
+  return props === d.props ? d : { ...d, props };
+}
+
 /**
- * Stage-1 plans have no `devices`; a missing field means []. Legacy kinds are migrated, then invalid bindings
- * are dropped. Same object back when nothing changes.
+ * Stage-1 plans have no `devices`; a missing field means []. Legacy kinds are migrated, a container default output
+ * that is not allowed reads as `off`, then invalid bindings are dropped. Same object back when nothing changes.
  */
 export function normalizeLevel(level: Level): Level {
   if (!level.devices) return { ...level, devices: [] };
-  const devices = level.devices.map(d => sanitizeBindings(migrateSwitch(migrateEquipment(d))));
+  const devices = level.devices.map(d => sanitizeBindings(allowedDefault(migrateSwitch(migrateEquipment(d)))));
   return devices.some((d, i) => d !== level.devices[i]) ? { ...level, devices } : level;
 }
