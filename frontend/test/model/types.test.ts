@@ -131,3 +131,24 @@ describe("normalizeLevel: partial container props", () => {
     expect(normalizeLevel(l)).toBe(l);
   });
 });
+
+describe("normalizeLevel: climate zoneIds", () => {
+  const climate = (props: Record<string, unknown>): Device => ({
+    id: "c", name: "C", invalid: false, placement: { mode: "free", x: 100, y: 100, rotation: 0 },
+    props: props as unknown as DeviceProps,
+  });
+
+  it("drops a stored zoneIds; the other devices keep their objects", () => {
+    const other = climate({ kind: "climate_sensor" });
+    const l: Level = { ...rectRoomLevel(3000, 4000, 400), devices: [climate({ kind: "climate_sensor", zoneIds: ["z0"] }), other] };
+    const n = normalizeLevel(l);
+    expect(n.devices[0].props).toEqual({ kind: "climate_sensor" });
+    expect(n.devices[1]).toBe(other);
+  });
+
+  it("the default climate props have no zoneIds; a level without them is the same object", () => {
+    expect(deviceDefaults("climate_sensor", "free")).toEqual({ kind: "climate_sensor" });
+    const l: Level = { ...rectRoomLevel(3000, 4000, 400), devices: [climate({ kind: "climate_sensor" })] };
+    expect(normalizeLevel(l)).toBe(l);
+  });
+});

@@ -1,6 +1,7 @@
 import { newId } from './ids';
-import type { Id, Level, PlanNode, Pt, Wall } from './types';
+import { levelZones, type Id, type Level, type PlanNode, type Pt, type Wall } from './types';
 import { clone, deleteWall, dropOrphans, finalize, hostPoint } from './ops';
+import { lostVertex } from './automation-zones';
 import { findNode, nodePos } from '../geometry/walls';
 import { dist, dot, lineIntersect, norm, projectT, sub } from '../geometry/vec';
 
@@ -63,9 +64,9 @@ function endNode(out: Level, c: Cut): Id {
 /**
  * Removes the piece of a wall between the nearest intersections on each side of `at` (T-nodes hosted on it and
  * crossings with other walls' axes, its own ends excluded). Both sides: two walls, the first keeps the id. One
- * side: the wall is shortened. None: the wall is deleted. Openings, wall devices and T-nodes on a kept part move
- * with it; items centred on the cut piece are deleted (T-nodes there are only unhosted). Pure; the same level
- * when the wall is unknown.
+ * side: the wall is shortened. None: the wall is deleted. Openings, wall devices, T-nodes and zone wall vertices on a
+ * kept part move with it; items centred on the cut piece are deleted (T-nodes there are only unhosted, zone vertices
+ * there become lost free vertices at their cached position). Pure; the same level when the wall is unknown.
  */
 export function trimWall(level: Level, wallId: Id, at: Pt): Level {
   const w = level.walls.find(x => x.id === wallId);
@@ -108,6 +109,10 @@ export function trimWall(level: Level, wallId: Id, at: Pt): Level {
   out.openings = out.openings.filter(o => keep(o, o.offset + o.width / 2));
   out.devices = out.devices.filter(d => d.placement.mode !== 'wall' || keep(d.placement, d.placement.offset));
   for (const n of out.nodes) if (n.host && !keep(n.host, n.host.offset)) delete n.host;
+  for (const z of levelZones(out)) {
+    const s = z.shape;
+    if (s.kind === 'polygon') s.vertices = s.vertices.map(v => (v.kind !== 'wall' || keep(v, v.offset) ? v : lostVertex(v)));
+  }
   dropOrphans(out);
   return finalize(out, level);
 }

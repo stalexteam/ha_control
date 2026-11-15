@@ -89,20 +89,12 @@ export function deleteDevice(level: Level, id: Id): Level {
   return withDevices(level, level.devices.filter(x => x.id !== id));
 }
 
-/** Climate sensor with zone ids that are not zones of the level: the unknown ids dropped; same object when none. */
-function dropUnknownZones(level: Level, d: Device): Device {
-  if (d.props.kind !== 'climate_sensor') return d;
-  const ids = d.props.zoneIds.filter(id => level.zones.some(z => z.id === id));
-  return ids.length === d.props.zoneIds.length ? d : { ...d, props: { ...d.props, zoneIds: ids } };
-}
-
 /**
- * invalid = wall device whose offset is outside [0, len] of its wall (or whose wall is gone). Climate sensors lose ids
- * of deleted zones. Never deletes or clamps. An unchanged device keeps its object (the renderer caches cones on it).
+ * invalid = wall device whose offset is outside [0, len] of its wall (or whose wall is gone). Never deletes or clamps.
+ * An unchanged device keeps its object (the renderer caches cones on it).
  */
 export function refreshDevices(level: Level): Level {
-  return withDevices(level, level.devices.map(dev => {
-    const d = dropUnknownZones(level, dev);
+  return withDevices(level, level.devices.map(d => {
     if (d.placement.mode !== 'wall') return d.invalid ? { ...d, invalid: false } : d;
     const l = wallLen(level, d.placement.wallId);
     // l === null (wall gone) is a safety net: ops delete hosted devices with their wall.

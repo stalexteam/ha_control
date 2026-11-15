@@ -4,7 +4,7 @@ import type { ContainerKind, Device, DeviceKind, DevicePlacement, DeviceProps, L
 import { AIM_KINDS, AIM_MAX, DEVICE_PLACEMENTS, FAN_DIAMETERS, deviceDefaults, isContainerKind, type FanDiameter } from '../model/types';
 import { changeDeviceKind, deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
 import type { Selection } from '../editor/tools/types';
-import { deviceRoomId, withAim } from '../geometry/devices';
+import { withAim } from '../geometry/devices';
 import { t } from '../i18n';
 import { numField, row, select } from './fields';
 import type { WholeRule } from '../geometry/parse';
@@ -21,7 +21,7 @@ export function initialNextProps(): Record<DeviceKind, DeviceProps> {
 export interface DevicePropsOpts {
   /** Selected device, or null. */
   device: Device | null;
-  /** The level of the selected device (its rooms are listed for a climate sensor). */
+  /** The level of the selected device. */
   level?: Level;
   /** Kind of the active placement tool (shown when nothing is selected), or null. */
   nextKind: DeviceKind | null;
@@ -90,8 +90,6 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
         }}>
         ${FAN_DIAMETERS.map(v => html`<option value=${String(v)} ?selected=${v === p.diameter}>${v}</option>`)}
       </select>`);
-    case 'climate_sensor':
-      return pre === '' && o.device && o.level ? zoneFields(o.level, o.device, p.zoneIds, set) : nothing_();
     case 'equipment':
       return html`
         ${row(t('props.shape'), select(p.shape, labelled([...EQUIPMENT_SHAPES], 'shape'), v => set({ shape: v }), `${pre}shape`))}
@@ -129,22 +127,6 @@ function iconField(o: DevicePropsOpts, value: string, field: string, set: (patch
       const el = e.target as HTMLInputElement;
       commit(el.value.trim(), s => { el.value = s; });
     }} />`;
-}
-
-const nothing_ = (): TemplateResult => html`${nothing}`;
-
-/** All rooms of the level as checkboxes; with none checked the derived ("auto") room is named. */
-function zoneFields(level: Level, d: Device, ids: string[], set: (patch: Partial<DeviceProps>) => boolean): TemplateResult {
-  const auto = ids.length === 0 ? level.zones.find(z => z.id === deviceRoomId(level, d))?.name : undefined;
-  return html`<fieldset class="zones" data-field="zoneIds"><legend>${t('props.zones')}${ids.length === 0
-      ? html` (${t('props.zonesAuto')}${auto ? `: ${auto}` : ''})` : nothing}</legend>
-    ${level.zones.map(z => html`<label class="row"><input type="checkbox" data-zone=${z.id} .checked=${ids.includes(z.id)}
-      @change=${(e: Event) => {
-        const on = (e.target as HTMLInputElement).checked;
-        const next = level.zones.map(x => x.id).filter(id => (id === z.id ? on : ids.includes(id)));
-        if (!set({ zoneIds: next })) (e.target as HTMLInputElement).checked = !on;
-      }} /><span>${z.name}</span></label>`)}
-  </fieldset>`;
 }
 
 function placementFields(o: DevicePropsOpts, d: Device): TemplateResult {

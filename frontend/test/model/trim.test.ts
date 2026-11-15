@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { trimWall } from '../../src/model/trim';
+import { finalize } from '../../src/model/ops';
 import { nodePos } from '../../src/geometry/walls';
+import { vertexPoint } from '../../src/geometry/zones';
 import { dist, lerp } from '../../src/geometry/vec';
 import {
-  deviceDefaults, type Device, type Id, type Level, type Opening, type PlanNode, type Pt, type Wall,
+  deviceDefaults, levelZones, type Device, type Id, type Level, type Opening, type PlanNode, type Pt, type Wall,
+  type ZoneVertex,
 } from '../../src/model/types';
 
 const W = (id: Id, a: Id, b: Id, extra: Partial<Wall> = {}): Wall =>
@@ -165,6 +168,47 @@ describe('trimWall', () => {
     const w2 = l.walls.find(x => !['w', 's0', 's1', 's2', 's3'].includes(x.id))!.id;
     expect(l.nodes.find(n => n.id === 't3')).toMatchObject({ x: 7500, y: 0, host: { wallId: w2, offset: 1500 } });
     expect(l.nodes.find(n => n.id === 't0')).toMatchObject({ x: 1000, y: 0, host: { wallId: 'w', offset: 1000 } });
+  });
+
+  it('trim re-homes zone vertices and loses the ones on the cut piece', () => {
+    const wv = (offset: number): ZoneVertex => ({ kind: 'wall', wallId: 'w', offset, side: 'right', x: 0, y: 0 });
+    /** A zone with wall vertices on 'w' at the given offsets and one free vertex below; caches resolved by finalize. */
+    const zoned = (l: Level, offsets: number[]): Level => finalize({
+      ...l, automationZones: [{ id: 'z', name: 'Z', invalid: false,
+        shape: { kind: 'polygon', vertices: [...offsets.map(wv), { kind: 'free', x: 4500, y: 1500 }] } }],
+    });
+    const verts = (l: Level): ZoneVertex[] => {
+      const s = levelZones(l)[0].shape;
+      return s.kind === 'polygon' ? s.vertices : [];
+    };
+
+    // Both sides: the cut piece is 3000..6000; the second part starts at t2 (6000).
+    const base = zoned(twoTees(), [1000, 4500, 8000]);
+    const l = trimWall(base, 'w', { x: 4500, y: 0 });
+    const w2 = l.walls.find(x => !['w', 's1', 's2'].includes(x.id))!.id;
+    const [v0, v1, v2] = verts(l);
+    const [b0, b1, b2] = verts(base);
+    expect(v0).toMatchObject({ kind: 'wall', wallId: 'w', offset: 1000 });
+    expect(v1).toEqual({ kind: 'free', x: b1.x, y: b1.y, lost: true });
+    expect(v2).toMatchObject({ kind: 'wall', wallId: w2, offset: 2000, side: 'right' });
+    near(vertexPoint(l, v0)!, b0);
+    near(vertexPoint(l, v2)!, b2);
+    near(v2, b2);
+    expect(levelZones(l)[0].invalid).toBe(true);
+
+    // One side holding node A: the wall now starts at t1 (2000), so kept offsets shift by 2000.
+    const oneSided = zoned(lvl(
+      [N('n0', 0, 0), N('n1', 6000, 0), N('t1', 2000, 0, { wallId: 'w', offset: 2000 }), N('p1', 2000, 3000)],
+      [W('w', 'n0', 'n1'), W('s1', 't1', 'p1')],
+    ), [500, 3000, 5000]);
+    const a = trimWall(oneSided, 'w', { x: 1000, y: 0 });
+    const [a0, a1, a2] = verts(a);
+    const [c0, c1, c2] = verts(oneSided);
+    expect(a0).toEqual({ kind: 'free', x: c0.x, y: c0.y, lost: true });
+    expect(a1).toMatchObject({ kind: 'wall', wallId: 'w', offset: 1000 });
+    expect(a2).toMatchObject({ kind: 'wall', wallId: 'w', offset: 3000 });
+    near(vertexPoint(a, a1)!, c1);
+    near(vertexPoint(a, a2)!, c2);
   });
 
   it('the input level is unchanged', () => {

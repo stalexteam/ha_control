@@ -82,9 +82,9 @@ export type DeviceProps =
   | { kind: 'ceiling_light'; shape: 'round' | 'linear' | 'spot'; diameter: number; length: number; width: number; poolRadius: number | null }
   | { kind: 'wall_light'; coneAngle: number; coneRange: number }
   | { kind: 'motion_sensor'; zoneAngle: number; zoneRange: number }
-  | { kind: 'climate_sensor'; zoneIds: Id[] } // zoneIds: rooms the reading applies to; empty = the room containing the device (derived by geometry)
   | { kind: 'exhaust_fan'; diameter: FanDiameter }
-  | { kind: 'illuminance_sensor' } | { kind: 'socket' }
+  // A climate sensor's reading applies to the automation zones containing it (its stage-2a `zoneIds` is retired).
+  | { kind: 'illuminance_sensor' } | { kind: 'socket' } | { kind: 'climate_sensor' }
   | { kind: 'equipment'; shape: 'rect' | 'circle'; width: number; depth: number; diameter: number;
       icon: string; label: string }
   // windowSec: whole seconds 1..10, used only with autoByDoubleToggle.
@@ -190,8 +190,6 @@ export function deviceDefaults(kind: DeviceKind, mode: 'wall' | 'free'): DeviceP
       return { kind, coneAngle: 90, coneRange: 2000 };
     case 'motion_sensor':
       return { kind, zoneAngle: mode === 'free' ? 360 : 110, zoneRange: 5000 };
-    case 'climate_sensor':
-      return { kind, zoneIds: [] };
     case 'exhaust_fan':
       return { kind, diameter: 100 };
     case 'equipment':
@@ -266,6 +264,13 @@ function completeContainer(d: Device): Device {
   return next ? { ...d, props: next as unknown as DeviceProps } : d;
 }
 
+/** A climate sensor's stored `zoneIds` (retired by automation zones) is dropped; same device when it has none. */
+function dropClimateZoneIds(d: Device): Device {
+  if (d.props.kind !== 'climate_sensor' || !('zoneIds' in d.props)) return d;
+  const { zoneIds: _dropped, ...props } = d.props as DeviceProps & { zoneIds: unknown };
+  return { ...d, props: props as DeviceProps };
+}
+
 /** A container's stored `defaultOutput` (removed in v0.5) is dropped; same device when it has none. */
 function dropDefaultOutput(d: Device): Device {
   if (!isContainerKind(d.props.kind) || !('defaultOutput' in d.props)) return d;
@@ -275,12 +280,13 @@ function dropDefaultOutput(d: Device): Device {
 
 /**
  * Stage-1 plans have no `devices`; a missing field means []. Legacy kinds are migrated, missing or invalid container
- * props take their defaults, a stored container `defaultOutput` is dropped, then invalid bindings (such as a
- * v0.4 `final`) are dropped. Same object back when nothing changes.
+ * props take their defaults, a stored container `defaultOutput` and a stored climate `zoneIds` are dropped, then
+ * invalid bindings (such as a v0.4 `final`) are dropped. A missing `automationZones` stays missing (it means []).
+ * Same object back when nothing changes.
  */
 export function normalizeLevel(level: Level): Level {
   if (!level.devices) return { ...level, devices: [] };
   const devices = level.devices.map(d =>
-    sanitizeBindings(dropDefaultOutput(completeContainer(migrateSwitch(migrateEquipment(d))))));
+    sanitizeBindings(dropClimateZoneIds(dropDefaultOutput(completeContainer(migrateSwitch(migrateEquipment(d)))))));
   return devices.some((d, i) => d !== level.devices[i]) ? { ...level, devices } : level;
 }

@@ -12,13 +12,13 @@ import type { Level } from '../../src/model/types';
 const bp = { type: 'partition', thickness: 100, baseline: 'center' } as const;
 const empty = (): Level => ({ id: 'l0', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] });
 
-function twoRooms(): { level: Level; ids: string[]; dev: string } {
+function twoRooms(): { level: Level; dev: string } {
   let l = addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 3000 }, bp, 'axis');
   l = addBox(l, { x: 5000, y: 0 }, { x: 8000, y: 3000 }, bp, 'axis');
   const a = addZone(l, { x: 1500, y: 1500 }, 'A');
   const b = addZone(a.level, { x: 6500, y: 1500 }, 'B');
   const d = addDevice(b.level, deviceDefaults('climate_sensor', 'free'), { mode: 'free', x: 1000, y: 1000, rotation: 0 }, 'C');
-  return { level: d.level, ids: [a.zoneId!, b.zoneId!], dev: d.deviceId! };
+  return { level: d.level, dev: d.deviceId! };
 }
 
 function mountProps(level: Level, id: string, commits: Level[]): HTMLElement {
@@ -31,28 +31,12 @@ function mountProps(level: Level, id: string, commits: Level[]): HTMLElement {
 }
 
 describe('climate sensor props', () => {
-  it('lists all rooms, shows auto room, stores checked ids', () => {
-    const { level, ids, dev } = twoRooms();
-    const commits: Level[] = [];
-    const host = mountProps(level, dev, commits);
-    const boxes = host.querySelectorAll<HTMLInputElement>('input[data-zone]');
-    expect(boxes).toHaveLength(2);
-    expect(host.textContent).toContain('auto');
+  it('has no room fieldset (zoneIds is retired)', () => {
+    const { level, dev } = twoRooms();
+    const host = mountProps(level, dev, []);
+    expect(host.querySelector('[data-field="zoneIds"]')).toBeNull();
+    expect(host.querySelector('fieldset.zones')).toBeNull();
     expect(host.querySelector('[data-field="aim"]')).toBeNull();
-    boxes[1].checked = true;
-    boxes[1].dispatchEvent(new Event('change'));
-    expect(commits[0].devices[0].props).toEqual({ kind: 'climate_sensor', zoneIds: [ids[1]] });
-  });
-  it('unchecking all gives []', () => {
-    const { level, ids, dev } = twoRooms();
-    const withZ = { ...level, devices: [{ ...level.devices[0], props: { kind: 'climate_sensor' as const, zoneIds: [ids[0]] } }] };
-    const commits: Level[] = [];
-    const host = mountProps(withZ, dev, commits);
-    const box = host.querySelectorAll<HTMLInputElement>('input[data-zone]')[0];
-    expect(box.checked).toBe(true);
-    box.checked = false;
-    box.dispatchEvent(new Event('change'));
-    expect(commits[0].devices[0].props).toEqual({ kind: 'climate_sensor', zoneIds: [] });
   });
 });
 

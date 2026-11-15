@@ -1,10 +1,11 @@
 import { newId } from './ids';
-import type { Baseline, Id, Level, PlanNode, Pt, Wall, WallType } from './types';
+import { levelZones, type Baseline, type Id, type Level, type PlanNode, type Pt, type Wall, type WallType } from './types';
 import { add, dist, lerp, norm, projectT, scale, sub } from '../geometry/vec';
 import { findNode, nodePos } from '../geometry/walls';
 import { refreshOpenings } from './openings';
 import { refreshDevices } from './devices';
 import { refreshZones } from './zones';
+import { refreshAutomationZones, reuseZones } from './automation-zones';
 
 /** Result of snapping a cursor point. */
 export type Endpoint =
@@ -67,13 +68,15 @@ function settleNodes(out: Level): void {
 }
 
 /**
- * Shared post-edit step on a private clone: settle T-nodes, re-anchor openings of walls whose node A
- * moved (needs `before`), refresh opening validity, refresh zones.
+ * Shared post-edit step on a private clone: settle T-nodes, re-anchor openings, wall devices and zone wall vertices of
+ * walls whose node A moved (needs `before`), refresh opening and device validity, rooms, then automation zones. With
+ * `before`, zones the edit left alone keep their objects.
  */
 function postEdit(out: Level, before?: Level): Level {
   settleNodes(out);
   if (before) reanchorHosted(before, out);
-  return refreshZones(refreshDevices(refreshOpenings(out)));
+  const next = refreshAutomationZones(refreshZones(refreshDevices(refreshOpenings(out))));
+  return before ? reuseZones(next, before) : next;
 }
 
 /** Post-edit step for a level already edited by the caller; `before` enables opening re-anchoring. */
@@ -167,11 +170,16 @@ export function moveNode(level: Level, nodeId: Id, to: Pt): Level {
   return postEdit(out, level);
 }
 
-/** Mutating on `out`: walls whose node A moved keep their openings and wall devices at the same world position. */
+/**
+ * Mutating on `out`: walls whose node A moved keep their openings, wall devices and zone wall vertices at the same
+ * world position.
+ */
 function reanchorHosted(before: Level, out: Level): void {
   const hosted: { wallId: Id; offset: number }[] = [
     ...out.openings,
     ...out.devices.flatMap(d => (d.placement.mode === 'wall' ? [d.placement] : [])),
+    ...levelZones(out).flatMap(z => (z.shape.kind === 'polygon' ? z.shape.vertices : []))
+      .flatMap(v => (v.kind === 'wall' ? [v] : [])),
   ];
   for (const w of out.walls) {
     const oldW = before.walls.find(x => x.id === w.id);
@@ -214,7 +222,10 @@ export function detachWallEnd(level: Level, wallId: Id, end: 'a' | 'b'): { level
   return { level: finalize(out, level), nodeId: node.id };
 }
 
-/** Re-points every wall end at `fromId` to `intoId`; walls that collapse (a === b) go with their openings. */
+/**
+ * Re-points every wall end and zone node vertex at `fromId` to `intoId`; walls that collapse (a === b) go with their
+ * openings.
+ */
 export function mergeNodes(level: Level, fromId: Id, intoId: Id): Level {
   if (fromId === intoId) return level;
   const out = clone(level);
@@ -227,6 +238,10 @@ export function mergeNodes(level: Level, fromId: Id, intoId: Id): Level {
   out.openings = out.openings.filter(o => !dead.has(o.wallId));
   out.devices = out.devices.filter(d => d.placement.mode !== 'wall' || !dead.has(d.placement.wallId));
   for (const n of out.nodes) if (n.host && dead.has(n.host.wallId)) delete n.host;
+  for (const z of levelZones(out)) {
+    if (z.shape.kind !== 'polygon') continue;
+    for (const v of z.shape.vertices) if (v.kind === 'node' && v.nodeId === fromId) v.nodeId = intoId;
+  }
   out.nodes = out.nodes.filter(n => n.id !== fromId);
   dropOrphans(out);
   return finalize(out, level);

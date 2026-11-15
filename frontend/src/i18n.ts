@@ -194,8 +194,6 @@ const en: Dict = {
   'props.label': 'Label',
   'props.rotation': 'Rotation',
   'props.aim': 'Aim',
-  'props.zones': 'Rooms',
-  'props.zonesAuto': 'auto',
   'props.badAim': 'Aim must be a whole number from -90 to 90',
   'props.side': 'Side',
   'props.badNumber': 'Must be a whole number above 0',
