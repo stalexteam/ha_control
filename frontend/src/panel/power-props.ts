@@ -1,10 +1,11 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import type { Device, Id, Level } from '../model/types';
+import type { BindingRole, Device, Id, Level } from '../model/types';
 import {
-  clearPins, deleteBlock, deleteWire, placeableDevices, updateBlock,
+  clearPins, deleteBlock, deleteWire, placeableDevices, setDeviceInverterDoc, updateBlock,
   type Position, type PowerBlock, type PowerFrame, type PowerSchema, type PowerWire, type WireEnd,
 } from '../model/power';
-import { POWER, activeRoleSpecs } from '../model/bindings';
+import { POWER, activeRoleSpecs, setBinding } from '../model/bindings';
+import { setDeviceControllable, setDeviceProps } from '../model/devices';
 import { candidates, entityLabel, type MatchSpec } from '../binding/candidates';
 import type { HaMeta, States } from '../binding/ha-meta';
 import '../binding/entity-combo';
@@ -14,6 +15,9 @@ import { BUS_MIN } from '../editor/tools/power-select-tool';
 import type { Selection } from '../editor/tools/types';
 import { fieldValue } from './field-value';
 import { numField, row, select } from './fields';
+import { checkRow, deviceNameRow } from './device-props';
+import { roleLabel } from './binding-props';
+import { deviceTitle, newUnplacedDevice } from './unplaced-devices';
 import type { ToolId } from './tool-factory';
 import { t } from '../i18n';
 
@@ -25,6 +29,8 @@ const BUS_THICK_MIN = 6;
 const POSITIONS: Position[] = ['A', '0', 'B'];
 /** A plan device's bindings the schematic reads: its meter and its switch. */
 const BOUND_ROLES = ['power', 'control'] as const;
+/** The order of an equipment device's fields: its measurements, then its switch. */
+const EQUIPMENT_ROLES: BindingRole[] = ['power', 'power_in', 'power_out', 'voltage', 'control'];
 
 export interface PowerPropsOpts {
   power: PowerSchema;
@@ -41,10 +47,12 @@ export interface PowerPropsOpts {
   /** Why there are no live values (the live feed's subscription failed), or null. */
   feedError: string | null;
   toolId: ToolId;
-  /** The plan device the Plan device tool places next, or null. */
+  /** The device the Device tool places next, or null. */
   placeDeviceId: Id | null;
-  /** Arms a plan device for the Plan device tool. */
+  /** Arms a device for the Device tool. */
   onPlaceDevice(id: Id): void;
+  /** Pushes an undoable edit of the level (a device block's device); `power` joins it when the edit changed the schematic too. */
+  commit(next: Level, power?: PowerSchema): void;
   /** Pushes an undoable edit of the schematic. */
   commitPower(next: PowerSchema): void;
   /** Sets a transfer switch position live (not a plan edit). */
@@ -90,7 +98,7 @@ function nameRow(o: PowerPropsOpts, b: PowerBlock): TemplateResult {
     }} />`);
 }
 
-/** The plan device's power and control bindings, read-only (they are edited in the Binding step). */
+/** A plan device's power and control bindings, read-only (they are edited in the Binding step). */
 function boundRows(o: PowerPropsOpts, d: Device): TemplateResult {
   const roles = new Set(activeRoleSpecs(d).map(s => s.role));
   return html`${BOUND_ROLES.filter(r => roles.has(r)).map(r => {
@@ -104,12 +112,49 @@ function boundRows(o: PowerPropsOpts, d: Device): TemplateResult {
   <p class="note" data-note="bound-hint">${t('power.boundHint')}</p>`;
 }
 
+/** Commits a level edit of a device block's device; false (refused) when the level did not change. */
+function editLevel(o: PowerPropsOpts, next: Level, power?: PowerSchema): boolean {
+  if (next === o.level) return false;
+  o.commit(next, power);
+  return true;
+}
+
+/**
+ * An equipment device's own fields, edited in place: Name, a strict entity combo per active role (Power, or Input and
+ * Output power for an inverter; Voltage; Switch), Controllable while a switch is bound, and Inverter. Each edit is one
+ * commit of the level; Inverter also drops the PV and BAT wires of the device's blocks when it goes off.
+ */
+function equipmentFields(o: PowerPropsOpts, d: Device): TemplateResult {
+  const specs = activeRoleSpecs(d);
+  const roles = EQUIPMENT_ROLES.flatMap(r => specs.filter(x => x.role === r));
+  const p = d.props;
+  return html`
+    ${deviceNameRow(d, name => editLevel(o, setDeviceProps(o.level, d.id, {}, name)))}
+    ${roles.map(spec => html`<div class="role">
+      <div class="role-head"><span class="role-label" data-label=${spec.role}>${roleLabel(d, spec.role)}</span></div>
+      <ps-entity-combo data-field=${spec.role} .meta=${o.meta} .states=${o.states} .items=${candidates(o.meta, spec, false)}
+        .value=${d.bindings?.[spec.role] ?? null} .label=${roleLabel(d, spec.role)}
+        @value-changed=${(e: CustomEvent<{ value: string | null }>) => {
+          e.stopPropagation();
+          editLevel(o, setBinding(o.level, d.id, spec.role, e.detail.value || null));
+        }}></ps-entity-combo>
+    </div>`)}
+    ${p.kind === 'equipment' && d.bindings?.control ? checkRow('controllable', t('props.controllable'), !!p.controllable,
+      on => editLevel(o, setDeviceControllable(o.level, d.id, on))) : nothing}
+    ${p.kind === 'equipment' ? checkRow('inverter', t('props.inverter'), !!p.inverter, on => {
+      const e = setDeviceInverterDoc(o.level, o.power, d.id, on);
+      return editLevel(o, e.level, e.power);
+    }) : nothing}`;
+}
+
+/** A device block: an equipment device's editable fields; another kind's name, kind and bindings, read-only. */
 function deviceFields(o: PowerPropsOpts, b: Block<'device'>): TemplateResult {
   const d = o.level.devices.find(x => x.id === b.deviceId);
+  if (!d) return html`<p class="warn" data-note="device-missing">${t('power.missing')}</p>`;
+  if (d.props.kind === 'equipment') return equipmentFields(o, d);
   return html`
-    ${row(t('props.name'), html`<span class="val ro" data-field="device-name">${d?.name ?? '—'}</span>`)}
-    ${d ? html`${row(t('props.kind'), html`<span class="val ro">${t(`device.${d.props.kind}`)}</span>`)}${boundRows(o, d)}`
-      : html`<p class="warn" data-note="device-missing">${t('power.missing')}</p>`}`;
+    ${row(t('props.name'), html`<span class="val ro" data-field="device-name">${d.name}</span>`)}
+    ${row(t('props.kind'), html`<span class="val ro">${t(`device.${d.props.kind}`)}</span>`)}${boundRows(o, d)}`;
 }
 
 /** Form, and the live position buttons (the live position is marked; none without a frame). */
@@ -167,8 +212,9 @@ function kindFields(o: PowerPropsOpts, b: PowerBlock): TemplateResult | typeof n
 
 function blockProps(o: PowerPropsOpts, b: PowerBlock): TemplateResult {
   const pinned = !!b.portPins && Object.keys(b.portPins).length > 0;
+  const d = b.kind === 'device' ? o.level.devices.find(x => x.id === b.deviceId) : undefined;
   return html`
-    <h4>${t(`power.title.${b.kind}`)}</h4>
+    <h4>${d ? deviceTitle(d) : t(`power.title.${b.kind}`)}</h4>
     ${b.kind === 'device' ? nothing : nameRow(o, b)}
     ${kindFields(o, b)}
     <div class="pactions">
@@ -196,15 +242,24 @@ function wireProps(o: PowerPropsOpts, w: PowerWire): TemplateResult {
       @click=${() => o.commitPower(deleteWire(o.power, w.id))}>${t('action.delete')}</button></div>`;
 }
 
-/** The Plan device tool's list: a click arms the device, the next canvas click places it. */
+/**
+ * The Device tool's list: "New device" on top (a new device not on the plan, armed at once), then the placeable
+ * devices; a click arms one, the next canvas click places it.
+ */
 function deviceList(o: PowerPropsOpts): TemplateResult {
   const list = placeableDevices(o.level, o.power);
+  const onNew = () => {
+    const made = newUnplacedDevice(o.level);
+    o.commit(made.level);
+    o.onPlaceDevice(made.id);
+  };
   return html`
+    <div class="pactions"><button class="btn" data-action="new-device" @click=${onNew}>${t('devices.new')}</button></div>
     <p class="muted" data-note="power-hint">${t('power.help.device')}</p>
     ${list.length === 0 ? html`<p class="muted" data-note="no-devices">${t('power.noDevices')}</p>` : html`<div class="pdevs">
       ${list.map(d => html`<button class="pdev${d.id === o.placeDeviceId ? ' sel' : ''}" data-place-device=${d.id}
         aria-pressed=${d.id === o.placeDeviceId ? 'true' : 'false'} @click=${() => o.onPlaceDevice(d.id)}>
-        <span class="name">${d.name}</span><span class="kind">${t(`device.${d.props.kind}`)}</span>
+        <span class="name">${d.name}</span><span class="kind">${deviceTitle(d)}</span>
       </button>`)}
     </div>`}`;
 }
@@ -221,10 +276,10 @@ function content(o: PowerPropsOpts): TemplateResult {
 }
 
 /**
- * The Power step properties: the live feed error at the top, then the Plan device tool's device list, the selected
- * block (name, per-kind entity fields, a device's bindings, transfer form and live position, bus size, Auto ports,
- * Delete) or wire (ends, live value, Delete), or a hint. Every edit is one undoable commit; a transfer position is live
- * state, not an edit.
+ * The Power step properties: the live feed error at the top, then the Device tool's list ("New device" and the
+ * placeable devices), the selected block (name, per-kind entity fields, an equipment device's own fields or another
+ * device's bindings, transfer form and live position, bus size, Auto ports, Delete) or wire (ends, live value, Delete),
+ * or a hint. Every edit is one undoable commit; a transfer position is live state, not an edit.
  */
 export function renderPowerProps(o: PowerPropsOpts): TemplateResult {
   return html`<div class="props pprops">

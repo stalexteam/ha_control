@@ -26,41 +26,46 @@ function room(): Plan {
   return { id: 'room', name: 'Room', schemaVersion: 1, revision: 1, levels: [level] };
 }
 
-const equipment = (id: string, name: string, x: number, y: number, bindings: Device['bindings']): Device => ({
-  id, name, invalid: false, bindings, placement: { mode: 'free', x, y, rotation: 0 },
-  props: { kind: 'equipment', shape: 'rect', width: 600, depth: 400, diameter: 600, icon: 'mdi:flash', label: '' },
+const equipment = (id: string, name: string, placement: Device['placement'], bindings: Device['bindings'],
+  flags: { inverter?: true; controllable?: true } = {}): Device => ({
+  id, name, invalid: false, bindings, placement,
+  props: { kind: 'equipment', shape: 'rect', width: 600, depth: 400, diameter: 600, icon: 'mdi:flash', label: '', ...flags },
 });
+const free = (x: number, y: number): Device['placement'] => ({ mode: 'free', x, y, rotation: 0 });
 
 /**
  * The owner's installation (spec §9 live check): AC-IN -> Main bus -> Inverter (PV roof, battery bus with three
  * batteries) -> RCBO output -> Apartment input (transfer A; B is the bypass from the Main bus) -> Apartment bus ->
- * PC, Boiler and the remainder. Units are screen px at 100 %.
+ * PC, Boiler and the remainder. Units are screen px at 100 %. Stored in the one device model: the inverter is an
+ * equipment device with the inverter flag, the RCBO a metered switch (read-only) that is not on the plan, and the
+ * level is marked switchesMigrated, so the panel's migration leaves it as it is.
  */
 function powerPlan(): Plan {
   const level = rectRoomLevel(6000, 4000, 200);
   level.devices = [
-    equipment('d-inverter', 'Inverter', 1000, 1000, { power: 'sensor.inverter_power' }),
+    equipment('d-inverter', 'Inverter', free(1000, 1000),
+      { power_in: 'sensor.inverter_in_power', power_out: 'sensor.inverter_out_power' }, { inverter: true }),
     {
       id: 'd-pc', name: 'PC', invalid: false, bindings: { power: 'sensor.pc_power' },
       placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 3000 }, props: { kind: 'socket' },
     },
-    equipment('d-boiler', 'Boiler', 4500, 2500, { control: 'switch.boiler', power: 'sensor.boiler_power' }),
+    equipment('d-boiler', 'Boiler', free(4500, 2500), { control: 'switch.boiler', power: 'sensor.boiler_power' },
+      { controllable: true }),
+    equipment('d-rcbo', 'RCBO output', { mode: 'none' },
+      { power: 'sensor.rcbo_power', voltage: 'sensor.rcbo_voltage', control: 'switch.rcbo' }),
   ];
-  // Stored in the v0.7 shape (a meter block, a block-level inverter flag): the panel migrates it when the plan opens.
-  const power = {
+  level.switchesMigrated = true;
+  const power: PowerSchema = {
     blocks: [
       { id: 'grid', kind: 'grid', x: 620, y: 30, name: 'AC-IN', power: 'sensor.grid_power', voltage: 'sensor.grid_voltage' },
       { id: 'main', kind: 'bus', x: 480, y: 150, w: 640, h: 20, name: 'Main bus' },
-      { id: 'inv', kind: 'device', x: 620, y: 230, deviceId: 'd-inverter', inverter: true },
+      { id: 'inv', kind: 'device', x: 620, y: 230, deviceId: 'd-inverter' },
       { id: 'pv', kind: 'pv', x: 340, y: 228, name: 'PV roof', power: 'sensor.pv_roof_power' },
       { id: 'batbus', kind: 'bus', x: 120, y: 340, w: 400, h: 20, name: 'Battery bus' },
       { id: 'b1', kind: 'battery', x: 120, y: 410, name: 'BAT 1', power: 'sensor.bat1_power', soc: 'sensor.bat1_soc' },
       { id: 'b2', kind: 'battery', x: 260, y: 410, name: 'BAT 2', power: 'sensor.bat2_power', soc: 'sensor.bat2_soc' },
       { id: 'b3', kind: 'battery', x: 400, y: 410, name: 'BAT 3', power: 'sensor.bat3_power', soc: 'sensor.bat3_soc' },
-      {
-        id: 'rcbo', kind: 'meter', x: 620, y: 370, name: 'RCBO output', power: 'sensor.rcbo_power',
-        voltage: 'sensor.rcbo_voltage', switch: { entity: 'switch.rcbo', controllable: false },
-      },
+      { id: 'rcbo', kind: 'device', x: 620, y: 370, deviceId: 'd-rcbo' },
       {
         id: 'ts', kind: 'transfer', x: 611.5, y: 520, name: 'Apartment input', form: '2in1out',
         portPins: { B: { side: 'right', at: 0.5 } },
@@ -86,14 +91,14 @@ function powerPlan(): Plan {
       { id: 'w-boiler', from: { bus: 'apt', at: 0.5 }, to: { block: 'boiler', port: 'IN' } },
       { id: 'w-rem', from: { bus: 'apt', at: 0.8 }, to: { block: 'rem', port: 'IN' } },
     ],
-  } as unknown as PowerSchema;
+  };
   return { id: 'power', name: 'Power', schemaVersion: 1, revision: 1, levels: [level], power };
 }
 
 /*
  * Frames computed by the server evaluator (power.py `evaluate`) for powerPlan() from these readings: grid 1060 W at
- * 231.4 V, inverter -300 W (exporting through its input), PV roof 500 W, batteries +40 / +38 / +37 W at 62 / 61 / 63 %,
- * RCBO 0 W at 229.8 V with its read-only switch on, PC 251.4 W, Boiler 0 W with its switch off.
+ * 231.4 V, inverter input -300 W (exporting through its input) and output 0 W, PV roof 500 W, batteries +40 / +38 /
+ * +37 W at 62 / 61 / 63 %, RCBO 0 W at 229.8 V with its read-only switch on, PC 251.4 W, Boiler 0 W with its switch off.
  */
 
 /** Position B: the inverter output path is idle, the bypass is live, the Boiler is off, the remainder is solved. */
@@ -116,7 +121,7 @@ const POWER_FRAME: PowerFrame = {
   },
   blocks: {
     grid: { power: 1060, voltage: 231.4 },
-    inv: { power: -300, loss: 85 },
+    inv: { power_in: -300, power_out: 0, loss: 85 },
     pv: { power: 500 },
     b1: { power: 40, soc: 62 },
     b2: { power: 38, soc: 61 },
@@ -149,7 +154,7 @@ const POWER_OFF_FRAME: PowerFrame = {
   },
   blocks: {
     grid: { power: -300, voltage: 231.4 },
-    inv: { power: -300, loss: 85 },
+    inv: { power_in: -300, power_out: 0, loss: 85 },
     pv: { power: 500 },
     b1: { power: 40, soc: 62 },
     b2: { power: 38, soc: 61 },

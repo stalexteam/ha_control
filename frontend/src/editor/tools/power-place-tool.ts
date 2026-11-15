@@ -6,8 +6,9 @@ import type { PowerPlaceToolId, Preview, Tool, ToolContext, ToolEvent } from './
 
 /**
  * A Power place tool (one per block kind but the grid): a click places a new block centred on the click with its
- * corner snapped to the grid, selects it and returns to the Power select tool. The Plan device tool places the plan
- * device armed in the device list and clears the arm; with none armed it asks for one and places nothing.
+ * corner snapped to the grid, selects it and returns to the Power select tool. The Device tool places the block of
+ * the device armed in its list (a device on the plan or not, a new one included) and clears the arm; with none armed
+ * it asks for one and places nothing.
  */
 export function createPowerPlaceTool(ctx: ToolContext, id: PowerPlaceToolId): Tool {
   const kind = id.slice('power-'.length) as Exclude<PowerKind, 'grid'>;

@@ -179,10 +179,14 @@ describe('renderPower blocks', () => {
     expect(line.getAttribute('fill')).toBe(P.blockInvalid);
   });
 
-  it('a plan device block carries the pin mark', () => {
+  it('a block of a device on the plan carries the pin mark; one not on the plan does not', () => {
     const b: PowerBlock = { id: 'd', kind: 'device', x: 0, y: 0, deviceId: 'pc' };
-    const root = draw({ blocks: [b], wires: [] }, { geo: geo(dev('pc', 'PC', { power: 'sensor.pc' })) });
-    expect([...root.querySelectorAll('g.block path')].some((p) => p.getAttribute('d') === mdiMapMarker)).toBe(true);
+    const pc = dev('pc', 'PC', { power: 'sensor.pc' });
+    const pin = (d: Device) => [...draw({ blocks: [b], wires: [] }, { geo: geo(d) }).querySelectorAll('g.block path')]
+      .some((p) => p.getAttribute('d') === mdiMapMarker);
+    expect(pin(pc)).toBe(true);
+    document.body.innerHTML = '';
+    expect(pin({ ...pc, placement: { mode: 'none' } })).toBe(false);
   });
 
   it('the transfer shows chip B as current for position B, in the geometry chip rects', () => {

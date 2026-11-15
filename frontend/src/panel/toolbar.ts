@@ -70,7 +70,7 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
     </div>${o.steps}</div>`;
 }
 
-/** Tools that start a group on the rail: the room tool, the first device tool, the Plan device and the service blocks. */
+/** Tools that start a group on the rail: the room tool, the first device tool, the Power step's Device tool and the service blocks. */
 const GROUP_STARTS: ToolId[] = ['zone', 'ceiling_light', 'power-device', 'power-bus'];
 
 /** The step's tool buttons (with a separator before each group). */

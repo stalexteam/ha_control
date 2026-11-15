@@ -28,6 +28,8 @@
     import { renderPower } from '../src/render/power-svg.ts';
     import { paletteFor } from '../src/render/theme.ts';
     import { schemaBounds } from '../src/geometry/power.ts';
+    import { migrateDevices } from '../src/model/migrate-devices.ts';
+    import { normalizePower } from '../src/model/power.ts';
 
     const params = new URLSearchParams(location.search);
     const dark = params.get('dark') !== '0';
@@ -43,12 +45,14 @@
 
     if (params.get('render') === 'power') {
       // render=power: the scene's schematic and frame drawn by renderPower full-screen (no panel), at 100 % or
-      // zoom=<screen px per unit>; a schematic larger than the window is fitted.
+      // zoom=<screen px per unit>; a schematic larger than the window is fitted. The plan goes through the same
+      // migrateDevices and normalizePower as in the panel, so both show the same schematic.
       panel.remove();
       const plan = scene?.plans[0];
-      const schema = plan?.power ?? { blocks: [], wires: [] };
-      const devices = plan ? plan.levels.flatMap(l => l.devices ?? []) : [];
+      const doc = plan ? migrateDevices({ level: plan.levels[0], power: plan.power }) : null;
+      const devices = doc?.level.devices ?? [];
       const geo = { device: id => devices.find(d => d.id === id) };
+      const schema = (doc && normalizePower(doc.power, geo)) ?? { blocks: [], wires: [] };
       const b = schemaBounds(schema, geo) ?? { x: 0, y: 0, w: 0, h: 0 };
       const W = innerWidth, H = innerHeight;
       const scale = Number(params.get('zoom')) || Math.min(1, (W - 80) / Math.max(b.w, 1), (H - 80) / Math.max(b.h, 1));

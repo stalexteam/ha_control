@@ -26,7 +26,7 @@ export interface ToolHost {
   commit(next: Level): void;
   readonly power: PowerSchema;
   commitPower(next: PowerSchema): void;
-  /** Power step: the plan device the Plan device tool places next (armed in the device list). */
+  /** Power step: the device the Device tool places next (armed in the device list). */
   placeDeviceId: Id | null;
   setPowerPosition(blockId: Id, p: Position): void;
   pickTool(id: Tool['id']): void;

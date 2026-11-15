@@ -47,7 +47,8 @@ export function renderSide(h: PlanStudioPanel, level: Level): TemplateResult {
     return renderPowerProps({
       power: h.power, level, selection: h.selection, meta: h.haMeta.get(), states: h.hass?.states, frame: h.powerFeed.frame,
       notice: h.notice, feedError: h.powerFeed.error, toolId: h.toolId, placeDeviceId: h.placeDeviceId, onPlaceDevice: id => h.armDevice(id),
-      commitPower: next => h.commitPower(next), setPosition: (id, p) => h.setPowerPosition(id, p),
+      commit: (next, power) => h.commit(next, power), commitPower: next => h.commitPower(next),
+      setPosition: (id, p) => h.setPowerPosition(id, p),
     });
   }
   if (h.mode === 'zones') return renderZonesProps({ level, selection: h.selection, notice: h.notice, commit: next => h.commit(next) });

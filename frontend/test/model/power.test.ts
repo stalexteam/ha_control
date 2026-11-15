@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addBlock, blockPorts, clearPins, connect, defaultPower, deleteBlock, deleteDeviceBlocks, deleteWire, moveBlock, newBlock,
+  addBlock, blockPorts, clearPins, connect, defaultPower, deleteBlock, deleteDeviceBlocks, deleteDeviceDoc, deleteWire,
+  moveBlock, newBlock,
   normalizePower, placeableDevices, pruneDeviceBlocks, setPin, stepDone, updateBlock, type PortName, type PowerBlock,
   type PowerSchema, type WireEnd, type WireError,
 } from '../../src/model/power';
@@ -428,6 +429,16 @@ describe('device blocks of one device', () => {
     expect(out.blocks.map((b) => b.id)).toEqual(['g', 'p', 'b', 'x']);
     expect(out.wires).toEqual([]);
     expect(deleteDeviceBlocks(inv, 'nobody')).toBe(inv);
+  });
+
+  it('deleteDeviceDoc of a placed inverter keeps its block (Device missing) without the PV and BAT wires and pins', () => {
+    const level = { ...emptyLevel('L1'), devices: [device('i', 'equipment', { inverter: true }, { mode: 'free', x: 0, y: 0, rotation: 0 })] };
+    const pinned = setPin(s(), 'a', 'BAT', { side: 'left', at: 0.5 });
+    const out = deleteDeviceDoc(level, pinned, 'i');
+    expect(out.level.devices).toEqual([]);
+    expect(out.power.blocks.map((b) => b.id)).toEqual(['g', 'a', 'p', 'b', 'x']);
+    expect(out.power.wires.map((w) => w.id)).toEqual(['w-in', 'w-x']);
+    expect('portPins' in out.power.blocks[1]).toBe(false);
   });
 });
 

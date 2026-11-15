@@ -63,7 +63,7 @@ describe('Power step', () => {
     expect($(el, '.steps [data-mode="power"] .n').textContent).toBe('5');
     expect($(el, '.steps [data-mode="power"] .name').textContent).toBe('Power');
     expect([...el.shadowRoot!.querySelectorAll('.tools .tool')].map(b => b.textContent!.trim())).toEqual([
-      'Select', 'Plan device', 'Bus', 'Battery', 'PV field', 'Transfer switch', 'Remainder',
+      'Select', 'Device', 'Bus', 'Battery', 'PV field', 'Transfer switch', 'Remainder',
     ]);
     await press(el, 'button[data-tool="power-bus"]');
     expect(el.toolId).toBe('power-bus');

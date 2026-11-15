@@ -48,9 +48,9 @@ export interface ToolContext {
   zonePlaced?(): void;
   /** Plan devices for the power schematic geometry (device block names and lines). */
   geo(): GeoCtx;
-  /** The plan device the Power step's Plan device tool places next (armed in the device list), or null. */
+  /** The device the Power step's Device tool places next (armed in the device list), or null. */
   placeDeviceId(): Id | null;
-  /** Called after the Plan device tool placed the armed device (the arm is cleared). */
+  /** Called after the Device tool placed the armed device (the arm is cleared). */
   devicePlaced?(): void;
   /** Sets a transfer switch position live (not part of the plan document). */
   setPosition(blockId: Id, p: Position): void;

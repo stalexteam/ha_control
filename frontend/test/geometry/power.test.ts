@@ -227,8 +227,11 @@ describe('blockLines and blockRect', () => {
     expect(blockLines({ id: 'g', kind: 'grid', voltage: 'sensor.v', ...at }, g)).toBe(2);
     expect(blockLines({ id: 'd', kind: 'device', deviceId: 'pc', ...at }, g)).toBe(2);
     expect(blockLines({ id: 'd', kind: 'device', deviceId: 'bare', ...at }, g)).toBe(0);
-    // the loss line of its inverter device
-    expect(blockLines({ id: 'd', kind: 'device', deviceId: 'inv', ...at }, g)).toBe(1);
+    // the Out line and the loss line of its inverter device
+    expect(blockLines({ id: 'd', kind: 'device', deviceId: 'inv', ...at }, g)).toBe(2);
+    // power, voltage and the switch
+    const rcbo = dev('rcbo', 'RCBO', { power: 'sensor.p', voltage: 'sensor.v', control: 'switch.r' });
+    expect(blockLines({ id: 'd', kind: 'device', deviceId: 'rcbo', ...at }, geo(rcbo))).toBe(3);
     expect(blockLines({ id: 'b', kind: 'battery', ...at }, g)).toBe(2);
     expect(blockLines({ id: 'p', kind: 'pv', ...at }, g)).toBe(1);
     expect(blockLines({ id: 't', kind: 'transfer', form: '2in1out', ...at }, g)).toBe(1);

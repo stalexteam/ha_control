@@ -146,7 +146,7 @@ function iconField(o: DevicePropsOpts, value: string, field: string, set: (patch
 }
 
 /** A labelled checkbox; a refused change puts it back on the model value. */
-function checkRow(field: string, label: string, value: boolean, on: (v: boolean) => boolean): TemplateResult {
+export function checkRow(field: string, label: string, value: boolean, on: (v: boolean) => boolean): TemplateResult {
   return row(label, html`<input type="checkbox" data-field=${field} .checked=${fieldValue(value)} @change=${(e: Event) => {
     const el = e.target as HTMLInputElement;
     if (!on(el.checked)) el.checked = value;

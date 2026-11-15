@@ -60,9 +60,10 @@ export function blockName(b: PowerBlock, g: GeoCtx): string {
 
 /**
  * Value lines under the name, from the configuration only (never live values, so blocks do not jump):
- * grid: power, voltage when set; device: power when bound, switch when the control is bound, loss when its device is
- * an inverter, a single "missing" line when its device is gone; battery: SOC and power; pv: power; transfer: the A/0/B
- * chips; remainder: power; bus: none.
+ * grid: power, voltage when set; device: one line per bound measurement (power, or input and output power for an
+ * inverter; voltage), the switch when the control is bound, loss for an inverter, nothing more for a dummy, a single
+ * "missing" line when its device is gone; battery: SOC and power; pv: power; transfer: the A/0/B chips; remainder:
+ * power; bus: none.
  */
 export function blockLines(b: PowerBlock, g: GeoCtx): number {
   const count = (...on: unknown[]) => on.filter(Boolean).length;
@@ -70,7 +71,10 @@ export function blockLines(b: PowerBlock, g: GeoCtx): number {
     case 'grid': return 1 + count(b.voltage);
     case 'device': {
       const d = g.device(b.deviceId);
-      return d ? count(d.bindings?.power, d.bindings?.control, isInverter(d)) : 1;
+      if (!d) return 1;
+      const k = d.bindings ?? {};
+      const inv = isInverter(d);
+      return count(inv ? k.power_in : k.power, inv && k.power_out, k.voltage, k.control, inv);
     }
     case 'battery': return 2;
     case 'bus': return 0;

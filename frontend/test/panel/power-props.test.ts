@@ -62,6 +62,7 @@ function harness(power: PowerSchema, over: Partial<PowerPropsOpts> = {}) {
     power, level: level(), selection: null, meta: META, states: STATES, frame: null, notice: null, feedError: null,
     toolId: 'power-select', placeDeviceId: null,
     onPlaceDevice: id => { calls.armed.push(id); },
+    commit: (next, p) => { o.level = next; if (p) o.power = p; calls.commits++; draw(); },
     commitPower: next => { o.power = next; calls.commits++; draw(); },
     setPosition: (id, p) => { calls.positions.push([id, p]); },
     ...over,
@@ -178,14 +179,23 @@ describe('Power properties', () => {
     expect(ids(h.q<EntityCombo>('ps-entity-combo[data-field="soc"]')!)).toEqual(['sensor.bat1_soc']);
   });
 
-  it('a device block shows the plan device name and its bindings read-only, and no name field', () => {
-    const h = harness(schema(boiler), selected('boiler'));
+  it('a block of a light shows its device name and bindings read-only, and no name field', () => {
+    const h = harness(schema({ id: 'desk', kind: 'device', x: 0, y: 0, deviceId: 'l2' }), selected('desk'));
+    expect(h.q('h4')!.textContent).toBe('Ceiling light');
     expect(h.q('input[data-field="name"]')).toBeNull();
-    expect(h.q('[data-field="device-name"]')!.textContent).toBe('Boiler');
+    expect(h.q('[data-field="device-name"]')!.textContent).toBe('Desk light');
     expect(h.q('ps-entity-combo')).toBeNull();
-    expect(h.q('[data-bound="power"]')!.textContent).toContain('sensor.grid_power');
-    expect(h.q('[data-bound="control"]')!.textContent).toContain('switch.rcbo');
+    expect(h.q('[data-bound="control"]')!.textContent).toContain('light.desk');
     expect(h.q('[data-note="bound-hint"]')!.textContent).toBe('Bound in the Binding step');
+  });
+
+  it('an equipment block edits its device in place: a name field and entity combos, no read-only bindings', () => {
+    const h = harness(schema(boiler), selected('boiler'));
+    expect(h.q('h4')!.textContent).toBe('Device · Metered switch');
+    expect(h.q<HTMLInputElement>('input[data-field="name"]')!.value).toBe('Boiler');
+    expect(h.q<EntityCombo>('ps-entity-combo[data-field="power"]')!.value).toBe('sensor.grid_power');
+    expect(h.q<EntityCombo>('ps-entity-combo[data-field="control"]')!.value).toBe('switch.rcbo');
+    expect(h.q('[data-bound]')).toBeNull();
   });
 
   it('a device block whose plan device is gone says so', () => {

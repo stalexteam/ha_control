@@ -193,7 +193,7 @@ export const panelStyles = css`
   .unplaced { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--ch-divider); }
   .uhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
   .uhead h4 { margin: 0; }
-  /* Power properties: the Plan device tool's device list, read-only bindings, the action buttons. */
+  /* Power properties: the Device tool's list, read-only bindings, the action buttons. */
   .pdevs { display: flex; flex-direction: column; margin: 8px -12px 0; }
   .pdev { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 6px 12px;
     border: 0; background: none; color: var(--ch-text); text-align: left; }

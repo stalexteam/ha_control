@@ -77,7 +77,7 @@ export class PlanStudioPanel extends LitElement {
   /** The plan's view (mm) and the power schematic's own view (units: 1 unit = 1 screen px at scale 1). */
   @state() planView: View = { x: -1000, y: -1000, scale: 0.08 };
   @state() powerView: View = { x: -40, y: -40, scale: 1 };
-  /** Power step: the plan device the Plan device tool places next (armed in the device list); null when none. */
+  /** Power step: the device the Device tool places next (armed in the device list); null when none. */
   @state() placeDeviceId: Id | null = null;
   @state() private size = { w: 0, h: 0 };
   /** The open modal dialog; Escape closes it (the restore prompt then leaves a non-modal banner). */
@@ -304,7 +304,7 @@ export class PlanStudioPanel extends LitElement {
   }
 
   /**
-   * Power step device list: arms a plan device for the Plan device tool (activated when another tool is on), so the
+   * Power step device list: arms a device for the Device tool (activated when another tool is on), so the
    * next canvas click places it; the "pick a device first" notice goes. The arm stays across tool switches; a
    * placement, leaving the step or opening another plan clears it.
    */

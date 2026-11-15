@@ -25,7 +25,7 @@ export const EQUIPMENT_TOOL_IDS: ToolId[] = ['device-select', 'ceiling_light', '
 export const BINDING_TOOL_IDS: ToolId[] = ['binding-select'];
 /** The Zones step tools; its rail adds the zone list under them. */
 export const ZONES_TOOL_IDS: ToolId[] = ['zones-select', 'zone-room', 'zone-draw'];
-/** The Power step: select, then the Plan device tool and the service blocks (no grid tool: the grid always exists). */
+/** The Power step: select, then the Device tool and the service blocks (no grid tool: the grid always exists). */
 export const POWER_TOOL_IDS: ToolId[] = ['power-select', 'power-device', 'power-bus', 'power-battery', 'power-pv',
   'power-transfer', 'power-remainder'];
 

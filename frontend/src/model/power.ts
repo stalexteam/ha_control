@@ -175,10 +175,14 @@ export interface DocEdit { level: Level; power: PowerSchema }
 
 const geoOf = (level: Level): GeoCtx => ({ device: (id) => level.devices.find((d) => d.id === id) });
 
-/** Deletes a device; one not on the plan also takes its device blocks and their wires out of the schematic. */
+/**
+ * Deletes a device; one not on the plan also takes its device blocks and their wires out of the schematic. A placed
+ * device's blocks stay ("Device missing", IN and OUT only), so a placed inverter's blocks lose their PV and BAT wires.
+ */
 export function deleteDeviceDoc(level: Level, power: PowerSchema, id: Id): DocEdit {
   const unplaced = level.devices.find((d) => d.id === id)?.placement.mode === 'none';
-  return { level: deleteDevice(level, id), power: unplaced ? deleteDeviceBlocks(power, id) : power };
+  const next = deleteDevice(level, id);
+  return { level: next, power: unplaced ? deleteDeviceBlocks(power, id) : pruneDeviceBlocks(power, id, geoOf(next)) };
 }
 
 /** Sets a device's inverter flag (setDeviceInverter); its blocks lose their PV and BAT wires when it stops being one. */
@@ -393,7 +397,7 @@ export function normalizePower(raw: unknown, g: GeoCtx): PowerSchema | undefined
 }
 
 /**
- * Devices the Plan device tool can place, by name: sockets, equipment (on the plan or not) and devices with a power or
+ * Devices the Power step's Device tool can place, by name: sockets, equipment (on the plan or not) and devices with a power or
  * control binding that are not in the schematic yet.
  */
 export function placeableDevices(level: Level, power: PowerSchema): Device[] {

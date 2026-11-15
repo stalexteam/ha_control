@@ -37,7 +37,7 @@ const PORT_ICON = 13;
 /** Bus terminal circle radius and its icon size, in units. */
 const TERMINAL_R = 9;
 const TERMINAL_ICON = 11;
-/** Switch and lock icons on a value line, and the plan-device pin, in units. */
+/** Switch and lock icons on a value line, and the pin of a device on the plan, in units. */
 const SWITCH_ICON = 18;
 const LOCK_ICON = 12;
 const PIN_ICON = 11;
@@ -161,7 +161,10 @@ type Line =
   | { kind: 'switch'; state: BlockLive['switch']; controllable: boolean }
   | { kind: 'chips' };
 
-/** The value lines of a block: one per blockLines (geometry) line, from the configuration and the live values. */
+/**
+ * The value lines of a block: one per blockLines (geometry) line, from the configuration and the live values. A device
+ * block: power (or In and Out for an inverter), voltage, the switch, and loss for an inverter, each only when bound.
+ */
 function blockContent(b: PowerBlock, g: GeoCtx, live: BlockLive | undefined, p: PlanPalette): Line[] {
   const watts = (): Line => ({ kind: 'text', value: formatWatts(live?.power) });
   const sw = (controllable: boolean): Line => ({ kind: 'switch', state: live?.switch, controllable });
@@ -171,11 +174,17 @@ function blockContent(b: PowerBlock, g: GeoCtx, live: BlockLive | undefined, p: 
     case 'device': {
       const dev = g.device(b.deviceId);
       if (!dev) return [{ kind: 'text', value: t('power.missing'), fill: p.blockInvalid }];
+      const k = dev.bindings ?? {};
+      const inv = isInverter(dev);
       const out: Line[] = [];
-      if (dev.bindings?.power) out.push(watts());
+      if (inv) {
+        if (k.power_in) out.push({ kind: 'text', label: t('power.in'), value: formatWatts(live?.power_in) });
+        if (k.power_out) out.push({ kind: 'text', label: t('power.out'), value: formatWatts(live?.power_out) });
+      } else if (k.power) out.push(watts());
+      if (k.voltage) out.push({ kind: 'text', value: unit(live?.voltage, 'V') });
       // Equipment shows a lock unless it is controllable; other kinds are actuators Plan Studio operates.
-      if (dev.bindings?.control) out.push(sw(isControllable(dev)));
-      if (isInverter(dev)) out.push({ kind: 'text', label: t('power.loss'), value: formatWatts(live?.loss) });
+      if (k.control) out.push(sw(isControllable(dev)));
+      if (inv) out.push({ kind: 'text', label: t('power.loss'), value: formatWatts(live?.loss) });
       return out;
     }
     case 'battery':
@@ -246,7 +255,8 @@ function renderBlock(s: PowerSchema, b: PowerBlock, o: PowerRenderOpts,
   const p = o.palette;
   const r = blockRect(b, o.geo, s);
   const live = o.frame?.blocks[b.id];
-  const missing = b.kind === 'device' && !o.geo.device(b.deviceId);
+  const dev = b.kind === 'device' ? o.geo.device(b.deviceId) : undefined;
+  const missing = b.kind === 'device' && !dev;
   const cx = r.x + r.w / 2;
   const name = blockName(b, o.geo) || t(`power.kind.${b.kind}`);
   const lines = blockContent(b, o.geo, live, p);
@@ -256,7 +266,7 @@ function renderBlock(s: PowerSchema, b: PowerBlock, o: PowerRenderOpts,
       stroke=${remainder ? p.powerRemainder : p.blockStroke} stroke-width=${remainder ? 1.5 : 1.25}
       stroke-dasharray=${remainder ? '6 4' : nothing} vector-effect=${NS}></rect>
     ${b.kind === 'transfer' ? transferPath(s, b, live, o, (port) => styleOf(b.id, port)) : nothing}
-    ${b.kind === 'device' ? svg`<g class="pin"><title>${t('power.planDevice')}</title>
+    ${dev && dev.placement.mode !== 'none' ? svg`<g class="pin"><title>${t('power.planDevice')}</title>
       ${icon(mdiMapMarker, { x: r.x + 4 + PIN_ICON / 2, y: r.y + 4 + PIN_ICON / 2 }, PIN_ICON, p.blockValue)}</g>` : nothing}
     <text class="name" x=${cx} y=${r.y + HEAD_H - 11.5} text-anchor="middle" dominant-baseline="central"
       font-size=${NAME_PX} font-weight="600" fill=${p.blockName} font-family=${FONT}>${name}</text>
