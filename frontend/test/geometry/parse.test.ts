@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseWhole } from '../../src/panel/fields';
+import { parseWhole } from '../../src/geometry/parse';
 
 const NB = ' ';
 const MINUS = '−';

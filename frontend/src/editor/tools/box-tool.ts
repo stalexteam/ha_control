@@ -1,7 +1,7 @@
 import type { Pt } from '../../model/types';
 import { addBox } from '../../model/ops';
 import { snap } from '../../geometry/snap';
-import { parseWhole } from '../../panel/fields';
+import { parseWhole } from '../../geometry/parse';
 import type { Preview, Tool, ToolContext, ToolEvent } from './types';
 
 /** Box (rectangular room) tool: DOM-free state machine. */

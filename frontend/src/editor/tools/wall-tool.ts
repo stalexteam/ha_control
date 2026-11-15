@@ -2,7 +2,7 @@ import type { Id, Pt } from '../../model/types';
 import { addWallSegment, nodePos, type Endpoint } from '../../model/ops';
 import { pointAlong, snap, type SnapResult } from '../../geometry/snap';
 import { dist } from '../../geometry/vec';
-import { parseWhole } from '../../panel/fields';
+import { parseWhole } from '../../geometry/parse';
 import type { Preview, Tool, ToolContext, ToolEvent } from './types';
 
 const clean = (v: number): number => Math.round(v * 1000) / 1000 + 0;

@@ -6,7 +6,8 @@ import { AIM_MAX, deleteDevice, moveDevice, setDeviceProps } from '../model/devi
 import type { Selection } from '../editor/tools/types';
 import { deviceRoomId, withAim } from '../geometry/devices';
 import { t } from '../i18n';
-import { numField, row, select, type WholeRule } from './fields';
+import { numField, row, select } from './fields';
+import type { WholeRule } from '../geometry/parse';
 import type { ToolId } from './tool-factory';
 
 const DEVICE_KINDS = Object.keys(DEVICE_PLACEMENTS) as DeviceKind[];
