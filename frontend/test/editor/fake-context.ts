@@ -1,4 +1,4 @@
-import type { Level } from '../../src/model/types';
+import { deviceDefaults, type Level } from '../../src/model/types';
 import type { ToolContext } from '../../src/editor/tools/types';
 
 /** Minimal ToolContext: keeps the level in memory and records every commit. */
@@ -15,5 +15,6 @@ export function fakeContext(level?: Level): ToolContext & { commits: Level[] } {
     boxMeasure: () => 'inner',
     select: () => {},
     lang: () => 'en',
+    deviceDefaults: k => deviceDefaults(k, 'free'),
   };
 }

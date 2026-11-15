@@ -1,10 +1,11 @@
 import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from 'lit';
 import { property, state } from 'lit/decorators.js';
 import type { Id, Level, Plan, Pt, WallType } from '../model/types';
-import { WALL_PRESETS, emptyPlan, normalizeLevel } from '../model/types';
+import { WALL_PRESETS, deviceDefaults, emptyPlan, normalizeLevel } from '../model/types';
 import { newId } from '../model/ids';
 import { deleteWall } from '../model/ops';
 import { deleteOpening } from '../model/openings';
+import { deleteDevice } from '../model/devices';
 import { deleteZone } from '../model/zones';
 import { History } from '../editor/history';
 import { SaveController } from '../editor/save';
@@ -31,7 +32,7 @@ const EMPTY_LEVEL: Level = { id: '', name: '', kind: 'floor', order: 0, nodes: [
 
 function exists(level: Level, s: Selection): boolean {
   const list = s.kind === 'wall' ? level.walls : s.kind === 'node' ? level.nodes
-    : s.kind === 'opening' ? level.openings : level.zones;
+    : s.kind === 'opening' ? level.openings : s.kind === 'device' ? level.devices : level.zones;
   return list.some(x => x.id === s.id);
 }
 
@@ -113,6 +114,7 @@ export class PlanStudioPanel extends LitElement {
       boxMeasure: () => this.boxMeasure,
       select: s => { this.selection = s; this.notice = null; },
       lang: () => this.uiLang,
+      deviceDefaults: k => deviceDefaults(k, 'free'),
     };
     this.activeTool = this.makeTool('select');
     const host: InputHost = {
@@ -411,7 +413,7 @@ export class PlanStudioPanel extends LitElement {
     const level = this.history?.current;
     if (!s || !level || s.kind === 'node' || !exists(level, s)) return false;
     this.commitRemoval(s.kind === 'wall' ? deleteWall(level, s.id) : s.kind === 'opening' ? deleteOpening(level, s.id)
-      : deleteZone(level, s.id));
+      : s.kind === 'device' ? deleteDevice(level, s.id) : deleteZone(level, s.id));
     return true;
   }
 

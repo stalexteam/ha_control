@@ -1,4 +1,4 @@
-import type { Pt, Id, Level, OpeningKind } from "../../model/types";
+import type { Pt, Id, Level, OpeningKind, DeviceKind, DevicePlacement, DeviceProps } from "../../model/types";
 import type { WallProps } from "../../model/ops";
 import type { SnapResult } from "../../geometry/snap";
 
@@ -22,9 +22,11 @@ export interface ToolContext {
   boxMeasure(): "inner" | "axis" | "outer";
   select(sel: Selection | null): void;
   lang(): string;
+  /** The panel's "next device" props for the free mode. */
+  deviceDefaults(kind: DeviceKind): DeviceProps;
 }
 
-export type Selection = { kind: "wall" | "node" | "opening" | "zone"; id: Id };
+export type Selection = { kind: "wall" | "node" | "opening" | "zone" | "device"; id: Id };
 
 /** Transient overlay a tool asks the renderer to draw. */
 export interface Preview {
@@ -37,10 +39,11 @@ export interface Preview {
   anchor?: Pt;
   /** Working copy of the level during a drag; the renderer draws it instead of the committed level. */
   level?: Level;
+  device?: { placement: DevicePlacement; props: DeviceProps; invalid: boolean };
 }
 
 export interface Tool {
-  readonly id: "select" | "box" | "wall" | "door" | "window" | "opening" | "zone";
+  readonly id: "select" | "box" | "wall" | "door" | "window" | "opening" | "zone" | "device-select" | DeviceKind;
   down(e: ToolEvent): void;
   move(e: ToolEvent): void;
   up(e: ToolEvent): void;

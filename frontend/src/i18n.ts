@@ -9,6 +9,13 @@ const en: Dict = {
   'tool.opening': 'Opening',
   'tool.zone': 'Zone',
   'zone.default': 'Room',
+  'device.ceiling_light': 'Ceiling light',
+  'device.wall_light': 'Wall light',
+  'device.motion_sensor': 'Motion sensor',
+  'device.illuminance_sensor': 'Illuminance sensor',
+  'device.switch': 'Switch',
+  'device.socket': 'Socket',
+  'device.equipment': 'Equipment',
 
   'plan.default': 'Plan',
   'plan.name': 'Plan name',
