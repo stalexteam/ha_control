@@ -15,6 +15,8 @@ export const GRID = 10;
 
 const CHIP_W = 24;
 const CHIP_GAP = 6;
+/** Room per port along a side: a port circle plus a gap. */
+const PORT_PITCH = 2 * PORT_R + 6;
 /** Route cost of one bend, in units of length: a bend is worth a short detour. */
 const BEND = STUB;
 /** Route cost of running through a block: any clear route beats it. */
@@ -71,8 +73,15 @@ export function blockLines(b: PowerBlock, g: GeoCtx): number {
   }
 }
 
-/** Top-left at (x, y); a bus has its own size, other blocks fit their name and value lines. */
-export function blockRect(b: PowerBlock, g: GeoCtx): Rect {
+/**
+ * Top-left at (x, y); a bus has its own size, other blocks fit their name and value lines (the base rect).
+ * With the schema, the rect also grows to fit its ports: each side at least (n + 1) * PORT_PITCH long for its n ports.
+ */
+export function blockRect(b: PowerBlock, g: GeoCtx, s?: PowerSchema): Rect {
+  return s ? layout(s, b, g).r : baseRect(b, g);
+}
+
+function baseRect(b: PowerBlock, g: GeoCtx): Rect {
   if (b.kind === 'bus') return { x: b.x, y: b.y, w: b.w, h: b.h };
   return {
     x: b.x, y: b.y,
@@ -154,7 +163,7 @@ const busById = (s: PowerSchema, id: Id): Bus | undefined => {
 };
 const isPort = (e: WireEnd, block: Id, port: PortName): boolean => 'block' in e && e.block === block && e.port === port;
 
-/** What a wired port looks at: the far block's centre or the bus axis point; null when the port is free. */
+/** What a wired port looks at: the far block's base-rect centre or the bus axis point; null when the port is free. */
 function farPoint(s: PowerSchema, block: Id, port: PortName, g: GeoCtx): Pt | null {
   const w = s.wires.find((x) => isPort(x.from, block, port) || isPort(x.to, block, port));
   if (!w) return null;
@@ -164,48 +173,64 @@ function farPoint(s: PowerSchema, block: Id, port: PortName, g: GeoCtx): Pt | nu
     return bus ? busAxis(bus, far.at) : null;
   }
   const b = blockById(s, far.block);
-  return b ? centre(blockRect(b, g)) : null;
+  return b ? centre(baseRect(b, g)) : null;
 }
 
 /**
- * Ruling 7: a pinned port sits on its pin; a wired one on the side facing the far end; a free one on its default
- * side. Unpinned ports sharing a side are spaced at (i+1)/(n+1), ordered by their far end along that side (a free
- * port counts as the block centre), so wires do not cross. The result follows blockPorts order.
+ * A block's grown rect and its port places (blockPorts order). Ruling 7: sides come from the base rect, so nothing
+ * depends on itself: a pinned port takes its pin's side; a wired one the side facing the far end; a free one its
+ * default side. Then each side grows to (n + 1) * PORT_PITCH for its n ports (pinned ones included), keeping (x, y).
+ * Pins sit at their `at` on the grown rect; unpinned ports sharing a side are spaced at (i+1)/(n+1), ordered by their
+ * far end along that side (a free port counts as the block centre), so wires do not cross.
  */
-export function portPlaces(s: PowerSchema, b: PowerBlock, g: GeoCtx): PortPlace[] {
-  const r = blockRect(b, g);
-  const c = centre(r);
-  const ports = blockPorts(b);
-  const placed: PortPlace[] = new Array(ports.length);
-  const auto: { i: number; side: PortSide; key: number }[] = [];
-  ports.forEach((p, i) => {
+function layout(s: PowerSchema, b: PowerBlock, g: GeoCtx): { r: Rect; places: PortPlace[] } {
+  const base = baseRect(b, g);
+  const c = centre(base);
+  const ports = blockPorts(b).map((p) => {
     const pin = b.portPins?.[p.name];
-    if (pin) {
-      placed[i] = { name: p.name, dir: p.dir, side: pin.side, pt: sidePoint(r, pin.side, pin.at), pinned: true };
-      return;
-    }
+    if (pin) return { ...p, side: pin.side, pin, key: 0 };
     const far = farPoint(s, b.id, p.name, g);
-    const side = (far && facingSide(r, far)) ?? defaultSide(b, p);
+    const side = (far && facingSide(base, far)) ?? defaultSide(b, p);
     const look = far ?? c;
-    auto.push({ i, side, key: side === 'top' || side === 'bottom' ? look.x : look.y });
+    return { ...p, side, pin: undefined, key: side === 'top' || side === 'bottom' ? look.x : look.y };
+  });
+  const need = (side: PortSide): number => {
+    const n = ports.filter((p) => p.side === side).length;
+    return n ? (n + 1) * PORT_PITCH : 0;
+  };
+  const r = {
+    ...base,
+    w: Math.max(base.w, need('top'), need('bottom')),
+    h: Math.max(base.h, need('left'), need('right')),
+  };
+  const places: PortPlace[] = new Array(ports.length);
+  ports.forEach((p, i) => {
+    if (p.pin) places[i] = { name: p.name, dir: p.dir, side: p.side, pt: sidePoint(r, p.side, p.pin.at), pinned: true };
   });
   for (const side of ['top', 'right', 'bottom', 'left'] as const) {
-    const group = auto.filter((u) => u.side === side).sort((u, v) => u.key - v.key || u.i - v.i);
-    group.forEach((u, j) => {
-      const p = ports[u.i];
-      placed[u.i] = { name: p.name, dir: p.dir, side, pt: sidePoint(r, side, (j + 1) / (group.length + 1)), pinned: false };
+    const group = ports.map((p, i) => ({ p, i })).filter(({ p }) => !p.pin && p.side === side)
+      .sort((u, v) => u.p.key - v.p.key || u.i - v.i);
+    group.forEach(({ p, i }, j) => {
+      places[i] = { name: p.name, dir: p.dir, side, pt: sidePoint(r, side, (j + 1) / (group.length + 1)), pinned: false };
     });
   }
-  return placed;
+  return { r, places };
 }
 
-/** Both ends of a wire (a = from, b = to), each with the rect it sits on; null when an end is missing. */
+/** Where each port of b sits (blockPorts order), on blockRect(b, g, s); see layout for the rules. */
+export function portPlaces(s: PowerSchema, b: PowerBlock, g: GeoCtx): PortPlace[] {
+  return layout(s, b, g).places;
+}
+
+/** Both ends of a wire (a = from, b = to), each with the (grown) rect it sits on; null when an end is missing. */
 export function wireEnds(s: PowerSchema, w: PowerWire, g: GeoCtx): { a: EndPlace; b: EndPlace } | null {
   const portEnd = (e: WireEnd): EndPlace | null => {
     if (!('block' in e)) return null;
     const b = blockById(s, e.block);
-    const p = b && portPlaces(s, b, g).find((x) => x.name === e.port);
-    return b && p ? { pt: p.pt, side: p.side, rect: blockRect(b, g) } : null;
+    if (!b) return null;
+    const { r, places } = layout(s, b, g);
+    const p = places.find((x) => x.name === e.port);
+    return p ? { pt: p.pt, side: p.side, rect: r } : null;
   };
   const busEnd = (e: WireEnd, other: WireEnd, otherPlace: EndPlace | null): EndPlace | null => {
     if (!('bus' in e)) return null;
@@ -216,7 +241,7 @@ export function wireEnds(s: PowerSchema, w: PowerWire, g: GeoCtx): { a: EndPlace
       const ob = busById(s, other.bus);
       toward = ob && busAxis(ob, other.at);
     }
-    return toward ? { ...busAttach(bus, e.at, toward), rect: blockRect(bus, g) } : null;
+    return toward ? { ...busAttach(bus, e.at, toward), rect: blockRect(bus, g, s) } : null;
   };
   const from = portEnd(w.from);
   const to = portEnd(w.to);
@@ -328,9 +353,9 @@ export function routeWire(a: EndPlace, b: EndPlace): Pt[] {
   return best ?? [A, P, vertA ? { x: P.x, y: Q.y } : { x: Q.x, y: P.y }, Q, B];
 }
 
-/** The A/0/B chips of a transfer block, centred on its value line. */
-export function transferChips(b: Transfer, g: GeoCtx): { position: Position; rect: Rect }[] {
-  const r = blockRect(b, g);
+/** The A/0/B chips of a transfer block, centred on its value line (on the grown rect when the schema is given). */
+export function transferChips(b: Transfer, g: GeoCtx, s?: PowerSchema): { position: Position; rect: Rect }[] {
+  const r = blockRect(b, g, s);
   const x0 = r.x + (r.w - (3 * CHIP_W + 2 * CHIP_GAP)) / 2;
   const y = r.y + HEAD_H + 1;
   return (['A', '0', 'B'] as const).map((position, i) => ({
@@ -351,7 +376,7 @@ export function hitPower(s: PowerSchema, p: Pt, tol: number, g: GeoCtx): PowerHi
   const top = [...s.blocks].reverse();
   for (const b of top) {
     if (b.kind !== 'transfer') continue;
-    const chip = transferChips(b, g).find((c) => inRect(p, c.rect, 0));
+    const chip = transferChips(b, g, s).find((c) => inRect(p, c.rect, 0));
     if (chip) return { kind: 'chip', block: b.id, position: chip.position };
   }
   // nearest within reach; a tie keeps the topmost block
@@ -375,7 +400,7 @@ export function hitPower(s: PowerSchema, p: Pt, tol: number, g: GeoCtx): PowerHi
     if (end) return end;
   }
   for (const b of top) {
-    if (b.kind !== 'bus' || !inRect(p, blockRect(b, g), tol)) continue;
+    if (b.kind !== 'bus' || !inRect(p, blockRect(b, g, s), tol)) continue;
     const at = isHorizontal(b) ? (p.x - b.x) / b.w : (p.y - b.y) / b.h;
     return { kind: 'bus', id: b.id, at: clamp01(at) };
   }
@@ -391,11 +416,11 @@ export function hitPower(s: PowerSchema, p: Pt, tol: number, g: GeoCtx): PowerHi
     }
   }
   if (wire) return wire;
-  const block = top.find((b) => b.kind !== 'bus' && inRect(p, blockRect(b, g), 0));
+  const block = top.find((b) => b.kind !== 'bus' && inRect(p, blockRect(b, g, s), 0));
   return block ? { kind: 'block', id: block.id } : null;
 }
 
-/** The union of all block rects; null for an empty schematic. */
+/** The union of all (grown) block rects; null for an empty schematic. */
 export function schemaBounds(s: PowerSchema, g: GeoCtx): Rect | null {
   if (!s.blocks.length) return null;
   let x0 = Infinity;
@@ -403,7 +428,7 @@ export function schemaBounds(s: PowerSchema, g: GeoCtx): Rect | null {
   let x1 = -Infinity;
   let y1 = -Infinity;
   for (const b of s.blocks) {
-    const r = blockRect(b, g);
+    const r = blockRect(b, g, s);
     x0 = Math.min(x0, r.x);
     y0 = Math.min(y0, r.y);
     x1 = Math.max(x1, r.x + r.w);

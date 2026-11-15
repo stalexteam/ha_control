@@ -250,7 +250,7 @@ describe('portPlaces', () => {
 
   it('puts a wired OUT on the side facing a block to its right', () => {
     const s = schema([grid, meterRight], [wire('w', { block: 'g', port: 'OUT' }, { block: 'm', port: 'IN' })]);
-    const r = blockRect(grid, G);
+    const r = blockRect(grid, G, s);
     const [out] = portPlaces(s, grid, G);
     expect(out).toEqual({ name: 'OUT', dir: 'out', side: 'right', pt: { x: r.x + r.w, y: r.y + r.h / 2 }, pinned: false });
     const into = portPlaces(s, meterRight, G).find((p) => p.name === 'IN')!;
@@ -260,10 +260,11 @@ describe('portPlaces', () => {
   it('puts free ports on their default sides', () => {
     const g = geo(dev('inv', 'Inverter'));
     const inv: PowerBlock = { id: 'i', kind: 'device', deviceId: 'inv', inverter: true, x: 0, y: 0 };
-    const places = portPlaces(schema([inv]), inv, g);
+    const s = schema([inv]);
+    const places = portPlaces(s, inv, g);
     const side = Object.fromEntries(places.map((p) => [p.name, p.side]));
     expect(side).toEqual({ IN: 'top', OUT: 'bottom', PV: 'top', BAT: 'right' });
-    const r = blockRect(inv, g);
+    const r = blockRect(inv, g, s);
     expect(places.find((p) => p.name === 'IN')!.pt).toEqual({ x: r.x + r.w / 3, y: r.y });
     expect(places.find((p) => p.name === 'PV')!.pt).toEqual({ x: r.x + (2 * r.w) / 3, y: r.y });
     expect(places.find((p) => p.name === 'BAT')!.pt).toEqual({ x: r.x + r.w, y: r.y + r.h / 2 });
@@ -277,7 +278,7 @@ describe('portPlaces', () => {
       wire('wa', { block: 't', port: 'A' }, { block: 'r', port: 'IN' }),
       wire('wb', { block: 't', port: 'B' }, { block: 'l', port: 'IN' }),
     ]);
-    const r = blockRect(ts, G);
+    const r = blockRect(ts, G, s);
     const places = portPlaces(s, ts, G);
     const a = places.find((p) => p.name === 'A')!;
     const b = places.find((p) => p.name === 'B')!;
@@ -290,7 +291,7 @@ describe('portPlaces', () => {
   it('a pin wins over the automatic side', () => {
     const pinned: PowerBlock = { ...grid, portPins: { OUT: { side: 'left', at: 0.25 } } };
     const s = schema([pinned, meterRight], [wire('w', { block: 'g', port: 'OUT' }, { block: 'm', port: 'IN' })]);
-    const r = blockRect(pinned, G);
+    const r = blockRect(pinned, G, s);
     expect(portPlaces(s, pinned, G)).toEqual([
       { name: 'OUT', dir: 'out', side: 'left', pt: { x: r.x, y: r.y + 0.25 * r.h }, pinned: true },
     ]);
@@ -311,6 +312,56 @@ describe('portPlaces', () => {
     const m2: PowerBlock = { ...m, x: 50, y: 60 };
     const s2 = schema([grid, m2], [wire('w', { block: 'g', port: 'OUT' }, { block: 'm', port: 'IN' })]);
     expect(portPlaces(s2, grid, G)[0].side).toBe('bottom');
+  });
+});
+
+describe('blocks grow to fit their ports', () => {
+  const g = geo(dev('bare', 'Bare'), dev('inv', 'Inverter'));
+  const short: PowerBlock = { id: 'd', kind: 'device', deviceId: 'bare', x: 0, y: 0 };
+  const src: PowerBlock = { id: 'g', kind: 'grid', name: 'Grid', x: -600, y: -100 };
+  const sink: PowerBlock = { id: 'm', kind: 'meter', name: 'Meter', x: -600, y: 100 };
+  const s = schema([short, src, sink], [
+    wire('w1', { block: 'g', port: 'OUT' }, { block: 'd', port: 'IN' }),
+    wire('w2', { block: 'd', port: 'OUT' }, { block: 'm', port: 'IN' }),
+  ]);
+
+  it('spaces two wired ports on the left of a short block at least 2 * PORT_R + 6 apart, on the grown edge', () => {
+    const base = blockRect(short, g);
+    expect(base.h).toBe(HEAD_H + 8);
+    const r = blockRect(short, g, s);
+    expect(r).toEqual({ x: 0, y: 0, w: base.w, h: 3 * (2 * PORT_R + 6) });
+    const [into, out] = portPlaces(s, short, g);
+    expect([into.side, out.side]).toEqual(['left', 'left']);
+    expect(out.pt.y - into.pt.y).toBeGreaterThanOrEqual(2 * PORT_R + 6);
+    for (const p of [into, out]) {
+      expect(p.pt.x).toBe(r.x);
+      expect(p.pt.y).toBeGreaterThanOrEqual(r.y + PORT_R);
+      expect(p.pt.y).toBeLessThanOrEqual(r.y + r.h - PORT_R);
+    }
+  });
+
+  it('blockRect without a schema stays the base rect', () => {
+    expect(blockRect(short, g)).toEqual({ x: 0, y: 0, w: MIN_W, h: HEAD_H + 8 });
+  });
+
+  it('wire ends, hits and bounds use the grown rect', () => {
+    const r = blockRect(short, g, s);
+    expect(wireEnds(s, s.wires[0], g)!.b.rect).toEqual(r);
+    expect(hitPower(s, { x: 60, y: r.h - 6 }, 4, g)).toEqual({ kind: 'block', id: 'd' });
+    expect(schemaBounds(schema([short], s.wires), g)!.h).toBe(HEAD_H + 8);
+    expect(schemaBounds(s, g)).toEqual({ x: -600, y: -100, w: 720, h: 256 }); // the meter's single right port grows it to 56
+  });
+
+  it('grows the width for many ports on one side, pins included', () => {
+    const inv: PowerBlock = {
+      id: 'i', kind: 'device', deviceId: 'inv', inverter: true, x: 0, y: 0,
+      portPins: { IN: { side: 'top', at: 0.2 }, OUT: { side: 'top', at: 0.4 }, PV: { side: 'top', at: 0.6 }, BAT: { side: 'top', at: 0.8 } },
+    };
+    const si = schema([inv]);
+    expect(blockRect(inv, g).w).toBe(MIN_W);
+    const r = blockRect(inv, g, si);
+    expect(r.w).toBe(5 * (2 * PORT_R + 6));
+    expect(portPlaces(si, inv, g).map((p) => p.pt.x)).toEqual([0.2, 0.4, 0.6, 0.8].map((at) => at * r.w));
   });
 });
 
@@ -377,8 +428,8 @@ describe('wireEnds', () => {
     const e = wireEnds(s, w, G)!;
     const pts = routeWire(e.a, e.b);
     expect(routeProblems(pts, e.a, e.b)).toEqual([]);
-    expect(crosses(pts, blockRect(grid, G))).toBe(false);
-    expect(crosses(pts, blockRect(m, G))).toBe(false);
+    expect(crosses(pts, blockRect(grid, G, s))).toBe(false);
+    expect(crosses(pts, blockRect(m, G, s))).toBe(false);
   });
 });
 
@@ -391,7 +442,7 @@ describe('hitPower', () => {
 
   it('prefers a port over its block', () => {
     const out = portPlaces(s, grid, G)[0];
-    const r = blockRect(grid, G);
+    const r = blockRect(grid, G, s);
     const inside = { x: out.pt.x, y: out.pt.y - 3 };
     expect(inside.y).toBeGreaterThan(r.y);
     expect(hitPower(s, inside, 4, G)).toEqual({ kind: 'port', block: 'g', port: 'OUT' });
@@ -399,11 +450,11 @@ describe('hitPower', () => {
   });
 
   it('hits transfer chips before anything else', () => {
-    const chips = transferChips(ts as PowerBlock & { kind: 'transfer' }, G);
+    const chips = transferChips(ts as PowerBlock & { kind: 'transfer' }, G, s);
     expect(chips.map((c) => c.position)).toEqual(['A', '0', 'B']);
     const b = chips[2].rect;
     expect(hitPower(s, centre(b), 4, G)).toEqual({ kind: 'chip', block: 't', position: 'B' });
-    const r = blockRect(ts, G);
+    const r = blockRect(ts, G, s);
     for (const c of chips) {
       expect(c.rect.x).toBeGreaterThanOrEqual(r.x + PORT_R);
       expect(c.rect.x + c.rect.w).toBeLessThanOrEqual(r.x + r.w - PORT_R);
