@@ -11,7 +11,6 @@ import type { ToolHost } from './tool-context';
 export interface SideHost extends ToolHost {
   mode: EditorMode;
   toolId: ToolId;
-  commitRemoval(next: Level): void;
   setWallType(type: WallType): void;
 }
 
@@ -19,7 +18,7 @@ export interface SideHost extends ToolHost {
 export function renderSide(h: SideHost, level: Level): TemplateResult {
   const common = {
     level, selection: h.selection, notice: h.notice,
-    commit: (next: Level) => h.commit(next), remove: (next: Level) => h.commitRemoval(next),
+    commit: (next: Level) => h.commit(next),
     setNotice: (msg: string | null) => { h.notice = msg; },
   };
   if (h.mode === 'equipment') {

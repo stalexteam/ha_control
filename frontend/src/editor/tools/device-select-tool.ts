@@ -1,5 +1,5 @@
 import type { DevicePlacement, Id, Level, Pt } from '../../model/types';
-import { deleteDevice, moveDevice } from '../../model/devices';
+import { moveDevice } from '../../model/devices';
 import { angleOf, deviceAt, devicePose } from '../../geometry/devices';
 import { orthoConstrain } from '../../geometry/snap';
 import { wallFrame } from '../../geometry/walls';
@@ -87,13 +87,7 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
     key(key) {
       if (key === 'Escape' && aim.cancel()) return true;
       if (key === 'Escape' && drag) { reset(); return true; }
-      if (key !== 'Delete' && key !== 'Backspace') return false;
-      if (!sel || sel.kind !== 'device') return false;
-      const level = ctx.level();
-      if (!level.devices.some(x => x.id === sel!.id)) return false;
-      ctx.commit(deleteDevice(level, sel.id));
-      setSel(null);
-      return true;
+      return false;
     },
     preview(): Preview {
       const w = aim.working();

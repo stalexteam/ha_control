@@ -11,7 +11,6 @@ const props = { type: 'partition', thickness: 100, baseline: 'center' } as const
 const empty = (): Level => ({ id: 'l0', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] });
 const box = () => addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 4000 }, props, 'axis');
 const click = (t: ReturnType<typeof createSelectTool>, x: number, y: number) => { t.down(ev(x, y)); t.up(ev(x, y)); };
-const k = { shift: false };
 
 describe('select tool', () => {
   it('dragging a corner of the selected wall is one commit, both walls change', () => {
@@ -96,17 +95,6 @@ describe('select tool', () => {
     expect(ctx.level().openings[0].offset).toBe(1250);
   });
 
-  it('Delete removes the selected wall and its openings', () => {
-    const base = box();
-    const { level } = addOpening(base, base.walls[0].id, 'door', 1500);
-    const ctx = fakeContext(level);
-    const t = createSelectTool(ctx);
-    click(t, 500, 0);
-    expect(t.key('Delete', k)).toBe(true);
-    expect(ctx.level().walls).toHaveLength(3);
-    expect(ctx.level().openings).toHaveLength(0);
-  });
-
   it('click on empty space selects nothing; click without move does not commit', () => {
     const ctx = fakeContext(box());
     const sel: unknown[] = [];
@@ -115,7 +103,6 @@ describe('select tool', () => {
     click(t, 500, 0); click(t, 1500, 2000);
     expect(ctx.commits).toHaveLength(0);
     expect(sel[1]).toBeNull();
-    expect(t.key('Delete', k)).toBe(false);
   });
 
   it('alt-click on an end without movement commits nothing', () => {
@@ -124,25 +111,6 @@ describe('select tool', () => {
     click(t, 1500, 0);
     t.down(ev(3000, 0, { alt: true })); t.up(ev(3000, 0, { alt: true }));
     expect(ctx.commits).toHaveLength(0);
-  });
-
-  it('cancel clears the selection so Delete does nothing', () => {
-    const ctx = fakeContext(box());
-    const t = createSelectTool(ctx);
-    click(t, 500, 0);
-    t.cancel();
-    expect(t.key('Delete', k)).toBe(false);
-    expect(ctx.level().walls).toHaveLength(4);
-  });
-
-  it('Delete is a no-op when the selected id no longer exists', () => {
-    const ctx = fakeContext(box());
-    const t = createSelectTool(ctx);
-    click(t, 500, 0);
-    ctx.commit({ ...ctx.level(), walls: [] });
-    const n = ctx.commits.length;
-    expect(t.key('Delete', k)).toBe(false);
-    expect(ctx.commits).toHaveLength(n);
   });
 
   const withFree = () => {

@@ -34,7 +34,7 @@ describe('opening width field', () => {
     const opts = {
       level: r.level, selection: { kind: 'opening' as const, id: r.openingId! }, tool: 'select' as const,
       boxMeasure: 'inner' as const, wallType: 'bearing' as const, thickness: 400, notice: null,
-      commit: (n: unknown) => commits.push(n), remove: () => {}, setBoxMeasure: () => {}, setWallType: () => {}, setThickness: () => {}, next: initialNext(), setNext: () => {},
+      commit: (n: unknown) => commits.push(n), setBoxMeasure: () => {}, setWallType: () => {}, setThickness: () => {}, next: initialNext(), setNext: () => {},
       setNotice: (m: string | null) => { notice = m; },
     };
     render(renderProps(opts), host);

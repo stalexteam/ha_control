@@ -30,7 +30,6 @@ export interface PropsOpts {
   notice: string | null;
   commit(next: Level): void;
   /** Commits a level in which the selected element was deleted. */
-  remove(next: Level): void;
   setBoxMeasure(m: BoxMeasure): void;
   setWallType(type: WallType): void;
   setThickness(mm: number): void;
@@ -97,7 +96,7 @@ function wallProps(w: Wall, o: PropsOpts): TemplateResult {
     ${row(t('props.baseline'), select<Baseline>(w.baseline,
       (['center', 'left', 'right'] as Baseline[]).map(v => ({ v, label: t(`baseline.${v}`) })), v => set({ baseline: v })))}
     ${row(t('props.length'), html`<span class="val ro">${formatMm(len)} ${t('unit.mm')}</span>`)}
-    <button class="btn danger" data-action="delete-wall" @click=${() => o.remove(deleteWall(o.level, w.id))}>
+    <button class="btn danger" data-action="delete-wall" @click=${() => o.commit(deleteWall(o.level, w.id))}>
       ${t('action.delete')}</button>`;
 }
 
@@ -130,7 +129,7 @@ function openingProps(op: Opening, o: PropsOpts): TemplateResult {
       ${row(t('props.swing'), select(op.swing ?? 'left', sides, v => patch({ swing: v })))}` : nothing}
     ${op.kind === 'window' ? row(t('props.outside'), select(op.outside ?? 'left', sides, v => patch({ outside: v }))) : nothing}
     ${op.invalid ? html`<p class="warn">${t('props.invalidOpening')}</p>` : nothing}
-    <button class="btn danger" data-action="delete-opening" @click=${() => o.remove(deleteOpening(o.level, op.id))}>
+    <button class="btn danger" data-action="delete-opening" @click=${() => o.commit(deleteOpening(o.level, op.id))}>
       ${t('action.delete')}</button>`;
 }
 
@@ -146,7 +145,7 @@ function zoneProps(z: Level['zones'][number], o: PropsOpts): TemplateResult {
       }} />`)}
     ${row(t('props.area'), html`<span class="val ro">${formatArea(roomAreaM2(z.outline))}</span>`)}
     ${z.broken ? html`<p class="warn">${t('props.broken')}</p>` : nothing}
-    <button class="btn danger" data-action="delete-zone" @click=${() => o.remove(deleteZone(o.level, z.id))}>
+    <button class="btn danger" data-action="delete-zone" @click=${() => o.commit(deleteZone(o.level, z.id))}>
       ${t('action.delete')}</button>`;
 }
 

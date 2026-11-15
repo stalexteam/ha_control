@@ -166,18 +166,12 @@ export class PlanStudioPanel extends LitElement {
     this.requestUpdate();
   }
 
-  /** Commit from outside the tool that removes the selected element. */
-  commitRemoval(next: Level): void {
-    this.activeTool.cancel();
-    this.selection = null;
-    this.commit(next);
-  }
-
+  /** Delete/Backspace: remove the selected element (commit() drops the tool state and the selection). */
   deleteSelection(): boolean {
     const s = this.selection;
     const level = this.history?.current;
     if (!s || !level || s.kind === 'node' || !selectionExists(level, s)) return false;
-    this.commitRemoval(s.kind === 'wall' ? deleteWall(level, s.id) : s.kind === 'opening' ? deleteOpening(level, s.id)
+    this.commit(s.kind === 'wall' ? deleteWall(level, s.id) : s.kind === 'opening' ? deleteOpening(level, s.id)
       : s.kind === 'device' ? deleteDevice(level, s.id) : deleteZone(level, s.id));
     return true;
   }

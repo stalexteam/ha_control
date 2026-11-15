@@ -25,7 +25,7 @@ function mountProps(level: Level, id: string, commits: Level[]): HTMLElement {
   const host = document.createElement('div');
   render(renderEquipmentProps({
     level, selection: { kind: 'device', id }, toolId: 'device-select', nextProps: initialNext(), notice: null,
-    commit: n => commits.push(n), remove: n => commits.push(n), setNextProps: () => {}, setNotice: () => {},
+    commit: n => commits.push(n), setNextProps: () => {}, setNotice: () => {},
   }), host);
   return host;
 }

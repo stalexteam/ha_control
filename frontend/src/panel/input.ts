@@ -17,7 +17,7 @@ export interface InputHost {
   undo(): void;
   redo(): void;
   save(): void;
-  /** Panel fallback for an unconsumed Delete; returns true when something was deleted. */
+  /** Panel fallback for an unconsumed Delete/Backspace; returns true when something was deleted. */
   deleteSelection(): boolean;
   /** Panel fallback for an unconsumed Escape: cancel the tool and clear the selection. */
   clearSelection(): void;
@@ -117,7 +117,7 @@ export class EditorInput {
       return;
     }
     let consumed = this.h.tool().key(e.key, { shift: e.shiftKey });
-    if (!consumed && e.key === 'Delete') consumed = this.h.deleteSelection();
+    if (!consumed && (e.key === 'Delete' || e.key === 'Backspace')) consumed = this.h.deleteSelection();
     if (!consumed && e.key === 'Escape') { this.h.clearSelection(); consumed = true; }
     if (consumed) e.preventDefault();
     this.h.update();

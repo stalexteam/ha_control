@@ -220,7 +220,6 @@ export interface EquipmentPropsOpts {
   notice: string | null;
   commit(next: Level): void;
   /** Commits a level in which the selected device was deleted. */
-  remove(next: Level): void;
   setNextProps(next: Record<DeviceKind, DeviceProps>): void;
   setNotice(msg: string | null): void;
 }
@@ -246,7 +245,7 @@ export function renderEquipmentProps(o: EquipmentPropsOpts): TemplateResult {
         if (!nextKind) return;
         o.setNextProps({ ...o.nextProps, [nextKind]: { ...o.nextProps[nextKind], ...patch, kind: nextKind } as DeviceProps });
       },
-      onDelete: () => { if (device) o.remove(deleteDevice(level, device.id)); },
+      onDelete: () => { if (device) o.commit(deleteDevice(level, device.id)); },
       onNotice: msg => o.setNotice(msg),
     })}
     ${o.notice ? html`<p class="warn">${o.notice}</p>` : nothing}

@@ -1,7 +1,6 @@
 import type { Id, Level, Pt } from '../../model/types';
-import { deleteWall, detachWallEnd, finalize, mergeNodes, moveNode, moveWall, nodePos } from '../../model/ops';
-import { deleteOpening, moveOpening } from '../../model/openings';
-import { deleteZone } from '../../model/zones';
+import { detachWallEnd, finalize, mergeNodes, moveNode, moveWall, nodePos } from '../../model/ops';
+import { moveOpening } from '../../model/openings';
 import { snap, type SnapResult } from '../../geometry/snap';
 import { wallFrame } from '../../geometry/walls';
 import { dot, sub } from '../../geometry/vec';
@@ -123,17 +122,7 @@ export function createSelectTool(ctx: ToolContext): Tool {
     },
     key(key) {
       if (key === 'Escape' && drag) { reset(); return true; }
-      if (key !== 'Delete' && key !== 'Backspace') return false;
-      if (!sel || sel.kind === 'node') return false;
-      const level = ctx.level();
-      const list = sel.kind === 'wall' ? level.walls : sel.kind === 'opening' ? level.openings : level.zones;
-      if (!list.some(x => x.id === sel!.id)) return false;
-      const next = sel.kind === 'wall' ? deleteWall(level, sel.id)
-        : sel.kind === 'opening' ? deleteOpening(level, sel.id)
-          : deleteZone(level, sel.id);
-      ctx.commit(next);
-      setSel(null);
-      return true;
+      return false;
     },
     preview(): Preview {
       if (!drag || !working) return {};

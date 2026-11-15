@@ -99,17 +99,13 @@ describe('device select tool', () => {
     expect(ctx.level().devices[0].placement).toMatchObject({ mode: 'free', rotation: 315 });
   });
 
-  it('Delete removes the selected device; cancel clears selection', () => {
+  it('cancel clears the selection', () => {
     const { lv } = withDevice('equipment', free(1000, 1000));
     const ctx = fakeContext(lv);
     const sels: unknown[] = [];
     ctx.select = s => { sels.push(s); };
     const t = createDeviceSelectTool(ctx);
-    expect(t.key('Delete', k)).toBe(false);
     t.down(ev(1000, 1000)); t.up(ev(1000, 1000));
-    expect(t.key('Delete', k)).toBe(true);
-    expect(ctx.level().devices).toHaveLength(0);
-    expect(ctx.commits).toHaveLength(1);
     t.cancel();
     expect(sels[sels.length - 1]).toBeNull();
   });
@@ -140,15 +136,6 @@ describe('device select tool', () => {
     t.up(ev(1500, 1000));
     expect(ctx.commits).toHaveLength(0);
     expect(ctx.level().devices[0].placement).toMatchObject({ x: 1000, y: 1000 });
-  });
-
-  it('Backspace deletes the selected device', () => {
-    const { lv } = withDevice('equipment', free(1000, 1000));
-    const ctx = fakeContext(lv);
-    const t = createDeviceSelectTool(ctx);
-    t.down(ev(1000, 1000)); t.up(ev(1000, 1000));
-    expect(t.key('Backspace', k)).toBe(true);
-    expect(ctx.level().devices).toHaveLength(0);
   });
 
   it('a 1 mm jitter on a wall switch commits nothing', () => {

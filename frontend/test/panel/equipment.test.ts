@@ -84,6 +84,35 @@ describe('Equipment tab', () => {
     expect(el.history!.current.devices).toHaveLength(1);
   });
 
+  it('Delete and Backspace both delete the selected device; Backspace in a text field does not', async () => {
+    for (const k of ['Delete', 'Backspace']) {
+      const el = await mount();
+      await tab(el, 'equipment');
+      await tool(el, 'motion_sensor');
+      click(el, 1000, 1000);
+      await el.updateComplete;
+      await tool(el, 'device-select');
+      click(el, 1000, 1000);
+      await el.updateComplete;
+      expect(el.selection?.kind).toBe('device');
+      key(el, 'keydown', k);
+      await el.updateComplete;
+      expect(el.history!.current.devices).toHaveLength(0);
+    }
+    const el = await mount();
+    await tab(el, 'equipment');
+    await tool(el, 'motion_sensor');
+    click(el, 1000, 1000);
+    await el.updateComplete;
+    await tool(el, 'device-select');
+    click(el, 1000, 1000);
+    await el.updateComplete;
+    const field = el.shadowRoot!.querySelector('input')!;
+    field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, composed: true }));
+    await el.updateComplete;
+    expect(el.history!.current.devices).toHaveLength(1);
+  });
+
   it('unchecking Cones & zones removes the cone elements', async () => {
     const el = await mount();
     await tab(el, 'equipment');
