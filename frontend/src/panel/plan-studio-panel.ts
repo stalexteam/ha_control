@@ -1,11 +1,14 @@
 import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from 'lit';
 import { property, state } from 'lit/decorators.js';
-import type { Level, Plan, Pt, WallType } from '../model/types';
+import type { Device, Id, Level, Plan, Pt, WallType } from '../model/types';
 import { WALL_PRESETS } from '../model/types';
 import { deleteWall } from '../model/ops';
 import { deleteOpening } from '../model/openings';
 import { deleteDevice } from '../model/devices';
 import { deleteZone } from '../model/zones';
+import { bindingStatus, type BindStatus } from '../model/bindings';
+import { metaFromStates, presence, type HaMeta } from '../binding/ha-meta';
+import { devicePose } from '../geometry/devices';
 import { History } from '../editor/history';
 import { SaveController } from '../editor/save';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
@@ -13,18 +16,20 @@ import type { HassLike, PlanSummary } from '../api';
 import { renderLevel } from '../render/plan-svg';
 import { paletteFor } from '../render/theme';
 import { t } from '../i18n';
-import { renderToolRail, renderTopBar } from './toolbar';
+import { renderTopBar } from './toolbar';
+import { renderSteps } from './steps';
+import { nextUnbound, type ListFilter } from './binding-list';
 import { createTool, selectionExists, toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
 import type { BoxMeasure } from './props-panel';
 import { initialNext } from './next-object';
 import { PlanSession } from './plan-session';
 import { createToolContext } from './tool-context';
-import { renderSide } from './side-panel';
+import { renderRail, renderSide } from './side-panel';
 import { initialNextProps } from './device-props';
 import { renderStatusBar } from './statusbar';
 import { renderTracker, trackerLive } from './tracker';
 import { panelStyles, paletteVars } from './styles';
-import { fitView, renderGrid, screenToMm, type View } from './viewport';
+import { fitView, renderGrid, revealPt, screenToMm, type View } from './viewport';
 import { EditorInput } from './input';
 import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
@@ -44,8 +49,11 @@ export class PlanStudioPanel extends LitElement {
   @state() thickness = WALL_PRESETS.bearing;
   @state() boxMeasure: BoxMeasure = 'inner';
   @state() grid = true;
-  /** Plan / Equipment tab (per session, not saved); cones: device cones and zones are drawn. */
+  /** Wizard step: Plan / Equipment / Binding (per session, not saved); cones: device cones and zones are drawn. */
   @state() mode: EditorMode = 'plan';
+  /** Binding step device list: Not bound / Bound / All and the text filter. */
+  @state() bindFilter: ListFilter = 'unbound';
+  @state() bindQuery = '';
   @state() private cones = true;
   /** "Next device" props per kind; they drive ctx.deviceDefaults. */
   @state() nextProps = initialNextProps();
@@ -76,6 +84,17 @@ export class PlanStudioPanel extends LitElement {
   private resizeObs: ResizeObserver | null = null;
   readonly ctx: ToolContext;
   readonly session = new PlanSession(this);
+  private metaMemo: { states: HassLike['states']; meta: HaMeta } | null = null;
+
+  /** HA metadata from hass.states, rebuilt only when HA hands over a new states object. */
+  private haMeta(): HaMeta {
+    const states = this.hass?.states;
+    if (!this.metaMemo || this.metaMemo.states !== states) this.metaMemo = { states, meta: metaFromStates(states) };
+    return this.metaMemo.meta;
+  }
+
+  /** Binding status of a device. Without the registries no entity is Missing (its presence is unknown). */
+  readonly bindStatus = (d: Device): BindStatus => bindingStatus(d, eid => presence(this.haMeta(), eid));
 
   doSave(): Promise<void> { return this.session.doSave(); }
 
@@ -156,11 +175,11 @@ export class PlanStudioPanel extends LitElement {
     this.requestUpdate();
   }
 
-  /** Delete/Backspace: remove the selected element (commit() drops the tool state and the selection). */
+  /** Delete/Backspace: remove the selected element (commit() drops the tool state and the selection). Not in the Binding step. */
   deleteSelection(): boolean {
     const s = this.selection;
     const level = this.history?.current;
-    if (!s || !level || s.kind === 'node' || !selectionExists(level, s)) return false;
+    if (this.mode === 'binding' || !s || !level || s.kind === 'node' || !selectionExists(level, s)) return false;
     this.commit(s.kind === 'wall' ? deleteWall(level, s.id) : s.kind === 'opening' ? deleteOpening(level, s.id)
       : s.kind === 'device' ? deleteDevice(level, s.id) : deleteZone(level, s.id));
     return true;
@@ -190,11 +209,28 @@ export class PlanStudioPanel extends LitElement {
     this.activeTool = createTool(id, this.ctx);
   }
 
-  /** Plan / Equipment tab: cancels the tool, clears the selection, activates the tab's first tool. */
+  /** Wizard step switch: cancels the tool, clears the selection, activates the step's first tool. */
   setMode(mode: EditorMode): void {
     if (mode === this.mode) return;
     this.mode = mode;
     this.pickTool(toolIdsFor(mode)[0]);
+  }
+
+  /** Selects a device (binding list, Next unbound device) and pans the plan to it when it is off-screen. */
+  pickDevice(id: Id): void {
+    const level = this.history?.current;
+    const d = level?.devices.find(x => x.id === id);
+    if (!level || !d) return;
+    this.selection = { kind: 'device', id };
+    this.notice = null;
+    const pose = devicePose(level, d);
+    if (pose) this.view = revealPt(this.view, pose.pt, this.size.w, this.size.h);
+  }
+
+  nextUnboundDevice(): void {
+    const level = this.history?.current;
+    const id = level ? nextUnbound(level, this.selection?.kind === 'device' ? this.selection.id : null, this.bindStatus) : null;
+    if (id) this.pickDevice(id);
   }
 
   // ---- view / pointer ----
@@ -253,18 +289,23 @@ export class PlanStudioPanel extends LitElement {
     const w = Math.max(1, this.size.w) / scale, h = Math.max(1, this.size.h) / scale;
     const s = this.save;
     return html`
-      <div class="ed" style=${paletteVars(pal)} @click=${this.refocus} @change=${this.refocusAfterChange}>
+      <div class="ed${this.mode === 'binding' ? ' binding' : ''}" style=${paletteVars(pal)}
+        @click=${this.refocus} @change=${this.refocusAfterChange}>
         ${renderTopBar({
-          mode: this.mode, onMode: m => this.setMode(m), planName: this.plan.name, planId: this.plan.id, plans: this.session.planOptions(),
+          steps: renderSteps({
+            mode: this.mode, level, status: this.bindStatus, planName: this.plan.name,
+            onRename: name => { this.plan = { ...this.plan!, name }; s.markDirty(); },
+            onMode: m => this.setMode(m), onNextUnbound: () => this.nextUnboundDevice(),
+          }),
+          planId: this.plan.id, plans: this.session.planOptions(),
           canUndo: this.history.canUndo, canRedo: this.history.canRedo,
           saveState: s.state, dirty: s.dirty, errorMessage: s.errorMessage,
           lead: this.narrow ? html`<ha-menu-button .hass=${this.hass} .narrow=${this.narrow}></ha-menu-button>` : nothing,
-          onRename: name => { this.plan = { ...this.plan!, name }; s.markDirty(); },
           onPickPlan: id => this.session.pickPlan(id),
           onNewPlan: () => this.session.requestNewPlan(), onDeletePlan: () => this.session.requestDelete(), busy: this.deleting,
           onUndo: () => this.undo(), onRedo: () => this.redo(), onSave: () => this.session.doSave(),
         })}
-        ${renderToolRail(this.mode, this.toolId, id => this.pickTool(id))}
+        ${renderRail(this, level)}
         ${renderSide(this, level)}
         <div class="canvas">
           <svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox=${`${x} ${y} ${w} ${h}`}
@@ -273,7 +314,10 @@ export class PlanStudioPanel extends LitElement {
             @pointerup=${this.input.pointerUp} @pointercancel=${this.input.pointerAbort}
             @lostpointercapture=${this.input.pointerAbort} @wheel=${this.input.wheel} @contextmenu=${(e: Event) => e.preventDefault()}>
             ${this.grid ? renderGrid(this.view, w, h, pal) : nothing}
-            ${renderLevel(level, { palette: pal, selection: this.selection, preview, scale, mode: this.mode, showCones: this.cones })}
+            ${renderLevel(level, {
+              palette: pal, selection: this.selection, preview, scale, mode: this.mode, showCones: this.cones,
+              bindingStatus: this.bindStatus,
+            })}
             ${preview.tracker ? renderTracker(preview.tracker, {
               palette: pal, scale, mode: this.toolId === 'box' ? 'box' : 'wall',
               live: trackerLive(preview, this.toolId === 'box' ? 'box' : 'wall', this.boxMeasure, this.thickness),

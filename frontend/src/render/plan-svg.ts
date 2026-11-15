@@ -1,5 +1,6 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
-import type { Id, Level, Opening, Pt, Wall, Zone } from '../model/types';
+import type { Device, Id, Level, Opening, Pt, Wall, Zone } from '../model/types';
+import type { BindStatus } from '../model/bindings';
 import type { WallProps } from '../model/ops';
 import type { Preview, Selection } from '../editor/tools/types';
 import { segmentFrame, wallFrame, wallOutlines, wallPieces, wallsUnion, type WallFrame } from '../geometry/walls';
@@ -16,8 +17,10 @@ export interface RenderOpts {
   preview: Preview;
   /** Screen pixels per millimetre; used to keep strokes, text and handles a constant on-screen size. */
   scale: number;
-  /** plan: devices dimmed; equipment: walls, openings and rooms dimmed. Default plan. */
-  mode?: 'plan' | 'equipment';
+  /** plan: devices dimmed; equipment and binding: walls, openings and rooms dimmed. Default plan. */
+  mode?: 'plan' | 'equipment' | 'binding';
+  /** Binding status per device; drawn as rings in the binding mode only. */
+  bindingStatus?: (d: Device) => BindStatus;
   /** Default true. */
   showCones?: boolean;
 }
@@ -315,8 +318,8 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
   const pieces = lightWalls.length ? cached(piecesCache, lv, wallPieces) : null;
   const hs = 8 / o.scale;
   const sel = o.selection;
-  const equip = o.mode === 'equipment';
-  const dimOp = equip ? String(p.dimOpacity) : nothing;
+  const plan = (o.mode ?? 'plan') === 'plan';
+  const dimOp = plan ? nothing : String(p.dimOpacity);
   return svg`
     <defs>
       <pattern id="hatch" patternUnits="userSpaceOnUse" width=${hs} height=${hs} patternTransform="rotate(45)">
@@ -331,7 +334,8 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
     <g class="openings" opacity=${dimOp}>${lv.openings.map(op => renderOpening(lv, op, o))}</g>
     <g class="wall-breaks" opacity=${dimOp}>${renderWallBreaks(lv, o)}</g>
     <g class="devices-layer">${renderDevices(lv, {
-      palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: !equip, preview: o.preview.device,
+      palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: plan, preview: o.preview.device,
+      bindingStatus: o.mode === 'binding' ? o.bindingStatus : undefined,
     })}</g>
     <g class="selection">${renderSelection(lv, o)}</g>
     <g class="preview">${renderPreview(lv, o)}</g>`;

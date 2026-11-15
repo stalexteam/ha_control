@@ -5,10 +5,8 @@ import { t } from '../i18n';
 import { toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
 
 export interface TopBarOpts {
-  /** Plan or Equipment tab; the wall type settings show only in the Plan tab. */
-  mode: EditorMode;
-  onMode(mode: EditorMode): void;
-  planName: string;
+  /** The wizard title block (renderSteps) under the action bar. */
+  steps: TemplateResult;
   planId: string;
   /** Plans the selector offers (stored plans plus the open one); hidden when there is only one. */
   plans: { id: string; name: string }[];
@@ -19,7 +17,6 @@ export interface TopBarOpts {
   errorMessage: string | null;
   /** Leading content, e.g. HA's menu button in narrow mode. */
   lead?: TemplateResult | typeof nothing;
-  onRename(name: string): void;
   onPickPlan(id: string): void;
   onUndo(): void;
   onRedo(): void;
@@ -41,9 +38,10 @@ function saveLabel(o: TopBarOpts): string {
   }
 }
 
+/** Header: an action bar (plans, undo / redo, save) like an HA page toolbar, then the wizard steps. */
 export function renderTopBar(o: TopBarOpts): TemplateResult {
   return html`
-    <div class="top">
+    <div class="top"><div class="bar">
       ${o.lead ?? nothing}
       ${o.plans.length > 1 ? html`
         <select class="plan-pick" aria-label=${t('plan.pick')} title=${t('plan.pick')}
@@ -60,13 +58,6 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
         ?disabled=${o.busy || o.saveState === 'saving'} @click=${o.onNewPlan}>+</button>
       <button class="btn" data-action="delete-plan" title=${t('plan.delete')} aria-label=${t('plan.delete')}
         ?disabled=${o.busy || o.saveState === 'saving'} @click=${o.onDeletePlan}>&#128465;</button>
-      <input class="plan-name" .value=${fieldValue(o.planName)} aria-label=${t('plan.name')} title=${t('plan.name')}
-        @change=${(e: Event) => o.onRename((e.target as HTMLInputElement).value)} />
-      <span class="seg mode-tabs">
-        ${(['plan', 'equipment'] as EditorMode[]).map(m => html`
-          <button class="tab ${o.mode === m ? 'on' : ''}" data-mode=${m} @click=${() => o.onMode(m)}>
-            ${t(`mode.${m}`)}</button>`)}
-      </span>
       <span class="sp"></span>
       <button class="btn" title=${t('action.undo')} aria-label=${t('action.undo')} ?disabled=${!o.canUndo}
         @click=${o.onUndo}>↶</button>
@@ -76,7 +67,7 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
         ${saveLabel(o)}${o.saveState === 'error' && o.errorMessage ? html`: ${o.errorMessage}` : nothing}</span>
       <button class="btn primary" data-action="save" ?disabled=${o.saveState === 'saving'} @click=${o.onSave}>
         ${t('action.save')}</button>
-    </div>`;
+    </div>${o.steps}</div>`;
 }
 
 export function renderToolRail(mode: EditorMode, active: ToolId, onPick: (id: ToolId) => void): TemplateResult {

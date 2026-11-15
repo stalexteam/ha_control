@@ -43,6 +43,13 @@ export function panBy(v: View, dxPx: number, dyPx: number): View {
   return { ...v, x: v.x - dxPx / v.scale, y: v.y - dyPx / v.scale };
 }
 
+/** `v` itself when plan point p is inside the w x h px canvas; otherwise the same zoom centred on p. */
+export function revealPt(v: View, p: Pt, wPx: number, hPx: number): View {
+  const w = wPx / v.scale, h = hPx / v.scale;
+  if (p.x >= v.x && p.x <= v.x + w && p.y >= v.y && p.y <= v.y + h) return v;
+  return { ...v, x: p.x - w / 2, y: p.y - h / 2 };
+}
+
 /** Background grid over the visible area (w x h in mm): 100 mm cells when large enough, 1 m lines always. */
 export function renderGrid(v: View, w: number, h: number, pal: PlanPalette): SVGTemplateResult | typeof nothing {
   const minor = 100 * v.scale >= 6 ? 100 : 1000;

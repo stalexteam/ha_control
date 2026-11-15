@@ -1,5 +1,6 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
 import type { Device, Level, Pt } from '../model/types';
+import type { BindStatus } from '../model/bindings';
 import type { Preview, Selection } from '../editor/tools/types';
 import { clippedCone, devicePose, directionHandle, type DevicePose } from '../geometry/devices';
 import { roomHoles } from '../geometry/rooms';
@@ -17,11 +18,20 @@ export interface DeviceRenderOpts {
   showCones: boolean;
   dim: boolean;
   preview?: Preview['device'];
+  /**
+   * Binding step overlay: a status ring around every device that is not fully bound. When set, the direction
+   * handle is not drawn (devices are not edited in that step).
+   */
+  bindingStatus?: (d: Device) => BindStatus;
 }
 
 const NS = 'non-scaling-stroke';
 const GLYPH: Record<string, string> = { boiler: 'B', pc: 'PC', automation: 'A', other: '•' };
 const PREVIEW_ID = '__preview__';
+/** Ring stroke per binding status; a bound device has no ring. Unbound follows the HA theme's secondary text. */
+const BIND_STROKE: Record<Exclude<BindStatus, 'bound'>, string> = {
+  unbound: 'var(--secondary-text-color, #94a3b8)', partial: '#f59e0b', missing: '#f43f5e',
+};
 
 // Room holes are cached per level object (levels are immutable snapshots): one computation per frame.
 const holesCache = new WeakMap<Level, Pt[][]>();
@@ -100,6 +110,12 @@ function equipmentBlock(d: Device, o: DeviceRenderOpts, color: string, deg: numb
     <g class="equipment-data"></g>`;
 }
 
+function bindRing(st: BindStatus, scale: number): SVGTemplateResult | typeof nothing {
+  if (st === 'bound') return nothing;
+  return svg`<circle class=${`bind-ring bind-${st}`} r=${(ICON_PX * 1.7) / scale} fill="none" style=${`stroke:${BIND_STROKE[st]}`}
+    stroke-width="2" stroke-dasharray=${st === 'unbound' ? '4 3' : nothing} vector-effect=${NS}></circle>`;
+}
+
 function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview: boolean): SVGTemplateResult {
   const p = o.palette;
   const color = d.invalid ? p.invalid : p.device;
@@ -118,6 +134,7 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
       ${d.props.kind === 'equipment'
         ? equipmentBlock(d, o, color, deg)
         : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, p.deviceFill)}</g>`}
+      ${o.bindingStatus && !preview ? bindRing(o.bindingStatus(d), o.scale) : nothing}
     </g>`;
 }
 
@@ -138,7 +155,7 @@ function renderCone(level: Level, d: Device, o: DeviceRenderOpts, preview: boole
 
 /** Direction handle of the selected wall light / sensor: a segment and a round grab knob. */
 function renderHandle(level: Level, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
-  if (o.selection?.kind !== 'device') return nothing;
+  if (o.selection?.kind !== 'device' || o.bindingStatus) return nothing;
   const id = o.selection.id;
   const d = level.devices.find(x => x.id === id);
   const h = d ? directionHandle(level, d, o.scale) : null;

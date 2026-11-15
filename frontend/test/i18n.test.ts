@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { I18N_KEYS } from '../src/i18n';
 import { DEVICE_PLACEMENTS, WALL_PRESETS, OPENING_DEFAULT_WIDTH } from '../src/model/types';
 import { LIGHT_SHAPES, EQUIPMENT_SHAPES, EQUIPMENT_SYMBOLS } from '../src/panel/device-props';
+import { STEPS } from '../src/panel/steps';
+import { LIST_FILTERS } from '../src/panel/binding-list';
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap(n => {
@@ -73,6 +75,9 @@ describe('i18n', () => {
       side: ['left', 'right'],
       hinge: ['start', 'end'],
       baseline: ['center', 'left', 'right'],
+      mode: STEPS,
+      'binding.filter': LIST_FILTERS,
+      bindstatus: ['bound', 'partial', 'unbound', 'missing'],
     };
     const missing = Object.entries(sets).flatMap(([pre, members]) => members.map(m => `${pre}.${m}`)).filter(k => !keys.has(k));
     expect(missing).toEqual([]);
