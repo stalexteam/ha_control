@@ -15,6 +15,7 @@ describe('createToolContext', () => {
     expect(c.wallProps()).toEqual({ type: 'partition', thickness: 250, baseline: 'center' });
     expect(c.grid()).toBe(100);
     expect(c.tolMm()).toBeCloseTo(100);
+    expect(c.scale()).toBe(0.1);
   });
 
   it('opening defaults come from next-object state', () => {

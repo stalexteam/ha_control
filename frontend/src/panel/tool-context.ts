@@ -27,6 +27,7 @@ export function createToolContext(h: ToolHost): ToolContext {
   return {
     level: () => h.history?.current ?? EMPTY_LEVEL,
     commit: next => h.commit(next),
+    scale: () => h.view.scale,
     tolMm: () => 10 / h.view.scale,
     grid: () => (h.grid ? 100 : null),
     wallProps: () => ({ type: h.wallType, thickness: h.thickness, baseline: 'center' }),

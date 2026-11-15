@@ -1,21 +1,11 @@
 import type { TemplateResult } from 'lit';
 import type { Level } from '../model/types';
-import type { ToolId } from './tool-factory';
-import type { EditorMode } from './tool-factory';
-import type { WallType } from '../model/types';
 import { renderEquipmentProps } from './device-props';
 import { renderProps } from './props-panel';
-import type { ToolHost } from './tool-context';
-
-/** Panel state the properties side panel reads and writes (the panel itself satisfies this). */
-export interface SideHost extends ToolHost {
-  mode: EditorMode;
-  toolId: ToolId;
-  setWallType(type: WallType): void;
-}
+import type { PlanStudioPanel } from './plan-studio-panel';
 
 /** The properties panel of the active tab (Plan or Equipment). */
-export function renderSide(h: SideHost, level: Level): TemplateResult {
+export function renderSide(h: PlanStudioPanel, level: Level): TemplateResult {
   const common = {
     level, selection: h.selection, notice: h.notice,
     commit: (next: Level) => h.commit(next),

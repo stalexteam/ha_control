@@ -151,7 +151,8 @@ describe('device select tool', () => {
   it('a wall device grabbed 50 mm off-centre slides by exactly the pointer delta', () => {
     const { lv, id } = withDevice('wall_light', onTop(1500));
     const ctx = fakeContext(lv);
-    ctx.tolMm = () => 100; // zoomed out: the icon is 120 mm wide, so a grab 50 mm off-centre still hits
+    ctx.tolMm = () => 100;
+    ctx.scale = () => 0.1; // zoomed out: the icon is 120 mm wide, so a grab 50 mm off-centre still hits
     const t = createDeviceSelectTool(ctx);
     t.down(ev(1550, 50)); t.move(ev(1700, 50)); t.up(ev(1850, 50));
     expect(ctx.level().devices.find(d => d.id === id)!.placement).toMatchObject({ mode: 'wall', side: 'right', offset: 1800 });

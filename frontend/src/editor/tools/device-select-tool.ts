@@ -6,7 +6,7 @@ import { wallFrame, wallLocal } from '../../geometry/walls';
 import { add, dist, dot, sub } from '../../geometry/vec';
 import { createAimDrag } from './aim-drag';
 import { deviceCandidate } from './device-tool';
-import type { Preview, Selection, Tool, ToolContext, ToolEvent } from './types';
+import { DRAG_PX, type Preview, type Selection, type Tool, type ToolContext, type ToolEvent } from './types';
 
 const placementOf = (l: Level, id: Id) => JSON.stringify(l.devices.find(d => d.id === id)?.placement);
 const placementChanged = (a: Level, b: Level, id: Id | undefined) => id === undefined || placementOf(a, id) !== placementOf(b, id);
@@ -26,8 +26,8 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
 
   function update(e: ToolEvent): void {
     if (!drag || !original) return;
-    // Pointer jitter (under 3 screen px; tolMm is 10 px) is a click, not a drag.
-    if (!moved && dist(e.pt, downPt) <= ctx.tolMm() * 0.3) return;
+    // Pointer jitter is a click, not a drag.
+    if (!moved && dist(e.pt, downPt) <= DRAG_PX / ctx.scale()) return;
     moved = true;
     if (e.pt.x === downPt.x && e.pt.y === downPt.y) { working = original; return; } // back at the grab point: nothing moved
     const d = original.devices.find(x => x.id === drag!.id);

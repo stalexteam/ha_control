@@ -9,12 +9,18 @@ export interface ToolEvent {
   alt: boolean;
 }
 
+/** Pointer travel (screen px) below which a press-move-release is a click, not a drag. */
+export const DRAG_PX = 3;
+
 /** Services the editor provides to a tool. */
 export interface ToolContext {
   /** Current level. */
   level(): Level;
   /** Pushes `next` to History and marks the document dirty. */
   commit(next: Level): void;
+  /** Screen pixels per mm. */
+  scale(): number;
+  /** Pick tolerance in mm (10 screen px). */
   tolMm(): number;
   grid(): number | null;
   wallProps(): WallProps;

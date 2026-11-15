@@ -1,40 +1,16 @@
 import type { Id, Level, Plan } from '../model/types';
 import { emptyPlan, normalizeLevel } from '../model/types';
 import { History } from '../editor/history';
-import type { SaveController } from '../editor/save';
-import type { DraftStore, Draft } from '../editor/draft';
-import type { Selection, Tool } from '../editor/tools/types';
-import { deletePlan, errorText, getPlan, listPlans, type HassLike, type PlanSummary } from '../api';
+import type { Draft } from '../editor/draft';
+import { deletePlan, errorText, getPlan, listPlans, type PlanSummary } from '../api';
 import { t } from '../i18n';
 import type { Dialog } from './dialogs';
-import { createTool, toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
-import type { ToolContext } from '../editor/tools/types';
-
-/** Panel state the plan session reads and writes (the panel itself satisfies this). */
-export interface SessionHost {
-  hass?: HassLike;
-  plan: Plan | null;
-  plans: PlanSummary[];
-  loadError: string | null;
-  loading: boolean;
-  needFit: boolean;
-  deleting: boolean;
-  history: History<Level> | null;
-  readonly save: SaveController;
-  readonly drafts: DraftStore;
-  activeTool: Tool;
-  readonly ctx: ToolContext;
-  toolId: ToolId;
-  mode: EditorMode;
-  selection: Selection | null;
-  notice: string | null;
-  pendingDraft: Draft | null;
-  dialog: Dialog | null;
-}
+import { createTool, toolIdsFor } from './tool-factory';
+import type { PlanStudioPanel } from './plan-studio-panel';
 
 /** Plan lifecycle: load / open / switch / new / delete, local drafts and saving. */
 export class PlanSession {
-  constructor(private readonly h: SessionHost) {}
+  constructor(private readonly h: PlanStudioPanel) {}
 
   async load(): Promise<void> {
     if (!this.h.hass) return;

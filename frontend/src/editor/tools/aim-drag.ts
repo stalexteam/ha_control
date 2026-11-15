@@ -2,7 +2,7 @@ import type { Id, Level, Pt } from '../../model/types';
 import { moveDevice } from '../../model/devices';
 import { angleFromHandle, angleOf, devicePose, directionHandle, wrap180 } from '../../geometry/devices';
 import { dist, sub } from '../../geometry/vec';
-import type { ToolContext, ToolEvent } from './types';
+import { DRAG_PX, type ToolContext, type ToolEvent } from './types';
 
 /** Drag of the direction handle (knob) of one device. One commit on `up`, only when the placement changed. */
 export interface AimDrag {
@@ -27,15 +27,15 @@ export function createAimDrag(ctx: ToolContext): AimDrag {
   const offsetAt = (level: Level, id: Id, p: Pt): number => {
     const d = level.devices.find(x => x.id === id);
     const pose = d ? devicePose(level, d) : null;
-    const h = d ? directionHandle(level, d, 10 / ctx.tolMm()) : null;
+    const h = d ? directionHandle(level, d, ctx.scale()) : null;
     if (!pose || !h) return 0;
     return wrap180(angleOf(sub(p, pose.pt)) - angleOf(sub(h.to, pose.pt)));
   };
 
   function update(e: ToolEvent): void {
     if (!st) return;
-    // Pointer jitter (under 3 screen px; tolMm is 10 px) is a click, not a drag.
-    if (!st.moved && dist(e.pt, st.downPt) <= ctx.tolMm() * 0.3) return;
+    // Pointer jitter is a click, not a drag.
+    if (!st.moved && dist(e.pt, st.downPt) <= DRAG_PX / ctx.scale()) return;
     st.moved = true;
     const d = st.original.devices.find(x => x.id === st!.id);
     const pose = d ? devicePose(st.original, d) : null;
@@ -54,7 +54,7 @@ export function createAimDrag(ctx: ToolContext): AimDrag {
       if (!id) return false;
       const level = ctx.level();
       const d = level.devices.find(x => x.id === id);
-      const h = d ? directionHandle(level, d, 10 / ctx.tolMm()) : null;
+      const h = d ? directionHandle(level, d, ctx.scale()) : null;
       if (!d || !h || dist(e.pt, h.to) > ctx.tolMm()) return false;
       st = { id, original: level, work: level, downPt: e.pt, offset: offsetAt(level, id, e.pt), moved: false };
       return true;

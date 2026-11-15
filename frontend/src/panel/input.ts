@@ -1,27 +1,10 @@
-import type { Pt } from '../model/types';
-import type { Tool, ToolEvent } from '../editor/tools/types';
-import { panBy, zoomAt, type View } from './viewport';
+import type { ToolEvent } from '../editor/tools/types';
+import type { PlanStudioPanel } from './plan-studio-panel';
+import { panBy, zoomAt } from './viewport';
 
-/** What the pointer / keyboard handlers need from the panel. */
-export interface InputHost {
-  tool(): Tool;
-  view: View;
-  ready(): boolean;
-  /** A modal dialog is open: nothing may reach the tool or History. */
-  modal(): boolean;
-  /** Escape on a modal: close it without taking a decision. */
-  closeModal(): void;
-  toMm(e: { clientX: number; clientY: number }): Pt;
-  focus(): void;
-  update(): void;
-  undo(): void;
-  redo(): void;
-  save(): void;
-  /** Panel fallback for an unconsumed Delete/Backspace; returns true when something was deleted. */
-  deleteSelection(): boolean;
-  /** Panel fallback for an unconsumed Escape: cancel the tool and clear the selection. */
-  clearSelection(): void;
-}
+/** The panel members the pointer / keyboard handlers use. */
+export type InputHost = Pick<PlanStudioPanel,
+  'activeTool' | 'view' | 'history' | 'selection' | 'dialog' | 'toMm' | 'focus' | 'requestUpdate' | 'undo' | 'redo' | 'doSave' | 'deleteSelection'>;
 
 const MODIFIER_KEYS = ['Shift', 'Control', 'Alt', 'Meta'];
 
@@ -58,8 +41,8 @@ export class EditorInput {
     if (e.button !== 0) return;
     el.setPointerCapture?.(e.pointerId);
     this.pointerActive = true;
-    this.h.tool().down(this.toolEvent(e));
-    this.h.update();
+    this.h.activeTool.down(this.toolEvent(e));
+    this.h.requestUpdate();
   };
 
   readonly pointerMove = (e: PointerEvent) => {
@@ -68,16 +51,16 @@ export class EditorInput {
       this.panFrom = { x: e.clientX, y: e.clientY };
       return;
     }
-    this.h.tool().move(this.toolEvent(e));
-    this.h.update();
+    this.h.activeTool.move(this.toolEvent(e));
+    this.h.requestUpdate();
   };
 
   readonly pointerUp = (e: PointerEvent) => {
     if (this.panFrom) { this.panFrom = null; return; }
     if (e.button !== 0 || !this.pointerActive) return;
     this.pointerActive = false;
-    this.h.tool().up(this.toolEvent(e));
-    this.h.update();
+    this.h.activeTool.up(this.toolEvent(e));
+    this.h.requestUpdate();
   };
 
   /** pointercancel / lostpointercapture: abort a pan or an in-progress drag (nothing is committed). */
@@ -85,8 +68,8 @@ export class EditorInput {
     if (this.panFrom) { this.panFrom = null; return; }
     if (!this.pointerActive) return; // e.g. the lostpointercapture that follows a normal pointerup
     this.pointerActive = false;
-    if (this.h.tool().preview().level) this.h.tool().cancel();
-    this.h.update();
+    if (this.h.activeTool.preview().level) this.h.activeTool.cancel();
+    this.h.requestUpdate();
   };
 
   readonly wheel = (e: WheelEvent) => {
@@ -95,11 +78,11 @@ export class EditorInput {
   };
 
   readonly keyDown = (e: KeyboardEvent) => {
-    if (this.h.modal()) {
-      if (e.key === 'Escape') { e.preventDefault(); this.h.closeModal(); }
+    if (this.h.dialog !== null) {
+      if (e.key === 'Escape') { e.preventDefault(); this.h.dialog = null; } // closes without deciding: a restore prompt leaves its banner
       return;
     }
-    if (inField(e) || !this.h.ready()) return;
+    if (inField(e) || !this.h.history) return;
     const ctrl = e.ctrlKey || e.metaKey;
     // Shortcuts use the physical key (e.code) so they work with any keyboard layout
     // (with a non-Latin layout e.key is a different letter).
@@ -109,18 +92,18 @@ export class EditorInput {
       if (k === 'z' && !e.shiftKey) this.h.undo(); else this.h.redo();
       return;
     }
-    if (ctrl && k === 's') { e.preventDefault(); this.h.save(); return; }
+    if (ctrl && k === 's') { e.preventDefault(); void this.h.doSave(); return; }
     if (e.key === ' ') {
       // Deferred to keyup so a Space held for panning never lands in the tool's length buffer.
       e.preventDefault();
       if (!e.repeat && !this.spaceDown) { this.spaceDown = true; this.spacePending = true; }
       return;
     }
-    let consumed = this.h.tool().key(e.key, { shift: e.shiftKey });
+    let consumed = this.h.activeTool.key(e.key, { shift: e.shiftKey });
     if (!consumed && (e.key === 'Delete' || e.key === 'Backspace')) consumed = this.h.deleteSelection();
-    if (!consumed && e.key === 'Escape') { this.h.clearSelection(); consumed = true; }
+    if (!consumed && e.key === 'Escape') { this.h.activeTool.cancel(); this.h.selection = null; consumed = true; }
     if (consumed) e.preventDefault();
-    this.h.update();
+    this.h.requestUpdate();
   };
 
   /**
@@ -128,18 +111,18 @@ export class EditorInput {
    * not pan; other keys act on keydown, so digits are never entered twice.
    */
   readonly keyUp = (e: KeyboardEvent) => {
-    const blocked = this.h.modal() || inField(e);
+    const blocked = this.h.dialog !== null || inField(e);
     const mods = { shift: e.shiftKey };
     if (e.key === ' ') {
       this.spaceDown = false;
       const tap = this.spacePending;
       this.spacePending = false;
-      if (tap && !blocked) { this.h.tool().key(' ', mods); this.h.update(); }
+      if (tap && !blocked) { this.h.activeTool.key(' ', mods); this.h.requestUpdate(); }
       return;
     }
     if (blocked || !MODIFIER_KEYS.includes(e.key)) return;
-    this.h.tool().key(e.key, mods);
-    this.h.update();
+    this.h.activeTool.key(e.key, mods);
+    this.h.requestUpdate();
   };
 
   readonly blur = () => { this.spaceDown = false; this.spacePending = false; };

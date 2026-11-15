@@ -26,7 +26,6 @@ import { renderTracker, trackerLive } from './tracker';
 import { panelStyles, paletteVars } from './styles';
 import { fitView, renderGrid, screenToMm, type View } from './viewport';
 import { EditorInput } from './input';
-import { createInputHost } from './input-host';
 import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 
@@ -93,8 +92,7 @@ export class PlanStudioPanel extends LitElement {
     });
     this.ctx = createToolContext(this);
     this.activeTool = createTool('select', this.ctx);
-    const host = createInputHost(this);
-    this.input = new EditorInput(host);
+    this.input = new EditorInput(this);
   }
 
   // ---- lifecycle ----

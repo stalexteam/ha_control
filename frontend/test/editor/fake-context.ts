@@ -10,6 +10,7 @@ export function fakeContext(level?: Level): ToolContext & { commits: Level[] } {
     commits,
     level: () => current,
     commit: (next: Level) => { current = next; commits.push(next); },
+    scale: () => 0.5,
     tolMm: () => 20,
     grid: () => 100,
     wallProps: () => ({ type: 'partition', thickness: 100, baseline: 'center' }),
