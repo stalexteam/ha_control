@@ -128,6 +128,7 @@ export const panelStyles = css`
   .brow.sel, .zrow.sel { background: var(--ch-tint); box-shadow: inset 3px 0 0 var(--ch-primary); }
   .brow .name, .zrow .name, .member .name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .brow .kind, .zrow .kind, .member .kind { display: block; color: var(--ch-muted); font-size: 12px; }
+  .bgroup h5 { margin: 12px 12px 4px; color: var(--ch-muted); font-size: 12px; font-weight: 600; }
   .brow .cnt, .zrow .zcount { color: var(--ch-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   .zswatch { width: 12px; height: 12px; box-sizing: border-box; border-radius: 3px; }
   .zswatch.zinvalid { border: 1.5px solid var(--ch-error);

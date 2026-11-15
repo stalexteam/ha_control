@@ -1,10 +1,11 @@
-import { html, type TemplateResult } from 'lit';
+import { html, nothing, type TemplateResult } from 'lit';
 import type { Device, Id, Level } from '../model/types';
 import { countNotBound, roleCount, type BindStatus } from '../model/bindings';
 import type { Selection } from '../editor/tools/types';
 import { cached } from '../render/shared';
 import { t } from '../i18n';
 import { fieldValue } from './field-value';
+import { deviceRoleLabel } from './unplaced-devices';
 
 /** Which devices the list shows; partly bound and missing count as "Not bound". */
 export type ListFilter = 'unbound' | 'bound' | 'all';
@@ -27,9 +28,12 @@ export interface BindingListOpts {
 
 const orderCache = new WeakMap<Level, Device[]>();
 
-/** Devices in list order: by name, then id. */
+const unplaced = (d: Device): boolean => d.placement.mode === 'none';
+
+/** Devices in list order: placed ones first, devices not on the plan after them; each by name, then id. */
 export function listOrder(level: Level): Device[] {
-  return cached(orderCache, level, l => [...l.devices].sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)));
+  return cached(orderCache, level, l => [...l.devices].sort((a, b) =>
+    Number(unplaced(a)) - Number(unplaced(b)) || a.name.localeCompare(b.name) || a.id.localeCompare(b.id)));
 }
 
 /** The next device after `currentId` in list order whose status is not bound, wrapping around; null when all are bound. */
@@ -44,6 +48,8 @@ export function nextUnbound(level: Level, currentId: Id | null, status: (d: Devi
 }
 
 const kindLabel = (d: Device): string => t(`device.${d.props.kind}`);
+/** The row's second line: equipment shows what it is (Dummy, Meter, Inverter...), other kinds their kind. */
+const subLabel = (d: Device): string => (d.props.kind === 'equipment' ? deviceRoleLabel(d) : kindLabel(d));
 const shown = (f: ListFilter, st: BindStatus): boolean => f === 'all' || (f === 'bound') === (st === 'bound');
 
 function emptyText(o: BindingListOpts, total: number, q: string): string {
@@ -70,8 +76,16 @@ export function renderBindingList(o: BindingListOpts): TemplateResult {
   };
   const q = o.query.trim().toLowerCase();
   const rows = items.filter(({ d, st }) => shown(o.filter, st)
-    && (!q || d.name.toLowerCase().includes(q) || kindLabel(d).toLowerCase().includes(q)));
+    && (!q || d.name.toLowerCase().includes(q) || kindLabel(d).toLowerCase().includes(q) || subLabel(d).toLowerCase().includes(q)));
   const sel = o.selection?.kind === 'device' ? o.selection.id : null;
+  const row = (d: Device, st: BindStatus): TemplateResult => {
+    const c = roleCount(d);
+    return html`<button class="brow${d.id === sel ? ' sel' : ''}" data-id=${d.id} @click=${() => o.onPick(d.id)}>
+      <span class="dot ${st}" role="img" aria-label=${t(`bindstatus.${st}`)} title=${t(`bindstatus.${st}`)}></span>
+      <span class="nm"><span class="name">${d.name}</span><small class="kind">${subLabel(d)}</small></span>
+      <span class="cnt">${c.filled}/${c.total}</span>
+    </button>`;
+  };
   return html`
     <div class="blist">
       <div class="bhead">
@@ -84,14 +98,12 @@ export function renderBindingList(o: BindingListOpts): TemplateResult {
       <input class="list-search" type="search" placeholder=${t('binding.search')} aria-label=${t('binding.search')}
         .value=${fieldValue(o.query)} @input=${(e: Event) => o.onQuery((e.target as HTMLInputElement).value)} />
       <div class="rows">
-        ${rows.length === 0 ? html`<p class="empty">${emptyText(o, items.length, q)}</p>` : rows.map(({ d, st }) => {
-          const c = roleCount(d);
-          return html`<button class="brow${d.id === sel ? ' sel' : ''}" data-id=${d.id} @click=${() => o.onPick(d.id)}>
-            <span class="dot ${st}" role="img" aria-label=${t(`bindstatus.${st}`)} title=${t(`bindstatus.${st}`)}></span>
-            <span class="nm"><span class="name">${d.name}</span><small class="kind">${kindLabel(d)}</small></span>
-            <span class="cnt">${c.filled}/${c.total}</span>
-          </button>`;
-        })}
+        ${rows.length === 0 ? html`<p class="empty">${emptyText(o, items.length, q)}</p>` : html`
+          ${rows.filter(x => !unplaced(x.d)).map(x => row(x.d, x.st))}
+          ${rows.some(x => unplaced(x.d)) ? html`<div class="bgroup" data-group="unplaced">
+            <h5>${t('devices.unplaced')}</h5>
+            ${rows.filter(x => unplaced(x.d)).map(x => row(x.d, x.st))}
+          </div>` : nothing}`}
       </div>
     </div>`;
 }

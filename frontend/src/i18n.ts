@@ -84,6 +84,7 @@ const en: Dict = {
   'binding.window': 'Window, s',
   'binding.duplicate': 'Two triggers of this device are identical; the first one (On, Off, Auto) wins.',
   'role.control': 'Control',
+  'role.control.equipment': 'Switch',
   'role.motion': 'Motion',
   'role.illuminance': 'Illuminance',
   'role.temperature': 'Temperature',

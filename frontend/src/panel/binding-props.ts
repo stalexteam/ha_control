@@ -8,6 +8,7 @@ import { presence, type HaMeta, type States } from '../binding/ha-meta';
 import '../binding/entity-combo';
 import { setDeviceProps } from '../model/devices';
 import { deviceNameRow } from './device-props';
+import { deviceTitle } from './unplaced-devices';
 import { containerFields, containerFlags, triggerFields } from './container-fields';
 import type { ContainerFeed, ContainerIntent, ContainerState } from '../live/container-feed';
 import { t } from '../i18n';
@@ -41,8 +42,12 @@ export interface BindingPropsOpts {
   feed: Pick<ContainerFeed, 'ready' | 'error' | 'stateOf'>;
 }
 
-/** The role's name; a smart button in toggle mode calls its `on` role "On / Off" (that trigger does both). */
-function roleLabel(d: Device, r: BindingRole): string {
+/**
+ * The role's name; a smart button in toggle mode calls its `on` role "On / Off" (that trigger does both), and an
+ * equipment device calls its `control` role "Switch".
+ */
+export function roleLabel(d: Device, r: BindingRole): string {
+  if (r === 'control' && d.props.kind === 'equipment') return t('role.control.equipment');
   return r === 'on' && d.props.kind === 'smart_button' && !d.props.separateOff ? t('binding.onOff') : t(`role.${r}`);
 }
 
@@ -134,7 +139,7 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
       <button class="btn" data-action="retry-registry" ?disabled=${o.registryLoading}
         @click=${() => o.onRetry()}>${t(o.registryLoading ? 'load.loading' : 'action.retry')}</button></div>` : nothing}
     ${d ? html`
-      <h4>${t(`device.${d.props.kind}`)}</h4>
+      <h4>${deviceTitle(d)}</h4>
       ${deviceNameRow(d, name => o.commit(setDeviceProps(o.level, d.id, {}, name)))}
       ${outputLine(o, d)}
       ${activeRoleSpecs(d).map(spec => html`${roleField(o, d, spec)}${containerFlags(o, d, spec.role)}`)}
