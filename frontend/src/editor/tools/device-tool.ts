@@ -1,6 +1,6 @@
 import type { DeviceKind, DevicePlacement, DeviceProps, Level, Pt } from '../../model/types';
-import { DEVICE_PLACEMENTS, deviceDefaults } from '../../model/types';
-import { addDevice } from '../../model/devices';
+import { DEVICE_PLACEMENTS } from '../../model/types';
+import { addDevice, retargetZoneAngle } from '../../model/devices';
 import { snap } from '../../geometry/snap';
 import { wallFrame, wallLocal } from '../../geometry/walls';
 import { t } from '../../i18n';
@@ -52,16 +52,12 @@ export function deviceCandidate(
   return null;
 }
 
-/** Props for a new device: panel defaults, with the wall zone angle for a wall motion sensor. */
+/**
+ * Props for a new device: panel defaults (free mode), with the wall zone angle for a wall motion sensor.
+ * Only the untouched free default becomes the wall default; a user-set angle stays.
+ */
 export function propsFor(ctx: ToolContext, kind: DeviceKind, placement: DevicePlacement): DeviceProps {
-  const p = ctx.deviceDefaults(kind);
-  if (placement.mode === 'wall' && p.kind === 'motion_sensor') {
-    const w = deviceDefaults('motion_sensor', 'wall');
-    const f = deviceDefaults('motion_sensor', 'free');
-    // Only the untouched free default becomes the wall default; a user-set angle stays.
-    if (w.kind === 'motion_sensor' && f.kind === 'motion_sensor' && p.zoneAngle === f.zoneAngle) return { ...p, zoneAngle: w.zoneAngle };
-  }
-  return p;
+  return retargetZoneAngle(ctx.deviceDefaults(kind), 'free', placement.mode);
 }
 
 /** Device placement tool: one click places one device of `kind`. */

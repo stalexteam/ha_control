@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Level } from '../../src/model/types';
 import {
-  addBox, addWallSegment, deleteWall, detachWallEnd, finalize, mergeNodes, moveNode, moveWall, setWallProps,
+  addBox, addWallSegment, boxCorners, deleteWall, detachWallEnd, finalize, mergeNodes, moveNode, moveWall, setWallProps,
   type WallProps,
 } from '../../src/model/ops';
 import { nodePos } from '../../src/geometry/walls';
@@ -14,6 +14,19 @@ const bearing400: WallProps = { type: 'bearing', thickness: 400, baseline: 'cent
 const part100: WallProps = { type: 'partition', thickness: 100, baseline: 'center' };
 const empty = (): Level => ({ id: 'l', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] });
 const pts = (l: Level) => l.nodes.map(n => ({ x: n.x, y: n.y }));
+
+describe('boxCorners', () => {
+  it('inner grows, outer shrinks by thickness/2, axis is exact; any two opposite corners give the same box', () => {
+    const c1 = { x: 3000, y: 4000 }, c2 = { x: 0, y: 0 };
+    expect(boxCorners(c1, c2, 400, 'inner')).toEqual([{ x: -200, y: -200 }, { x: 3200, y: -200 }, { x: 3200, y: 4200 }, { x: -200, y: 4200 }]);
+    expect(boxCorners(c1, c2, 400, 'outer')).toEqual([{ x: 200, y: 200 }, { x: 2800, y: 200 }, { x: 2800, y: 3800 }, { x: 200, y: 3800 }]);
+    expect(boxCorners(c2, c1, 400, 'axis')).toEqual([{ x: 0, y: 0 }, { x: 3000, y: 0 }, { x: 3000, y: 4000 }, { x: 0, y: 4000 }]);
+  });
+  it('null when the outer measure collapses the box (under 1 mm)', () => {
+    expect(boxCorners({ x: 0, y: 0 }, { x: 400, y: 3000 }, 400, 'outer')).toBeNull();
+    expect(boxCorners({ x: 0, y: 0 }, { x: 401, y: 3000 }, 400, 'outer')).not.toBeNull();
+  });
+});
 
 describe('addBox', () => {
   it('inner expands by thickness/2', () => {

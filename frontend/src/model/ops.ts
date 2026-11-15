@@ -130,14 +130,23 @@ export function addWallSegment(
   return { level: finalize(out, level), wallId: wall.id, endNodeId: b };
 }
 
-export function addBox(level: Level, c1: Pt, c2: Pt, props: WallProps, measure: 'inner' | 'axis' | 'outer'): Level {
-  const h = measure === 'inner' ? props.thickness / 2 : measure === 'outer' ? -props.thickness / 2 : 0;
+/**
+ * Axis corners of a box drawn from c1 to c2 measured at `measure` (inner faces, axes or outer faces), starting
+ * at the min-x/min-y corner. Null when the box collapses (outer measure on a box thinner than the wall).
+ */
+export function boxCorners(c1: Pt, c2: Pt, thickness: number, measure: 'inner' | 'axis' | 'outer'): Pt[] | null {
+  const h = measure === 'inner' ? thickness / 2 : measure === 'outer' ? -thickness / 2 : 0;
   const x0 = Math.min(c1.x, c2.x) - h, x1 = Math.max(c1.x, c2.x) + h;
   const y0 = Math.min(c1.y, c2.y) - h, y1 = Math.max(c1.y, c2.y) + h;
+  if (x1 - x0 < EPS || y1 - y0 < EPS) return null;
+  return [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+}
+
+export function addBox(level: Level, c1: Pt, c2: Pt, props: WallProps, measure: 'inner' | 'axis' | 'outer'): Level {
+  const corners = boxCorners(c1, c2, props.thickness, measure);
   // Outer measure on a box thinner than the wall collapses: nothing sensible to build.
-  if (x1 - x0 < EPS || y1 - y0 < EPS) return level;
+  if (!corners) return level;
   const out = clone(level);
-  const corners: Pt[] = [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
   const ids = corners.map(c => {
     const n: PlanNode = { id: newId(), x: c.x, y: c.y };
     out.nodes.push(n);

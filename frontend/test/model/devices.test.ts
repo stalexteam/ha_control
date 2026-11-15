@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { rectRoomLevel } from '../fixtures';
-import { addDevice, deleteDevice, moveDevice, refreshDevices, setDeviceProps } from '../../src/model/devices';
+import { addDevice, deleteDevice, moveDevice, refreshDevices, retargetZoneAngle, setDeviceProps } from '../../src/model/devices';
 import { addZone, deleteZone } from '../../src/model/zones';
 import { addBox, deleteWall, mergeNodes, moveNode } from '../../src/model/ops';
 import { deviceDefaults, normalizeLevel, type DevicePlacement, type Level } from '../../src/model/types';
@@ -79,6 +79,22 @@ describe('moveDevice', () => {
     const a = addDevice(room(), { kind: 'motion_sensor', zoneAngle: 200, zoneRange: 5000 }, free, 'M');
     const l = moveDevice(a.level, a.deviceId!, onWall('w0', 1000));
     expect(l.devices[0].props).toMatchObject({ zoneAngle: 200 });
+  });
+});
+
+describe('retargetZoneAngle', () => {
+  const motion = (zoneAngle: number) => ({ kind: 'motion_sensor', zoneAngle, zoneRange: 5000 } as const);
+  it('a default zone angle follows the new mode; a user-set one stays', () => {
+    expect(retargetZoneAngle(motion(360), 'free', 'wall')).toEqual(motion(110));
+    expect(retargetZoneAngle(motion(110), 'wall', 'free')).toEqual(motion(360));
+    const own = motion(180);
+    expect(retargetZoneAngle(own, 'free', 'wall')).toBe(own);
+  });
+  it('same mode or another kind: the same object', () => {
+    const m = motion(360);
+    expect(retargetZoneAngle(m, 'free', 'free')).toBe(m);
+    const light = deviceDefaults('wall_light', 'free');
+    expect(retargetZoneAngle(light, 'free', 'wall')).toBe(light);
   });
 });
 

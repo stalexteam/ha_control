@@ -44,7 +44,8 @@ export interface Preview {
   walls?: { a: Pt; b: Pt; props: WallProps }[];
   opening?: { wallId: Id; offset: number; width: number; kind: OpeningKind; invalid?: boolean };
   snap?: SnapResult;
-  tracker?: { length: string; angle: string; field: "length" | "angle"; at: Pt };
+  /** Typed input next to the cursor: wall length + angle, box width + depth. */
+  tracker?: { first: string; second: string; field: "first" | "second"; at: Pt };
   orthoFrom?: Pt;
   /** Fixed start of the segment / box being drawn (chain start or last fixed point). */
   anchor?: Pt;

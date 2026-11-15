@@ -53,7 +53,7 @@ describe('wall tool', () => {
     expect(t.key('3', k)).toBe(true);
     expect(t.key(',', k)).toBe(false);
     t.key('4', k);
-    expect(t.preview().tracker?.length).toBe('34');
+    expect(t.preview().tracker?.first).toBe('34');
   });
 
   it('zero segment is not committed and chain stays active', () => {
@@ -82,7 +82,7 @@ describe('wall tool', () => {
     const t = createWallTool(ctx);
     t.down(ev(0, 0)); typeKeys(t, '12');
     expect(t.key('Escape', k)).toBe(true);
-    expect(t.preview().tracker?.length).toBe('');
+    expect(t.preview().tracker?.first).toBe('');
     t.down(ev(1000, 0));
     expect(ctx.level().walls).toHaveLength(1);
   });

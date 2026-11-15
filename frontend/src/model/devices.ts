@@ -32,19 +32,26 @@ export function addDevice(
   return { level: withDevices(level, [...level.devices, d]), deviceId: d.id };
 }
 
+/**
+ * Props of a device going from placement mode `from` to `to`: a motion sensor whose zone angle is still the
+ * default of `from` gets the default of `to`; a user-set angle stays. Anything else: the same object.
+ */
+export function retargetZoneAngle(props: DeviceProps, from: DevicePlacement['mode'], to: DevicePlacement['mode']): DeviceProps {
+  if (props.kind !== 'motion_sensor' || from === to) return props;
+  const old = deviceDefaults('motion_sensor', from);
+  const next = deviceDefaults('motion_sensor', to);
+  if (old.kind === 'motion_sensor' && next.kind === 'motion_sensor' && props.zoneAngle === old.zoneAngle) {
+    return { ...props, zoneAngle: next.zoneAngle };
+  }
+  return props;
+}
+
 /** Rejected (same level returned) when the placement is not allowed for the kind or a wall offset is outside the wall. */
 export function moveDevice(level: Level, id: Id, placement: DevicePlacement): Level {
   const devices = level.devices;
   const d = devices.find(x => x.id === id);
   if (!d || !fits(level, d.props, placement)) return level;
-  let props = d.props;
-  if (props.kind === 'motion_sensor' && placement.mode !== d.placement.mode) {
-    const old = deviceDefaults('motion_sensor', d.placement.mode);
-    const next = deviceDefaults('motion_sensor', placement.mode);
-    if (old.kind === 'motion_sensor' && next.kind === 'motion_sensor' && props.zoneAngle === old.zoneAngle) {
-      props = { ...props, zoneAngle: next.zoneAngle };
-    }
-  }
+  const props = retargetZoneAngle(d.props, d.placement.mode, placement.mode);
   return refreshDevices(withDevices(level, devices.map(x => (x.id === id ? { ...x, placement, props } : x))));
 }
 

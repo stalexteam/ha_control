@@ -49,11 +49,11 @@ describe('panel input edge cases', () => {
     pointer(el, 'pointermove', 80, 80);
     pointer(el, 'pointerup', 80, 80);
     key(el, 'keyup', ' ');
-    expect(el.activeTool.preview().tracker?.length).toBe('3');
+    expect(el.activeTool.preview().tracker?.first).toBe('3');
     // A plain tap of space (no pan) still reaches the tool as a thousands separator.
     key(el, 'keydown', ' ');
     key(el, 'keyup', ' ');
-    expect(el.activeTool.preview().tracker?.length).toBe('3 ');
+    expect(el.activeTool.preview().tracker?.first).toBe('3 ');
     expect(el.history!.current.walls.length).toBe(0); // the pan did not add a segment
   });
 

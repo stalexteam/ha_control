@@ -7,7 +7,7 @@ import { t } from '../i18n';
 export interface TrackerOpts {
   palette: PlanPalette;
   scale: number;
-  /** Wall: length + angle; box: width + depth (the tool reuses the length/angle field names). */
+  /** Wall: length + angle; box: width + depth. */
   mode: 'wall' | 'box';
   /** Live values shown dimmed while the matching buffer is empty. */
   live: { first: string; second: string } | null;
@@ -20,11 +20,11 @@ export function renderTracker(tr: NonNullable<Preview['tracker']>, o: TrackerOpt
   const rows: { label: string; buf: string; live: string; active: boolean; unit: string }[] = [
     {
       label: t(o.mode === 'box' ? 'tracker.width' : 'tracker.length'),
-      buf: tr.length, live: o.live?.first ?? '', active: tr.field === 'length', unit: t('unit.mm'),
+      buf: tr.first, live: o.live?.first ?? '', active: tr.field === 'first', unit: t('unit.mm'),
     },
     {
       label: t(o.mode === 'box' ? 'tracker.depth' : 'tracker.angle'),
-      buf: tr.angle, live: o.live?.second ?? '', active: tr.field === 'angle',
+      buf: tr.second, live: o.live?.second ?? '', active: tr.field === 'second',
       unit: o.mode === 'box' ? t('unit.mm') : '°',
     },
   ];
