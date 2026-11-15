@@ -12,10 +12,11 @@ export function paletteVars(p: PlanPalette): string {
 export const panelStyles = css`
   :host { display: block; height: 100%; outline: none; }
   .ed {
-    display: grid; grid-template-columns: 64px 1fr 240px; grid-template-rows: auto 1fr 30px;
+    display: grid; grid-template-columns: 64px 240px 1fr; grid-template-rows: auto 1fr 30px;
     height: 100vh; overflow: hidden; position: relative;
     background: var(--ps-background); color: var(--ps-text); font: 13px system-ui, sans-serif;
   }
+  @media (max-width: 700px) { .ed { grid-template-columns: 54px 170px 1fr; } }
   .center { display: flex; align-items: center; justify-content: center; gap: 12px; height: 100vh;
     font: 14px system-ui, sans-serif; }
   .top { grid-column: 1 / 4; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 10px;
@@ -50,7 +51,7 @@ export const panelStyles = css`
   .tool-sep { height: 1px; width: 36px; background: var(--ps-border); margin: 4px 0; }
   .canvas { position: relative; min-width: 0; min-height: 0; touch-action: none; }
   .canvas svg { width: 100%; height: 100%; display: block; user-select: none; }
-  .props { background: var(--ps-panel); border-left: 1px solid var(--ps-border); padding: 12px; overflow-y: auto; }
+  .props { background: var(--ps-panel); border-right: 1px solid var(--ps-border); padding: 12px; min-width: 0; overflow-y: auto; }
   .props h4 { margin: 0 0 10px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em;
     color: var(--ps-muted); }
   .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0; }

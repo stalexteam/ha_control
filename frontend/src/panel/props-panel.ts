@@ -1,7 +1,6 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
 import type { Baseline, Level, Opening, OpeningKind, Side, Wall, WallType } from '../model/types';
-import { WALL_PRESETS } from '../model/types';
 import { deleteWall, setWallProps } from '../model/ops';
 import { deleteOpening, moveOpening, resizeOpening, setOpeningProps } from '../model/openings';
 import { deleteZone, renameZone } from '../model/zones';
@@ -11,6 +10,7 @@ import type { Selection } from '../editor/tools/types';
 import { formatArea, formatMm } from '../render/plan-svg';
 import { t } from '../i18n';
 import { parseMm, type ToolId } from './toolbar';
+import { isNextObjectTool, renderNextObject, type NextObjects } from './next-object';
 
 export type BoxMeasure = 'inner' | 'axis' | 'outer';
 
@@ -19,9 +19,12 @@ export interface PropsOpts {
   selection: Selection | null;
   tool: ToolId;
   boxMeasure: BoxMeasure;
-  /** Settings for the next wall drawn (shared with the top bar). */
+  /** Settings for the next wall drawn. */
   wallType: WallType;
   thickness: number;
+  /** Parameters of the next door / window / opening / zone. */
+  next: NextObjects;
+  setNext(n: NextObjects): void;
   lang: string;
   /** Validation message from the last rejected edit, shown under the fields. */
   notice: string | null;
@@ -90,7 +93,7 @@ function wallProps(w: Wall, o: PropsOpts): TemplateResult {
   return html`
     <h4>${t('props.wall', lang)}</h4>
     ${row(t('props.type', lang), select(w.type, types.map(v => ({ v, label: t(`walltype.${v}`, lang) })),
-      v => set({ type: v, thickness: WALL_PRESETS[v] })))}
+      v => set({ type: v })))}
     ${row(t('props.thickness', lang), mmField(w.thickness, v => { set({ thickness: v }); return true; }, o, 'props.badWidth'))}
     ${row(t('props.baseline', lang), select<Baseline>(w.baseline,
       (['center', 'left', 'right'] as Baseline[]).map(v => ({ v, label: t(`baseline.${v}`, lang) })), v => set({ baseline: v })))}
@@ -198,6 +201,7 @@ export function renderProps(o: PropsOpts): TemplateResult {
   return html`
     <div class="props">
       ${body === nothing && (o.tool === 'wall' || o.tool === 'box') ? newWallProps(o)
+        : body === nothing && isNextObjectTool(o.tool) ? renderNextObject({ tool: o.tool, level, next: o.next, lang: o.lang, setNext: o.setNext, setNotice: o.setNotice })
         : body === nothing ? html`<p class="muted">${t('props.none', o.lang)}</p>` : body}
       ${o.notice ? html`<p class="warn">${o.notice}</p>` : nothing}
     </div>`;

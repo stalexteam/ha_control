@@ -16,6 +16,7 @@ import { t } from '../i18n';
 import { renderToolRail, renderTopBar } from './toolbar';
 import { createTool, selectionExists, toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
 import { renderProps, type BoxMeasure } from './props-panel';
+import { defaultZoneName, initialNext, openingDefaults } from './next-object';
 import { initialNextProps, renderEquipmentProps } from './device-props';
 import { renderStatusBar } from './statusbar';
 import { renderTracker, trackerLive } from './tracker';
@@ -47,6 +48,8 @@ export class PlanStudioPanel extends LitElement {
   @state() private cones = true;
   /** "Next device" props per kind; they drive ctx.deviceDefaults. */
   @state() nextProps = initialNextProps();
+  /** "Next object" parameters of the door / window / opening / zone tools. */
+  @state() nextObj = initialNext();
   @state() private view: View = { x: -1000, y: -1000, scale: 0.08 };
   @state() private size = { w: 0, h: 0 };
   @state() private dialog: 'none' | 'conflict' | 'conflict-again' = 'none';
@@ -103,6 +106,9 @@ export class PlanStudioPanel extends LitElement {
       select: s => { this.selection = s; this.notice = null; },
       lang: () => this.uiLang,
       deviceDefaults: k => this.nextProps[k],
+      openingDefaults: k => openingDefaults(this.nextObj, k),
+      zoneName: () => this.nextObj.zoneName ?? defaultZoneName(this.history?.current ?? EMPTY_LEVEL, this.uiLang),
+      zonePlaced: () => { this.nextObj = { ...this.nextObj, zoneName: null }; },
     };
     this.activeTool = createTool('select', this.ctx);
     const host: InputHost = {
@@ -405,17 +411,16 @@ export class PlanStudioPanel extends LitElement {
     this.requestUpdate();
   }
 
-  /** Wall type for the next wall; the thickness follows the type preset. */
+  /** Wall type for the next wall; the thickness is independent and stays as it is. */
   setWallType(wt: WallType): void {
     this.wallType = wt;
-    this.thickness = WALL_PRESETS[wt];
   }
 
   pickTool(id: ToolId): void {
     this.activeTool.cancel();
     this.selection = null;
     this.notice = null;
-    if (id === 'box') { this.wallType = 'bearing'; this.thickness = WALL_PRESETS.bearing; }
+    if (id === 'box') this.wallType = 'bearing';
     this.toolId = id;
     this.activeTool = createTool(id, this.ctx);
   }
@@ -538,18 +543,27 @@ export class PlanStudioPanel extends LitElement {
     return html`
       <div class="ed" style=${paletteVars(pal)} @click=${this.refocus} @change=${this.refocusAfterChange}>
         ${renderTopBar({
-          lang, mode: this.mode, onMode: m => this.setMode(m), planName: this.plan.name, planId: this.plan.id, plans: this.planOptions(), wallType: this.wallType, thickness: this.thickness,
+          lang, mode: this.mode, onMode: m => this.setMode(m), planName: this.plan.name, planId: this.plan.id, plans: this.planOptions(),
           canUndo: this.history.canUndo, canRedo: this.history.canRedo,
           saveState: s.state, dirty: s.dirty, errorMessage: s.errorMessage,
           lead: this.narrow ? html`<ha-menu-button .hass=${this.hass} .narrow=${this.narrow}></ha-menu-button>` : nothing,
           onRename: name => { this.plan = { ...this.plan!, name }; s.markDirty(); },
           onPickPlan: id => this.pickPlan(id),
           onNewPlan: () => this.requestNewPlan(), onDeletePlan: () => this.requestDelete(), busy: this.deleting,
-          onWallType: wt => this.setWallType(wt),
-          onThickness: mm => { this.thickness = mm; },
           onUndo: () => this.undo(), onRedo: () => this.redo(), onSave: () => this.doSave(),
         })}
         ${renderToolRail(this.mode, this.toolId, lang, id => this.pickTool(id))}
+        ${this.mode === 'equipment' ? renderEquipmentProps({
+          level, selection: this.selection, toolId: this.toolId, nextProps: this.nextProps, lang, notice: this.notice,
+          commit: next => this.commit(next), remove: next => this.commitRemoval(next),
+          setNextProps: np => { this.nextProps = np; }, setNotice: msg => { this.notice = msg; },
+        }) : renderProps({
+          level, selection: this.selection, tool: this.toolId, boxMeasure: this.boxMeasure, lang, notice: this.notice,
+          wallType: this.wallType, thickness: this.thickness, next: this.nextObj, setNext: n => { this.nextObj = n; },
+          setWallType: wt => this.setWallType(wt), setThickness: mm => { this.thickness = mm; },
+          commit: next => this.commit(next), remove: next => this.commitRemoval(next),
+          setBoxMeasure: m => { this.boxMeasure = m; }, setNotice: msg => { this.notice = msg; },
+        })}
         <div class="canvas">
           <svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox=${`${x} ${y} ${w} ${h}`}
             preserveAspectRatio="xMinYMin meet" style=${`background:${pal.background}`}
@@ -568,17 +582,6 @@ export class PlanStudioPanel extends LitElement {
             onRestore: () => this.restoreDraft(this.pendingDraft!), onDiscard: () => this.discardDraft(this.pendingDraft!),
           }) : nothing}
         </div>
-        ${this.mode === 'equipment' ? renderEquipmentProps({
-          level, selection: this.selection, toolId: this.toolId, nextProps: this.nextProps, lang, notice: this.notice,
-          commit: next => this.commit(next), remove: next => this.commitRemoval(next),
-          setNextProps: np => { this.nextProps = np; }, setNotice: msg => { this.notice = msg; },
-        }) : renderProps({
-          level, selection: this.selection, tool: this.toolId, boxMeasure: this.boxMeasure, lang, notice: this.notice,
-          wallType: this.wallType, thickness: this.thickness,
-          setWallType: wt => this.setWallType(wt), setThickness: mm => { this.thickness = mm; },
-          commit: next => this.commit(next), remove: next => this.commitRemoval(next),
-          setBoxMeasure: m => { this.boxMeasure = m; }, setNotice: msg => { this.notice = msg; },
-        })}
         ${renderStatusBar({
           lang, grid: this.grid, zoomPct: Math.round(scale * 1000),
           snap: preview.snap && preview.snap.kind !== 'none' ? t(`snap.${preview.snap.kind}`, lang) : null,

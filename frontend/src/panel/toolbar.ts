@@ -1,13 +1,10 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
-import type { WallType } from '../model/types';
-import { WALL_PRESETS } from '../model/types';
 import type { SaveState } from '../editor/save';
 import { t } from '../i18n';
 import { toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
 
 export type { ToolId } from './tool-factory';
-const EDITOR_WALL_TYPES: WallType[] = ['bearing', 'partition', 'railing'];
 
 export interface TopBarOpts {
   lang: string;
@@ -18,8 +15,6 @@ export interface TopBarOpts {
   planId: string;
   /** Plans the selector offers (stored plans plus the open one); hidden when there is only one. */
   plans: { id: string; name: string }[];
-  wallType: WallType;
-  thickness: number;
   canUndo: boolean;
   canRedo: boolean;
   saveState: SaveState;
@@ -29,8 +24,6 @@ export interface TopBarOpts {
   lead?: TemplateResult | typeof nothing;
   onRename(name: string): void;
   onPickPlan(id: string): void;
-  onWallType(type: WallType): void;
-  onThickness(mm: number): void;
   onUndo(): void;
   onRedo(): void;
   onSave(): void;
@@ -87,20 +80,6 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
             ${t(`mode.${m}`, lang)}</button>`)}
       </span>
       <span class="sp"></span>
-      ${o.mode === 'plan' ? html`
-        <span class="muted">${t('walltype.label', lang)}:</span>
-        ${EDITOR_WALL_TYPES.map(wt => html`
-          <button class="tab ${o.wallType === wt ? 'on' : ''}" data-walltype=${wt} @click=${() => o.onWallType(wt)}>
-            ${t(`walltype.${wt}`, lang)} ${WALL_PRESETS[wt]}</button>`)}
-        <input class="num" type="text" inputmode="numeric" .value=${fieldValue(String(o.thickness))}
-          aria-label=${t('props.thickness', lang)} title=${t('props.thickness', lang)}
-          @change=${(e: Event) => {
-            const el = e.target as HTMLInputElement;
-            const v = parseMm(el.value);
-            if (v === null) el.value = String(o.thickness); else o.onThickness(v);
-          }} />
-        <span class="muted">${t('unit.mm', lang)}</span>
-        <span class="sp"></span>` : nothing}
       <button class="btn" title=${t('action.undo', lang)} aria-label=${t('action.undo', lang)} ?disabled=${!o.canUndo}
         @click=${o.onUndo}>↶</button>
       <button class="btn" title=${t('action.redo', lang)} aria-label=${t('action.redo', lang)} ?disabled=${!o.canRedo}

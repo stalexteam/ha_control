@@ -13,6 +13,9 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 ## Usage
 
 - Tools: walls, doors, windows, zones, select/move; pick from the toolbar.
+- Wall type (bearing / partition / railing) is only a visual style; thickness is a separate field and never changes when you pick a type. Both live in the left properties panel.
+- With a placement tool active and nothing selected, the left panel shows the parameters of the next object (door: width, hinge, swing; window: width, outside side; opening: width; room: name, default "Room N"). Values are remembered per tool for the session.
+- Layout: tool rail, properties panel, plan.
 - Hold Shift while drawing to snap to 90 degrees.
 - Type a length in millimetres and press Enter to set the exact segment length.
 - Tab switches to angle input.
@@ -32,8 +35,8 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 - Climate sensor (wall or free): temperature and humidity; checks the rooms it applies to, none checked means the room it stands in.
 - Exhaust fan (wall only): diameter 100, 125 or 150 mm; no cone and no aim.
 - Select: click a device to select it, drag to move it (Shift locks the axis). A wall device slides along its wall, can be dragged onto another wall, or into open space if its kind allows. Delete removes it. A selected wall light or sensor shows a direction handle (a segment ending in a round knob): drag the knob to set the aim (wall device) or rotation (free device), Shift snaps to 15 degrees, Esc cancels.
-- Right panel: properties of the selected device (name, kind settings, rotation for free devices, side, offset and aim, -90 to 90 degrees off the wall normal, for wall lights and sensors). With a placement tool active and nothing selected, it edits the defaults of the next device.
-- A newly placed device is selected, so the right panel shows its properties. Press Esc (or click empty space with the Select tool) to get back to the next-device defaults.
+- Left panel (between the tool rail and the plan): properties of the selected device (name, kind settings, rotation for free devices, side, offset and aim, -90 to 90 degrees off the wall normal, for wall lights and sensors). With a placement tool active and nothing selected, it edits the defaults of the next device.
+- A newly placed device is selected, so the left panel shows its properties. Press Esc (or click empty space with the Select tool) to get back to the next-device defaults.
 - Deleting a wall also deletes the devices on it; Ctrl+Z brings both back.
 - "Cones & zones" in the status bar shows or hides light pools, wall-light cones and motion zones.
 

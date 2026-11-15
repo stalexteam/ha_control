@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { applyOpeningPatch, kindPatch } from '../../src/panel/props-panel';
 import { addOpening } from '../../src/model/openings';
+import { initialNext } from '../../src/panel/next-object';
 import { rectRoomLevel } from '../fixtures';
 
 describe('opening kind switch', () => {
@@ -33,7 +34,7 @@ describe('opening width field', () => {
     const opts = {
       level: r.level, selection: { kind: 'opening' as const, id: r.openingId! }, tool: 'select' as const,
       boxMeasure: 'inner' as const, wallType: 'bearing' as const, thickness: 400, lang: 'en', notice: null,
-      commit: (n: unknown) => commits.push(n), remove: () => {}, setBoxMeasure: () => {}, setWallType: () => {}, setThickness: () => {},
+      commit: (n: unknown) => commits.push(n), remove: () => {}, setBoxMeasure: () => {}, setWallType: () => {}, setThickness: () => {}, next: initialNext(), setNext: () => {},
       setNotice: (m: string | null) => { notice = m; },
     };
     render(renderProps(opts), host);

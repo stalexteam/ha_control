@@ -31,13 +31,14 @@ function withOpenings(level: Level, openings: Opening[]): Level {
 
 export function addOpening(
   level: Level, wallId: Id, kind: OpeningKind, centerOffset: number, width?: number,
+  extra: Pick<Opening, 'hinge' | 'swing' | 'outside'> = {},
 ): { level: Level; openingId: Id | null } {
   const w = width ?? OPENING_DEFAULT_WIDTH[kind];
   const offset = centerOffset - w / 2;
   if (!fits(level, wallId, offset, w)) return { level, openingId: null };
   const o: Opening = { id: newId(), wallId, kind, offset, width: w, invalid: false };
-  if (kind === 'door' || kind === 'gate' || kind === 'wicket') { o.hinge = 'start'; o.swing = 'left'; }
-  if (kind === 'window') o.outside = 'left';
+  if (kind === 'door' || kind === 'gate' || kind === 'wicket') { o.hinge = extra.hinge ?? 'start'; o.swing = extra.swing ?? 'left'; }
+  if (kind === 'window') o.outside = extra.outside ?? 'left';
   return { level: refreshZones(withOpenings(level, [...level.openings, o])), openingId: o.id };
 }
 

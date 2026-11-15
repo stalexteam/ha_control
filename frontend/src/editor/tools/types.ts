@@ -24,6 +24,19 @@ export interface ToolContext {
   lang(): string;
   /** The panel's "next device" props for the free mode. */
   deviceDefaults(kind: DeviceKind): DeviceProps;
+  /** The panel's "next opening" values for the door / window / opening tool. */
+  openingDefaults(kind: OpeningKind): OpeningDefaults;
+  /** Name the zone tool gives the next room. */
+  zoneName(): string;
+  /** Called after the zone tool placed a zone (the automatic name advances). */
+  zonePlaced?(): void;
+}
+
+export interface OpeningDefaults {
+  width: number;
+  hinge?: "start" | "end";
+  swing?: "left" | "right";
+  outside?: "left" | "right";
 }
 
 export type Selection = { kind: "wall" | "node" | "opening" | "zone" | "device"; id: Id };

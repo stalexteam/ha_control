@@ -40,8 +40,6 @@ export function key(el: PlanStudioPanel, type: 'keydown' | 'keyup', k: string, i
 
 /** Box from (100,100) to (500,400), inner measure, 400 walls: axis rectangle (-100,-100)-(700,600). */
 export async function drawBox(el: PlanStudioPanel): Promise<void> {
-  $<HTMLButtonElement>(el, 'button[data-walltype="partition"]').click();
-  await el.updateComplete;
   $<HTMLButtonElement>(el, 'button[data-tool="box"]').click();
   await el.updateComplete;
   expect(el.wallType).toBe('bearing');

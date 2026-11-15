@@ -33,15 +33,14 @@ describe('<plan-studio-panel>', () => {
     type.dispatchEvent(new Event('change'));
     await el.updateComplete;
     expect(el.wallType).toBe('partition');
-    expect(el.thickness).toBe(100);
-    expect($<HTMLInputElement>(el, '.props input[data-field="new-wall-thickness"]').value).toBe('100');
-    expect($<HTMLButtonElement>(el, '.top button[data-walltype="partition"]').classList.contains('on')).toBe(true);
+    expect(el.thickness).toBe(400);
+    expect($<HTMLInputElement>(el, '.props input[data-field="new-wall-thickness"]').value).toBe('400');
     click(el, 0, 0);
     click(el, 2000, 0);
     await el.updateComplete;
     const walls = el.history!.current.walls;
     expect(walls).toHaveLength(1);
-    expect(walls[0]).toMatchObject({ type: 'partition', thickness: 100 });
+    expect(walls[0]).toMatchObject({ type: 'partition', thickness: 400 });
   });
 
   it('props panel thickness field sets the new wall thickness; Box shows the measure toggle there', async () => {
