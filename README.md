@@ -30,8 +30,9 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 ### Equipment tab
 
 - The steps Plan, Equipment and Binding sit in the title block under the top bar: click any step, or use Back / Next. Walls, openings and rooms are dimmed and locked in the Equipment step; devices are dimmed and locked in the Plan step.
-- Tools: Select, Ceiling light, Wall light, Motion sensor, Illuminance sensor, Climate sensor, Switch, Socket, Exhaust fan, Equipment. One click places one device.
-- Switches and sockets snap to the nearest wall face. Wall lights and sensors go on a wall face near the cursor, otherwise at a free grid point. Ceiling lights and equipment blocks are always free.
+- Tools: Select, Ceiling light, Wall light, Motion sensor, Illuminance sensor, Climate sensor, Wall switch, Smart button, Socket, Exhaust fan, Equipment. One click places one device.
+- Wall switches and sockets snap to the nearest wall face (wall only). Wall lights, sensors and smart buttons go on a wall face near the cursor, otherwise at a free grid point (wall or free). Ceiling lights and equipment blocks are always free.
+- Wall switch (a square) and smart button (a rounded square with a dot) are input containers: see "Wall switches and smart buttons" below. Their properties show a Type select that turns one into the other; it keeps the id, name and placement, resets the settings to the new type's defaults and drops bindings the new type does not have. A free smart button cannot become a wall switch until it is moved onto a wall. Plans with the former Switch device are migrated on load: a switch with a button-events binding becomes a smart button, any other becomes a wall switch.
 - Climate sensor (wall or free): temperature and humidity; checks the rooms it applies to, none checked means the room it stands in.
 - Exhaust fan (wall only): diameter 100, 125 or 150 mm; no cone and no aim.
 - Select: click a device to select it, drag to move it (Shift locks the axis). A wall device slides along its wall, can be dragged onto another wall, or into open space if its kind allows. Delete removes it. A selected wall light or sensor shows a direction handle (a segment ending in a round knob): drag the knob to set the aim (wall device) or rotation (free device), Shift snaps to 15 degrees, Esc cancels.
@@ -51,12 +52,28 @@ Binding links every device on the plan to Home Assistant entities, one field per
   3. Fill or change each role in its search field (for example Control and Power for a socket, Temperature and Humidity for a climate sensor). The clear button empties a role; Ctrl+Z undoes.
 - Filter rules: candidates are chosen only by domain, device class and unit, never by guessing from entity ids or names. The strict list needs the role's domain and a matching device class; an entity without a device class matches by unit, and a conflicting device class excludes it (a battery % sensor is never a humidity candidate). Hidden, disabled, config and diagnostic entities are left out. "Show all" keeps only the domain filter.
 - Status:
-  - Bound: the primary role is set (Control for lights, sockets, fans and equipment; Motion, Illuminance or Button events for sensors and switches; Temperature or Humidity for a climate sensor).
+  - Bound: the primary role is set (Control for lights, sockets, fans and equipment; Motion or Illuminance for sensors; State for a wall switch; On for a smart button, plus Off and Auto while they are enabled; Temperature or Humidity for a climate sensor).
   - Partly bound: some role is set, but not the primary one.
   - Missing (red): a bound entity is neither in the live states nor in the entity registry. A disabled or unavailable entity is only noted; the device still counts as bound. Nothing is ever removed automatically.
-- One entity may be bound to several devices; the field then says "Also bound to".
+- One entity may be bound to several devices; the field then says "Also bound to". For smart button triggers it compares the entity and the action value, so two buttons of one physical switch are not reported.
 - The entity, device and area registries load once, when the Binding step first opens. If that fails, a notice offers Retry; the fields keep working from the live states and nothing is flagged Missing.
 - Delete does nothing in this step. Bindings are saved with the plan.
+
+### Wall switches and smart buttons
+
+Wall switches and smart buttons are input containers: virtual objects with a live output, `on`, `off`, `auto` or `error`, that later automations will read. They run inside Home Assistant for every saved plan, also while the panel is closed, and keep their output across restarts. Changes take effect when the plan is saved. No Home Assistant entities are created.
+
+- Wall switch, in the Binding step:
+  - State: the relay, light or binary sensor it follows; the output is `on` or `off`.
+  - "Auto by double toggle": two toggles within "Window, s" (1 to 10 seconds, default 3) give `auto`; a single toggle later gives the state again.
+- Smart button, in the Binding step:
+  - On / Off: the action sensor or event entity, Slot (0 to 9) and Event (`single`, `double`, `hold` or any other text). Slot 0 waits for the action value `event`, slot N for `N_event`. In toggle mode each press switches between `on` and `off`.
+  - "Separate Off" splits the section into On and Off, each with its own trigger. "Auto" adds the Auto section, whose trigger gives `auto`. Both new sections start with the On entity.
+  - Final state (light or switch), shown in toggle mode with Auto: a press while in `auto` gives the opposite of its state, or `off` when none is set.
+  - Identical triggers in one smart button show a warning; the first of On, Off, Auto wins.
+- Default output (both): the output while the container is not configured or a bound entity is unavailable.
+- Output line (both): the current output and, while it is the default, why (not configured, or the unavailable entities). "Not saved yet" means the saved plan has no such container, or has it as the other type.
+- On the plan, in every step, the symbol shows the output: `on` yellow, `auto` light blue, `error` red, `off` the plain device fill. A red dot marks a fault (the default output is shown). Without live data the symbol stays plain.
 
 ## Development
 
@@ -73,7 +90,7 @@ Deploy to a live instance (builds, copies over ssh as root, restarts core). `PLA
 PLAN_STUDIO_HOST=<HA_HOST> bash scripts/deploy.sh
 ```
 
-Websocket API smoke test (long-lived access token, never commit it):
+Websocket API smoke test (long-lived admin access token, never commit it). It saves and deletes a throwaway plan, and sets and then removes the `binary_sensor.plan_studio_smoke` entity through the REST API:
 
 ```
 HA_URL=http://<HA_HOST>:8123 HA_TOKEN=... node scripts/smoke_ws.mjs
