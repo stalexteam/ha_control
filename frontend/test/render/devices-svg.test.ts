@@ -49,6 +49,23 @@ const drawLevel = (level: Level, o: Record<string, unknown> = {}, scale = 0.1) =
 describe('renderDevices', () => {
   beforeEach(() => { document.body.innerHTML = ''; });
 
+  it('round ceiling light: radius = diameter/2 when larger than the icon, icon radius when smaller; ring encloses it', () => {
+    const scale = 0.1;
+    const lamp = (diameter: number, selected = false) => {
+      const level = { ...rectRoomLevel(6000, 5000, 200), devices: [free('cl', 'ceiling_light', 1000, 1000, { shape: 'round', diameter })] };
+      return drawDevs(level, selected ? { selection: { kind: 'device', id: 'cl' } } : {}, scale);
+    };
+    expect(Number(lamp(1000).querySelector('g.device-ceiling_light circle.icon')!.getAttribute('r'))).toBe(500);
+    expect(Number(lamp(10).querySelector('g.device-ceiling_light circle.icon')!.getAttribute('r'))).toBeCloseTo(ICON_PX / scale);
+    expect(Number(lamp(1000, true).querySelector('.selection-ring')!.getAttribute('r'))).toBeGreaterThan(500);
+  });
+
+  it('round ceiling light: binding ring encloses a large lamp', () => {
+    const level = { ...rectRoomLevel(6000, 5000, 200), devices: [free('cl', 'ceiling_light', 1000, 1000, { shape: 'round', diameter: 1000 })] };
+    const root = drawDevs(level, { bindingStatus: () => 'unbound' } as Partial<DevOpts>);
+    expect(Number(root.querySelector('circle.bind-ring')!.getAttribute('r'))).toBeGreaterThan(500);
+  });
+
   it('draws one group per device kind', () => {
     const root = drawDevs(levelWithAll());
     expect(root.querySelectorAll('g.device').length).toBe(7);
@@ -74,7 +91,7 @@ describe('renderDevices', () => {
 
   it('icon radius is ICON_PX / scale', () => {
     expect(ICON_PX).toBe(12);
-    const r = (s: number) => Number(drawDevs(levelWithAll(), {}, s).querySelector('g.device-ceiling_light circle.icon')!.getAttribute('r'));
+    const r = (s: number) => Number(drawDevs(levelWithAll(), {}, s).querySelector('g.device-socket circle.icon')!.getAttribute('r'));
     expect(r(1)).toBe(12);
     expect(r(0.01)).toBe(1200);
   });

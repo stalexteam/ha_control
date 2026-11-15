@@ -41,6 +41,17 @@ describe('climate sensor props', () => {
 });
 
 describe('exhaust fan props', () => {
+  it('ceiling light: Diameter field for round, none for spot and linear', () => {
+    const l = addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 3000 }, bp, 'axis');
+    const field = (shape: string) => {
+      const d = addDevice(l, { ...deviceDefaults('ceiling_light', 'free'), shape } as never, { mode: 'free', x: 1000, y: 1000, rotation: 0 }, 'L');
+      return mountProps(d.level, d.deviceId!, []).querySelector('[data-field="diameter"]');
+    };
+    expect(field('round')).not.toBeNull();
+    expect(field('spot')).toBeNull();
+    expect(field('linear')).toBeNull();
+  });
+
   it('diameter select 100 -> 125 stored, no aim field, unchanged is a no-op', () => {
     const l = addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 3000 }, bp, 'axis');
     const w = l.walls[0].id;

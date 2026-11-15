@@ -293,6 +293,14 @@ describe('wrap360 / wrap180', () => {
 });
 
 describe('deviceAt', () => {
+  it('a round ceiling light is hit anywhere inside its diameter (+ tol); a spot only near its point', () => {
+    const lamp = (shape: 'round' | 'spot') => withDevs(rectRoomLevel(3000, 4000, 400),
+      dev('r', { ...deviceDefaults('ceiling_light', 'free'), shape, diameter: 1000 } as DeviceProps, { mode: 'free', x: 1000, y: 1000, rotation: 0 }));
+    expect(deviceAt(lamp('round'), { x: 1450, y: 1000 }, 50)).toBe('r');
+    expect(deviceAt(lamp('round'), { x: 1600, y: 1000 }, 50)).toBeNull();
+    expect(deviceAt(lamp('spot'), { x: 1450, y: 1000 }, 50)).toBeNull();
+  });
+
   const eq = (rotation: number): Device =>
     dev('e', { kind: 'equipment', shape: 'rect', width: 600, depth: 600, diameter: 600, icon: 'mdi:desktop-tower', label: '' },
       { mode: 'free', x: 1000, y: 1000, rotation });

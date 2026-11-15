@@ -86,6 +86,11 @@ function coneRings(level: Level, d: Device): Pt[][] {
   return rings;
 }
 
+/** Drawn radius of a round ceiling light: its real diameter/2, never smaller than the icon radius R; R for other devices. */
+function roundLightR(d: Device, R: number): number {
+  return d.props.kind === 'ceiling_light' && d.props.shape === 'round' ? Math.max(d.props.diameter / 2, R) : R;
+}
+
 /** `dash`: the outline dash of an input container with no live state. */
 function iconShape(d: Device, R: number, color: string, fill: string, dash?: string): SVGTemplateResult {
   const pr = d.props;
@@ -99,7 +104,7 @@ function iconShape(d: Device, R: number, color: string, fill: string, dash?: str
       if (pr.shape === 'spot') {
         return svg`<circle class="icon" r=${R / 3} fill=${color} stroke=${color} stroke-width="1" vector-effect=${NS}></circle>`;
       }
-      return svg`<circle class="icon" r=${R} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>`;
+      return svg`<circle class="icon" r=${roundLightR(d, R)} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>`;
     case 'wall_light':
       return svg`<path class="icon" d=${`M0 ${-R}A${R} ${R} 0 0 0 0 ${R}Z`} fill=${common.fill} stroke=${common.stroke}
         stroke-width="1.5" vector-effect=${NS}></path>`;
@@ -164,9 +169,9 @@ function equipmentBlock(d: Device, o: DeviceRenderOpts, color: string, deg: numb
     <g class="equipment-data"></g>`;
 }
 
-function bindRing(st: BindStatus, scale: number): SVGTemplateResult | typeof nothing {
+function bindRing(st: BindStatus, scale: number, body = 0): SVGTemplateResult | typeof nothing {
   if (st === 'bound') return nothing;
-  return svg`<circle class=${`bind-ring bind-${st}`} r=${(ICON_PX * 1.7) / scale} fill="none" style=${`stroke:${BIND_STROKE[st]}`}
+  return svg`<circle class=${`bind-ring bind-${st}`} r=${Math.max((ICON_PX * 1.7) / scale, body + 4 / scale)} fill="none" style=${`stroke:${BIND_STROKE[st]}`}
     stroke-width="2" stroke-dasharray=${st === 'unbound' ? '4 3' : nothing} vector-effect=${NS}></circle>`;
 }
 
@@ -212,7 +217,7 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
   const opacity = preview ? '0.5' : o.dim ? String(p.dimOpacity) : nothing;
   const reach = d.props.kind === 'equipment'
     ? (d.props.shape === 'circle' ? d.props.diameter / 2 : Math.hypot(d.props.width, d.props.depth) / 2)
-    : R * 1.6;
+    : Math.max(R * 1.6, roundLightR(d, R));
   return svg`
     <g class=${cls} data-id=${d.id} opacity=${opacity} transform=${`translate(${pose.pt.x} ${pose.pt.y})`}>
       ${selected ? svg`<circle class="selection-ring" r=${reach + 4 / o.scale} fill="none" stroke=${p.selection}
@@ -221,7 +226,7 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
         ? equipmentBlock(d, o, color, deg)
         : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, p.deviceFill,
           noData ? NO_DATA_DASH : undefined)}</g>`}
-      ${o.bindingStatus && !preview ? bindRing(o.bindingStatus(d), o.scale) : nothing}
+      ${o.bindingStatus && !preview ? bindRing(o.bindingStatus(d), o.scale, roundLightR(d, R)) : nothing}
       ${live ? badge(live, o.containerFlash?.(d) ?? null, R, o) : nothing}
     </g>`;
 }

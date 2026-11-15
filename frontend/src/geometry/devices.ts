@@ -263,6 +263,8 @@ function hits(level: Level, d: Device, p: Pt, tol: number): boolean {
     const along = Math.max(-pr.length / 2, Math.min(pr.length / 2, dot(sub(p, pose.pt), pose.dir)));
     return dist(add(pose.pt, scale(pose.dir, along)), p) <= tol;
   }
+  // Round lamp: the whole drawn disc (the geometry layer has no zoom, so tol covers the icon-sized minimum).
+  if (pr.kind === 'ceiling_light' && pr.shape === 'round') return dist(pose.pt, p) <= pr.diameter / 2 + tol;
   if (pr.kind !== 'equipment') return dist(pose.pt, p) <= tol;
   if (pr.shape === 'circle') return dist(pose.pt, p) <= pr.diameter / 2 + tol;
   // Rect: width along dir, depth along its normal.

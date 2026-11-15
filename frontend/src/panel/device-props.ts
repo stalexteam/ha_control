@@ -75,7 +75,7 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
         ${row(t('props.shape'), select(p.shape, labelled([...LIGHT_SHAPES], 'shape'), v => set({ shape: v }), `${pre}shape`))}
         ${p.shape === 'linear'
           ? html`${mm('length', 'props.length', p.length)}${mm('width', 'props.width', p.width)}`
-          : mm('diameter', 'props.diameter', p.diameter)}
+          : p.shape === 'round' ? mm('diameter', 'props.diameter', p.diameter) : nothing}
         ${row(`${t('props.poolRadius')}, ${t('unit.mm')}`, numField({
           ...NUM.mm, value: p.poolRadius, field: `${pre}poolRadius`, placeholder: t('props.poolHint'), setNotice: o.onNotice,
           skipSame: true, apply: v => set({ poolRadius: v }), onBlank: () => set({ poolRadius: null }),
