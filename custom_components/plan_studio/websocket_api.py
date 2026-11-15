@@ -15,12 +15,24 @@ def _store(hass: HomeAssistant):
     return hass.data[DOMAIN]["store"]
 
 
+def _live(hass: HomeAssistant):
+    """The running LiveRuntime, or None while the config entry is unloaded."""
+    return hass.data[DOMAIN].get("live")
+
+
+def _reload_live(hass: HomeAssistant) -> None:
+    live = _live(hass)
+    if live is not None:
+        live.reload()
+
+
 @callback
 def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_list)
     websocket_api.async_register_command(hass, ws_get)
     websocket_api.async_register_command(hass, ws_save)
     websocket_api.async_register_command(hass, ws_delete)
+    websocket_api.async_register_command(hass, ws_containers_subscribe)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "plan_studio/plans/list"})
@@ -62,6 +74,7 @@ async def ws_save(hass, connection, msg):
         connection.send_error(msg["id"], "invalid_plan", str(err))
     else:
         connection.send_result(msg["id"], {"revision": revision})
+        _reload_live(hass)
 
 
 @websocket_api.websocket_command(
@@ -70,5 +83,35 @@ async def ws_save(hass, connection, msg):
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_delete(hass, connection, msg):
-    await _store(hass).async_delete(msg["plan_id"])
+    deleted = await _store(hass).async_delete(msg["plan_id"])
     connection.send_result(msg["id"], {})
+    if deleted:
+        _reload_live(hass)
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "plan_studio/containers/subscribe", vol.Required("plan_id"): str}
+)
+@websocket_api.require_admin
+@callback
+def ws_containers_subscribe(hass, connection, msg):
+    """Stream container outputs of one plan: a full snapshot first, then changes.
+
+    Ends with HA's standard `unsubscribe_events` or when the connection closes.
+    """
+    live = _live(hass)
+    if live is None:
+        connection.send_error(msg["id"], "not_loaded", "Plan Studio is not loaded")
+        return
+    runtime = live.runtime
+    plan_id = msg["plan_id"]
+
+    @callback
+    def forward(full: bool, containers: dict) -> None:
+        connection.send_message(
+            websocket_api.event_message(msg["id"], {"full": full, "containers": containers})
+        )
+
+    connection.subscriptions[msg["id"]] = runtime.subscribe(plan_id, forward)
+    connection.send_result(msg["id"])
+    forward(True, runtime.snapshot(plan_id))

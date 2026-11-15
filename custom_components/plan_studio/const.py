@@ -6,3 +6,4 @@ STATIC_URL = "/plan_studio_static"
 PANEL_JS = "plan-studio-panel.js"
 STORAGE_KEY = "plan_studio.plans"
 STORAGE_VERSION = 1
+RUNTIME_STORAGE_KEY = "plan_studio.runtime"

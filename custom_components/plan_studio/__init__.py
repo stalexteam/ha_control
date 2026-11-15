@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 
 from . import websocket_api as ps_ws
 from .const import DOMAIN, PANEL_JS, PANEL_URL_PATH, STATIC_URL
+from .live import LiveRuntime
 from .store import PlanStore
 
 FRONTEND_DIR = Path(__file__).parent / "frontend"
@@ -34,6 +35,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await store.async_load()
         data["store"] = store
         ps_ws.async_register(hass)
+    if "live" not in data:
+        live = LiveRuntime(hass, data["store"])
+        await live.async_start()
+        data["live"] = live
     if not data.get("static_registered"):
         await hass.http.async_register_static_paths(
             [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
@@ -55,4 +60,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     frontend.async_remove_panel(hass, PANEL_URL_PATH)
+    live = hass.data.get(DOMAIN, {}).pop("live", None)
+    if live is not None:
+        await live.async_stop()
     return True
