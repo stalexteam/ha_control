@@ -142,6 +142,10 @@ Cones and zones are drawn when the toggle is on:
 
 They are clipped to the room outline the device is in, when the device is inside a room, so they do not leak through walls. A device outside every room is not clipped. Colours come from the existing dark and light palettes.
 
+## 5a. Wall break symbol (owner request)
+
+A free wall end is a node used by exactly one wall, with no T-junction host. It is drawn as a wall fragment with a break: a grey break line across the end cap, extending slightly past both faces, with a lightning-style zigzag in the middle. It is shown in both tabs.
+
 ## 6. Interaction with stage 1 edits
 
 - Deleting a wall deletes its hosted devices. Moving a wall carries its hosted devices along. A node-A move re-anchors devices the same way it re-anchors openings.

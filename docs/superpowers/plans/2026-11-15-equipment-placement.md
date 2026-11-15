@@ -233,6 +233,13 @@ Visual spec (classes are for tests):
 - **Equipment:** a rect (`width`×`depth`, rotated by `rotation`) or a circle (`diameter`) at real size. In the middle sits a symbol glyph: `B` boiler, `PC`, `A` automation, `•` other. Under it is `label` (class `equipment-label`), then an empty `<g class="equipment-data">` reserved for stage 2b.
 - **Cones** (class `cone`): a translucent fill of `clippedCone`, drawn only when `showCones`. A ceiling light's pool is a dashed outline (class `pool`).
 - **Placement preview:** the device is drawn at 50% opacity (class `device-preview`), with the class `invalid` when invalid.
+- **Wall break symbol (owner request 2026-11-15, both modes):** draw a break symbol (class `wall-break`) at every free wall end. A free end is a node used by exactly one wall and without `host`.
+  - The symbol is a grey line (palette `breakLine`: dark `#94a3b8`, light `#7c7368`), stroke 1.5 screen px, drawn across the end cap perpendicular to the wall.
+  - It extends past both faces by `6 / scale` mm.
+  - In the middle it has a lightning-style zigzag: two short segments of about `5 / scale` mm offset along the wall direction.
+  - It is drawn above the walls in `renderLevel`, so it appears in both tabs.
+
+  Test: a single wall with two free ends gives 2 `.wall-break`; the `rectRoomLevel` box gives 0; a partition with one T-node end and one free end gives 1.
 
 - [ ] **Step 1: Failing tests (happy-dom):**
   - The level has one device of each kind and renders exactly 7 `g.device` groups.
