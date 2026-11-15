@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import type { Level } from '../../src/model/types';
-import { addOpening, deleteOpening, fits, kindPatch, moveOpening, refreshOpenings, setOpeningProps } from '../../src/model/openings';
+import type { Level, Opening } from '../../src/model/types';
+import {
+  addOpening, deleteOpening, fits, kindPatch, moveOpening, passesLight, refreshOpenings, setOpeningProps,
+} from '../../src/model/openings';
 import { rectRoomLevel } from '../fixtures';
 import { deleteWall, moveNode } from '../../src/model/ops';
 
@@ -147,5 +149,23 @@ describe('openings follow wall edits', () => {
     const out = refreshOpenings(l);
     expect(out.openings.map(o => o.invalid)).toEqual([true, true, false]);
     expect(l.openings[0].invalid).toBe(false); // input untouched
+  });
+});
+
+describe('passesLight', () => {
+  it('passesLight defaults: opening true, door/window/gate/wicket false; an explicit value wins', () => {
+    const o = (kind: Opening['kind'], extra: Partial<Opening> = {}): Opening =>
+      ({ id: 'o', wallId: 'w', kind, offset: 0, width: 900, invalid: false, ...extra });
+    expect(passesLight(o('opening'))).toBe(true);
+    for (const k of ['door', 'window', 'gate', 'wicket'] as const) expect(passesLight(o(k))).toBe(false);
+    expect(passesLight(o('opening', { passesLight: false }))).toBe(false);
+    for (const k of ['door', 'window', 'gate', 'wicket'] as const) expect(passesLight(o(k, { passesLight: true }))).toBe(true);
+  });
+  it('setOpeningProps stores passesLight and removes it when patched to undefined', () => {
+    const r = addOpening(oneWall(), 'w', 'window', 1500);
+    const on = setOpeningProps(r.level, r.openingId!, { passesLight: true });
+    expect(on.openings[0].passesLight).toBe(true);
+    const off = setOpeningProps(on, r.openingId!, { passesLight: undefined });
+    expect('passesLight' in off.openings[0]).toBe(false);
   });
 });

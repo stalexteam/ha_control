@@ -1,5 +1,5 @@
 import polygonClipping, { type Polygon, type Ring } from 'polygon-clipping';
-import type { Baseline, Id, Level, PlanNode, Pt, Wall } from '../model/types';
+import type { Baseline, Id, Level, Opening, PlanNode, Pt, Wall } from '../model/types';
 import { add, cross, dist, dot, lineIntersect, norm, perpLeft, polygonArea, scale, sub } from './vec';
 
 export interface WallFrame { a: Pt; b: Pt; dir: Pt; len: number; leftOff: number; rightOff: number }
@@ -209,13 +209,16 @@ function clipHalf(poly: Pt[], g: (p: Pt) => number): Pt[] {
   return out;
 }
 
-/** Wall contours split by the wall's valid openings. */
-export function wallPieces(level: Level): Map<Id, Pt[][]> {
+/**
+ * Wall contours split by the wall's valid openings that `cut` accepts (default: every valid opening);
+ * an invalid opening never cuts.
+ */
+export function wallPieces(level: Level, cut: (o: Opening) => boolean = () => true): Map<Id, Pt[][]> {
   const res = new Map<Id, Pt[][]>();
   for (const b of joinedBodies(level)) {
     const contour = ring(b);
     const ops = level.openings
-      .filter(o => o.wallId === b.wall.id && !o.invalid)
+      .filter(o => o.wallId === b.wall.id && !o.invalid && cut(o))
       .sort((x, y) => x.offset - y.offset);
     const t = (p: Pt) => dot(sub(p, b.f.a), b.f.dir);
     const intervals: [number, number][] = [];
@@ -251,9 +254,11 @@ export function fromRing(r: Ring): Pt[] {
 
 /** Union of all wall contours (or pieces). MultiPolygon: [polygon][ring][pt], rings not closed. */
 export function wallsUnion(level: Level, cutOpenings: boolean): Pt[][][] {
-  const polys: Pt[][] = cutOpenings
-    ? [...wallPieces(level).values()].flat()
-    : [...wallOutlines(level).values()];
+  return unionOf(cutOpenings ? [...wallPieces(level).values()].flat() : [...wallOutlines(level).values()]);
+}
+
+/** Union of wall polygons (contours or pieces). MultiPolygon: [polygon][ring][pt], rings not closed. */
+export function unionOf(polys: Pt[][]): Pt[][][] {
   const geoms: Polygon[] = polys.map(toPoly);
   if (geoms.length === 0) return [];
   let mp: ReturnType<typeof polygonClipping.union>;

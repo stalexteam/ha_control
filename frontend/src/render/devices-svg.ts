@@ -4,7 +4,7 @@ import type { BindStatus } from '../model/bindings';
 import type { ContainerState } from '../live/container-feed';
 import type { Preview, Selection } from '../editor/tools/types';
 import { clippedCone, devicePose, directionHandle, type DevicePose } from '../geometry/devices';
-import { roomHoles } from '../geometry/rooms';
+import { lineOfSightObstacles, type Medium, type Segment } from '../geometry/visibility';
 import type { PlanPalette } from './theme';
 import { cached, ringD } from './shared';
 
@@ -59,9 +59,20 @@ const BIND_STROKE: Record<Exclude<BindStatus, 'bound'>, string> = {
   unbound: 'var(--secondary-text-color, #94a3b8)', partial: '#f59e0b', missing: '#f43f5e',
 };
 
-// Room holes are cached per level object (levels are immutable snapshots): one computation per frame.
-const holesCache = new WeakMap<Level, Pt[][]>();
-const holesOf = (level: Level): Pt[][] => cached(holesCache, level, roomHoles);
+// Line-of-sight obstacles are cached per level object (levels are immutable snapshots) and medium, and the clipped
+// cone rings per level object and device object: one computation per level, not per frame. The device object (not
+// its id) is the key so the placement preview, a fresh object with a fixed id on every render, never reads a stale cone.
+type ByMedium = Partial<Record<Medium, Segment[]>>;
+const obstacleCache = new WeakMap<Level, ByMedium>();
+const obstaclesOf = (level: Level, medium: Medium): Segment[] =>
+  (cached(obstacleCache, level, (): ByMedium => ({}))[medium] ??= lineOfSightObstacles(level, medium));
+const coneCache = new WeakMap<Level, WeakMap<Device, Pt[][]>>();
+function coneRings(level: Level, d: Device): Pt[][] {
+  const byDevice = cached(coneCache, level, () => new WeakMap<Device, Pt[][]>());
+  let rings = byDevice.get(d);
+  if (!rings) { rings = clippedCone(level, d, obstaclesOf); byDevice.set(d, rings); }
+  return rings;
+}
 
 /** `dot`: the smart button's centre dot (the device colour unless a live output fill needs another ink). */
 function iconShape(d: Device, R: number, color: string, fill: string, dot = color): SVGTemplateResult {
@@ -180,7 +191,7 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
 }
 
 function renderCone(level: Level, d: Device, o: DeviceRenderOpts, preview: boolean): SVGTemplateResult | typeof nothing {
-  const rings = clippedCone(level, d, holesOf); // [] for kinds without a cone
+  const rings = coneRings(level, d); // [] for kinds without a cone
   if (rings.length === 0) return nothing;
   const p = o.palette;
   const color = d.invalid ? p.invalid : p.cone;

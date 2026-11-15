@@ -37,6 +37,8 @@ export interface Opening {
   hinge?: 'start' | 'end';
   swing?: Side;
   outside?: Side;
+  /** Light passes through (line of sight of lamps); missing = the kind's default (see passesLight in model/openings). */
+  passesLight?: boolean;
   invalid: boolean;
 }
 

@@ -95,6 +95,21 @@ describe('renderDevices', () => {
     expect(g.getAttribute('opacity')).toBe('0.5');
     expect(g.classList.contains('invalid')).toBe(true);
   });
+
+  it('the preview cone follows the preview over the same level (no stale cached cone)', () => {
+    const lv = rectRoomLevel(6000, 5000, 200);
+    const at = (x: number) => ({ placement: { mode: 'free' as const, x, y: 2500, rotation: 0 }, props: deviceDefaults('motion_sensor', 'free'), invalid: false });
+    const coneD = (x: number) => drawDevs(lv, { preview: at(x) }).querySelector('.cone')!.getAttribute('d');
+    expect(coneD(1000)).not.toBe(coneD(3000));
+    expect(coneD(1000)).toBe(coneD(1000));
+  });
+
+  it('a cone is clipped by line of sight: a sensor facing a wall stops at it', () => {
+    const lv = { ...rectRoomLevel(6000, 5000, 200), devices: [free('ms', 'motion_sensor', 5000, 2500, { zoneAngle: 90, zoneRange: 4000 })] };
+    const xs = drawDevs(lv).querySelector('.cone')!.getAttribute('d')!.match(/-?\d+(\.\d+)?(e-?\d+)?/g)!
+      .map(Number).filter((_, i) => i % 2 === 0);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(5900 + 1e-6); // the inner face of the right wall
+  });
 });
 
 describe('renderLevel modes', () => {

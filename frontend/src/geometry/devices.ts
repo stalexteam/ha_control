@@ -2,7 +2,9 @@ import polygonClipping from 'polygon-clipping';
 import { AIM_KINDS, AIM_MAX, type Device, type DevicePlacement, type Id, type Level, type Pt } from '../model/types';
 import { add, dist, dot, perpLeft, pointInPolygon, polygonArea, scale, sub } from './vec';
 import { fromRing, toPoly, wallFrame } from './walls';
-import { outlineFromHoles, roomHoles } from './rooms';
+import {
+  FAN_STEP_DEG, lineOfSightObstacles, obstaclesWithin, visibilityPolygon, type Medium, type Segment,
+} from './visibility';
 
 /** pt: device centre; dir: unit facing direction (a wall device's face normal turned by its aim); normal: the wall face normal, wall devices only. */
 export interface DevicePose { pt: Pt; dir: Pt; normal?: Pt }
@@ -100,22 +102,42 @@ export function deviceRoomId(level: Level, d: Device): Id | null {
   return best;
 }
 
+/** Line-of-sight medium of a device's cone: wall and ceiling lights cast light, motion sensors see motion; else null. */
+function coneMedium(d: Device): Medium | null {
+  switch (d.props.kind) {
+    case 'wall_light':
+    case 'ceiling_light':
+      return 'light';
+    case 'motion_sensor':
+      return 'motion';
+    default:
+      return null;
+  }
+}
+
+/** The fan's chords lie inside its radius by up to cos(step / 2): this factor makes the visibility polygon cover the cone. */
+const FAN_COVER = 1 / Math.cos((FAN_STEP_DEG / 2) * (Math.PI / 180));
+
 /**
- * Cone clipped to the room the device is in (smallest room hole containing the probe point:
- * pt + face normal for wall devices, pt for free ones). Unclipped when outside every room.
- * `holesOf` may be a per-level cache of roomHoles to avoid recomputing per device; it runs only for a device
- * with a cone. Returns rings (outer rings and any holes, unclosed): render with fill-rule evenodd. [] when none.
+ * Cone clipped to what the device sees from its probe point (pt + face normal for wall devices, so sight never
+ * starts inside the host wall; pt for free ones): walls block it, openings let its medium through (coneMedium).
+ * Unclipped when no obstacle comes within reach. `obstaclesOf` may be a per-level cache of lineOfSightObstacles; it
+ * runs only for a device with a cone. Returns rings (outer rings and any holes, unclosed): render with fill-rule
+ * evenodd. [] when none.
  */
-export function clippedCone(level: Level, d: Device, holesOf: (level: Level) => Pt[][] = roomHoles): Pt[][] {
+export function clippedCone(
+  level: Level, d: Device, obstaclesOf: (level: Level, medium: Medium) => Segment[] = lineOfSightObstacles,
+): Pt[][] {
   const shape = coneShape(level, d);
-  if (!shape) return [];
-  const pose = devicePose(level, d)!;
-  const probe = probeOf(pose); // the face normal, not the aim, so the room does not change with aim
-  const room = outlineFromHoles(holesOf(level), probe);
-  if (!room) return [shape];
+  const medium = coneMedium(d);
+  if (!shape || !medium) return [];
+  const probe = probeOf(devicePose(level, d)!);
+  const reach = Math.max(...shape.map(p => dist(p, probe))) * FAN_COVER;
+  const near = obstaclesWithin(probe, obstaclesOf(level, medium), reach);
+  if (near.length === 0) return [shape];
   let mp: ReturnType<typeof polygonClipping.intersection>;
   try {
-    mp = polygonClipping.intersection(toPoly(shape), toPoly(room));
+    mp = polygonClipping.intersection(toPoly(shape), toPoly(visibilityPolygon(probe, near, reach)));
   } catch {
     // Degenerate geometry: never crash rendering; fall back to the unclipped shape.
     return [shape];

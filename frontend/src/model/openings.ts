@@ -9,7 +9,13 @@ const EPS = 1e-6; // mm
 export const DOOR_KINDS: readonly OpeningKind[] = ['door', 'gate', 'wicket'];
 
 /** Fields setOpeningProps may change; a key set to undefined is removed from the opening. */
-export type OpeningPatch = Partial<Pick<Opening, 'width' | 'kind' | 'hinge' | 'swing' | 'outside'>>;
+export type OpeningPatch = Partial<Pick<Opening, 'width' | 'kind' | 'hinge' | 'swing' | 'outside' | 'passesLight'>>;
+
+/** Whether light passes an opening of this kind when its `passesLight` is not set: only a plain opening (a gap). */
+export const passesLightByDefault = (kind: OpeningKind): boolean => kind === 'opening';
+
+/** Effective `passesLight`: the explicit value, else the kind's default (opening true; door, window, gate, wicket false). */
+export const passesLight = (o: Opening): boolean => o.passesLight ?? passesLightByDefault(o.kind);
 
 function overlaps(o: { offset: number; width: number }, p: { offset: number; width: number }): boolean {
   return o.offset < p.offset + p.width - EPS && p.offset < o.offset + o.width - EPS;

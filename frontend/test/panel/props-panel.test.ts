@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { addOpening } from '../../src/model/openings';
 import { initialNext } from '../../src/panel/next-object';
 import { rectRoomLevel } from '../fixtures';
@@ -77,5 +77,48 @@ describe('aim field', () => {
     el.value = '0'; el.dispatchEvent(new Event('change'));
     expect(got).toHaveLength(1);
     expect('aim' in got[0]).toBe(false);
+  });
+});
+
+describe('opening Passes light field', () => {
+  beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
+
+  it('the Passes light checkbox toggles the opening\'s passesLight and undo restores it', async () => {
+    const { mount, undo, $ } = await import('./helpers');
+    const el = await mount();
+    const r = addOpening(rectRoomLevel(4000, 3000, 400), 'w0', 'door', 2000);
+    el.history!.push(r.level);
+    el.selection = { kind: 'opening', id: r.openingId! };
+    await el.updateComplete;
+    const box = () => $<HTMLInputElement>(el, '.props input[data-field="passesLight"]');
+    expect(box().type).toBe('checkbox');
+    expect(box().checked).toBe(false); // a door blocks light by default
+    expect(el.shadowRoot!.querySelector('.props')!.textContent).toContain('Passes light');
+    box().checked = true;
+    box().dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.history!.current.openings[0].passesLight).toBe(true);
+    expect(box().checked).toBe(true);
+    await undo(el);
+    expect('passesLight' in el.history!.current.openings[0]).toBe(false);
+  });
+
+  it('an opening is checked by default; unchecking stores false, re-checking drops the key (the default)', async () => {
+    const { mount, $ } = await import('./helpers');
+    const el = await mount();
+    const r = addOpening(rectRoomLevel(4000, 3000, 400), 'w0', 'opening', 2000);
+    el.history!.push(r.level);
+    el.selection = { kind: 'opening', id: r.openingId! };
+    await el.updateComplete;
+    const box = () => $<HTMLInputElement>(el, '.props input[data-field="passesLight"]');
+    expect(box().checked).toBe(true);
+    box().checked = false;
+    box().dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.history!.current.openings[0].passesLight).toBe(false);
+    box().checked = true;
+    box().dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect('passesLight' in el.history!.current.openings[0]).toBe(false);
   });
 });

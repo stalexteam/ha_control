@@ -217,6 +217,22 @@ describe('wallPieces', () => {
     const l = lvl([{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 3000, y: 0 }], [wall('w', 'a', 'b', 200)]);
     expect(wallPieces(l).get('w')).toHaveLength(1);
   });
+  const fiveKinds = () => lvl([{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 12000, y: 0 }], [wall('w', 'a', 'b', 200)],
+    (['opening', 'door', 'window', 'gate', 'wicket'] as const).map((kind, i) =>
+      ({ id: `o${i}`, wallId: 'w', kind, offset: 1000 + i * 2000, width: 900, invalid: false })));
+  it('wallPieces default still cuts every valid opening', () => {
+    const l = fiveKinds();
+    expect(wallPieces(l).get('w')).toHaveLength(6);
+    const bad = { ...l, openings: l.openings.map(o => (o.kind === 'door' ? { ...o, invalid: true } : o)) };
+    expect(wallPieces(bad).get('w')).toHaveLength(5); // an invalid opening never cuts
+  });
+  it('the cut predicate keeps the openings it rejects as solid wall', () => {
+    const l = fiveKinds();
+    expect(wallPieces(l, o => o.kind === 'opening').get('w')).toHaveLength(2);
+    expect(wallPieces(l, () => false).get('w')).toHaveLength(1);
+    const bad = { ...l, openings: l.openings.map(o => ({ ...o, invalid: true })) };
+    expect(wallPieces(bad, () => true).get('w')).toHaveLength(1); // the predicate never cuts an invalid opening
+  });
 });
 
 describe('wallsUnion', () => {

@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { deviceDefaults, type Device, type DevicePlacement, type DeviceProps, type Level } from '../../src/model/types';
+import { deviceDefaults, type Device, type DevicePlacement, type DeviceProps, type Level, type Pt } from '../../src/model/types';
 import { addZone } from '../../src/model/zones';
 import {
   deviceRoomId, angleFromHandle, clippedCone, coneShape, deviceAt, devicePose, directionHandle, wrap180, wrap360,
 } from '../../src/geometry/devices';
-import { polygonArea } from '../../src/geometry/vec';
-import { rectRoomLevel } from '../fixtures';
+import type { Medium, Segment } from '../../src/geometry/visibility';
+import { pointInPolygon, polygonArea } from '../../src/geometry/vec';
+import { midGap, rectRoomLevel, twoRoomsLevel } from '../fixtures';
 
 const dev = (id: string, props: DeviceProps, placement: DevicePlacement): Device =>
   ({ id, name: id, props, placement, invalid: false });
@@ -118,9 +119,9 @@ describe('coneShape / clippedCone', () => {
     for (const r of rings) for (const p of r) expect(p.y).toBeGreaterThanOrEqual(200 - 1e-6);
   });
 
-  it('device outside the box is not clipped', () => {
+  it('a device with no wall within reach is not clipped', () => {
     const box = rectRoomLevel(3000, 4000, 400);
-    const d = dev('m', { kind: 'motion_sensor', zoneAngle: 360, zoneRange: 5000 }, { mode: 'free', x: -3000, y: -3000, rotation: 0 });
+    const d = dev('m', { kind: 'motion_sensor', zoneAngle: 360, zoneRange: 5000 }, { mode: 'free', x: -9000, y: -9000, rotation: 0 });
     expect(clippedCone(box, d)).toEqual([coneShape(box, d)]);
   });
 
@@ -139,16 +140,105 @@ describe('coneShape / clippedCone', () => {
     expect(clippedCone(box, sw)).toEqual([]);
   });
 
-  it('room holes are asked for only when the device has a cone, through the given getter', () => {
+  it('obstacles are asked for only when the device has a cone, through the given getter, with its medium', () => {
     const box = rectRoomLevel(3000, 4000, 400);
-    const calls: Level[] = [];
-    const holesOf = (l: Level) => { calls.push(l); return []; };
+    const calls: [Level, Medium][] = [];
+    const obstaclesOf = (l: Level, m: Medium): Segment[] => { calls.push([l, m]); return []; };
     const sw = dev('s', deviceDefaults('wall_switch', 'wall'), { mode: 'wall', wallId: 'w0', side: 'right', offset: 100 });
-    expect(clippedCone(box, sw, holesOf)).toEqual([]);
+    expect(clippedCone(box, sw, obstaclesOf)).toEqual([]);
     expect(calls).toEqual([]);
     const m = dev('m', { kind: 'motion_sensor', zoneAngle: 360, zoneRange: 5000 }, { mode: 'free', x: 1500, y: 2000, rotation: 0 });
-    expect(clippedCone(box, m, holesOf)).toEqual([coneShape(box, m)]);
-    expect(calls).toEqual([box]);
+    expect(clippedCone(box, m, obstaclesOf)).toEqual([coneShape(box, m)]);
+    const wl = dev('w', { kind: 'wall_light', coneAngle: 90, coneRange: 2000 }, { mode: 'free', x: 1500, y: 2000, rotation: 0 });
+    clippedCone(box, wl, obstaclesOf);
+    const cl = dev('c', { ...deviceDefaults('ceiling_light', 'free'), poolRadius: 1000 } as DeviceProps, { mode: 'free', x: 1500, y: 2000, rotation: 0 });
+    clippedCone(box, cl, obstaclesOf);
+    expect(calls).toEqual([[box, 'motion'], [box, 'light'], [box, 'light']]);
+  });
+});
+
+/** Even-odd membership in the rings clippedCone returns. */
+const covers = (rings: Pt[][], p: Pt): boolean => rings.filter(r => pointInPolygon(p, r)).length % 2 === 1;
+const freeAt = (x: number, y: number, rotation = 0): DevicePlacement => ({ mode: 'free', x, y, rotation });
+const motion = (pl: DevicePlacement, zoneAngle = 90, zoneRange = 5000) => dev('m', { kind: 'motion_sensor', zoneAngle, zoneRange }, pl);
+const wallLight = (pl: DevicePlacement, coneAngle = 90, coneRange = 5000) => dev('w', { kind: 'wall_light', coneAngle, coneRange }, pl);
+const pool = (pl: DevicePlacement, poolRadius = 5000) =>
+  dev('c', { ...deviceDefaults('ceiling_light', 'free'), poolRadius } as DeviceProps, pl);
+
+/** L-shaped room on axis nodes (0,0)-(4000,0)-(4000,2000)-(2000,2000)-(2000,5000)-(0,5000), 200 mm walls. */
+function lRoom(): Level {
+  const pts = [[0, 0], [4000, 0], [4000, 2000], [2000, 2000], [2000, 5000], [0, 5000]];
+  return {
+    ...rectRoomLevel(1, 1, 200),
+    nodes: pts.map(([x, y], i) => ({ id: `n${i}`, x, y })),
+    walls: pts.map((_, i) => ({
+      id: `w${i}`, a: `n${i}`, b: `n${(i + 1) % pts.length}`, thickness: 200, type: 'partition' as const, baseline: 'center' as const,
+    })),
+  };
+}
+
+describe('clippedCone: line of sight', () => {
+  it('wall light on a face still lights its room', () => {
+    const box = rectRoomLevel(3000, 4000, 400);
+    const rings = clippedCone(box, wallLight({ mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 }, 160, 6000));
+    expect(rings.length).toBeGreaterThan(0);
+    expect(area(rings)).toBeGreaterThan(0.5 * 2600 * 3600);
+    for (const r of rings) {
+      for (const p of r) {
+        expect(p.x).toBeGreaterThanOrEqual(200 - 1e-6);
+        expect(p.x).toBeLessThanOrEqual(2800 + 1e-6);
+        expect(p.y).toBeGreaterThanOrEqual(200 - 1e-6);
+        expect(p.y).toBeLessThanOrEqual(3800 + 1e-6);
+      }
+    }
+    expect(covers(rings, { x: 1500, y: 3000 })).toBe(true);
+  });
+
+  it('a wall light on the outer face lights the outside, not its room', () => {
+    const box = rectRoomLevel(3000, 4000, 400);
+    const rings = clippedCone(box, wallLight({ mode: 'wall', wallId: 'w0', side: 'left', offset: 1500 }, 160, 3000));
+    expect(rings.length).toBeGreaterThan(0);
+    for (const r of rings) for (const p of r) expect(p.y).toBeLessThanOrEqual(-200 + 1e-6);
+  });
+
+  it('a motion sensor in an L-room does not see around the corner', () => {
+    const rings = clippedCone(lRoom(), motion(freeAt(3600, 1000), 360, 8000));
+    expect(covers(rings, { x: 1500, y: 4500 })).toBe(false); // far leg, behind the inner corner
+    expect(covers(rings, { x: 1000, y: 1000 })).toBe(true);
+    expect(covers(rings, { x: 500, y: 2500 })).toBe(true); // far leg, seen past the corner
+  });
+
+  it("an opening lets the cone through only within the gap's sight lines", () => {
+    const rings = clippedCone(twoRoomsLevel([midGap('opening')]), motion(freeAt(1000, 1500)));
+    expect(covers(rings, { x: 4500, y: 1500 })).toBe(true); // straight through the gap
+    expect(covers(rings, { x: 4500, y: 300 })).toBe(false); // beside the gap, behind the wall
+    expect(covers(rings, { x: 2000, y: 1500 })).toBe(true);
+  });
+
+  it('a door blocks like a wall', () => {
+    const lv = twoRoomsLevel([midGap('door')]);
+    for (const d of [motion(freeAt(1000, 1500)), wallLight(freeAt(1000, 1500)), pool(freeAt(1000, 1500))]) {
+      const rings = clippedCone(lv, d);
+      expect(covers(rings, { x: 4500, y: 1500 })).toBe(false);
+      expect(covers(rings, { x: 2000, y: 1500 })).toBe(true);
+    }
+  });
+
+  it("a window with Passes light lets a wall light's cone through but a motion sensor's zone stays blocked", () => {
+    const lv = twoRoomsLevel([midGap('window', { passesLight: true })]);
+    expect(covers(clippedCone(lv, wallLight(freeAt(1000, 1500))), { x: 4500, y: 1500 })).toBe(true);
+    expect(covers(clippedCone(lv, pool(freeAt(1000, 1500))), { x: 4500, y: 1500 })).toBe(true);
+    expect(covers(clippedCone(lv, motion(freeAt(1000, 1500))), { x: 4500, y: 1500 })).toBe(false);
+    const plain = twoRoomsLevel([midGap('window')]);
+    expect(covers(clippedCone(plain, wallLight(freeAt(1000, 1500))), { x: 4500, y: 1500 })).toBe(false);
+  });
+
+  it('an outdoor floodlight is clipped by the house walls', () => {
+    const box = rectRoomLevel(3000, 4000, 400);
+    const rings = clippedCone(box, wallLight(freeAt(-2000, 2000), 90, 6000));
+    expect(covers(rings, { x: 1500, y: 2000 })).toBe(false); // inside the house
+    expect(covers(rings, { x: -1000, y: 2000 })).toBe(true);
+    expect(covers(rings, { x: -500, y: 2600 })).toBe(true);
   });
 });
 
