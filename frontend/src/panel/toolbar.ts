@@ -33,6 +33,10 @@ export interface TopBarOpts {
   onUndo(): void;
   onRedo(): void;
   onSave(): void;
+  onNewPlan(): void;
+  onDeletePlan(): void;
+  /** A delete request is running. */
+  busy: boolean;
 }
 
 function saveLabel(o: TopBarOpts): string {
@@ -70,6 +74,10 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
           }}>
           ${o.plans.map(p => html`<option value=${p.id} ?selected=${p.id === o.planId}>${p.name}</option>`)}
         </select>` : nothing}
+      <button class="btn" data-action="new-plan" title=${t('plan.new', lang)} aria-label=${t('plan.new', lang)}
+        ?disabled=${o.busy || o.saveState === 'saving'} @click=${o.onNewPlan}>+</button>
+      <button class="btn" data-action="delete-plan" title=${t('plan.delete', lang)} aria-label=${t('plan.delete', lang)}
+        ?disabled=${o.busy || o.saveState === 'saving'} @click=${o.onDeletePlan}>&#128465;</button>
       <input class="plan-name" .value=${o.planName} aria-label=${t('plan.name', lang)} title=${t('plan.name', lang)}
         @change=${(e: Event) => o.onRename((e.target as HTMLInputElement).value)} />
       <span class="sp"></span>

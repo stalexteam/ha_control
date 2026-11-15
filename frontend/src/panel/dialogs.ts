@@ -91,3 +91,47 @@ export function renderSwitchDialog(o: SwitchOpts): TemplateResult {
       </div>
     </div>`;
 }
+
+export interface NewPlanOpts {
+  lang: string;
+  onDiscard(): void;
+  onCancel(): void;
+}
+
+/** Confirmation before starting a new plan while the current one has unsaved changes. */
+export function renderNewPlanDialog(o: NewPlanOpts): TemplateResult {
+  const lang = o.lang;
+  return html`
+    <div class="backdrop">
+      <div class="dialog" role="dialog" aria-modal="true">
+        <h3>${t('new.title', lang)}</h3>
+        <p>${t('new.text', lang)}</p>
+        <div class="actions">
+          <button class="btn primary" data-action="new-discard" @click=${o.onDiscard}>${t('new.discard', lang)}</button>
+          <button class="btn" data-action="new-cancel" @click=${o.onCancel}>${t('new.cancel', lang)}</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+export interface DeletePlanOpts {
+  lang: string;
+  name: string;
+  onDelete(): void;
+  onCancel(): void;
+}
+
+export function renderDeleteDialog(o: DeletePlanOpts): TemplateResult {
+  const lang = o.lang;
+  return html`
+    <div class="backdrop">
+      <div class="dialog" role="dialog" aria-modal="true">
+        <h3>${t('delete.title', lang)}</h3>
+        <p>${t('delete.text', lang).replace('{name}', o.name)}</p>
+        <div class="actions">
+          <button class="btn primary" data-action="delete-confirm" @click=${o.onDelete}>${t('delete.confirm', lang)}</button>
+          <button class="btn" data-action="delete-cancel" @click=${o.onCancel}>${t('delete.cancel', lang)}</button>
+        </div>
+      </div>
+    </div>`;
+}

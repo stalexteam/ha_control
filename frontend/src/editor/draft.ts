@@ -95,6 +95,13 @@ export class DraftStore {
     try { this.storage()?.setItem(LAST_PLAN_KEY, planId); } catch { /* quota / unavailable */ }
   }
 
+  clearLastPlanId(planId: Id): void {
+    try {
+      const s = this.storage();
+      if (s?.getItem(LAST_PLAN_KEY) === planId) s.removeItem(LAST_PLAN_KEY);
+    } catch { /* unavailable */ }
+  }
+
   clear(planId: Id): void {
     try { this.storage()?.removeItem(DRAFT_PREFIX + planId); } catch { /* unavailable */ }
   }

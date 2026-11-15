@@ -52,3 +52,11 @@ export async function savePlan(
     throw err;
   }
 }
+
+/** Deletes a stored plan (admin only on the server). */
+export async function deletePlan(hass: HassLike, id: Id): Promise<void> {
+  await hass.connection.sendMessagePromise<Record<string, never>>({
+    type: 'plan_studio/plans/delete',
+    plan_id: id,
+  });
+}

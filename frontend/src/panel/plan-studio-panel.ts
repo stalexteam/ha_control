@@ -14,7 +14,7 @@ import { createWallTool } from '../editor/tools/wall-tool';
 import { createOpeningTool } from '../editor/tools/opening-tool';
 import { createZoneTool } from '../editor/tools/zone-tool';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
-import { getPlan, listPlans, type HassLike, type PlanSummary } from '../api';
+import { deletePlan, getPlan, listPlans, type HassLike, type PlanSummary } from '../api';
 import { paletteFor, renderLevel } from '../render/plan-svg';
 import { t } from '../i18n';
 import { renderToolRail, renderTopBar, type ToolId } from './toolbar';
@@ -24,7 +24,7 @@ import { renderTracker, trackerLive } from './tracker';
 import { panelStyles, paletteVars } from './styles';
 import { fitView, renderGrid, screenToMm, type View } from './viewport';
 import { EditorInput, type InputHost } from './input';
-import { renderConflictDialog, renderDraftBanner, renderRestoreDialog, renderSwitchDialog } from './dialogs';
+import { renderConflictDialog, renderDeleteDialog, renderDraftBanner, renderNewPlanDialog, renderRestoreDialog, renderSwitchDialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 
 const EMPTY_LEVEL: Level = { id: '', name: '', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [] };
@@ -74,6 +74,13 @@ export class PlanStudioPanel extends LitElement {
   /** Plan the user picked while the current one is dirty: waiting for confirmation. */
   @state() private switchTo: Id | null = null;
 
+  /** Confirmation for "New plan" (current plan is dirty) is open. */
+  @state() private newConfirm = false;
+  /** Confirmation for "Delete plan" is open. */
+  @state() private deleteConfirm = false;
+  /** A delete request is running. */
+  @state() private deleting = false;
+
   history: History<Level> | null = null;
   readonly save: SaveController;
   activeTool: Tool;
@@ -113,9 +120,11 @@ export class PlanStudioPanel extends LitElement {
       get view() { return self.view; },
       set view(v: View) { self.view = v; },
       ready: () => !!this.history,
-      modal: () => this.restoreOpen || this.dialog !== 'none' || this.switchTo !== null,
+      modal: () => this.restoreOpen || this.dialog !== 'none' || this.switchTo !== null
+        || this.newConfirm || this.deleteConfirm,
       // Escape on the restore prompt = decide later: the draft is kept and a banner keeps offering it.
-      closeModal: () => { this.restoreOpen = false; this.dialog = 'none'; this.switchTo = null; },
+      closeModal: () => { this.restoreOpen = false; this.dialog = 'none'; this.switchTo = null;
+        this.newConfirm = false; this.deleteConfirm = false; },
       toMm: e => this.toMm(e),
       focus: () => this.focus(),
       update: () => this.requestUpdate(),
@@ -264,6 +273,68 @@ export class PlanStudioPanel extends LitElement {
     this.drafts.cancel();
     if (!this.draftBlocked()) this.drafts.clear(this.plan.id);
     void this.switchPlan(id);
+  }
+
+  // ---- new / delete ----
+
+  private busy(): boolean { return this.save.state === 'saving' || this.deleting; }
+
+  private requestNewPlan(): void {
+    if (!this.plan || this.busy()) return;
+    if (this.save.dirty) { this.newConfirm = true; return; }
+    this.startNewPlan();
+  }
+
+  /** Replaces the open plan with a fresh unsaved one (tool, selection and history are reset by adopt). */
+  private startNewPlan(): void {
+    this.newConfirm = false;
+    this.drafts.cancel();
+    if (this.plan && !this.draftBlocked()) this.drafts.clear(this.plan.id);
+    this.openFresh();
+  }
+
+  private openFresh(): void {
+    this.toolId = 'select';
+    this.notice = null;
+    this.save.reset(null);
+    this.adopt(emptyPlan(t('plan.default', this.uiLang)));
+    this.offerDraft(null);
+  }
+
+  private requestDelete(): void {
+    if (!this.plan || this.busy()) return;
+    this.deleteConfirm = true;
+  }
+
+  private async confirmDelete(): Promise<void> {
+    this.deleteConfirm = false;
+    const plan = this.plan;
+    if (!plan || !this.hass || this.busy()) return;
+    this.deleting = true;
+    try {
+      if (this.save.baseRevision !== null) {
+        try {
+          await deletePlan(this.hass, plan.id);
+        } catch (err) {
+          this.save.state = 'error';
+          this.save.errorMessage = errorText(err);
+          return;
+        }
+      }
+      this.drafts.cancel();
+      this.drafts.clear(plan.id);
+      this.drafts.clearLastPlanId(plan.id);
+      if (this.pendingDraft?.planId === plan.id) this.offerDraft(null);
+      let list: PlanSummary[] = [];
+      try { list = await listPlans(this.hass); this.plans = list; } catch { list = []; }
+      const next = list.find(x => x.id !== plan.id);
+      if (next) {
+        try { await this.openPlan(next.id); return; } catch (err) { this.notice = errorText(err); }
+      }
+      this.openFresh();
+    } finally {
+      this.deleting = false;
+    }
   }
 
   private adopt(input: Plan): void {
@@ -438,6 +509,17 @@ export class PlanStudioPanel extends LitElement {
         lang: this.uiLang, savedAt: d.savedAt, onRestore: () => this.restoreDraft(d), onDiscard: () => this.discardDraft(d),
       });
     }
+    if (this.newConfirm) {
+      return renderNewPlanDialog({
+        lang: this.uiLang, onDiscard: () => this.startNewPlan(), onCancel: () => { this.newConfirm = false; },
+      });
+    }
+    if (this.deleteConfirm) {
+      return renderDeleteDialog({
+        lang: this.uiLang, name: this.plan?.name ?? '',
+        onDelete: () => { void this.confirmDelete(); }, onCancel: () => { this.deleteConfirm = false; },
+      });
+    }
     if (this.switchTo) {
       return renderSwitchDialog({
         lang: this.uiLang, onDiscard: () => this.confirmSwitch(), onCancel: () => { this.switchTo = null; },
@@ -475,6 +557,7 @@ export class PlanStudioPanel extends LitElement {
           lead: this.narrow ? html`<ha-menu-button .hass=${this.hass} .narrow=${this.narrow}></ha-menu-button>` : nothing,
           onRename: name => { this.plan = { ...this.plan!, name }; s.markDirty(); },
           onPickPlan: id => this.pickPlan(id),
+          onNewPlan: () => this.requestNewPlan(), onDeletePlan: () => this.requestDelete(), busy: this.deleting,
           onWallType: wt => this.setWallType(wt),
           onThickness: mm => { this.thickness = mm; },
           onUndo: () => this.undo(), onRedo: () => this.redo(), onSave: () => this.doSave(),
