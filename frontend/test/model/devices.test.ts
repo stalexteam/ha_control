@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { rectRoomLevel } from '../fixtures';
 import { addDevice, deleteDevice, moveDevice, refreshDevices, setDeviceProps } from '../../src/model/devices';
-import { deleteWall, moveNode } from '../../src/model/ops';
+import { deleteWall, mergeNodes, moveNode } from '../../src/model/ops';
 import { deviceDefaults, normalizeLevel, type DevicePlacement, type Level } from '../../src/model/types';
 
 const room = (): Level => rectRoomLevel(3000, 4000, 400);
@@ -101,6 +101,30 @@ describe('ops integration', () => {
     delete l.devices;
     expect(() => moveNode(l as Level, 'n0', { x: 10, y: 0 })).not.toThrow();
     expect(refreshDevices(l as Level).devices).toEqual([]);
+  });
+});
+
+describe('moveDevice refresh and mergeNodes', () => {
+  const invalidated = () => {
+    const l = addDevice(room(), deviceDefaults('wall_light', 'wall'), onWall('w0', 2500), 'L').level;
+    const r = moveNode(l, 'n1', { x: 1000, y: 0 });
+    expect(r.devices[0].invalid).toBe(true);
+    return r;
+  };
+  it('invalid device moved to valid offset -> invalid false', () => {
+    const r = invalidated();
+    expect(moveDevice(r, r.devices[0].id, onWall('w0', 500)).devices[0].invalid).toBe(false);
+  });
+  it('invalid wall light moved to free -> invalid false', () => {
+    const r = invalidated();
+    expect(moveDevice(r, r.devices[0].id, free).devices[0].invalid).toBe(false);
+  });
+  it('mergeNodes collapsing a wall removes its hosted devices', () => {
+    let l = addDevice(room(), deviceDefaults('switch', 'wall'), onWall('w0', 1000), 'S').level;
+    l = addDevice(l, deviceDefaults('socket', 'wall'), onWall('w1', 1000), 'K').level;
+    const r = mergeNodes(l, 'n0', 'n1');
+    expect(r.walls.some(w => w.id === 'w0')).toBe(false);
+    expect(r.devices.map(d => d.name)).toEqual(['K']);
   });
 });
 

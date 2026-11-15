@@ -51,7 +51,7 @@ export function moveDevice(level: Level, id: Id, placement: DevicePlacement): Le
       props = { ...props, zoneAngle: next.zoneAngle };
     }
   }
-  return withDevices(level, devices.map(x => (x.id === id ? { ...x, placement, props } : x)));
+  return refreshDevices(withDevices(level, devices.map(x => (x.id === id ? { ...x, placement, props } : x))));
 }
 
 /** The patch never changes the kind. */
@@ -74,6 +74,7 @@ export function refreshDevices(level: Level): Level {
   return withDevices(level, (level.devices ?? []).map(d => {
     if (d.placement.mode !== 'wall') return d.invalid ? { ...d, invalid: false } : d;
     const l = wallLen(level, d.placement.wallId);
+    // l === null (wall gone) is a safety net: ops delete hosted devices with their wall.
     const invalid = l === null || d.placement.offset < -EPS || d.placement.offset > l + EPS;
     return { ...d, invalid };
   }));
