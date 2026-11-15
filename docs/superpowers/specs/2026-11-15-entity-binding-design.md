@@ -1,7 +1,7 @@
 # Plan Studio stage 2b (entity binding) design
 
 Date: 2026-11-15
-Status: draft v2 (wizard, modal, HA-like styling), awaiting owner approval
+Status: approved 2026-11-15 (v3: wizard, HA-like styling, MDI equipment icons, left properties panel instead of modal)
 Builds on: `2026-11-14-ha-floorplan-editor-design.md` (stage 1) and `2026-11-15-equipment-placement-design.md` (stage 2a).
 
 ## 1. Why
@@ -149,14 +149,17 @@ The owner called the old four-value `symbol` a meagre choice.
   - The device list is grouped by status: Missing, Unbound, Partial, Bound.
   - Each row shows the device name, its kind icon and the bound count over the role count.
   - Clicking a row selects the device and pans the view to it.
-- **Editing happens in a modal dialog over the plan** (owner request), not in a right panel.
-  - Clicking a device on the plan or in the list opens it, and the plan stays visible behind a scrim.
-  - Header: device name and kind (read-only).
-  - Body: the HA device picker, then one field per role. Each field has:
-    - the entity combobox, with its "show all" link;
-    - a warning when the entity is missing;
-    - the "also bound to …" info.
-  - Footer: Close, an "N not bound" counter, and "Next unbound device". Esc or a click on the scrim closes the dialog.
+- **Layout: the same three columns as every step, with no modal.** The owner first asked for a modal, then replaced it: "for bindings too, instead of a popup, the same properties panel on the left". Left to right:
+  1. The **device list**, in the place of the tool rail.
+  2. The **properties panel** with the binding fields:
+     - header: the device name and kind (read-only);
+     - the HA device picker;
+     - one field per role, each with the entity combobox, a "Show all" link, the missing or unavailable note, and the "also bound to …" info;
+     - footer: an "N not bound" counter and a "Next unbound device" button.
+  3. The **plan**.
+
+  With nothing selected, the panel invites the user to pick a device or press "Next unbound device". Esc clears the selection.
+- The left-panel order "tool rail | properties | plan" was applied to the Plan and Equipment steps in v0.2.7. The Binding step reuses it, so all steps look alike.
 - **Entity combobox** (owner request: "like HA's entity picker").
   - Closed, it shows the domain or device-class icon, the friendly name, "HA area ▸ HA device", a clear ✕ and a ▾.
   - Open, it shows a search field and rows with icon, name, "area ▸ device", the domain label ("Sensor", "Binary sensor"…) and the current value.
@@ -189,7 +192,7 @@ The owner called the old four-value `symbol` a meagre choice.
 
 - The exact search widget. It can be an input with a filtered list, or HA's `ha-entity-picker` if it can be used without breaking the bundle-only, no-CDN rule. The default is a self-contained Lit component.
 - Badge artwork and colours from the palette.
-- The panel layout split: a new `binding-panel.ts` and `binding-list.ts`. `plan-studio-panel.ts` must stay under 600 lines.
+- The module split follows the v0.2.7 refactor: new `binding-list.ts` and `binding-props.ts` (and a pure `binding-candidates.ts`), composed by `side-panel.ts`. `plan-studio-panel.ts` stays a thin composer (it is about 333 lines now; keep it ≤ 400).
 
 ## 8. Verification
 
