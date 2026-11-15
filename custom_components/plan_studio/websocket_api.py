@@ -95,7 +95,7 @@ async def ws_delete(hass, connection, msg):
 @websocket_api.require_admin
 @callback
 def ws_containers_subscribe(hass, connection, msg):
-    """Stream container outputs of one plan: a full snapshot first, then changes.
+    """Stream container state and events of one plan: a full snapshot first, then changes.
 
     Ends with HA's standard `unsubscribe_events` or when the connection closes.
     """

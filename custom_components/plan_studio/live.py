@@ -42,7 +42,7 @@ class LiveRuntime:
         # The v0.4 runtime store held persisted outputs; it is no longer used.
         try:
             await Store(self._hass, 1, RUNTIME_STORAGE_KEY).async_remove()
-        except OSError:  # a missing file is fine; a failed cleanup must not stop the runtime
+        except Exception:  # noqa: BLE001 - a missing file is fine; a failed cleanup must not stop the runtime
             _LOGGER.warning("could not remove the old %s store", RUNTIME_STORAGE_KEY, exc_info=True)
         self.runtime = Runtime(self._lookup, time.monotonic, _clock)
         self.reload()

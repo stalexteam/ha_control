@@ -555,6 +555,19 @@ describe('binding step: output line', () => {
     expect(line(el)).toBe('Last event: auto, 23:59:59');
   });
 
+  it('the output line parses the server timestamp format (microseconds, +00:00) to local HH:MM:SS', async () => {
+    const live = liveHass();
+    const el = await open(live.hass);
+    // The server sends dt_util.utcnow().isoformat(); build the same shape for a known local time.
+    const server = new Date(2026, 10, 15, 12, 3, 15).toISOString().replace('.000Z', '.123456+00:00');
+    expect(server).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.123456\+00:00$/);
+    await push(el, live.subs[0], { full: true, containers: {
+      b: { kind: 'smart_button', status: 'ok', last: { action: 'toggle', at: server } },
+    } });
+    await pick(el, 'b');
+    expect(line(el)).toBe('Last event: toggle, 12:03:15');
+  });
+
   it('the plan badge flashes a partial-frame intent for 3 s; the snapshot does not flash', async () => {
     const live = liveHass();
     const el = await open(live.hass);
@@ -636,7 +649,7 @@ describe('binding step: output line', () => {
   it('a connection without subscribeMessage says live outputs are not available', async () => {
     const el = await open(); // registryHass: sendMessagePromise only
     await pick(el, 'w');
-    expect(line(el)).toBe('Live outputs are not available.');
+    expect(line(el)).toBe('Live state is not available.');
     expect(coloured(el)).toEqual([]);
   });
 

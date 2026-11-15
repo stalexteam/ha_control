@@ -217,14 +217,14 @@ describe('ContainerFeed', () => {
     const feed = new ContainerFeed(host(), () => ({ sendMessagePromise: () => Promise.reject(new Error('not used')) }));
     expect(() => feed.watch('P1')).not.toThrow();
     expect(feed.ready).toBe(false);
-    expect(feed.error).toBe('Live outputs are not available.');
+    expect(feed.error).toBe('Live state is not available.');
     expect(feed.get('a')).toBeUndefined();
     expect(() => feed.stop()).not.toThrow();
     expect(feed.error).toBeNull();
 
     const none = new ContainerFeed(host(), () => undefined);
     expect(() => none.watch('P1')).not.toThrow();
-    expect(none.error).toBe('Live outputs are not available.');
+    expect(none.error).toBe('Live state is not available.');
   });
 
   it('watching no plan subscribes to nothing', () => {

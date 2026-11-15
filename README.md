@@ -1,6 +1,6 @@
 # Plan Studio
 
-Home Assistant custom integration that adds a "Plan Studio" sidebar panel: a 2D floor-plan editor in three steps. Plan: draw walls, openings and rooms. Equipment: place lights, sensors, switches and other devices. Binding: link each device to Home Assistant entities. Plans are saved to Home Assistant storage, and wall switches and smart buttons run as live input containers. Automation zones are not built yet.
+Home Assistant custom integration that adds a "Plan Studio" sidebar panel: a 2D floor-plan editor in three steps. Plan: draw walls, openings and rooms. Equipment: place lights, sensors, switches and other devices. Binding: link each device to Home Assistant entities. Plans are saved to Home Assistant storage, and wall switches and smart buttons report button and switch events. Automation zones are not built yet.
 
 ## Install
 
@@ -62,19 +62,31 @@ Binding links every device on the plan to Home Assistant entities, one field per
 
 ### Wall switches and smart buttons
 
-Wall switches and smart buttons are input containers: virtual objects with a live output, `on`, `off`, `auto` or `error`, that later automations will read. They run inside Home Assistant for every saved plan, also while the panel is closed, and keep their output across restarts. Changes take effect when the plan is saved. No Home Assistant entities are created.
+Wall switches and smart buttons are input containers: virtual objects that report events. Each event is an intent (`toggle`, `set on`, `set off` or `auto`) plus a status (`ok` or `error`; the reason is "not configured" or "unavailable (ids)"). Nothing acts on intents yet; controllers will come later. No Home Assistant entities or events are created. They run inside Home Assistant for every saved plan, also while the panel is closed, and changes take effect when the plan is saved.
 
-- Wall switch, in the Binding step:
-  - State: the relay, light or binary sensor it follows; the output is `on` or `off`.
-  - "Auto by double toggle": two toggles within "Window, s" (1 to 10 seconds, default 3) give `auto`; a single toggle later gives the state again.
 - Smart button, in the Binding step:
-  - On / Off: the action sensor or event entity, Slot (0 to 9) and Event (`single`, `double`, `hold` or any other text). Slot 0 waits for the action value `event`, slot N for `N_event`. In toggle mode each press switches between `on` and `off`.
-  - "Separate Off" splits the section into On and Off, each with its own trigger. "Auto" adds the Auto section, whose trigger gives `auto`. Both new sections start with the On entity.
-  - Final state (light or switch), shown in toggle mode with Auto: a press while in `auto` gives the opposite of its state, or `off` when none is set.
+  - On / Off: the action sensor or event entity, Slot (0 to 9) and Event (`single`, `double`, `hold` or any other text). Slot 0 waits for the action value `event`, slot N for `N_event`. In toggle mode a press gives `toggle`.
+  - "Separate Off" splits the section into On and Off, each with its own trigger: On gives `set on`, Off gives `set off`. A repeated `set on` is meaningful (for example, to extend a timer).
+  - "Auto" adds the Auto section, whose trigger gives `auto`. Both new sections start with the On entity.
   - Identical triggers in one smart button show a warning; the first of On, Off, Auto wins.
-- Default output (both): the output while the container is not configured or a bound entity is unavailable.
-- Output line (both): the current output and, while it is the default, why (not configured, or the unavailable entities). "Not saved yet" means the saved plan has no such container, or has it as the other type.
-- On the plan, in every step, the symbol shows the output: `on` yellow, `auto` light blue, `error` red, `off` the plain device fill. A red dot marks a fault (the default output is shown). Without live data the outline is dashed: the container is not saved yet, live outputs are not available, the subscription failed, or the connection to Home Assistant was lost. A live `off` stays solid. When the connection drops, the outputs go neutral and come back after the reconnect, retried every 5 s for up to 1 minute while the output line shows the error.
+- Wall switch, in the Binding step:
+  - State: the relay, light or binary sensor it follows. Any on/off change of that entity that Plan Studio did not cause gives `set on` or `set off`. This includes changes from the Home Assistant UI, automations and AppDaemon.
+  - "Auto by double toggle": a change within "Window, s" (1 to 10 seconds, default 3) of the previous one gives `auto`, and so do later quick changes. The first change still gives `set`.
+- Not a press: a change from a missing or unavailable state, the same state again, and anything while the status is `error`. A recovery from `error` gives no intent.
+- Nothing is persisted. The last event and the status are lost on a Home Assistant restart or an integration reload. Version 0.5.0 deletes the old `plan_studio.runtime` store on start.
+- Removed in 0.5.0: Default output, Final state, output colours and the fault dot. Version 0.4 plans load clean, and the dropped fields leave the stored plan on the next save.
+- Binding line, under the entity fields:
+  - "Last event: <event>, HH:MM:SS" (browser local time)
+  - "No events yet"
+  - "Status: error, not configured"
+  - "Status: error, unavailable (ids)"
+  - "Not saved yet" (the saved plan has no such container, or has it as the other type)
+  - or the feed error.
+- Plan badge, top-right of the symbol, in every step:
+  - A red alert while the status is `error`. An unbound or partly bound container shows it permanently.
+  - An intent icon (toggle, auto, power, power-off) for 3 s, only for events that arrive while the panel is open.
+  - A dashed outline when there is no live data. When the connection drops, the reconnect is retried every 5 s for up to 1 minute; reopen the panel if Home Assistant took longer.
+- Upgrade note: reload any open Plan Studio tab after updating.
 
 ## Development
 

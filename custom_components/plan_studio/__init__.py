@@ -44,7 +44,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await live.async_start()
         except Exception:  # noqa: BLE001 - the editor panel must load even when the container runtime cannot start
             # Without data["live"], subscribe answers `not_loaded` and save/delete skip the reload.
-            _LOGGER.exception("container runtime failed to start; the panel loads without live outputs")
+            _LOGGER.exception("container runtime failed to start; the panel loads without live state and events")
         else:
             data["live"] = live
     if not data.get("static_registered"):

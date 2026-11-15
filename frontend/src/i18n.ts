@@ -81,7 +81,7 @@ const en: Dict = {
   'output.errorNotConfigured': 'Status: error, not configured',
   'output.errorUnavailable': 'Status: error, unavailable ({entities})',
   'output.notSaved': 'Not saved yet',
-  'output.noLive': 'Live outputs are not available.',
+  'output.noLive': 'Live state is not available.',
   'bindstatus.bound': 'Bound',
   'bindstatus.partial': 'Partly bound',
   'bindstatus.unbound': 'Not bound',
