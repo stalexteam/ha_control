@@ -9,7 +9,7 @@ import '../binding/entity-combo';
 import '../binding/device-combo';
 import { setDeviceProps } from '../model/devices';
 import { deviceNameRow } from './device-props';
-import { containerFields, triggerFields } from './container-fields';
+import { containerFields, containerFlags, triggerFields } from './container-fields';
 import { t } from '../i18n';
 
 export interface BindingPropsOpts {
@@ -128,8 +128,9 @@ function roleField(o: BindingPropsOpts, d: Device, spec: RoleSpec): TemplateResu
 
 /**
  * Binding step properties: the selected device's name and kind, the HA device picker, one field per active role
- * and, for an input container, its settings; with nothing selected, an invitation to pick a device. The footer
- * counts the devices not bound and offers Next unbound device.
+ * and, for an input container, its checkboxes after the sections above them and its settings after the roles;
+ * with nothing selected, an invitation to pick a device. The footer counts the devices not bound and offers Next
+ * unbound device.
  */
 export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
   const d = o.device;
@@ -144,7 +145,7 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
       ${deviceNameRow(d, name => o.commit(setDeviceProps(o.level, d.id, {}, name)))}
       ${haDevicePicker(o, d)}
       ${o.fillNotice ? html`<p class="note" data-notice="fill">${o.fillNotice}</p>` : nothing}
-      ${activeRoleSpecs(d).map(spec => roleField(o, d, spec))}
+      ${activeRoleSpecs(d).map(spec => html`${roleField(o, d, spec)}${containerFlags(o, d, spec.role)}`)}
       ${containerFields(o, d)}`
     : html`<p class="muted">${t('binding.pick')}</p>`}
     <div class="bfoot">

@@ -1,6 +1,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import {
-  TRIGGER_EVENTS, allowedOutputs, type ContainerOutput, type Device, type DeviceProps, type Level, type Trigger,
+  TRIGGER_EVENTS, allowedOutputs, type BindingRole, type ContainerOutput, type Device, type DeviceProps, type Level,
+  type Trigger,
 } from '../model/types';
 import { duplicateTriggers, setBinding, type TriggerRole } from '../model/bindings';
 import { setDeviceProps } from '../model/devices';
@@ -26,12 +27,13 @@ function commit(o: BindingPropsOpts, next: Level): boolean {
 const setProps = (o: BindingPropsOpts, d: Device, patch: Partial<DeviceProps>): boolean =>
   commit(o, setDeviceProps(o.level, d.id, patch));
 
-/** A labelled checkbox; a refused change puts it back on the model value. */
+/** A labelled checkbox in its own block between role sections; a refused change puts it back on the model value. */
 function check(field: string, label: string, value: boolean, on: (v: boolean) => boolean): TemplateResult {
-  return row(label, html`<input type="checkbox" data-field=${field} .checked=${fieldValue(value)} @change=${(e: Event) => {
-    const el = e.target as HTMLInputElement;
-    if (!on(el.checked)) el.checked = value;
-  }} />`);
+  return html`<div class="cflag">${row(label, html`<input type="checkbox" data-field=${field} .checked=${fieldValue(value)}
+    @change=${(e: Event) => {
+      const el = e.target as HTMLInputElement;
+      if (!on(el.checked)) el.checked = value;
+    }} />`)}</div>`;
 }
 
 /** The default output select: only the outputs the props allow, in allowedOutputs order. */
@@ -70,32 +72,42 @@ export function triggerFields(o: BindingPropsOpts, d: Device, role: TriggerRole)
 }
 
 /**
- * Container settings after the roles. A wall switch: "Auto by double toggle", its window (only when checked) and
- * the default output. A smart button: "Separate Off" (turning it on starts the Off entity as the On entity, in
- * the same commit), "Auto", the default output and the duplicate-trigger warning. Nothing for other kinds.
+ * The container checkboxes that follow a role section, so each sits under the section above it and before the
+ * section it reveals (ticking one never moves it from under the pointer):
+ * - wall switch, after State: "Auto by double toggle", then "Window, s" while it is checked;
+ * - smart button, after On / Off (On): "Separate Off" (turning it on starts the Off entity as the On entity, in the
+ *   same commit), then "Auto" unless the Off section comes between them;
+ * - smart button, after Off: "Auto".
+ * Nothing after any other role or for other kinds.
  */
-export function containerFields(o: BindingPropsOpts, d: Device): TemplateResult {
+export function containerFlags(o: BindingPropsOpts, d: Device, role: BindingRole): TemplateResult {
   const p = d.props;
-  if (p.kind === 'wall_switch') {
-    return html`<div class="cfields">
+  if (p.kind === 'wall_switch' && role === 'state') {
+    return html`
       ${check('autoByDoubleToggle', t('binding.autoByDoubleToggle'), p.autoByDoubleToggle,
         v => setProps(o, d, { autoByDoubleToggle: v }))}
-      ${p.autoByDoubleToggle ? row(t('binding.window'), numField({
+      ${p.autoByDoubleToggle ? html`<div class="cflag">${row(t('binding.window'), numField({
         value: p.windowSec, rule: WINDOW, bad: 'props.badWindow', field: 'windowSec', skipSame: true,
         setNotice: msg => o.setNotice(msg), apply: v => setProps(o, d, { windowSec: v }),
-      })) : nothing}
-      ${defaultOutputRow(o, d, p)}
-    </div>`;
+      }))}</div>` : nothing}`;
   }
-  if (p.kind !== 'smart_button') return html`${nothing}`;
+  if (p.kind !== 'smart_button' || (role !== 'on' && role !== 'off')) return html`${nothing}`;
   const separate = (on: boolean): boolean => {
     const next = setDeviceProps(o.level, d.id, { separateOff: on });
     return commit(o, on && !d.bindings?.off ? setBinding(next, d.id, 'off', d.bindings?.on ?? null) : next);
   };
+  const auto = check('autoEnabled', t('binding.autoEnabled'), p.autoEnabled, v => setProps(o, d, { autoEnabled: v }));
+  if (role === 'off') return auto;
+  return html`${check('separateOff', t('binding.separateOff'), p.separateOff, separate)}${p.separateOff ? nothing : auto}`;
+}
+
+/** Container settings after all the roles: the default output and, for a smart button, the duplicate-trigger warning. */
+export function containerFields(o: BindingPropsOpts, d: Device): TemplateResult {
+  const p = d.props;
+  if (p.kind !== 'wall_switch' && p.kind !== 'smart_button') return html`${nothing}`;
   return html`<div class="cfields">
-    ${check('separateOff', t('binding.separateOff'), p.separateOff, separate)}
-    ${check('autoEnabled', t('binding.autoEnabled'), p.autoEnabled, v => setProps(o, d, { autoEnabled: v }))}
     ${defaultOutputRow(o, d, p)}
-    ${duplicateTriggers(d).length ? html`<p class="warn" data-note="duplicate">${t('binding.duplicate')}</p>` : nothing}
+    ${p.kind === 'smart_button' && duplicateTriggers(d).length
+      ? html`<p class="warn" data-note="duplicate">${t('binding.duplicate')}</p>` : nothing}
   </div>`;
 }

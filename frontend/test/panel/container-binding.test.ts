@@ -234,6 +234,32 @@ describe('binding step: container sections', () => {
     expect($<HTMLSelectElement>(el, '.props select[data-field="defaultOutput"]').value).toBe('off');
   });
 
+  it('sections follow the spec order: each checkbox after the section above it and before the section it reveals', async () => {
+    const el = await open();
+    /** Role sections, container fields and the duplicate warning in document order. */
+    const order = () => [...el.shadowRoot!.querySelectorAll(
+      '.props .role, .props [data-field="autoByDoubleToggle"], .props [data-field="windowSec"], .props [data-field="separateOff"], '
+      + '.props [data-field="autoEnabled"], .props [data-field="defaultOutput"], .props [data-note="duplicate"]',
+    )].map(n => (n.classList.contains('role') ? `role:${n.getAttribute('data-role')}`
+      : n.getAttribute('data-field') ?? `note:${n.getAttribute('data-note')}`));
+
+    await pick(el, 'w');
+    expect(order()).toEqual(['role:state', 'autoByDoubleToggle', 'defaultOutput']);
+    await toggle(el, 'autoByDoubleToggle');
+    expect(order()).toEqual(['role:state', 'autoByDoubleToggle', 'windowSec', 'defaultOutput']);
+
+    await pick(el, 'b');
+    expect(order()).toEqual(['role:on', 'separateOff', 'autoEnabled', 'defaultOutput']);
+    await toggle(el, 'separateOff');
+    expect(order()).toEqual(['role:on', 'separateOff', 'role:off', 'autoEnabled', 'defaultOutput']);
+    await toggle(el, 'autoEnabled');
+    expect(order()).toEqual(['role:on', 'separateOff', 'role:off', 'autoEnabled', 'role:auto', 'defaultOutput']);
+    await type(el, 'off-event', 'single');
+    expect(order()).toEqual(['role:on', 'separateOff', 'role:off', 'autoEnabled', 'role:auto', 'defaultOutput', 'note:duplicate']);
+    await toggle(el, 'separateOff');
+    expect(order()).toEqual(['role:on', 'separateOff', 'autoEnabled', 'role:auto', 'role:final', 'defaultOutput']);
+  });
+
   it('two buttons of one switch on different slots show no also-bound note; the same trigger shows it', async () => {
     const el = await open();
     await pick(el, 'k2');
