@@ -134,4 +134,31 @@ describe('device select tool', () => {
     expect(t.key('Backspace', k)).toBe(true);
     expect(ctx.level().devices).toHaveLength(0);
   });
+
+  it('a 1 mm jitter on a wall switch commits nothing', () => {
+    const { lv } = withDevice('switch', onTop(1500));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    t.down(ev(1500, 50)); t.move(ev(1501, 50)); t.up(ev(1501, 50));
+    expect(ctx.commits).toHaveLength(0);
+    t.down(ev(1500, 50)); t.move(ev(1500, 49)); t.up(ev(1500, 49));
+    expect(ctx.commits).toHaveLength(0);
+  });
+
+  it('a wall device grabbed 50 mm off-centre slides by exactly the pointer delta', () => {
+    const { lv, id } = withDevice('wall_light', onTop(1500));
+    const ctx = fakeContext(lv);
+    ctx.tolMm = () => 100; // zoomed out: the icon is 120 mm wide, so a grab 50 mm off-centre still hits
+    const t = createDeviceSelectTool(ctx);
+    t.down(ev(1550, 50)); t.move(ev(1700, 50)); t.up(ev(1850, 50));
+    expect(ctx.level().devices.find(d => d.id === id)!.placement).toMatchObject({ mode: 'wall', side: 'right', offset: 1800 });
+  });
+
+  it('a same-wall drag near the axis never flips the side', () => {
+    const { lv, id } = withDevice('wall_light', onTop(1500));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    t.down(ev(1500, 50)); t.move(ev(1600, -10)); t.up(ev(1700, -10));
+    expect(ctx.level().devices.find(d => d.id === id)!.placement).toMatchObject({ mode: 'wall', side: 'right', offset: 1700 });
+  });
 });
