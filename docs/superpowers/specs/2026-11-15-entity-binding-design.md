@@ -68,7 +68,7 @@ Each role has a domain set and an optional class filter. All roles are optional.
 | illuminance_sensor | `illuminance` | sensor | device_class = illuminance, or unit = `lx` |
 | climate_sensor | `temperature` | sensor | device_class = temperature, or unit ∈ {`°C`, `°F`} |
 | climate_sensor | `humidity` | sensor | device_class = humidity, or unit = `%` with device_class humidity or none |
-| switch | `action` | event, sensor | none |
+| switch | `action` | event, sensor | event: none; sensor: no device_class and no unit; `diagnostic` category allowed |
 | switch | `state` | switch, light, binary_sensor | none |
 | socket | `control` | switch | none |
 | socket | `power` | sensor | device_class = power, or unit ∈ {`W`, `kW`} |
@@ -79,6 +79,7 @@ Each role has a domain set and an optional class filter. All roles are optional.
 Rules:
 - "Show all" for a field drops the strict filter but keeps the domains.
 - Entities whose registry entry is hidden or has `entity_category` config or diagnostic are excluded unless "show all" is on. This is the document author's call.
+- Exception, found on live data: Zigbee2MQTT registers its button action sensors (`sensor.*_action`) as `diagnostic`, with no device class and no unit. The `action` role therefore allows the `diagnostic` category. It takes a sensor only when that sensor has no device class and no unit. This keeps the device's battery and link-quality sensors out, so auto-fill from the HA device stays unambiguous.
 - The candidate label is `friendly_name — entity_id`, plus the HA device name when known. The current state is shown greyed as a hint.
 - One entity may be bound to several devices, for example one relay feeding two light fittings. An info badge says "also bound to …". It is not an error.
 

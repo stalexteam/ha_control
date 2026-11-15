@@ -611,7 +611,8 @@ const Dn = { role: "power", domains: ["sensor"], deviceClasses: ["power"], units
     { role: "humidity", domains: ["sensor"], deviceClasses: ["humidity"], units: ["%"], primary: !0 }
   ],
   switch: [
-    { role: "action", domains: ["event", "sensor"], primary: !0 },
+    // Zigbee2MQTT registers its action sensors as diagnostic, with no class and no unit.
+    { role: "action", domains: ["event", "sensor"], plainDomains: ["sensor"], categories: ["diagnostic"], primary: !0 },
     { role: "state", domains: ["switch", "light", "binary_sensor"], primary: !1 }
   ],
   socket: [{ role: "control", domains: ["switch"], primary: !0 }, Dn],
@@ -4954,8 +4955,8 @@ function ua(n) {
     </div>`;
 }
 function pa(n, t) {
-  var e;
-  return t.domains.includes(n.domain) ? t.deviceClasses ? n.deviceClass !== null ? t.deviceClasses.includes(n.deviceClass) : n.unit !== null && !!((e = t.units) != null && e.includes(n.unit)) : !0 : !1;
+  var e, i;
+  return t.domains.includes(n.domain) ? (e = t.plainDomains) != null && e.includes(n.domain) ? n.deviceClass === null && n.unit === null : t.deviceClasses ? n.deviceClass !== null ? t.deviceClasses.includes(n.deviceClass) : n.unit !== null && !!((i = t.units) != null && i.includes(n.unit)) : !0 : !1;
 }
 const fi = /* @__PURE__ */ new WeakMap();
 function Pe(n, t, e) {
@@ -4965,7 +4966,10 @@ function Pe(n, t, e) {
   s || i.set(t, s = [null, null]);
   const r = e ? 1 : 0;
   if (s[r]) return s[r];
-  const o = [...n.entities.values()].filter((l) => e ? t.domains.includes(l.domain) : pa(l, t) && !l.hidden && !l.disabled && l.category === null);
+  const o = [...n.entities.values()].filter((l) => {
+    var a;
+    return e ? t.domains.includes(l.domain) : pa(l, t) && !l.hidden && !l.disabled && (l.category === null || !!((a = t.categories) != null && a.includes(l.category)));
+  });
   return o.sort((l, a) => l.name.localeCompare(a.name) || l.entityId.localeCompare(a.entityId)), s[r] = o, o;
 }
 const gi = /* @__PURE__ */ new WeakMap();

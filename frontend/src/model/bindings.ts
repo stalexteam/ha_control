@@ -1,6 +1,12 @@
 import type { BindingRole, Device, DeviceKind, Id, Level } from './types';
 
-export interface RoleSpec { role: BindingRole; domains: string[]; deviceClasses?: string[]; units?: string[]; primary: boolean }
+export interface RoleSpec {
+  role: BindingRole; domains: string[]; deviceClasses?: string[]; units?: string[]; primary: boolean;
+  /** Domains whose entities match only without a device class and a unit (non-measuring, e.g. Zigbee2MQTT action sensors). */
+  plainDomains?: string[];
+  /** Entity categories the strict filter still offers (default: none). */
+  categories?: string[];
+}
 
 const POWER: RoleSpec = { role: 'power', domains: ['sensor'], deviceClasses: ['power'], units: ['W', 'kW'], primary: false };
 
@@ -14,7 +20,8 @@ export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
     { role: 'humidity', domains: ['sensor'], deviceClasses: ['humidity'], units: ['%'], primary: true },
   ],
   switch: [
-    { role: 'action', domains: ['event', 'sensor'], primary: true },
+    // Zigbee2MQTT registers its action sensors as diagnostic, with no class and no unit.
+    { role: 'action', domains: ['event', 'sensor'], plainDomains: ['sensor'], categories: ['diagnostic'], primary: true },
     { role: 'state', domains: ['switch', 'light', 'binary_sensor'], primary: false },
   ],
   socket: [{ role: 'control', domains: ['switch'], primary: true }, POWER],

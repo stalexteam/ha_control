@@ -27,6 +27,19 @@ describe('candidates', () => {
   it('motion includes occupancy and excludes door', () => {
     expect(ids(candidates(meta, spec('motion_sensor', 'motion'), false))).toEqual(['binary_sensor.occ']);
   });
+  it('action: events and plain sensors (no class, no unit), diagnostic allowed; measuring sensors and config excluded', () => {
+    const m = makeMeta([
+      ent('event.btn'),
+      ent('sensor.sw_action', { category: 'diagnostic' }), // Zigbee2MQTT action sensor
+      ent('sensor.sw_battery', { deviceClass: 'battery', unit: '%', category: 'diagnostic' }),
+      ent('sensor.sw_lqi', { unit: 'lqi', category: 'diagnostic' }),
+      ent('sensor.temp', { deviceClass: 'temperature', unit: '°C' }),
+      ent('sensor.cfg', { category: 'config' }),
+      ent('sensor.hidden_action', { hidden: true }),
+    ]);
+    expect(ids(candidates(m, spec('switch', 'action'), false))).toEqual(['event.btn', 'sensor.sw_action']);
+    expect(ids(candidates(m, spec('switch', 'action'), true))).toHaveLength(7);
+  });
   it('sorted by name then id, memoised', () => {
     const a = candidates(meta, spec('climate_sensor', 'humidity'), false);
     expect(a.map(e => e.name)).toEqual([...a.map(e => e.name)].sort((x, y) => x.localeCompare(y)));
@@ -57,6 +70,17 @@ describe('autoFill', () => {
     const r = autoFill(level, id, 'dev1', fixtureMeta());
     expect(r.level.devices[0].bindings).toEqual({ temperature: 'sensor.t_wc', humidity: 'sensor.h_wc' });
     expect([...r.filled].sort()).toEqual(['humidity', 'temperature']);
+    expect(r.ambiguous).toEqual([]);
+  });
+  it('fills a Zigbee2MQTT switch from its diagnostic action sensor, not from battery or link quality', () => {
+    const meta = makeMeta([
+      ent('sensor.sw_action', { category: 'diagnostic', deviceId: 'z' }),
+      ent('sensor.sw_battery', { deviceClass: 'battery', unit: '%', category: 'diagnostic', deviceId: 'z' }),
+      ent('sensor.sw_lqi', { unit: 'lqi', category: 'diagnostic', deviceId: 'z' }),
+    ]);
+    const { level, id } = add('switch');
+    const r = autoFill(level, id, 'z', meta);
+    expect(r.level.devices[0].bindings).toEqual({ action: 'sensor.sw_action' });
     expect(r.ambiguous).toEqual([]);
   });
   it('ambiguous when two candidates; never overwrites', () => {
