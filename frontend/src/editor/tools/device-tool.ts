@@ -93,7 +93,7 @@ export function createDeviceTool(ctx: ToolContext, kind: DeviceKind): Tool {
       if (!pr || pr.invalid) return;
       const level = ctx.level();
       const base = t(`device.${kind}`, ctx.lang());
-      const used = new Set((level.devices ?? []).filter(d => d.props.kind === kind).map(d => d.name));
+      const used = new Set(level.devices.filter(d => d.props.kind === kind).map(d => d.name));
       let n = 1;
       while (used.has(`${base} ${n}`)) n++;
       const res = addDevice(level, pr.props, pr.placement, `${base} ${n}`);

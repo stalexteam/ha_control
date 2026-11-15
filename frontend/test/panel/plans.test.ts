@@ -84,23 +84,3 @@ describe('plan selection', () => {
     expect(el2.plan!.id).toBe(newId);
   });
 });
-
-describe('plan without levels', () => {
-  beforeEach(() => {
-    document.body.innerHTML = '';
-    localStorage.clear();
-  });
-
-  it('opens with one empty floor level instead of crashing', async () => {
-    const [p] = seed('Broken');
-    const raw = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
-    raw.plans[p.id].levels = [];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(raw));
-    const el = await mount();
-    expect(el.plan!.levels).toHaveLength(1);
-    expect(el.plan!.levels[0].kind).toBe('floor');
-    expect(el.history!.current.walls).toEqual([]);
-    await drawBox(el);
-    expect(el.history!.current.walls).toHaveLength(4);
-  });
-});

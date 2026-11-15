@@ -100,15 +100,17 @@ export const OPENING_DEFAULT_WIDTH: Record<OpeningKind, number> = {
   wicket: 1000,
 };
 
+export function emptyLevel(id: string = newId(), name = 'Level 1'): Level {
+  return { id, name, kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] };
+}
+
 export function emptyPlan(name: string): Plan {
   return {
     id: newId(),
     name,
     schemaVersion: 1,
     revision: 0,
-    levels: [
-      { id: newId(), name: 'Level 1', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] },
-    ],
+    levels: [emptyLevel()],
   };
 }
 

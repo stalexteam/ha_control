@@ -39,12 +39,12 @@ export function addDevice(
 ): { level: Level; deviceId: Id | null } {
   if (!fits(level, props, placement)) return { level, deviceId: null };
   const d: Device = { id: newId(), name, placement, props, invalid: false };
-  return { level: withDevices(level, [...(level.devices ?? []), d]), deviceId: d.id };
+  return { level: withDevices(level, [...level.devices, d]), deviceId: d.id };
 }
 
 /** Rejected (same level returned) when the placement is not allowed for the kind or a wall offset is outside the wall. */
 export function moveDevice(level: Level, id: Id, placement: DevicePlacement): Level {
-  const devices = level.devices ?? [];
+  const devices = level.devices;
   const d = devices.find(x => x.id === id);
   if (!d || !fits(level, d.props, placement)) return level;
   let props = d.props;
@@ -60,7 +60,7 @@ export function moveDevice(level: Level, id: Id, placement: DevicePlacement): Le
 
 /** The patch never changes the kind. */
 export function setDeviceProps(level: Level, id: Id, patch: Partial<DeviceProps>, name?: string): Level {
-  const devices = level.devices ?? [];
+  const devices = level.devices;
   if (!devices.some(x => x.id === id)) return level;
   return withDevices(level, devices.map(x => {
     if (x.id !== id) return x;
@@ -70,7 +70,7 @@ export function setDeviceProps(level: Level, id: Id, patch: Partial<DeviceProps>
 }
 
 export function deleteDevice(level: Level, id: Id): Level {
-  return withDevices(level, (level.devices ?? []).filter(x => x.id !== id));
+  return withDevices(level, level.devices.filter(x => x.id !== id));
 }
 
 /** Climate sensor with zone ids that are not zones of the level: the unknown ids dropped; same object when none. */
@@ -82,7 +82,7 @@ function dropUnknownZones(level: Level, d: Device): Device {
 
 /** invalid = wall device whose offset is outside [0, len] of its wall (or whose wall is gone). Climate sensors lose ids of deleted zones. Never deletes or clamps. */
 export function refreshDevices(level: Level): Level {
-  return withDevices(level, (level.devices ?? []).map(dev => {
+  return withDevices(level, level.devices.map(dev => {
     const d = dropUnknownZones(level, dev);
     if (d.placement.mode !== 'wall') return d.invalid ? { ...d, invalid: false } : d;
     const l = wallLen(level, d.placement.wallId);
@@ -94,7 +94,6 @@ export function refreshDevices(level: Level): Level {
 
 /** Mutating on `out`: walls whose node A moved keep their devices at the same world position. */
 export function reanchorDevices(before: Level, out: Level): void {
-  if (!out.devices) return;
   for (const w of out.walls) {
     const oldW = before.walls.find(x => x.id === w.id);
     if (!oldW || oldW.a !== w.a) continue;

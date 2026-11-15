@@ -116,12 +116,6 @@ describe('ops integration', () => {
     expect(r.devices).toHaveLength(1);
     expect(r.devices[0].invalid).toBe(true);
   });
-  it('tolerates level without devices', () => {
-    const l = { ...room() } as Partial<Level>;
-    delete l.devices;
-    expect(() => moveNode(l as Level, 'n0', { x: 10, y: 0 })).not.toThrow();
-    expect(refreshDevices(l as Level).devices).toEqual([]);
-  });
 });
 
 describe('moveDevice refresh and mergeNodes', () => {

@@ -147,7 +147,7 @@ function renderCone(level: Level, d: Device, o: DeviceRenderOpts, preview: boole
 function renderHandle(level: Level, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
   if (o.selection?.kind !== 'device') return nothing;
   const id = o.selection.id;
-  const d = (level.devices ?? []).find(x => x.id === id);
+  const d = level.devices.find(x => x.id === id);
   const h = d ? directionHandle(level, d, o.scale) : null;
   if (!h) return nothing;
   const c = o.palette.selection;
@@ -161,7 +161,7 @@ function renderHandle(level: Level, o: DeviceRenderOpts): SVGTemplateResult | ty
 /** Devices (and their cones, drawn first so the icons sit on top) in millimetre user units. */
 export function renderDevices(level: Level, o: DeviceRenderOpts): SVGTemplateResult {
   const items: { d: Device; pose: DevicePose; preview: boolean }[] = [];
-  for (const d of level.devices ?? []) {
+  for (const d of level.devices) {
     const pose = devicePose(level, d);
     if (pose) items.push({ d, pose, preview: false });
   }

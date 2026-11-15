@@ -1,10 +1,10 @@
-import { deviceDefaults, type Level } from '../../src/model/types';
+import { deviceDefaults, emptyLevel, type Level } from '../../src/model/types';
 import { defaultZoneName } from '../../src/panel/next-object';
 import type { ToolContext } from '../../src/editor/tools/types';
 
 /** Minimal ToolContext: keeps the level in memory and records every commit. */
 export function fakeContext(level?: Level): ToolContext & { commits: Level[] } {
-  let current: Level = level ?? { id: 'l0', name: 'Level 1', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] };
+  let current: Level = level ?? emptyLevel('l0');
   const commits: Level[] = [];
   return {
     commits,

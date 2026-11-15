@@ -1,6 +1,5 @@
 import type { Id, Level, Plan } from '../model/types';
 import { emptyPlan, normalizeLevel } from '../model/types';
-import { newId } from '../model/ids';
 import { History } from '../editor/history';
 import type { SaveController } from '../editor/save';
 import type { DraftStore, Draft } from '../editor/draft';
@@ -177,12 +176,7 @@ export class PlanSession {
   }
 
   adopt(input: Plan): void {
-    // A plan without levels (foreign or hand-edited data) gets one empty floor instead of crashing the editor.
-    const plan: Plan = Array.isArray(input.levels) && input.levels.length > 0 ? input : {
-      ...input,
-      levels: [{ id: newId(), name: 'Level 1', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] }],
-    };
-    this.h.plan = { ...plan, levels: plan.levels.map(normalizeLevel) };
+    this.h.plan = { ...input, levels: input.levels.map(normalizeLevel) };
     this.h.history = new History<Level>(this.h.plan.levels[0]);
     this.h.activeTool.cancel();
     this.h.activeTool = createTool(this.h.toolId, this.h.ctx);

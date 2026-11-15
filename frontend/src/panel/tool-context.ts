@@ -1,4 +1,4 @@
-import type { Level } from '../model/types';
+import { emptyLevel, type Level } from '../model/types';
 import type { Selection, ToolContext } from '../editor/tools/types';
 import type { DeviceKind, DeviceProps, WallType, OpeningKind } from '../model/types';
 import type { History } from '../editor/history';
@@ -6,7 +6,7 @@ import { defaultZoneName, openingDefaults, type NextObjects } from './next-objec
 import type { BoxMeasure } from './props-panel';
 import type { View } from './viewport';
 
-const EMPTY_LEVEL: Level = { id: '', name: '', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] };
+const EMPTY_LEVEL: Level = emptyLevel('', '');
 
 /** The panel state the tools read (the panel itself satisfies this). */
 export interface ToolHost {

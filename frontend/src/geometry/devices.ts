@@ -139,7 +139,7 @@ function hits(level: Level, d: Device, p: Pt, tol: number): boolean {
 
 /** Device under p, or null: icon devices first (topmost first), then equipment bodies (topmost first). */
 export function deviceAt(level: Level, p: Pt, tolMm: number): Id | null {
-  const devices = level.devices ?? [];
+  const devices = level.devices;
   for (const bodies of [false, true]) {
     for (let i = devices.length - 1; i >= 0; i--) {
       if ((devices[i].props.kind === 'equipment') === bodies && hits(level, devices[i], p, tolMm)) return devices[i].id;

@@ -229,7 +229,7 @@ export function mergeNodes(level: Level, fromId: Id, intoId: Id): Level {
   const dead = new Set(out.walls.filter(w => w.a === w.b).map(w => w.id));
   out.walls = out.walls.filter(w => !dead.has(w.id));
   out.openings = out.openings.filter(o => !dead.has(o.wallId));
-  out.devices = (out.devices ?? []).filter(d => d.placement.mode !== 'wall' || !dead.has(d.placement.wallId));
+  out.devices = out.devices.filter(d => d.placement.mode !== 'wall' || !dead.has(d.placement.wallId));
   for (const n of out.nodes) if (n.host && dead.has(n.host.wallId)) delete n.host;
   out.nodes = out.nodes.filter(n => n.id !== fromId);
   dropOrphans(out);
@@ -240,7 +240,7 @@ export function deleteWall(level: Level, wallId: Id): Level {
   const out = clone(level);
   out.walls = out.walls.filter(w => w.id !== wallId);
   out.openings = out.openings.filter(o => o.wallId !== wallId);
-  out.devices = (out.devices ?? []).filter(d => d.placement.mode !== 'wall' || d.placement.wallId !== wallId);
+  out.devices = out.devices.filter(d => d.placement.mode !== 'wall' || d.placement.wallId !== wallId);
   for (const n of out.nodes) if (n.host?.wallId === wallId) delete n.host;
   dropOrphans(out);
   return finalize(out, level);
