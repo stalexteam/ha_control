@@ -1,4 +1,5 @@
 import { newId } from './ids';
+import { sanitizeBindings } from './bindings';
 
 export type Id = string;
 
@@ -63,7 +64,9 @@ export type DeviceProps =
   | { kind: 'equipment'; shape: 'rect' | 'circle'; width: number; depth: number; diameter: number;
       symbol: 'boiler' | 'pc' | 'automation' | 'other'; label: string };
 
-export interface Device { id: Id; name: string; placement: DevicePlacement; props: DeviceProps; invalid: boolean }
+export type BindingRole = 'control' | 'motion' | 'illuminance' | 'temperature' | 'humidity' | 'action' | 'state' | 'power';
+
+export interface Device { id: Id; name: string; placement: DevicePlacement; props: DeviceProps; invalid: boolean; bindings?: Partial<Record<BindingRole, string>> }
 
 export interface Level {
   id: Id;
@@ -150,7 +153,9 @@ export function deviceDefaults(kind: DeviceKind, mode: 'wall' | 'free'): DeviceP
   }
 }
 
-/** Stage-1 plans have no `devices`; a missing field means []. Same object back when already present. */
+/** Stage-1 plans have no `devices`; a missing field means []. Invalid bindings are dropped. Same object back when nothing changes. */
 export function normalizeLevel(level: Level): Level {
-  return level.devices ? level : { ...level, devices: [] };
+  if (!level.devices) return { ...level, devices: [] };
+  const devices = level.devices.map(sanitizeBindings);
+  return devices.some((d, i) => d !== level.devices[i]) ? { ...level, devices } : level;
 }
