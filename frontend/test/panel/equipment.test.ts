@@ -211,6 +211,26 @@ describe('Equipment tab: rejected edits', () => {
     expect(el.shadowRoot!.querySelector('.props .warn')).not.toBeNull();
   });
 
+  it('re-entering the current value commits nothing and stays clean', async () => {
+    const el = await mount();
+    await tab(el, 'equipment');
+    await tool(el, 'ceiling_light');
+    click(el, 1000, 1000);
+    await el.updateComplete;
+    await pressSave(el);
+    expect(el.save.state).toBe('saved');
+    const before = el.history!.current;
+    const field = (n: string) => $<HTMLInputElement>(el, `.props input[data-field="${n}"]`);
+    for (const n of ['diameter', 'rotation', 'name']) {
+      const f = field(n);
+      f.value = n === 'name' ? ` ${f.value} ` : f.value;
+      f.dispatchEvent(new Event('change'));
+      await el.updateComplete;
+    }
+    expect(el.history!.current).toBe(before);
+    expect(el.save.state).toBe('saved');
+  });
+
   it('undo with a device selected clears the selection', async () => {
     const el = await mount();
     await tab(el, 'equipment');

@@ -78,6 +78,7 @@ function numField(o: DevicePropsOpts, field: string, value: number, rule: NumRul
       const el = e.target as HTMLInputElement;
       const v = parseNum(el.value, rule);
       if (v === null) { el.value = shown; o.onNotice?.(t(BAD[rule], o.lang)); return; }
+      if (v === value) { o.onNotice?.(null); return; } // unchanged: no commit, no history entry
       if (!apply(v)) { el.value = shown; o.onNotice?.(t('props.noFit', o.lang)); return; }
       o.onNotice?.(null);
     }} />`;
@@ -102,9 +103,14 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
           data-field=${`${pre}poolRadius`} placeholder=${t('props.poolHint', lang)} title=${t('props.poolHint', lang)}
           .value=${fieldValue(pool)} @change=${(e: Event) => {
             const el = e.target as HTMLInputElement;
-            if (el.value.trim() === '') { if (set({ poolRadius: null })) o.onNotice?.(null); return; }
+            if (el.value.trim() === '') {
+              if (p.poolRadius === null) { o.onNotice?.(null); return; }
+              if (set({ poolRadius: null })) o.onNotice?.(null);
+              return;
+            }
             const v = parseNum(el.value, 'mm');
             if (v === null) { el.value = pool; o.onNotice?.(t('props.badNumber', lang)); return; }
+            if (v === p.poolRadius) { o.onNotice?.(null); return; }
             if (!set({ poolRadius: v })) { el.value = pool; o.onNotice?.(t('props.noFit', lang)); return; }
             o.onNotice?.(null);
           }} />`)}`;
@@ -122,7 +128,10 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
         ${row(t('props.symbol', lang), select(`${pre}symbol`, p.symbol, ['boiler', 'pc', 'automation', 'other'], 'symbol', lang,
           v => set({ symbol: v })))}
         ${row(t('props.label', lang), html`<input class="val wide" type="text" data-field=${`${pre}label`} .value=${fieldValue(p.label)}
-          @change=${(e: Event) => set({ label: (e.target as HTMLInputElement).value.trim() })} />`)}`;
+          @change=${(e: Event) => {
+            const label = (e.target as HTMLInputElement).value.trim();
+            if (label !== p.label) set({ label });
+          }} />`)}`;
     default:
       return html`<p class="muted">${t('props.noSettings', lang)}</p>`;
   }

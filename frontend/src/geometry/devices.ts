@@ -104,6 +104,11 @@ function hits(level: Level, d: Device, p: Pt, tol: number): boolean {
   const pose = devicePose(level, d);
   if (!pose) return false;
   const pr = d.props;
+  if (pr.kind === 'ceiling_light' && pr.shape === 'linear') {
+    // Segment along the facing direction, length centred on the pose point.
+    const along = Math.max(-pr.length / 2, Math.min(pr.length / 2, dot(sub(p, pose.pt), pose.dir)));
+    return dist(add(pose.pt, scale(pose.dir, along)), p) <= tol;
+  }
   if (pr.kind !== 'equipment') return dist(pose.pt, p) <= tol;
   if (pr.shape === 'circle') return dist(pose.pt, p) <= pr.diameter / 2 + tol;
   // Rect: width along dir, depth along its normal.
@@ -112,11 +117,13 @@ function hits(level: Level, d: Device, p: Pt, tol: number): boolean {
     && Math.abs(dot(v, perpLeft(pose.dir))) <= pr.depth / 2 + tol;
 }
 
-/** Topmost (last drawn) device under p, or null. */
+/** Device under p, or null: icon devices first (topmost first), then equipment bodies (topmost first). */
 export function deviceAt(level: Level, p: Pt, tolMm: number): Id | null {
   const devices = level.devices ?? [];
-  for (let i = devices.length - 1; i >= 0; i--) {
-    if (hits(level, devices[i], p, tolMm)) return devices[i].id;
+  for (const bodies of [false, true]) {
+    for (let i = devices.length - 1; i >= 0; i--) {
+      if ((devices[i].props.kind === 'equipment') === bodies && hits(level, devices[i], p, tolMm)) return devices[i].id;
+    }
   }
   return null;
 }

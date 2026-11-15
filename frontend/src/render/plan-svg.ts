@@ -342,7 +342,7 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
     ${pieces ? svg`<g class="railings" opacity=${dimOp}>${lightWalls.flatMap(w => (pieces.get(w.id) ?? []).map(r =>
       svg`<path d=${ringD(r)} fill=${p.railing}></path>`))}</g>` : nothing}
     <g class="openings" opacity=${dimOp}>${lv.openings.map(op => renderOpening(lv, op, o))}</g>
-    <g class="wall-breaks">${renderWallBreaks(lv, o)}</g>
+    <g class="wall-breaks" opacity=${dimOp}>${renderWallBreaks(lv, o)}</g>
     <g class="devices-layer">${renderDevices(lv, {
       palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: !equip, lang: o.lang, preview: o.preview.device,
     })}</g>

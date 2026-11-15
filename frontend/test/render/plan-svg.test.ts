@@ -118,4 +118,15 @@ describe('renderLevel', () => {
     document.body.innerHTML = '';
     expect(draw(sample(), null, {}).querySelector('.snap-start')).toBeNull();
   });
+
+  it('equipment mode dims the wall breaks group like the walls', () => {
+    const pal = paletteFor(true);
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    render(html`<svg xmlns="http://www.w3.org/2000/svg">${renderLevel(sample(), { palette: pal, selection: null, preview: {}, scale: 0.1, lang: 'en', mode: 'equipment' })}</svg>`, host);
+    const svg = host.querySelector('svg')!;
+    expect(svg.querySelector('g.wall-breaks')!.getAttribute('opacity')).toBe(String(pal.dimOpacity));
+    expect(svg.querySelector('path.walls')!.getAttribute('opacity')).toBe(String(pal.dimOpacity));
+    expect(draw(sample()).querySelector('g.wall-breaks')!.getAttribute('opacity')).toBeNull();
+  });
 });

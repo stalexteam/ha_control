@@ -57,7 +57,9 @@ export function propsFor(ctx: ToolContext, kind: DeviceKind, placement: DevicePl
   const p = ctx.deviceDefaults(kind);
   if (placement.mode === 'wall' && p.kind === 'motion_sensor') {
     const w = deviceDefaults('motion_sensor', 'wall');
-    if (w.kind === 'motion_sensor') return { ...p, zoneAngle: w.zoneAngle };
+    const f = deviceDefaults('motion_sensor', 'free');
+    // Only the untouched free default becomes the wall default; a user-set angle stays.
+    if (w.kind === 'motion_sensor' && f.kind === 'motion_sensor' && p.zoneAngle === f.zoneAngle) return { ...p, zoneAngle: w.zoneAngle };
   }
   return p;
 }
@@ -86,8 +88,11 @@ export function createDeviceTool(ctx: ToolContext, kind: DeviceKind): Tool {
       const pr = probe();
       if (!pr || pr.invalid) return;
       const level = ctx.level();
-      const n = (level.devices ?? []).filter(d => d.props.kind === kind).length + 1;
-      const res = addDevice(level, pr.props, pr.placement, `${t(`device.${kind}`, ctx.lang())} ${n}`);
+      const base = t(`device.${kind}`, ctx.lang());
+      const used = new Set((level.devices ?? []).filter(d => d.props.kind === kind).map(d => d.name));
+      let n = 1;
+      while (used.has(`${base} ${n}`)) n++;
+      const res = addDevice(level, pr.props, pr.placement, `${base} ${n}`);
       if (res.deviceId === null) return;
       ctx.commit(res.level);
       ctx.select({ kind: 'device', id: res.deviceId });

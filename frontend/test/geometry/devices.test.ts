@@ -132,4 +132,25 @@ describe('deviceAt', () => {
     expect(deviceAt(level, { x: 1400, y: 200 }, 50)).toBeNull();
     expect(deviceAt(level, { x: 1460, y: 200 }, 50)).toBe('a');
   });
+
+  it('an icon device under an equipment block stays selectable (icons first, then bodies)', () => {
+    const body = dev('body', { kind: 'equipment', shape: 'rect', width: 1000, depth: 1000, diameter: 600, symbol: 'pc', label: '' },
+      { mode: 'free', x: 1000, y: 1000, rotation: 0 });
+    const sensor = dev('s', { kind: 'illuminance_sensor' }, { mode: 'free', x: 1000, y: 1000, rotation: 0 });
+    const level = withDevs(rectRoomLevel(3000, 4000, 400), sensor, body); // body drawn last (topmost)
+    expect(deviceAt(level, { x: 1010, y: 1000 }, 50)).toBe('s');
+    expect(deviceAt(level, { x: 1400, y: 1000 }, 50)).toBe('body');
+  });
+
+  it('a linear ceiling light is hit along its whole length, rotated, within tol', () => {
+    const lin = (rotation: number) => dev('l', { ...deviceDefaults('ceiling_light', 'free'), shape: 'linear', length: 1200, width: 40 } as DeviceProps,
+      { mode: 'free', x: 1000, y: 1000, rotation });
+    const flat = withDevs(rectRoomLevel(3000, 4000, 400), lin(0));
+    expect(deviceAt(flat, { x: 1500, y: 1010 }, 50)).toBe('l');
+    expect(deviceAt(flat, { x: 1700, y: 1000 }, 50)).toBeNull();
+    expect(deviceAt(flat, { x: 1500, y: 1100 }, 50)).toBeNull();
+    const up = withDevs(rectRoomLevel(3000, 4000, 400), lin(90)); // 90 deg: along screen -Y
+    expect(deviceAt(up, { x: 1000, y: 500 }, 50)).toBe('l');
+    expect(deviceAt(up, { x: 1500, y: 1000 }, 50)).toBeNull();
+  });
 });

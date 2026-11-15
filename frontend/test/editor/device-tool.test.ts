@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createDeviceTool } from '../../src/editor/tools/device-tool';
 import { addBox } from '../../src/model/ops';
-import type { Level } from '../../src/model/types';
+import { deviceDefaults, type DeviceProps, type Level } from '../../src/model/types';
 import { fakeContext } from './fake-context';
 
 const ev = (x: number, y: number) => ({ pt: { x, y }, shift: false, alt: false, ctrl: false });
@@ -67,5 +67,28 @@ describe('device place tool', () => {
     const t = createDeviceTool(ctx, 'switch');
     t.move(ev(1500, -10));
     expect(t.preview().device!.placement).toMatchObject({ mode: 'wall', side: 'left', offset: 1500 });
+  });
+
+  it('keeps a user-set zone angle when a motion sensor lands on a wall; free default still becomes 110', () => {
+    const ctx = fakeContext(box());
+    ctx.deviceDefaults = k => ({ ...deviceDefaults(k, 'free'), ...(k === 'motion_sensor' ? { zoneAngle: 180 } : {}) } as DeviceProps);
+    const t = createDeviceTool(ctx, 'motion_sensor');
+    t.down(ev(1500, 10)); t.up(ev(1500, 10));
+    expect(ctx.level().devices[0].props).toMatchObject({ kind: 'motion_sensor', zoneAngle: 180 });
+    const ctx2 = fakeContext(box());
+    const t2 = createDeviceTool(ctx2, 'motion_sensor');
+    t2.down(ev(1500, 10)); t2.up(ev(1500, 10));
+    expect(ctx2.level().devices[0].props).toMatchObject({ zoneAngle: (deviceDefaults('motion_sensor', 'wall') as { zoneAngle: number }).zoneAngle });
+  });
+
+  it('default name uses the smallest unused number of the kind', () => {
+    const ctx = fakeContext(box());
+    const t = createDeviceTool(ctx, 'switch');
+    for (const x of [500, 1000, 1500]) { t.down(ev(x, 10)); t.up(ev(x, 10)); }
+    expect(ctx.level().devices.map(d => d.name)).toEqual(['Switch 1', 'Switch 2', 'Switch 3']);
+    const gone = ctx.level().devices[1].id;
+    ctx.commit({ ...ctx.level(), devices: ctx.level().devices.filter(d => d.id !== gone) });
+    t.down(ev(2000, 10)); t.up(ev(2000, 10));
+    expect(ctx.level().devices.map(d => d.name)).toEqual(['Switch 1', 'Switch 3', 'Switch 2']);
   });
 });
