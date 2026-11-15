@@ -37,6 +37,18 @@ describe('renderLevel', () => {
     expect(texts.some(s => s.includes('Kitchen') && s.includes('9.36'))).toBe(true);
   });
 
+  it('hides the room labels in the zones mode (room zones carry the name there)', () => {
+    const labels = (mode: 'plan' | 'equipment' | 'zones') => {
+      const content = renderLevel(sample(), { palette: paletteFor(true), selection: null, preview: {}, scale: 0.1, mode });
+      const host = document.createElement('div');
+      render(html`<svg xmlns="http://www.w3.org/2000/svg">${content}</svg>`, host);
+      return host.querySelectorAll('.zone-label').length;
+    };
+    expect(labels('plan')).toBe(1);
+    expect(labels('equipment')).toBe(1);
+    expect(labels('zones')).toBe(0);
+  });
+
   it('hatches a broken zone', () => {
     const level = sample();
     const broken: Level = { ...level, zones: level.zones.map(z => ({ ...z, broken: true })) };

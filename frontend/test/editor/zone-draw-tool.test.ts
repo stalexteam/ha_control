@@ -3,7 +3,8 @@ import { createZoneDrawTool } from '../../src/editor/tools/zone-draw-tool';
 import { createTool } from '../../src/panel/tool-factory';
 import { levelZones, type Level, type ZoneVertex } from '../../src/model/types';
 import type { Selection, Tool } from '../../src/editor/tools/types';
-import { rectRoomLevel } from '../fixtures';
+import { facePoint } from '../../src/geometry/devices';
+import { rectRoomLevel, twoRoomsLevel } from '../fixtures';
 import { fakeContext } from './fake-context';
 
 const ev = (x: number, y: number, o: { shift?: boolean; alt?: boolean } = {}) =>
@@ -120,6 +121,78 @@ describe('zone draw tool', () => {
     expect(v[0]).toMatchObject({ kind: 'node', nodeId: 'n0' });
     expect(v[1]).toMatchObject({ kind: 'wall', wallId: 'w0', side: 'right' });
     expect(v[2]).toMatchObject({ kind: 'free', x: 1500, y: 2000 });
+  });
+
+  it('a mid or axis snap gives a vertex on the face of the pointer side; the snap marker sits there', () => {
+    // twoRoomsLevel: w0 runs n0 (0,0) -> n1 (3000,0), 200 mm thick: its axis is y = 0, its faces y = -100 and y = 100.
+    const { ctx, t } = setup(twoRoomsLevel());
+    t.move(ev(1500, 10)); // the midpoint of w0, pointer on the inner half
+    const mid = t.preview().snap!;
+    expect(mid.kind).toBe('mid');
+    expect(mid.pt).toEqual(facePoint(ctx.level(), 'w0', 'right', 1500));
+    expect(mid.pt.y).toBeCloseTo(100);
+    click(t, 1500, 10);
+    expect(t.preview().zoneDraft!.points[0]).toEqual(facePoint(ctx.level(), 'w0', 'right', 1500));
+    t.move(ev(2500, -5)); // the axis of w0, pointer on the outer half: the outer face
+    const axis = t.preview().snap!;
+    expect(axis.kind).toBe('wall');
+    expect(axis.pt).toEqual(facePoint(ctx.level(), 'w0', 'left', 2500));
+    expect(axis.pt.y).toBeCloseTo(-100);
+    expect(t.preview().zoneDraft!.cursor).toEqual(axis.pt);
+    click(t, 2500, -5);
+    expect(t.preview().zoneDraft!.points[1]).toEqual(axis.pt);
+    click(t, 2000, 1500);
+    key(t, 'Enter');
+    const v = verts(ctx.level());
+    expect(v[0]).toMatchObject({ kind: 'wall', wallId: 'w0', offset: 1500, side: 'right' });
+    expect({ x: v[0].x, y: v[0].y }).toEqual(facePoint(ctx.level(), 'w0', 'right', 1500));
+    expect(v[1]).toMatchObject({ kind: 'wall', wallId: 'w0', offset: 2500, side: 'left' });
+    expect({ x: v[1].x, y: v[1].y }).toEqual(facePoint(ctx.level(), 'w0', 'left', 2500));
+  });
+
+  it('the snap marker shows before the first click; Shift shows the ortho guide from the last vertex', () => {
+    const { t } = setup();
+    expect(t.preview()).toEqual({});
+    t.move(ev(1010, 1990));
+    expect(t.preview().snap).toMatchObject({ kind: 'grid', pt: { x: 1000, y: 2000 } });
+    expect(t.preview().zoneDraft).toBeUndefined();
+    expect(t.preview().orthoFrom).toBeUndefined();
+    click(t, 1010, 1990);
+    t.move(ev(3000, 2030, { shift: true }));
+    expect(t.preview().orthoFrom).toEqual({ x: 1000, y: 2000 });
+    expect(t.preview().snap?.pt).toEqual({ x: 3000, y: 2000 });
+    t.move(ev(3000, 2030));
+    expect(t.preview().orthoFrom).toBeUndefined();
+    t.cancel();
+    expect(t.preview()).toEqual({});
+  });
+
+  it('hovering the first or the last vertex to close is not invalid unless the closing edge crosses', () => {
+    const a = setup();
+    triangle(a.t);
+    a.t.move(ev(5, 5)); // the first vertex
+    expect(a.t.preview().zoneDraft?.invalid).toBe(false);
+    expect(a.t.preview().zoneDraft?.cursor).toEqual({ x: 0, y: 0 });
+    a.t.move(ev(1003, 1003)); // the last vertex
+    expect(a.t.preview().zoneDraft?.invalid).toBe(false);
+    expect(a.t.preview().zoneDraft?.cursor).toEqual({ x: 1000, y: 1000 });
+    const b = setup();
+    click(b.t, 2000, 500); click(b.t, 1000, 0); click(b.t, 1000, 1000); click(b.t, 0, 500);
+    b.t.move(ev(1995, 505)); // the closing edge (0,500)-(2000,500) crosses the third edge
+    expect(b.t.preview().zoneDraft?.invalid).toBe(true);
+    b.t.move(ev(5, 495));
+    expect(b.t.preview().zoneDraft?.invalid).toBe(true);
+  });
+
+  it('Delete removes the last vertex like Backspace; with no vertices it is not consumed', () => {
+    const { t } = setup();
+    expect(key(t, 'Delete')).toBe(false);
+    click(t, 0, 0); click(t, 1000, 0);
+    expect(key(t, 'Delete')).toBe(true);
+    expect(t.preview().zoneDraft?.points).toEqual([{ x: 0, y: 0 }]);
+    expect(key(t, 'Delete')).toBe(true);
+    expect(t.preview().zoneDraft).toBeUndefined();
+    expect(key(t, 'Delete')).toBe(false);
   });
 
   it('the second zone is "Zone 2"', () => {

@@ -111,6 +111,7 @@ function renderWallBreaks(level: Level, o: RenderOpts): SVGTemplateResult | type
   return marks.length ? svg`${marks}` : nothing;
 }
 
+/** A room's fill and its name and area label; the zones mode drops the label (the room zone's label sits there). */
 function renderZone(z: Zone, o: RenderOpts, selected: boolean): SVGTemplateResult {
   const p = o.palette;
   const at = centroid(z.outline, z.seed);
@@ -119,11 +120,11 @@ function renderZone(z: Zone, o: RenderOpts, selected: boolean): SVGTemplateResul
     <path class="zone${z.broken ? ' broken' : ''}" d=${ringD(z.outline)}
       fill=${z.broken ? 'url(#hatch)' : p.zone}
       stroke=${selected ? p.selection : 'none'} stroke-width="2" vector-effect=${NS}></path>
-    <text class="zone-label" x=${at.x} y=${at.y} text-anchor="middle" font-size=${fs}
+    ${o.mode === 'zones' ? nothing : svg`<text class="zone-label" x=${at.x} y=${at.y} text-anchor="middle" font-size=${fs}
       fill=${z.broken ? p.invalid : p.zoneLabel} font-family="system-ui, sans-serif">
       <tspan x=${at.x} dy=${-0.2 * fs}>${z.name}</tspan>
       <tspan x=${at.x} dy=${1.2 * fs} font-size=${fs * 0.9}>${formatArea(roomAreaM2(z.outline))}</tspan>
-    </text>`;
+    </text>`}`;
 }
 
 /** Door / gate / wicket: a leaf at the hinge on the swing side plus a quarter arc. */

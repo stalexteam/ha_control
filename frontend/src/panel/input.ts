@@ -104,7 +104,8 @@ export class EditorInput {
       return;
     }
     let consumed = this.h.activeTool.key(e.key, { shift: e.shiftKey });
-    if (!consumed && (e.key === 'Delete' || e.key === 'Backspace')) consumed = this.h.deleteSelection();
+    // Only a fresh press deletes the selection: a held Backspace that empties a draft never runs on into a delete.
+    if (!consumed && (e.key === 'Delete' || e.key === 'Backspace') && !e.repeat) consumed = this.h.deleteSelection();
     if (!consumed && e.key === 'Escape') {
       // Nothing to cancel: leave a placement tool for the step's select tool.
       const home = HOME_TOOL[this.h.mode];

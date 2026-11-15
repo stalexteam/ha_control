@@ -13,6 +13,8 @@ const SAME_PT = 1e-6;
 const COLLINEAR = 1e-9;
 /** A ring with a smaller area (mm2) has no area centroid. */
 const AREA_EPS = 1e-6;
+/** A custom zone outline with a smaller area (mm2) has collapsed (e.g. to fewer than three distinct points). */
+const MIN_ZONE_AREA = 1;
 
 /** Why a zone is invalid, in priority order (see zoneInvalidReason). */
 export type ZoneInvalidReason = 'room' | 'lost' | 'wall' | 'self';
@@ -92,7 +94,8 @@ export function selfIntersects(ring: Pt[]): boolean {
 /**
  * Why the zone is invalid, or null. In priority order: 'room' (a room zone's room is broken or gone), 'lost' (a free
  * vertex lost its anchor, or a node or wall vertex's anchor is missing), 'wall' (a wall vertex offset lies outside
- * [-1, length + 1] mm), 'self' (the outline crosses itself). A room zone is only checked for 'room'.
+ * [-1, length + 1] mm), 'self' (the outline crosses itself or collapsed: fewer than three distinct points or under
+ * 1 mm2 of area). A room zone is only checked for 'room'.
  */
 export function zoneInvalidReason(level: Level, z: AutomationZone): ZoneInvalidReason | null {
   const s = z.shape;
@@ -107,7 +110,8 @@ export function zoneInvalidReason(level: Level, z: AutomationZone): ZoneInvalidR
     return len !== null && (v.offset < -WALL_TOL || v.offset > len + WALL_TOL);
   };
   if (s.vertices.some(beyond)) return 'wall';
-  return selfIntersects(zoneOutline(level, z)) ? 'self' : null;
+  const outline = zoneOutline(level, z);
+  return Math.abs(polygonArea(outline)) < MIN_ZONE_AREA || selfIntersects(outline) ? 'self' : null;
 }
 
 /** p lies inside the outline or within 1 mm of one of its edges. */

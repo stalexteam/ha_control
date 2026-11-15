@@ -272,6 +272,39 @@ describe('the Zones step', () => {
     expect(el.history!.current).toBe(start);
   });
 
+  it('Delete and Backspace during a draft remove vertices only; a held key never deletes the selected zone', async () => {
+    const { el } = await mountZones();
+    await press(el, '.zlist button[data-tool="zone-draw"]');
+    click(el, 3000, 3000);
+    click(el, 3500, 3000);
+    await press(el, '.zrow[data-id="door"]');
+    const before = el.history!.current;
+    key(el, 'keydown', 'Delete');
+    await el.updateComplete;
+    expect(el.activeTool.preview().zoneDraft?.points).toEqual([{ x: 3000, y: 3000 }]);
+    expect(el.toolId).toBe('zone-draw');
+    expect(el.selection).toEqual(az('door'));
+    // Holding Backspace: the auto-repeat empties the draft and stops there.
+    key(el, 'keydown', 'Backspace', { repeat: true });
+    key(el, 'keydown', 'Backspace', { repeat: true });
+    key(el, 'keydown', 'Delete', { repeat: true });
+    await el.updateComplete;
+    expect(el.activeTool.preview().zoneDraft).toBeUndefined();
+    expect(el.history!.current).toBe(before);
+    expect(el.selection).toEqual(az('door'));
+    // A fresh press with no draft deletes the selected zone.
+    key(el, 'keydown', 'Backspace');
+    await el.updateComplete;
+    expect(zones(el).map(z => z.id)).not.toContain('door');
+  });
+
+  it('room labels are hidden in the Zones step, where the room zones carry the name', async () => {
+    const { el } = await mountZones();
+    expect(el.shadowRoot!.querySelectorAll('svg.plan .zone-label')).toHaveLength(0);
+    await press(el, '.steps [data-mode="plan"]');
+    expect(el.shadowRoot!.querySelectorAll('svg.plan .zone-label')).toHaveLength(1);
+  });
+
   it('zones are drawn only in the Zones step', async () => {
     const { el } = await mountZones();
     expect(el.shadowRoot!.querySelectorAll('svg.plan .azones .azone')).toHaveLength(3);

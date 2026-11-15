@@ -157,6 +157,17 @@ describe('zoneInvalidReason priority', () => {
   it('a bow-tie gives \'self\'', () => {
     expect(zoneInvalidReason(box, poly('z', bowTie))).toBe('self');
   });
+
+  it('an outline collapsed to fewer than three distinct points or to no area gives \'self\'', () => {
+    // Two vertices on one corner (e.g. after merging nodes): two distinct points.
+    const merged = poly('z', [{ kind: 'node', nodeId: 'n0', x: 0, y: 0 }, { kind: 'node', nodeId: 'n0', x: 0, y: 0 }, free(1000, 1000)]);
+    expect(selfIntersects(zoneOutline(box, merged))).toBe(false);
+    expect(zoneInvalidReason(box, merged)).toBe('self');
+    // Three distinct points, area 0.5 mm2.
+    expect(zoneInvalidReason(box, poly('z', [free(0, 0), free(1000, 0), free(500, 0.001)]))).toBe('self');
+    // A thin but real sliver (1000 x 1 mm, area 500 mm2) is valid.
+    expect(zoneInvalidReason(box, poly('z', [free(0, 0), free(1000, 0), free(1000, 1)]))).toBeNull();
+  });
 });
 
 describe('zoneContains counts the boundary', () => {

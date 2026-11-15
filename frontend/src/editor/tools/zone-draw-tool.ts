@@ -4,6 +4,7 @@ import { nextFreeName } from '../../model/ids';
 import { segmentsMeet, selfIntersects } from '../../geometry/zones';
 import { cross, dist, dot, sub } from '../../geometry/vec';
 import { t } from '../../i18n';
+import type { SnapResult } from '../../geometry/snap';
 import { zoneVertexAt } from './zones-select-tool';
 import type { Preview, Tool, ToolContext, ToolEvent } from './types';
 
@@ -14,15 +15,19 @@ const pt = (v: ZoneVertex): Pt => ({ x: v.x, y: v.y });
 
 /**
  * Custom zone drawing tool. Each click adds a vertex placed by the same snap rules as the zone vertex drag (node ->
- * node vertex; wall midpoint, axis or face -> wall vertex; grid or nothing -> free; Alt: free; Shift: ortho from the
- * last vertex). A vertex is rejected within 1 mm of the previous one or when its edge would cross an earlier,
- * non-adjacent edge. With 3 or more vertices a click on the first or the last vertex, or Enter, closes the zone
- * (rejected while the closing edge crosses the outline). Backspace removes the last vertex; Escape drops the draft.
+ * node vertex; wall midpoint, axis or face -> wall vertex on the face of the pointer's side; grid or nothing -> free;
+ * Alt: free; Shift: ortho from the last vertex). The snap marker shows where the vertex lands, before the first click
+ * too. A vertex is rejected within 1 mm of the previous one or when its edge would cross an earlier, non-adjacent
+ * edge. With 3 or more vertices a click on the first or the last vertex, or Enter, closes the zone (rejected while
+ * the closing edge crosses the outline); hovering either vertex previews the closing. Backspace or Delete removes
+ * the last vertex; Escape drops the draft.
  */
 export function createZoneDrawTool(ctx: ToolContext): Tool {
   let draft: ZoneVertex[] = [];
   let cursor: Pt | null = null;
   let invalid = false;
+  let lastSnap: SnapResult | null = null; // the snap marker of the last pointer move
+  let ortho = false; // Shift was held on the last pointer move
 
   const last = (): Pt | undefined => (draft.length ? pt(draft[draft.length - 1]) : undefined);
 
@@ -38,6 +43,14 @@ export function createZoneDrawTool(ctx: ToolContext): Tool {
     }
     for (let i = 0; i + 2 < n; i++) if (segmentsMeet(pts[n - 1], p, pts[i], pts[i + 1])) return true;
     return false;
+  }
+
+  /** With 3 or more vertices: the first or the last vertex within the pick tolerance of p (a click there closes). */
+  function closingVertex(p: Pt): Pt | null {
+    if (draft.length < MIN_VERTICES) return null;
+    const tol = ctx.tolMm();
+    const first = pt(draft[0]), end = pt(draft[draft.length - 1]);
+    return dist(p, first) <= tol ? first : dist(p, end) <= tol ? end : null;
   }
 
   function close(): boolean {
@@ -57,9 +70,7 @@ export function createZoneDrawTool(ctx: ToolContext): Tool {
   return {
     id: 'zone-draw',
     down(e: ToolEvent) {
-      const p = e.pt;
-      const tol = ctx.tolMm();
-      if (draft.length >= MIN_VERTICES && (dist(p, pt(draft[0])) <= tol || dist(p, pt(draft[draft.length - 1])) <= tol)) {
+      if (closingVertex(e.pt)) {
         close();
         return;
       }
@@ -70,14 +81,24 @@ export function createZoneDrawTool(ctx: ToolContext): Tool {
       invalid = false;
     },
     move(e: ToolEvent) {
-      const v = place(e).vertex;
-      cursor = pt(v);
+      ortho = e.shift;
+      // Hovering the first or the last vertex previews the closing: invalid only when the closing edge crosses.
+      const end = closingVertex(e.pt);
+      if (end) {
+        cursor = end;
+        lastSnap = null;
+        invalid = selfIntersects(draft.map(pt));
+        return;
+      }
+      const r = place(e);
+      lastSnap = r.snap;
+      cursor = pt(r.vertex);
       invalid = rejects(cursor);
     },
     up() {},
     key(key: string) {
       if (key === 'Enter') return close();
-      if (key === 'Backspace') {
+      if (key === 'Backspace' || key === 'Delete') {
         if (draft.length === 0) return false;
         draft = draft.slice(0, -1);
         invalid = false;
@@ -91,9 +112,13 @@ export function createZoneDrawTool(ctx: ToolContext): Tool {
       return false;
     },
     preview(): Preview {
-      if (draft.length === 0) return {};
-      return { zoneDraft: { points: draft.map(pt), cursor, invalid } };
+      const pv: Preview = {};
+      if (draft.length > 0) pv.zoneDraft = { points: draft.map(pt), cursor, invalid };
+      if (lastSnap) pv.snap = lastSnap;
+      const from = last();
+      if (ortho && from) pv.orthoFrom = from;
+      return pv;
     },
-    cancel() { draft = []; cursor = null; invalid = false; },
+    cancel() { draft = []; cursor = null; invalid = false; lastSnap = null; ortho = false; },
   };
 }

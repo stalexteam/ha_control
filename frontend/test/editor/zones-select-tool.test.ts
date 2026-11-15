@@ -4,6 +4,7 @@ import { addRoomZone } from '../../src/model/automation-zones';
 import { addZone } from '../../src/model/zones';
 import { levelZones, type AutomationZone, type Id, type Level, type ZoneVertex } from '../../src/model/types';
 import type { Selection, Tool } from '../../src/editor/tools/types';
+import { facePoint } from '../../src/geometry/devices';
 import { rectRoomLevel } from '../fixtures';
 import { fakeContext } from './fake-context';
 
@@ -103,6 +104,23 @@ describe('zones select tool: dragging a vertex', () => {
     expect(left.x).toBeCloseTo(1500);
     expect(left.y).toBeCloseTo(-200);
     expect(ctx.commits).toHaveLength(2);
+  });
+
+  it('a drag onto a wall midpoint or axis shows the snap marker on the chosen face, where the vertex lands', () => {
+    const { ctx, t } = setup(plan([square('z', 500, 500, 1500, 1500)]));
+    click(t, 1000, 1000);
+    t.down(ev(1500, 500));
+    t.move(ev(1500, 10)); // the midpoint of w0 (axis y = 0), pointer on the inner half: the right face (y = 200)
+    const face = facePoint(ctx.level(), 'w0', 'right', 1500)!;
+    expect(t.preview().snap).toMatchObject({ kind: 'mid', pt: face });
+    const v = verts(t.preview().level!, 'z')[1];
+    expect({ x: v.x, y: v.y }).toEqual(face);
+    t.move(ev(2500, -5)); // the axis, pointer on the outer half: the left face (y = -200)
+    expect(t.preview().snap).toMatchObject({ kind: 'wall', pt: facePoint(ctx.level(), 'w0', 'left', 2500) });
+    t.up(ev(2500, -5));
+    const w = verts(ctx.level(), 'z')[1];
+    expect(w).toMatchObject({ kind: 'wall', wallId: 'w0', offset: 2500, side: 'left' });
+    expect({ x: w.x, y: w.y }).toEqual(facePoint(ctx.level(), 'w0', 'left', 2500));
   });
 
   it('Alt-drag gives a free vertex at the pointer', () => {

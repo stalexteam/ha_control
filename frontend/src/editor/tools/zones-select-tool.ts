@@ -3,6 +3,7 @@ import { moveZoneVertex } from '../../model/automation-zones';
 import { zoneContains, zoneOutline } from '../../geometry/zones';
 import { orthoConstrain, snap, type SnapResult } from '../../geometry/snap';
 import { wallFrame, wallLocal } from '../../geometry/walls';
+import { facePoint } from '../../geometry/devices';
 import { dist, distToSegment, polygonArea } from '../../geometry/vec';
 import { DRAG_PX, type Preview, type Tool, type ToolContext, type ToolEvent } from './types';
 
@@ -10,7 +11,8 @@ import { DRAG_PX, type Preview, type Tool, type ToolContext, type ToolEvent } fr
  * The zone vertex placed at the pointer, and the snap result for the marker (null with Alt). Alt: a free vertex at
  * the pointer (ortho from `from` with Shift), no snapping. Otherwise snap (Shift: ortho from `from`): a node gives a
  * node vertex; a wall midpoint, axis or face gives a wall vertex on the face of the pointer's side; the grid or
- * nothing gives a free vertex.
+ * nothing gives a free vertex. A wall vertex's x,y and the marker's point are the resolved face point (facePoint),
+ * not the axis point a midpoint or axis snap returns.
  */
 export function zoneVertexAt(ctx: ToolContext, level: Level, e: ToolEvent, from: Pt | undefined):
 { vertex: ZoneVertex; snap: SnapResult | null } {
@@ -27,7 +29,8 @@ export function zoneVertexAt(ctx: ToolContext, level: Level, e: ToolEvent, from:
     const w = level.walls.find(x => x.id === ep.wallId);
     if (w) {
       const side = wallLocal(wallFrame(level, w), e.pt).side >= 0 ? 'left' : 'right';
-      return { vertex: { kind: 'wall', wallId: w.id, offset: ep.offset, side, x: s.pt.x, y: s.pt.y }, snap: s };
+      const p = facePoint(level, w.id, side, ep.offset) ?? s.pt;
+      return { vertex: { kind: 'wall', wallId: w.id, offset: ep.offset, side, x: p.x, y: p.y }, snap: { ...s, pt: p } };
     }
   }
   return { vertex: { kind: 'free', x: s.pt.x, y: s.pt.y }, snap: s };
