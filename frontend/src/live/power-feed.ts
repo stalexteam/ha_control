@@ -76,7 +76,10 @@ export class PowerFeed {
   /** The latest frame of the current draft; null before the first one, after a failure and while disconnected. */
   get frame(): PowerFrame | null { return this.current; }
 
-  /** Why there are no live values (no subscription support, a failed subscription or position request), else null. */
+  /**
+   * Why there are no live values (no subscription support or a failed subscription), else null. A failed position
+   * request is not an error here: `setPosition` rejects and the caller shows it.
+   */
   get error(): string | null { return this.failure; }
 
   watch(planId: Id | null, payload: PowerPayload | null): void {
@@ -115,16 +118,14 @@ export class PowerFeed {
     this.offline = false;
   }
 
-  /** Sets a transfer position of the watched plan live on the server; nothing is sent while no plan is watched. */
+  /**
+   * Sets a transfer position of the watched plan live on the server; nothing is sent while no plan is watched.
+   * A failure rejects and leaves `error` as it is.
+   */
   async setPosition(blockId: Id, p: Position): Promise<void> {
     const conn = this.connection();
     if (!conn || this.planId === null) return;
-    try {
-      await conn.sendMessagePromise({ type: 'plan_studio/power/set_position', plan_id: this.planId, block_id: blockId, position: p });
-    } catch (err) {
-      this.setFailure(messageOf(err));
-      throw err;
-    }
+    await conn.sendMessagePromise({ type: 'plan_studio/power/set_position', plan_id: this.planId, block_id: blockId, position: p });
   }
 
   private start(): void {

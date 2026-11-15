@@ -337,17 +337,14 @@ describe('PowerFeed', () => {
     expect(feed.error).toBeNull();
   });
 
-  it('a failed setPosition sets the error and rejects', async () => {
-    const h = host();
+  it('a failed setPosition rejects and leaves `error` null (the panel shows it as the notice)', async () => {
     const c = fakeConnection();
-    const feed = new PowerFeed(h, () => c.connection);
+    const feed = new PowerFeed(host(), () => c.connection);
     feed.watch('P1', A);
-    h.requestUpdate.mockClear();
     const err = { code: 'not_loaded', message: 'Plan Studio is not loaded' };
     c.failSendWith(err);
     await expect(feed.setPosition('ts', 'B')).rejects.toBe(err);
-    expect(feed.error).toBe('Plan Studio is not loaded');
-    expect(h.requestUpdate).toHaveBeenCalled();
+    expect(feed.error).toBeNull();
   });
 });
 
@@ -445,6 +442,31 @@ describe('PowerFeed in the panel', () => {
     const el = await open(hass, schematic);
     await enterPower(el);
     expect($(el, 'g[data-wire="w1"] path.wire').getAttribute('class')).toBe('wire nodata');
+  });
+
+  it('a failed subscription (an old backend) shows its error at the top of the Power properties', async () => {
+    const base = createMockHass();
+    const hass: HassLike = {
+      ...base,
+      connection: {
+        ...base.connection,
+        subscribeMessage<T>(cb: (m: T) => void, msg: Record<string, unknown>, opts?: { resubscribe?: boolean }) {
+          if (msg.type === 'plan_studio/power/subscribe') {
+            return Promise.reject({ code: 'unknown_command', message: 'Unknown command.' });
+          }
+          return base.connection.subscribeMessage!<T>(cb, msg, opts);
+        },
+      },
+    };
+    const el = await open(hass, schematic);
+    expect(el.shadowRoot!.querySelector('[data-notice="feed"]')).toBeNull();
+    await enterPower(el);
+    await vi.waitFor(() => expect(el.powerFeed.error).toBe('Unknown command.'));
+    await el.updateComplete;
+    const line = $(el, '.props [data-notice="feed"]');
+    expect(line.textContent!.trim()).toBe('Unknown command.');
+    expect(line.classList.contains('note')).toBe(true);
+    expect(el.shadowRoot!.querySelector('.props [data-notice="session"]')).toBeNull();
   });
 
   it('a plan without power subscribes with the shown schematic and stays clean', async () => {

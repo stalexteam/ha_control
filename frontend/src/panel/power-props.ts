@@ -39,6 +39,8 @@ export interface PowerPropsOpts {
   frame: PowerFrame | null;
   /** Session error or warning text. */
   notice: string | null;
+  /** Why there are no live values (the live feed's subscription failed), or null. */
+  feedError: string | null;
   toolId: ToolId;
   /** The plan device the Plan device tool places next, or null. */
   placeDeviceId: Id | null;
@@ -228,13 +230,15 @@ function content(o: PowerPropsOpts): TemplateResult {
 }
 
 /**
- * The Power step properties: the Plan device tool's device list, the selected block (name, per-kind entity fields,
- * Inverter, transfer form and live position, bus size, Auto ports, Delete) or wire (ends, live value, Delete), or a
- * hint. Every edit is one undoable commit; a transfer position is live state, not an edit.
+ * The Power step properties: the live feed error at the top, then the Plan device tool's device list, the selected
+ * block (name, per-kind entity fields, Inverter, transfer form and live position, bus size, Auto ports, Delete) or
+ * wire (ends, live value, Delete), or a hint. Every edit is one undoable commit; a transfer position is live state,
+ * not an edit.
  */
 export function renderPowerProps(o: PowerPropsOpts): TemplateResult {
   return html`<div class="props pprops">
     ${o.notice ? html`<p class="warn" data-notice="session" role="alert">${o.notice}</p>` : nothing}
+    ${o.feedError ? html`<p class="note" data-notice="feed">${o.feedError}</p>` : nothing}
     ${content(o)}
   </div>`;
 }

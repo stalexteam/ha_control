@@ -59,7 +59,7 @@ function harness(power: PowerSchema, over: Partial<PowerPropsOpts> = {}) {
   document.body.appendChild(host);
   const calls = { armed: [] as Id[], positions: [] as [Id, Position][], commits: 0 };
   const o: PowerPropsOpts = {
-    power, level: level(), selection: null, meta: META, states: STATES, frame: null, notice: null,
+    power, level: level(), selection: null, meta: META, states: STATES, frame: null, notice: null, feedError: null,
     toolId: 'power-select', placeDeviceId: null,
     onPlaceDevice: id => { calls.armed.push(id); },
     commitPower: next => { o.power = next; calls.commits++; draw(); },
@@ -129,6 +129,16 @@ describe('Power properties', () => {
   it('the notice is shown above the content', () => {
     const h = harness(schema(), { notice: 'This wire would close a loop' });
     expect(h.q('.warn')!.textContent!.trim()).toBe('This wire would close a loop');
+  });
+
+  it('the live feed error is a muted line at the top, under the notice', () => {
+    expect(harness(schema()).q('[data-notice="feed"]')).toBeNull();
+    document.body.innerHTML = '';
+    const h = harness(schema(), { notice: 'This wire would close a loop', feedError: 'Connection lost' });
+    const kids = [...h.q('.pprops')!.children];
+    expect(kids.map(k => k.getAttribute('data-notice') ?? k.getAttribute('data-note'))).toEqual(['session', 'feed', 'power-hint', null]);
+    expect(h.q('[data-notice="feed"]')!.textContent).toBe('Connection lost');
+    expect(h.q('[data-notice="feed"]')!.className).toBe('note');
   });
 
   it('choosing a power entity for a meter stores it; the power list is strict (power class or W / kW only)', async () => {
