@@ -17,7 +17,7 @@ const withTimeout = (p, ms) => Promise.race([p, new Promise((res) => setTimeout(
 async function setEntity(state) {
   const r = await fetch(`${base}/api/states/${ENTITY}`, {
     method: state === null ? "DELETE" : "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Connection: "close" },
     ...(state === null ? {} : { body: JSON.stringify({ state }) }),
   });
   if (!r.ok) fail(`${state === null ? "remove" : "set"} ${ENTITY}: HTTP ${r.status}`);
@@ -34,7 +34,7 @@ async function abort(m) {
   aborting = true;
   console.error("SMOKE FAIL: " + m);
   await cleanup().catch(() => undefined);
-  process.exit(1);
+  process.exitCode = 1; ws.close();
 }
 const call = (msg) => new Promise((res) => {
   const id = nextId++; pending.set(id, res); ws.send(JSON.stringify({ ...msg, id }));
@@ -140,5 +140,5 @@ async function run() {
   const g = await call({ type: "plan_studio/plans/get", plan_id: id });
   if (g.success || g.error.code !== "not_found") fail("expected not_found, got " + JSON.stringify(g));
   console.log("SMOKE OK");
-  process.exit(0);
+  process.exitCode = 0; ws.close();
 }
