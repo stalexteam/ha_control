@@ -7,6 +7,7 @@ import { createDeviceTool } from '../editor/tools/device-tool';
 import { createDeviceSelectTool } from '../editor/tools/device-select-tool';
 import { createBindingSelectTool } from '../editor/tools/binding-select-tool';
 import { createZoneRoomTool } from '../editor/tools/zone-room-tool';
+import { createZoneDrawTool } from '../editor/tools/zone-draw-tool';
 import { createZonesSelectTool } from '../editor/tools/zones-select-tool';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
 import { levelZones, type Level } from '../model/types';
@@ -35,8 +36,7 @@ export function createTool(id: ToolId, ctx: ToolContext): Tool {
     case 'binding-select': return createBindingSelectTool(ctx);
     case 'zones-select': return createZonesSelectTool(ctx);
     case 'zone-room': return createZoneRoomTool(ctx);
-    // The custom zone tool is not wired yet; no rail offers it.
-    case 'zone-draw': throw new Error('zone-draw tool is not available yet');
+    case 'zone-draw': return createZoneDrawTool(ctx);
     default: return createDeviceTool(ctx, id);
   }
 }

@@ -88,6 +88,7 @@ const en: Dict = {
   'bindstatus.unbound': 'Not bound',
   'bindstatus.missing': 'Entity missing in Home Assistant',
   'zone.default': 'Room',
+  'zones.default': 'Zone',
   'device.ceiling_light': 'Ceiling light',
   'device.wall_light': 'Wall light',
   'device.motion_sensor': 'Motion sensor',

@@ -54,7 +54,7 @@ function orient(a: Pt, b: Pt, c: Pt): number {
 const between = (p: Pt, a: Pt, b: Pt): boolean => dot(sub(a, p), sub(b, p)) <= 0;
 
 /** The segments p1-p2 and q1-q2 cross or touch. */
-function segmentsMeet(p1: Pt, p2: Pt, q1: Pt, q2: Pt): boolean {
+export function segmentsMeet(p1: Pt, p2: Pt, q1: Pt, q2: Pt): boolean {
   const d1 = orient(q1, q2, p1), d2 = orient(q1, q2, p2), d3 = orient(p1, p2, q1), d4 = orient(p1, p2, q2);
   if (d1 * d2 < 0 && d3 * d4 < 0) return true;
   return (d3 === 0 && between(q1, p1, p2)) || (d4 === 0 && between(q2, p1, p2))
