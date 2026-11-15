@@ -7,6 +7,8 @@ export interface ToolEvent {
   pt: Pt;
   shift: boolean;
   alt: boolean;
+  /** Ctrl (Cmd on macOS) is held. */
+  ctrl: boolean;
 }
 
 /** Pointer travel (screen px) below which a press-move-release is a click, not a drag. */

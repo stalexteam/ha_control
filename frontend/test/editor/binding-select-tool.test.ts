@@ -6,7 +6,7 @@ import type { Selection } from '../../src/editor/tools/types';
 import { rectRoomLevel } from '../fixtures';
 import { fakeContext } from './fake-context';
 
-const ev = (x: number, y: number) => ({ pt: { x, y }, shift: false, alt: false });
+const ev = (x: number, y: number) => ({ pt: { x, y }, shift: false, alt: false, ctrl: false });
 const k = { shift: false };
 
 function setup() {

@@ -16,7 +16,7 @@ export interface WallProps { type: WallType; thickness: number; baseline: Baseli
 
 const EPS = 1; // mm
 
-function clone(level: Level): Level {
+export function clone(level: Level): Level {
   return structuredClone(level);
 }
 
@@ -34,7 +34,7 @@ function clamp(v: number, lo: number, hi: number): number {
  * Point on the host wall's axis at `at`: an offset from its node A, or a point projected onto the axis.
  * The offset is clamped to [0, len].
  */
-function hostPoint(level: Level, w: Wall, at: number | Pt): { pt: Pt; offset: number } {
+export function hostPoint(level: Level, w: Wall, at: number | Pt): { pt: Pt; offset: number } {
   const a = nodePos(level, w.a);
   const b = nodePos(level, w.b);
   const l = dist(a, b);
@@ -198,7 +198,8 @@ export function moveWall(level: Level, wallId: Id, delta: Pt): Level {
   return finalize(out, level);
 }
 
-function dropOrphans(level: Level): void {
+/** Mutating: drops nodes no wall uses. */
+export function dropOrphans(level: Level): void {
   level.nodes = level.nodes.filter(n => level.walls.some(w => w.a === n.id || w.b === n.id));
 }
 

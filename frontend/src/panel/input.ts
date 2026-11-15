@@ -25,7 +25,7 @@ export class EditorInput {
   constructor(private readonly h: InputHost) {}
 
   private toolEvent(e: PointerEvent): ToolEvent {
-    return { pt: this.h.toMm(e), shift: e.shiftKey, alt: e.altKey };
+    return { pt: this.h.toMm(e), shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey };
   }
 
   readonly pointerDown = (e: PointerEvent) => {

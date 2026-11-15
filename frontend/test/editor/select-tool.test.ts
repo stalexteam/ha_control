@@ -6,8 +6,8 @@ import { addOpening } from '../../src/model/openings';
 import type { Level } from '../../src/model/types';
 import { fakeContext } from './fake-context';
 
-const ev = (x: number, y: number, o: { shift?: boolean; alt?: boolean } = {}) =>
-  ({ pt: { x, y }, shift: !!o.shift, alt: !!o.alt });
+const ev = (x: number, y: number, o: { shift?: boolean; alt?: boolean; ctrl?: boolean } = {}) =>
+  ({ pt: { x, y }, shift: !!o.shift, alt: !!o.alt, ctrl: !!o.ctrl });
 const props = { type: 'partition', thickness: 100, baseline: 'center' } as const;
 const empty = (): Level => ({ id: 'l0', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] });
 const box = () => addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 4000 }, props, 'axis');
@@ -181,6 +181,31 @@ describe('select tool', () => {
     const n = l.nodes.find(x => x.id === l.walls.find(w => w.id === wall.id)!.a)!;
     expect(n.host).toBeUndefined();
     expect(nodePos(l, n.id)).toEqual({ x: 2000, y: 2000 });
+  });
+
+  it('Ctrl+click on a wall trims it in one commit; a plain click still selects', () => {
+    const b = box();
+    const top = b.walls[0], bottom = b.walls[2];
+    // A partition from the middle of the top wall to the middle of the bottom wall: T-nodes at x = 1500.
+    const r = addWallSegment(b, { kind: 'wall', wallId: top.id, offset: 1500 }, { kind: 'wall', wallId: bottom.id, offset: 1500 }, props);
+    const tee = r.level.walls.find(w => w.id === r.wallId)!.a;
+    const ctx = fakeContext(r.level);
+    const sel: unknown[] = [];
+    ctx.select = s => { sel.push(s); };
+    const t = createSelectTool(ctx);
+    click(t, 2000, 0); // select the top wall first
+    t.down(ev(500, 0, { ctrl: true })); t.move(ev(800, 300, { ctrl: true })); t.up(ev(800, 300, { ctrl: true }));
+    expect(ctx.commits).toHaveLength(1);
+    const l = ctx.level();
+    // The cut piece held node A: the top wall now starts at the former T-node, which is a plain junction.
+    expect(l.walls.find(w => w.id === top.id)).toMatchObject({ a: tee, b: top.b });
+    expect(l.nodes.find(n => n.id === tee)!.host).toBeUndefined();
+    expect(nodePos(l, tee)).toEqual({ x: 1500, y: 0 });
+    expect(nodePos(l, top.b)).toEqual({ x: 3000, y: 0 });
+    expect(sel[sel.length - 1]).toBeNull();
+    click(t, 2000, 0);
+    expect(ctx.commits).toHaveLength(1);
+    expect(sel[sel.length - 1]).toEqual({ kind: 'wall', id: top.id });
   });
 
   it('cancel also clears the editor selection', () => {

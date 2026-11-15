@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createWallTool } from '../../src/editor/tools/wall-tool';
 import { fakeContext } from './fake-context';
 
-const ev = (x: number, y: number, shift = false) => ({ pt: { x, y }, shift, alt: false });
+const ev = (x: number, y: number, shift = false) => ({ pt: { x, y }, shift, alt: false, ctrl: false });
 const typeKeys = (t: ReturnType<typeof createWallTool>, s: string) => {
   for (const ch of s) t.key(ch, { shift: false });
 };

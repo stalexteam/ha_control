@@ -27,8 +27,8 @@ export const $ = <T extends Element>(el: PlanStudioPanel, sel: string): T => {
 };
 
 /** happy-dom reports an identity screen CTM, so client coordinates equal plan millimetres. */
-export function pointer(el: PlanStudioPanel, type: string, x: number, y: number, button = 0): void {
-  $(el, 'svg.plan').dispatchEvent(new PointerEvent(type, { button, clientX: x, clientY: y, bubbles: true, composed: true }));
+export function pointer(el: PlanStudioPanel, type: string, x: number, y: number, button = 0, init: PointerEventInit = {}): void {
+  $(el, 'svg.plan').dispatchEvent(new PointerEvent(type, { button, clientX: x, clientY: y, bubbles: true, composed: true, ...init }));
 }
 
 export function click(el: PlanStudioPanel, x: number, y: number): void {

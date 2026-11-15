@@ -1,10 +1,11 @@
 import type { Id, Level, Pt } from '../../model/types';
 import { detachWallEnd, finalize, mergeNodes, moveNode, moveWall } from '../../model/ops';
 import { moveOpening } from '../../model/openings';
+import { trimWall } from '../../model/trim';
 import { snap, type SnapResult } from '../../geometry/snap';
 import { nodePos, wallFrame, wallLocal } from '../../geometry/walls';
 import { sub } from '../../geometry/vec';
-import { hitTest } from '../hit';
+import { hitTest, wallAt } from '../hit';
 import type { Preview, Selection, Tool, ToolContext, ToolEvent } from './types';
 
 type Drag =
@@ -12,7 +13,10 @@ type Drag =
   | { kind: 'wall'; wallId: Id; origin: Pt }
   | { kind: 'opening'; openingId: Id; grab: number };
 
-/** Select tool: pick, drag nodes/walls/openings (one commit per drag, on `up`), delete. */
+/**
+ * Select tool: pick, drag nodes/walls/openings (one commit per drag, on `up`), delete. Ctrl+press on a wall trims
+ * it (one commit, no drag) and clears the selection.
+ */
 export function createSelectTool(ctx: ToolContext): Tool {
   let sel: Selection | null = null;
   let drag: Drag | null = null;
@@ -86,6 +90,12 @@ export function createSelectTool(ctx: ToolContext): Tool {
       reset();
       downPt = e.pt;
       const level = ctx.level();
+      const trimmed = e.ctrl ? wallAt(level, e.pt, ctx.tolMm()) : null;
+      if (trimmed) {
+        setSel(null);
+        ctx.commit(trimWall(level, trimmed, e.pt));
+        return;
+      }
       const prev = sel;
       const hit = hitTest(level, e.pt, ctx.tolMm(), prev);
       setSel(hit);

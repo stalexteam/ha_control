@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { $, drawBox, key, mount, pointer, pressSave } from './helpers';
+import { $, drawBox, key, mount, pointer, pressSave, undo } from './helpers';
 import { simulateForeignSave } from '../../dev/mock-hass';
 
 describe('panel input edge cases', () => {
@@ -35,6 +35,23 @@ describe('panel input edge cases', () => {
     pointer(el, 'lostpointercapture', 300, -600);
     pointer(el, 'pointerup', 300, -600);
     expect(el.history!.current).toBe(before);
+  });
+
+  it('Ctrl+click (or Cmd+click) on a wall trims it in one Undo step', async () => {
+    const el = await mount();
+    await drawBox(el);
+    $<HTMLButtonElement>(el, 'button[data-tool="select"]').click();
+    await el.updateComplete;
+    const before = el.history!.current;
+    // The box's top wall has no intersections inside it: the trim deletes it.
+    pointer(el, 'pointerdown', 300, -100, 0, { ctrlKey: true });
+    pointer(el, 'pointerup', 300, -100, 0, { ctrlKey: true });
+    expect(el.history!.current.walls).toHaveLength(3);
+    await undo(el);
+    expect(el.history!.current).toBe(before);
+    pointer(el, 'pointerdown', 300, -100, 0, { metaKey: true });
+    pointer(el, 'pointerup', 300, -100, 0, { metaKey: true });
+    expect(el.history!.current.walls).toHaveLength(3);
   });
 
   it('space used for panning never reaches the tool buffer', async () => {
