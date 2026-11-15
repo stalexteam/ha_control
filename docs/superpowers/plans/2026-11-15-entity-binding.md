@@ -71,6 +71,25 @@ frontend/src/editor/tools/binding-select-tool.ts  NEW selection-only tool for th
 frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,device-props}.ts, render/{plan-svg,devices-svg}.ts, i18n.ts   integration
 ```
 
+## Code changes since this plan was written (simplification pass, main @ 9e8fce0)
+
+Use these current APIs; they replace anything older in the task texts:
+- **No `lang` anywhere.** `t(key)` takes one argument. Remove `lang` from every Opts or signature in this plan (`renderSteps`, `renderBindingList`, `renderBindingProps`), and do not add `lang` fields.
+- **Deleting goes through one path:** `deleteSelection` in `plan-studio-panel.ts` handles Delete and Backspace; tools no longer delete. Task 3 must gate it by mode: in `binding` mode Delete and Backspace do nothing. Add a panel-level test for both keys.
+- **Form fields live in `frontend/src/panel/fields.ts`:** `row`, `select`, `numField`, and focus-safety through `fieldValue`. Number parsing is `parseWhole(s, {min, max, signed})` in `frontend/src/geometry/parse.ts`. Use these for every new field and do not write new parsers.
+- **Dialogs are a single `Dialog | null` union** with one `renderDialog`. Binding needs no dialogs.
+- **User-visible error text** comes from `messageOf(err)` in `frontend/src/errors.ts`. Use it for the registry-load notice.
+- **Helpers to reuse:**
+  - `ToolContext.scale()`; there is no `ctx.lang()`. Express pixel thresholds as `PX / ctx.scale()`.
+  - Kind capability sets live in `model/types.ts`, for example `AIM_KINDS` and `AIM_MAX`. Add `ROLE_SPECS` alongside them, or in `model/bindings.ts`.
+  - `nextFreeName` in `model/ids.ts`.
+  - `emptyLevel()` in `model/types.ts`.
+  - `render/shared.ts`: `ringD` and `cached` (a WeakMap keyed by level).
+- **No host adapters.** `input-host.ts` is gone and the panel implements `InputHost` directly. Side-panel and session hosts are the panel class, or a `Pick` of it. New step and binding code should read panel fields through such a `Pick`; do not add new host interfaces.
+- **Task 4:** `EQUIPMENT_SYMBOLS` is now exported from `panel/device-props.ts` and used by the i18n key test, which checks every member of `symbol.*`. When `symbol` becomes `icon`, remove `EQUIPMENT_SYMBOLS` and the `symbol.*` keys, and update `frontend/test/i18n.test.ts` to match.
+- **The i18n key-existence test** (`frontend/test/i18n.test.ts`) fails on any unknown `t('…')` literal. Every new UI string must be added to `i18n.ts` in the same commit.
+- **Keep `plan-studio-panel.ts` small.** It must stay ≤ 400 lines; it is about 300 now.
+
 ---
 
 ### Task 1: Binding model
@@ -208,7 +227,7 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
 - Test: `frontend/test/panel/steps.test.ts`, `frontend/test/panel/binding-list.test.ts`, `frontend/test/editor/binding-select-tool.test.ts`, `frontend/test/render/binding-overlay.test.ts`
 
 **Interfaces:**
-- `renderSteps(o: { lang: string; mode: EditorMode; level: Level; status: (d: Device) => BindStatus; onMode(m: EditorMode): void; onNextUnbound(): void }): TemplateResult`.
+- `renderSteps(o: { mode: EditorMode; level: Level; status: (d: Device) => BindStatus; onMode(m: EditorMode): void; onNextUnbound(): void }): TemplateResult`.
   - Cells:
     - title (plan name and "Plan Studio");
     - 1 Plan: "N walls, M rooms", done when walls > 0 and zones > 0;
@@ -218,7 +237,7 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
   - Each cell is a button that sets the mode; the current one is underlined in `--primary-color`.
   - Back and Next are labelled with their target: "Back: Plan", "Next: Equipment", "Next: Binding". In Binding, Back is "Back: Equipment" and Next is "Next unbound device".
 - `nextUnbound(level: Level, currentId: Id | null, status): Id | null`: the next device in list order whose status is not `bound`, wrapping around. It lives in `binding-list.ts`.
-- `renderBindingList(o: { level; selection; status; lang; filter: 'unbound' | 'bound' | 'all'; query: string; onFilter; onQuery; onPick(id) }): TemplateResult`:
+- `renderBindingList(o: { level; selection; status; filter: 'unbound' | 'bound' | 'all'; query: string; onFilter; onQuery; onPick(id) }): TemplateResult`:
   - A segmented "Not bound / Bound / All" control with counts. Partial and missing count as "Not bound".
   - A search input over name and kind.
   - Rows show a status dot (dashed = unbound, amber = partial, red = missing, filled = bound), the name, the kind, and "filled/total".
@@ -309,7 +328,7 @@ frontend/src/panel/{tool-factory,side-panel,toolbar,styles,plan-studio-panel,dev
 - Test: `frontend/test/panel/binding.test.ts`
 
 **Interfaces:**
-- `renderBindingProps(o: { level; device: Device | null; meta: HaMeta; hass; lang; status; showAll: Record<string, boolean>; onShowAll(key); commit(next: Level); onNextUnbound(); notice; setNotice }): TemplateResult`.
+- `renderBindingProps(o: { level; device: Device | null; meta: HaMeta; status; showAll: Record<string, boolean>; onShowAll(key); commit(next: Level); onNextUnbound(); notice; setNotice }): TemplateResult`.
 - With no device: the text "Pick a device on the plan or in the list, or press Next unbound device", plus the button.
 - With a device:
   - a header with name and kind;
