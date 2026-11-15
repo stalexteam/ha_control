@@ -165,7 +165,7 @@ export const panelStyles = css`
   .bprops .warn { margin: 4px 0 0; }
   .bprops .reload { margin-top: 12px; }
   /* Input containers: a trigger's slot and event under its entity; checkboxes between the role sections they
-     reveal; the default output after the roles. */
+     reveal; the duplicate warning after the roles. */
   .trigger .row { margin: 4px 0; }
   .cflag { margin-top: 10px; }
   .cflag .row { margin: 0; }

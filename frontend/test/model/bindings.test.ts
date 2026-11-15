@@ -42,7 +42,6 @@ describe('setBinding', () => {
   it('a role inactive for the smart button flags -> same level', () => {
     const { level, id } = withDevice('smart_button');
     expect(setBinding(level, id, 'off', 'sensor.a')).toBe(level);
-    expect(setBinding(level, id, 'final', 'light.x')).toBe(level);
   });
 });
 
@@ -50,7 +49,7 @@ describe('activeRoleSpecs', () => {
   it('per smart button flag combination', () => {
     expect(roles(button())).toEqual(['on']);
     expect(roles(button({ separateOff: true }))).toEqual(['on', 'off']);
-    expect(roles(button({ autoEnabled: true }))).toEqual(['on', 'auto', 'final']);
+    expect(roles(button({ autoEnabled: true }))).toEqual(['on', 'auto']);
     expect(roles(button({ separateOff: true, autoEnabled: true }))).toEqual(['on', 'off', 'auto']);
   });
   it('a wall switch has the state role; other kinds have all their roles', () => {
@@ -107,23 +106,21 @@ describe('roleCount', () => {
 describe('roleCount: smart button', () => {
   it('counts the active roles only', () => {
     expect(roleCount(button({}, { on: 'sensor.a' }))).toEqual({ filled: 1, total: 1 });
-    expect(roleCount(button({ autoEnabled: true }, { on: 'sensor.a' }))).toEqual({ filled: 1, total: 3 });
+    expect(roleCount(button({ autoEnabled: true }, { on: 'sensor.a' }))).toEqual({ filled: 1, total: 2 });
   });
 });
 
 describe('setDeviceProps on a container', () => {
-  it('turning autoEnabled off drops the auto and final bindings and resets defaultOutput auto to off', () => {
+  it('turning autoEnabled off drops the auto binding and keeps the trigger in props', () => {
     const { level, id } = withDevice('smart_button');
-    let l = setDeviceProps(level, id, { autoEnabled: true, defaultOutput: 'auto' });
+    let l = setDeviceProps(level, id, { autoEnabled: true });
     l = setBinding(l, id, 'on', 'sensor.a');
     l = setBinding(l, id, 'auto', 'sensor.a');
-    l = setBinding(l, id, 'final', 'light.x');
-    expect(l.devices[0].bindings).toEqual({ on: 'sensor.a', auto: 'sensor.a', final: 'light.x' });
-    expect(l.devices[0].props).toMatchObject({ defaultOutput: 'auto' });
+    expect(l.devices[0].bindings).toEqual({ on: 'sensor.a', auto: 'sensor.a' });
     const off = setDeviceProps(l, id, { autoEnabled: false });
     expect(off.devices[0].bindings).toEqual({ on: 'sensor.a' });
     // The trigger settings stay in props, so turning auto on again restores them.
-    expect(off.devices[0].props).toMatchObject({ autoEnabled: false, defaultOutput: 'off', auto: { slot: 0, event: 'double' } });
+    expect(off.devices[0].props).toMatchObject({ autoEnabled: false, auto: { slot: 0, event: 'double' } });
   });
   it('turning separateOff off drops the off binding and keeps the off trigger in props', () => {
     const { level, id } = withDevice('smart_button');
@@ -134,25 +131,12 @@ describe('setDeviceProps on a container', () => {
     expect(off.devices[0].bindings).toEqual({ on: 'sensor.a' });
     expect(off.devices[0].props).toMatchObject({ separateOff: false, off: { slot: 2, event: 'hold' } });
   });
-  it('turning separateOff on drops final (it matters only in toggle mode)', () => {
-    const { level, id } = withDevice('smart_button');
-    let l = setDeviceProps(level, id, { autoEnabled: true });
-    l = setBinding(setBinding(l, id, 'on', 'sensor.a'), id, 'final', 'light.x');
-    expect(setDeviceProps(l, id, { separateOff: true }).devices[0].bindings).toEqual({ on: 'sensor.a' });
-  });
-  it('a wall switch keeps auto as the default only with autoByDoubleToggle', () => {
-    const { level, id } = withDevice('wall_switch');
-    const l = setDeviceProps(level, id, { autoByDoubleToggle: true, defaultOutput: 'auto' });
-    expect(l.devices[0].props).toMatchObject({ defaultOutput: 'auto' });
-    expect(setDeviceProps(l, id, { autoByDoubleToggle: false }).devices[0].props).toMatchObject({ defaultOutput: 'off' });
-  });
 });
 
 describe('bindingKey', () => {
   it('a smart button trigger is the entity and the expected action value; other roles are the entity', () => {
-    const d = button({ autoEnabled: true, on: { slot: 2, event: 'hold' } }, { on: 'sensor.a', final: 'light.x' });
+    const d = button({ autoEnabled: true, on: { slot: 2, event: 'hold' } }, { on: 'sensor.a' });
     expect(bindingKey(d, 'on')).toBe('sensor.a|2_hold');
-    expect(bindingKey(d, 'final')).toBe('light.x');
     expect(bindingKey(d, 'auto')).toBeNull();
     expect(bindingKey(withDevice('socket').level.devices[0], 'control')).toBeNull();
   });

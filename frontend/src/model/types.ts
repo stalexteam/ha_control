@@ -52,8 +52,6 @@ export interface Zone {
   broken: boolean;
 }
 
-/** Live output of an input container (computed by the integration). */
-export type ContainerOutput = 'on' | 'off' | 'auto' | 'error';
 /** A smart button trigger: slot 0..9 (0 = a one-button device) and a non-empty event (`single`, `double`, `hold` or free text). */
 export interface Trigger { slot: number; event: string }
 /** Input containers: kinds with a live output. */
@@ -76,10 +74,9 @@ export type DeviceProps =
   | { kind: 'equipment'; shape: 'rect' | 'circle'; width: number; depth: number; diameter: number;
       icon: string; label: string }
   // windowSec: whole seconds 1..10, used only with autoByDoubleToggle.
-  | { kind: 'wall_switch'; autoByDoubleToggle: boolean; windowSec: number; defaultOutput: ContainerOutput }
+  | { kind: 'wall_switch'; autoByDoubleToggle: boolean; windowSec: number }
   // off is used only with separateOff (otherwise the on trigger toggles); auto only with autoEnabled.
-  | { kind: 'smart_button'; separateOff: boolean; autoEnabled: boolean; on: Trigger; off: Trigger; auto: Trigger;
-      defaultOutput: ContainerOutput };
+  | { kind: 'smart_button'; separateOff: boolean; autoEnabled: boolean; on: Trigger; off: Trigger; auto: Trigger };
 
 /** Equipment icon default (an MDI name). */
 export const DEFAULT_EQUIPMENT_ICON = 'mdi:cube-outline';
@@ -87,21 +84,8 @@ export const DEFAULT_EQUIPMENT_ICON = 'mdi:cube-outline';
 /** Events offered for a trigger; any other non-empty text is accepted too. */
 export const TRIGGER_EVENTS = ['single', 'double', 'hold'] as const;
 
-/** Default outputs a container may have: `auto` only with auto enabled. Empty for kinds that are not containers. */
-export function allowedOutputs(p: DeviceProps): ContainerOutput[] {
-  const auto = p.kind === 'wall_switch' ? p.autoByDoubleToggle : p.kind === 'smart_button' ? p.autoEnabled : null;
-  if (auto === null) return [];
-  return auto ? ['off', 'on', 'auto', 'error'] : ['off', 'on', 'error'];
-}
-
-/** A container default output that is not allowed (`auto` with auto disabled, or unknown) reads as `off`. Same props otherwise. */
-export function normalizeDefaultOutput(p: DeviceProps): DeviceProps {
-  if (p.kind !== 'wall_switch' && p.kind !== 'smart_button') return p;
-  return allowedOutputs(p).includes(p.defaultOutput) ? p : { ...p, defaultOutput: 'off' };
-}
-
 export type BindingRole = 'control' | 'motion' | 'illuminance' | 'temperature' | 'humidity' | 'state' | 'power'
-  | 'on' | 'off' | 'auto' | 'final';
+  | 'on' | 'off' | 'auto';
 
 export interface Device { id: Id; name: string; placement: DevicePlacement; props: DeviceProps; invalid: boolean; bindings?: Partial<Record<BindingRole, string>> }
 
@@ -187,12 +171,11 @@ export function deviceDefaults(kind: DeviceKind, mode: 'wall' | 'free'): DeviceP
     case 'equipment':
       return { kind, shape: 'rect', width: 600, depth: 600, diameter: 600, icon: DEFAULT_EQUIPMENT_ICON, label: '' };
     case 'wall_switch':
-      return { kind, autoByDoubleToggle: false, windowSec: 3, defaultOutput: 'off' };
+      return { kind, autoByDoubleToggle: false, windowSec: 3 };
     case 'smart_button':
       return {
         kind, separateOff: false, autoEnabled: false,
         on: { slot: 0, event: 'single' }, off: { slot: 0, event: 'hold' }, auto: { slot: 0, event: 'double' },
-        defaultOutput: 'off',
       };
     default:
       return { kind };
@@ -257,20 +240,21 @@ function completeContainer(d: Device): Device {
   return next ? { ...d, props: next as unknown as DeviceProps } : d;
 }
 
-/** A container whose stored default output is not allowed gets `off` (see normalizeDefaultOutput); same device otherwise. */
-function allowedDefault(d: Device): Device {
-  const props = normalizeDefaultOutput(d.props);
-  return props === d.props ? d : { ...d, props };
+/** A container's stored `defaultOutput` (removed in v0.5) is dropped; same device when it has none. */
+function dropDefaultOutput(d: Device): Device {
+  if (!isContainerKind(d.props.kind) || !('defaultOutput' in d.props)) return d;
+  const { defaultOutput: _dropped, ...props } = d.props as DeviceProps & { defaultOutput: unknown };
+  return { ...d, props: props as DeviceProps };
 }
 
 /**
  * Stage-1 plans have no `devices`; a missing field means []. Legacy kinds are migrated, missing or invalid container
- * props take their defaults, a container default output that is not allowed reads as `off`, then invalid bindings
- * are dropped. Same object back when nothing changes.
+ * props take their defaults, a stored container `defaultOutput` is dropped, then invalid bindings (such as a
+ * v0.4 `final`) are dropped. Same object back when nothing changes.
  */
 export function normalizeLevel(level: Level): Level {
   if (!level.devices) return { ...level, devices: [] };
   const devices = level.devices.map(d =>
-    sanitizeBindings(allowedDefault(completeContainer(migrateSwitch(migrateEquipment(d))))));
+    sanitizeBindings(dropDefaultOutput(completeContainer(migrateSwitch(migrateEquipment(d))))));
   return devices.some((d, i) => d !== level.devices[i]) ? { ...level, devices } : level;
 }

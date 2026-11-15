@@ -1,17 +1,22 @@
 import type { HassLike } from '../api';
-import type { ContainerKind, ContainerOutput, Device } from '../model/types';
+import type { ContainerKind, Device } from '../model/types';
 import { messageOf } from '../errors';
 import { t } from '../i18n';
 
-/** Live output of one input container, as the integration reports it. */
+/** The last intent of a container: `value` only for `set`; `at` is an ISO 8601 UTC string. */
+export interface ContainerIntent { action: 'toggle' | 'set' | 'auto'; value?: 'on' | 'off'; at: string }
+
+/** Live state of one input container, as the integration reports it. */
 export interface ContainerState {
-  output: ContainerOutput;
-  /** null: normal; otherwise the output is the default because a binding is missing or an entity is unavailable. */
-  fault: null | 'not_configured' | 'unavailable';
-  /** The unavailable entities (with `unavailable` only). */
-  entities?: string[];
   /** The kind of the saved container; a device of another kind (an unsaved Type change) is not that container. */
   kind: ContainerKind;
+  status: 'ok' | 'error';
+  /** Why the status is `error`. */
+  reason?: 'not_configured' | 'unavailable';
+  /** The unavailable entities (with `unavailable` only). */
+  entities?: string[];
+  /** The last intent; absent until the container has had one. */
+  last?: ContainerIntent;
 }
 
 /** One `plan_studio/containers/subscribe` event: `full` replaces the map, otherwise the changed containers merge into it. */

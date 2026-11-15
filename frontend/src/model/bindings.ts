@@ -29,10 +29,7 @@ export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
   ],
   wall_switch: [{ role: 'state', domains: ['switch', 'light', 'binary_sensor'], primary: true }],
   // Active roles depend on the flags: see activeRoleSpecs.
-  smart_button: [
-    trigger('on'), trigger('off'), trigger('auto'),
-    { role: 'final', domains: ['light', 'switch'], primary: false },
-  ],
+  smart_button: [trigger('on'), trigger('off'), trigger('auto')],
   socket: [{ role: 'control', domains: ['switch'], primary: true }, POWER],
   exhaust_fan: [{ role: 'control', domains: ['switch', 'fan'], primary: true }],
   equipment: [{ role: 'control', domains: ['switch'], primary: true }, POWER],
@@ -49,14 +46,14 @@ export type BindStatus = 'bound' | 'partial' | 'unbound' | 'missing';
 
 /**
  * The roles the device uses now: all roles of its kind, except for a smart button, where `off` needs separateOff,
- * `auto` needs autoEnabled, and `final` needs toggle mode with auto (only then does it decide anything).
+ * and `auto` needs autoEnabled.
  */
 export function activeRoleSpecs(d: Device): RoleSpec[] {
   const p = d.props;
   const specs = ROLE_SPECS[p.kind];
   if (p.kind !== 'smart_button') return specs;
   return specs.filter(({ role: r }) =>
-    r === 'off' ? p.separateOff : r === 'auto' ? p.autoEnabled : r === 'final' ? !p.separateOff && p.autoEnabled : true);
+    r === 'off' ? p.separateOff : r === 'auto' ? p.autoEnabled : true);
 }
 
 function validRoles(d: Device): ReadonlySet<BindingRole> {

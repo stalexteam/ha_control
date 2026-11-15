@@ -48,9 +48,9 @@ const flush = () => new Promise<void>(r => setTimeout(r, 0));
 const SUBSCRIBE = { type: 'plan_studio/containers/subscribe', plan_id: 'P1' };
 const NOT_READY = { code: 'unknown_command', message: 'Not ready' };
 const host = () => ({ requestUpdate: vi.fn() });
-const on: ContainerState = { output: 'on', fault: null, kind: 'smart_button' };
-const off: ContainerState = { output: 'off', fault: 'not_configured', kind: 'wall_switch' };
-const err: ContainerState = { output: 'error', fault: 'unavailable', entities: ['sensor.x'], kind: 'smart_button' };
+const on: ContainerState = { kind: 'smart_button', status: 'ok', last: { action: 'set', value: 'on', at: '2026-11-15T10:00:00+00:00' } };
+const off: ContainerState = { kind: 'wall_switch', status: 'error', reason: 'not_configured' };
+const err: ContainerState = { kind: 'smart_button', status: 'error', reason: 'unavailable', entities: ['sensor.x'] };
 /** A device of the given kind (only id and kind matter to the feed). */
 const dev = (id: string, kind: ContainerKind): Device =>
   ({ id, name: id, invalid: false, placement: { mode: 'free', x: 0, y: 0, rotation: 0 }, props: deviceDefaults(kind, 'free') });
@@ -85,6 +85,14 @@ describe('ContainerFeed', () => {
     expect(feed.get('b')).toBeUndefined();
     expect(feed.get('c')).toEqual(on);
     expect(feed.ready).toBe(true);
+  });
+
+  it('ContainerState carries status and last', () => {
+    const toggled: ContainerState = { kind: 'smart_button', status: 'ok', last: { action: 'toggle', at: '2026-11-15T10:00:00+00:00' } };
+    expect(toggled.last?.value).toBeUndefined();
+    expect([on.status, off.status, err.status]).toEqual(['ok', 'error', 'error']);
+    expect([off.reason, err.reason, err.entities]).toEqual(['not_configured', 'unavailable', ['sensor.x']]);
+    expect(on.last).toEqual({ action: 'set', value: 'on', at: '2026-11-15T10:00:00+00:00' });
   });
 
   it('stateOf gives the state of a device only when the saved container is of the same kind', async () => {

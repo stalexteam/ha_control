@@ -1,6 +1,6 @@
 import { newId } from './ids';
 import {
-  AIM_MAX, DEVICE_PLACEMENTS, deviceDefaults, isContainerKind, normalizeDefaultOutput,
+  AIM_MAX, DEVICE_PLACEMENTS, deviceDefaults, isContainerKind,
   type ContainerKind, type Device, type DevicePlacement, type DeviceProps, type Id, type Level,
 } from './types';
 import { sanitizeBindings } from './bindings';
@@ -58,15 +58,15 @@ export function moveDevice(level: Level, id: Id, placement: DevicePlacement): Le
 }
 
 /**
- * The patch never changes the kind. Bindings of roles the new props disable (a smart button's off, auto, final)
- * are dropped, and the default output is kept allowed.
+ * The patch never changes the kind. Bindings of roles the new props disable (a smart button's off and auto)
+ * are dropped.
  */
 export function setDeviceProps(level: Level, id: Id, patch: Partial<DeviceProps>, name?: string): Level {
   const devices = level.devices;
   if (!devices.some(x => x.id === id)) return level;
   return withDevices(level, devices.map(x => {
     if (x.id !== id) return x;
-    const props = normalizeDefaultOutput({ ...x.props, ...patch, kind: x.props.kind } as DeviceProps);
+    const props = { ...x.props, ...patch, kind: x.props.kind } as DeviceProps;
     return sanitizeBindings({ ...x, props, name: name ?? x.name });
   }));
 }

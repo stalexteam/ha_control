@@ -24,13 +24,13 @@ function write(storage: Storage, data: Stored): void {
 
 const fail = (code: string, message: string) => Promise.reject({ code, message });
 
-/** Every input container of a stored plan at its default output, not configured (the mock has no runtime). */
+/** Every input container of a stored plan as error, not configured (the mock has no runtime). */
 function defaultOutputs(plan: Plan | undefined): Record<string, ContainerState> {
   const out: Record<string, ContainerState> = {};
   for (const d of plan?.levels.flatMap(l => l.devices ?? []) ?? []) { // stage-1 plans have no devices
     const p = d.props;
     if (p.kind === 'wall_switch' || p.kind === 'smart_button') {
-      out[d.id] = { output: p.defaultOutput ?? 'off', fault: 'not_configured', kind: p.kind };
+      out[d.id] = { kind: p.kind, status: 'error', reason: 'not_configured' };
     }
   }
   return out;
@@ -41,8 +41,8 @@ function defaultOutputs(plan: Plan | undefined): Record<string, ContainerState> 
  * revision rules of the Python PlanRepo: a new plan needs expected_revision null and gets revision 1;
  * an existing plan needs expected_revision == current unless force; a missing plan with a non-null
  * expected_revision is a conflict even with force.
- * `plan_studio/containers/subscribe` answers once with a full snapshot: every container of the stored plan at its
- * default output, not configured. Other subscriptions are unknown.
+ * `plan_studio/containers/subscribe` answers once with a full snapshot: every container of the stored plan as error,
+ * not configured. Other subscriptions are unknown.
  * With `demo` it also has live states and answers the entity, device and area registry commands with a small
  * sample (dev harness); without it those commands are unknown, so tests bring their own HA data.
  */

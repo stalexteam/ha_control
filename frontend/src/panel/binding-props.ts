@@ -9,7 +9,7 @@ import '../binding/entity-combo';
 import { setDeviceProps } from '../model/devices';
 import { deviceNameRow } from './device-props';
 import { containerFields, containerFlags, triggerFields } from './container-fields';
-import type { ContainerFeed, ContainerState } from '../live/container-feed';
+import type { ContainerFeed } from '../live/container-feed';
 import { t } from '../i18n';
 
 export interface BindingPropsOpts {
@@ -46,14 +46,6 @@ function roleLabel(d: Device, r: BindingRole): string {
   return r === 'on' && d.props.kind === 'smart_button' && !d.props.separateOff ? t('binding.onOff') : t(`role.${r}`);
 }
 
-/** "Output: On", and in fault why the output is the default: "— default: not configured" or "— default: unavailable (ids)". */
-function outputText(s: ContainerState): string {
-  const head = t('output.line').replace('{output}', t(`output.${s.output}`));
-  if (s.fault === 'not_configured') return `${head} — ${t('output.defaultNotConfigured')}`;
-  if (s.fault === 'unavailable') return `${head} — ${t('output.defaultUnavailable').replace('{entities}', (s.entities ?? []).join(', '))}`;
-  return head;
-}
-
 /**
  * Output line of an input container: its live output; "Not saved yet" when the saved plan has no such container (or
  * has it as the other kind, after an unsaved Type change); the feed error when there are no live outputs. Nothing
@@ -62,7 +54,7 @@ function outputText(s: ContainerState): string {
 function outputLine(o: BindingPropsOpts, d: Device): TemplateResult | typeof nothing {
   if (!isContainerKind(d.props.kind)) return nothing;
   const s = o.feed.stateOf(d);
-  const text = s ? outputText(s) : o.feed.error ?? (o.feed.ready ? t('output.notSaved') : null);
+  const text = s ? null : o.feed.error ?? (o.feed.ready ? t('output.notSaved') : null);
   return text === null ? nothing : html`<p class="note" data-field="output">${text}</p>`;
 }
 

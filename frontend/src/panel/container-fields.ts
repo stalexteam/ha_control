@@ -2,7 +2,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { live } from 'lit/directives/live.js';
 import { createRef, ref } from 'lit/directives/ref.js';
 import {
-  TRIGGER_EVENTS, allowedOutputs, type BindingRole, type ContainerOutput, type Device, type DeviceProps, type Level,
+  TRIGGER_EVENTS, type BindingRole, type Device, type DeviceProps, type Level,
   type Trigger,
 } from '../model/types';
 import { duplicateTriggers, setBinding, type TriggerRole } from '../model/bindings';
@@ -36,13 +36,6 @@ function check(field: string, label: string, value: boolean, on: (v: boolean) =>
       const el = e.target as HTMLInputElement;
       if (!on(el.checked)) el.checked = value;
     }} />`)}</div>`;
-}
-
-/** The default output select: only the outputs the props allow, in allowedOutputs order. */
-function defaultOutputRow(o: BindingPropsOpts, d: Device, p: DeviceProps & { defaultOutput: ContainerOutput }): TemplateResult {
-  const options = allowedOutputs(p).map(v => ({ v, label: t(`output.${v}`) }));
-  return row(t('binding.defaultOutput'),
-    select<ContainerOutput>(p.defaultOutput, options, v => setProps(o, d, { defaultOutput: v }), 'defaultOutput'));
 }
 
 /** Select value of the "Other…" option; no event can be stored under it. */
@@ -146,12 +139,11 @@ export function containerFlags(o: BindingPropsOpts, d: Device, role: BindingRole
   return html`${check('separateOff', t('binding.separateOff'), p.separateOff, separate)}${p.separateOff ? nothing : auto}`;
 }
 
-/** Container settings after all the roles: the default output and, for a smart button, the duplicate-trigger warning. */
-export function containerFields(o: BindingPropsOpts, d: Device): TemplateResult {
+/** Container settings after all the roles: for a smart button, the duplicate-trigger warning. */
+export function containerFields(_o: BindingPropsOpts, d: Device): TemplateResult {
   const p = d.props;
   if (p.kind !== 'wall_switch' && p.kind !== 'smart_button') return html`${nothing}`;
   return html`<div class="cfields">
-    ${defaultOutputRow(o, d, p)}
     ${p.kind === 'smart_button' && duplicateTriggers(d).length
       ? html`<p class="warn" data-note="duplicate">${t('binding.duplicate')}</p>` : nothing}
   </div>`;

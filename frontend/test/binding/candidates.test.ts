@@ -41,9 +41,8 @@ describe('candidates', () => {
     expect(ids(candidates(m, spec('smart_button', 'off'), false))).toEqual(['event.btn', 'sensor.sw_action']);
     expect(ids(candidates(m, spec('smart_button', 'auto'), false))).toEqual(['event.btn', 'sensor.sw_action']);
   });
-  it('final and state: lights and relays', () => {
+  it('wall switch state: lights, relays and binary sensors', () => {
     const m = makeMeta([ent('light.l'), ent('switch.s'), ent('binary_sensor.b'), ent('sensor.x')]);
-    expect(ids(candidates(m, spec('smart_button', 'final'), false))).toEqual(['light.l', 'switch.s']);
     expect(ids(candidates(m, spec('wall_switch', 'state'), false))).toEqual(['binary_sensor.b', 'light.l', 'switch.s']);
   });
   it('sorted by name then id, memoised', () => {

@@ -1,5 +1,5 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
-import { isContainerKind, type ContainerOutput, type Device, type Level, type Pt } from '../model/types';
+import { isContainerKind, type Device, type Level, type Pt } from '../model/types';
 import type { BindStatus } from '../model/bindings';
 import type { ContainerState } from '../live/container-feed';
 import type { Preview, Selection } from '../editor/tools/types';
@@ -32,13 +32,6 @@ export interface DeviceRenderOpts {
 }
 
 const NS = 'non-scaling-stroke';
-/** Symbol fill per container output, the same in both themes; `off` keeps the palette's neutral device fill. */
-const OUTPUT_FILL: Partial<Record<ContainerOutput, string>> = { on: '#facc15', auto: '#38bdf8', error: '#f43f5e' };
-/**
- * Ink of the smart button dot on a live output fill, the same in both themes like the fills: the device colour
- * would vanish on them (the dark theme's #fbbf24 on the `on` yellow). At least 3:1 against every output fill.
- */
-const OUTPUT_DOT = '#0f172a';
 /** Fault mark colour: a dot on the container symbol. */
 const FAULT_MARK = '#f43f5e';
 /** Outline dash of a container with no live state (screen pixels). */
@@ -191,10 +184,9 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
   const container = !preview && isContainerKind(d.props.kind);
   const live = container ? o.containerState?.(d) : undefined;
   const noData = container && !live;
-  const liveFill = live ? OUTPUT_FILL[live.output] : undefined;
-  const fill = liveFill ?? p.deviceFill;
+  const fill = p.deviceFill;
   const cls = `device device-${d.props.kind}${selected ? ' selected' : ''}${d.invalid ? ' invalid' : ''}${preview ? ' device-preview' : ''}`
-    + (live ? ` out-${live.output}` : '') + (noData ? ' no-data' : '');
+    + (noData ? ' no-data' : '');
   const opacity = preview ? '0.5' : o.dim ? String(p.dimOpacity) : nothing;
   const reach = d.props.kind === 'equipment'
     ? (d.props.shape === 'circle' ? d.props.diameter / 2 : Math.hypot(d.props.width, d.props.depth) / 2)
@@ -205,9 +197,9 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
         stroke-width="2" stroke-dasharray="4 3" vector-effect=${NS}></circle>` : nothing}
       ${d.props.kind === 'equipment'
         ? equipmentBlock(d, o, color, deg)
-        : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, fill, liveFill ? OUTPUT_DOT : color,
+        : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, fill, color,
           noData ? NO_DATA_DASH : undefined)}</g>`}
-      ${live?.fault ? faultMark(R, p) : nothing}
+      ${live?.status === 'error' ? faultMark(R, p) : nothing}
       ${o.bindingStatus && !preview ? bindRing(o.bindingStatus(d), o.scale) : nothing}
     </g>`;
 }

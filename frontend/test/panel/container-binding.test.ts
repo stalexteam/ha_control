@@ -102,12 +102,6 @@ async function toggle(el: PlanStudioPanel, field: string): Promise<void> {
   await el.updateComplete;
 }
 
-/** The default output select: option values and labels. */
-function outputs(el: PlanStudioPanel): { v: string[]; labels: string[] } {
-  const opts = [...$<HTMLSelectElement>(el, '.props select[data-field="defaultOutput"]').options];
-  return { v: opts.map(o => o.value), labels: opts.map(o => o.textContent!.trim()) };
-}
-
 describe('binding step: container sections', () => {
   beforeEach(() => {
     document.body.innerHTML = '';
@@ -124,13 +118,12 @@ describe('binding step: container sections', () => {
     expect(auto.checked).toBe(false);
     expect(auto.closest('label')!.textContent).toContain('Auto by double toggle');
     expect(q(el, '.props input[data-field="windowSec"]')).toBeNull();
-    expect(outputs(el)).toEqual({ v: ['off', 'on', 'error'], labels: ['Off', 'On', 'Error'] });
+    expect(q(el, '.props [data-field="defaultOutput"]')).toBeNull();
 
     await toggle(el, 'autoByDoubleToggle');
     expect(props(el, 'w').autoByDoubleToggle).toBe(true);
     expect(input(el, 'windowSec').value).toBe('3');
     expect(input(el, 'windowSec').closest('label')!.textContent).toContain('Window, s');
-    expect(outputs(el).v).toEqual(['off', 'on', 'auto', 'error']);
 
     for (const bad of ['0', '11', '2.5', 'x']) {
       await type(el, 'windowSec', bad);
@@ -353,36 +346,25 @@ describe('binding step: container sections', () => {
     expect(device(el, 'b').bindings).toBeUndefined();
   });
 
-  it('Auto adds the Auto section and Final state; default output offers Auto only while auto is enabled', async () => {
+  it('Auto adds the Auto section; there is no Final state or default output', async () => {
     const el = await open();
     await pick(el, 'b');
-    expect(outputs(el)).toEqual({ v: ['off', 'on', 'error'], labels: ['Off', 'On', 'Error'] });
     await toggle(el, 'autoEnabled');
     expect(props(el, 'b').autoEnabled).toBe(true);
-    expect(roles(el)).toEqual(['on', 'auto', 'final']);
-    expect(['on', 'auto', 'final'].map(r => label(el, r))).toEqual(['On / Off', 'Auto', 'Final state']);
+    expect(roles(el)).toEqual(['on', 'auto']);
+    expect(['on', 'auto'].map(r => label(el, r))).toEqual(['On / Off', 'Auto']);
     expect(input(el, 'auto-slot').value).toBe('0');
     expect(markedEvent(el, 'auto')).toBe('double');
-    expect(outputs(el)).toEqual({ v: ['off', 'on', 'auto', 'error'], labels: ['Off', 'On', 'Auto', 'Error'] });
+    expect(q(el, '.props [data-field="defaultOutput"]')).toBeNull();
 
-    const sel = $<HTMLSelectElement>(el, '.props select[data-field="defaultOutput"]');
-    sel.value = 'auto';
-    sel.dispatchEvent(new Event('change', { bubbles: true }));
-    await el.updateComplete;
-    expect(props(el, 'b').defaultOutput).toBe('auto');
-    expect($<HTMLSelectElement>(el, '.props select[data-field="defaultOutput"]').value).toBe('auto');
-
-    // Final state matters only in toggle mode.
     await toggle(el, 'separateOff');
     expect(roles(el)).toEqual(['on', 'off', 'auto']);
     await toggle(el, 'separateOff');
-    expect(roles(el)).toEqual(['on', 'auto', 'final']);
+    expect(roles(el)).toEqual(['on', 'auto']);
 
     await toggle(el, 'autoEnabled');
-    expect(props(el, 'b')).toMatchObject({ autoEnabled: false, defaultOutput: 'off', auto: { slot: 0, event: 'double' } });
+    expect(props(el, 'b')).toMatchObject({ autoEnabled: false, auto: { slot: 0, event: 'double' } });
     expect(roles(el)).toEqual(['on']);
-    expect(outputs(el).v).toEqual(['off', 'on', 'error']);
-    expect($<HTMLSelectElement>(el, '.props select[data-field="defaultOutput"]').value).toBe('off');
   });
 
   it('sections follow the spec order: each checkbox after the section above it and before the section it reveals', async () => {
@@ -390,25 +372,25 @@ describe('binding step: container sections', () => {
     /** Role sections, container fields and the duplicate warning in document order. */
     const order = () => [...el.shadowRoot!.querySelectorAll(
       '.props .role, .props [data-field="autoByDoubleToggle"], .props [data-field="windowSec"], .props [data-field="separateOff"], '
-      + '.props [data-field="autoEnabled"], .props [data-field="defaultOutput"], .props [data-note="duplicate"]',
+      + '.props [data-field="autoEnabled"], .props [data-note="duplicate"]',
     )].map(n => (n.classList.contains('role') ? `role:${n.getAttribute('data-role')}`
       : n.getAttribute('data-field') ?? `note:${n.getAttribute('data-note')}`));
 
     await pick(el, 'w');
-    expect(order()).toEqual(['role:state', 'autoByDoubleToggle', 'defaultOutput']);
+    expect(order()).toEqual(['role:state', 'autoByDoubleToggle']);
     await toggle(el, 'autoByDoubleToggle');
-    expect(order()).toEqual(['role:state', 'autoByDoubleToggle', 'windowSec', 'defaultOutput']);
+    expect(order()).toEqual(['role:state', 'autoByDoubleToggle', 'windowSec']);
 
     await pick(el, 'b');
-    expect(order()).toEqual(['role:on', 'separateOff', 'autoEnabled', 'defaultOutput']);
+    expect(order()).toEqual(['role:on', 'separateOff', 'autoEnabled']);
     await toggle(el, 'separateOff');
-    expect(order()).toEqual(['role:on', 'separateOff', 'role:off', 'autoEnabled', 'defaultOutput']);
+    expect(order()).toEqual(['role:on', 'separateOff', 'role:off', 'autoEnabled']);
     await toggle(el, 'autoEnabled');
-    expect(order()).toEqual(['role:on', 'separateOff', 'role:off', 'autoEnabled', 'role:auto', 'defaultOutput']);
+    expect(order()).toEqual(['role:on', 'separateOff', 'role:off', 'autoEnabled', 'role:auto']);
     await chooseEvent(el, 'off', 'single');
-    expect(order()).toEqual(['role:on', 'separateOff', 'role:off', 'autoEnabled', 'role:auto', 'defaultOutput', 'note:duplicate']);
+    expect(order()).toEqual(['role:on', 'separateOff', 'role:off', 'autoEnabled', 'role:auto', 'note:duplicate']);
     await toggle(el, 'separateOff');
-    expect(order()).toEqual(['role:on', 'separateOff', 'autoEnabled', 'role:auto', 'role:final', 'defaultOutput']);
+    expect(order()).toEqual(['role:on', 'separateOff', 'autoEnabled', 'role:auto']);
   });
 
   it('two buttons of one switch on different slots show no also-bound note; the same trigger shows it', async () => {
@@ -468,7 +450,7 @@ describe('binding step: output line', () => {
 
   const line = (el: PlanStudioPanel) => $(el, '.props [data-field="output"]').textContent!.trim();
   const coloured = (el: PlanStudioPanel) => [...el.shadowRoot!.querySelectorAll('svg.plan g.device')]
-    .filter(g => [...g.classList].some(c => c.startsWith('out-'))).map(g => g.getAttribute('data-id'));
+    .filter(g => /device-(wall_switch|smart_button)/.test(g.getAttribute('class')!) && !g.classList.contains('no-data')).map(g => g.getAttribute('data-id'));
 
   /** Sends a containers event on a subscription and waits for the panel to re-render. */
   async function push(el: PlanStudioPanel, sub: Sub, ev: unknown): Promise<void> {
@@ -476,7 +458,7 @@ describe('binding step: output line', () => {
     await el.updateComplete;
   }
 
-  it('shows the live output and the fault reason; the plan symbol takes the output colour', async () => {
+  it('with live state the Binding output line is empty for now (Task 4 builds it); symbols are live and errors get the mark', async () => {
     const live = liveHass();
     const el = await open(live.hass);
     expect(live.subs.map(s => s.msg)).toEqual([{ type: 'plan_studio/containers/subscribe', plan_id: 'P1' }]);
@@ -485,28 +467,26 @@ describe('binding step: output line', () => {
     expect(coloured(el)).toEqual([]);
 
     await push(el, live.subs[0], { full: true, containers: {
-      b: { output: 'on', fault: null, kind: 'smart_button' },
-      w: { output: 'off', fault: 'not_configured', kind: 'wall_switch' },
-      k1: { output: 'error', fault: 'unavailable', entities: ['sensor.x', 'light.y'], kind: 'smart_button' },
+      b: { kind: 'smart_button', status: 'ok' },
+      w: { kind: 'wall_switch', status: 'error', reason: 'not_configured' },
+      k1: { kind: 'smart_button', status: 'error', reason: 'unavailable', entities: ['sensor.x', 'light.y'] },
     } });
-    expect(line(el)).toBe('Output: On');
+    expect(q(el, '.props [data-field="output"]')).toBeNull();
     expect(coloured(el)).toEqual(['w', 'b', 'k1']);
-    expect($(el, 'svg.plan g.device[data-id="b"]').classList.contains('out-on')).toBe(true);
     expect(el.shadowRoot!.querySelectorAll('svg.plan .fault-mark')).toHaveLength(2);
 
     await pick(el, 'w');
-    expect(line(el)).toBe('Output: Off — default: not configured');
+    expect(q(el, '.props [data-field="output"]')).toBeNull();
     await pick(el, 'k1');
-    expect(line(el)).toBe('Output: Error — default: unavailable (sensor.x, light.y)');
+    expect(q(el, '.props [data-field="output"]')).toBeNull();
     await pick(el, 'k2');
     expect(line(el)).toBe('Not saved yet');
 
     // A change re-renders the line and the symbol at once.
-    await push(el, live.subs[0], { full: false, containers: { k2: { output: 'auto', fault: null, kind: 'smart_button' } } });
-    expect(line(el)).toBe('Output: Auto');
-    expect($(el, 'svg.plan g.device[data-id="k2"]').classList.contains('out-auto')).toBe(true);
+    await push(el, live.subs[0], { full: false, containers: { k2: { kind: 'smart_button', status: 'ok' } } });
+    expect(coloured(el)).toContain('k2');
     // A full snapshot (after a plan save) drops the containers it does not list.
-    await push(el, live.subs[0], { full: true, containers: { b: { output: 'off', fault: null, kind: 'smart_button' } } });
+    await push(el, live.subs[0], { full: true, containers: { b: { kind: 'smart_button', status: 'ok' } } });
     expect(line(el)).toBe('Not saved yet');
     expect(coloured(el)).toEqual(['b']);
     expect(live.subs).toHaveLength(1);
@@ -515,9 +495,9 @@ describe('binding step: output line', () => {
   it('HA restart: the outputs go neutral at the disconnect and come back after the reconnect', async () => {
     const live = liveHass();
     const el = await open(live.hass);
-    await push(el, live.subs[0], { full: true, containers: { b: { output: 'on', fault: null, kind: 'smart_button' } } });
+    await push(el, live.subs[0], { full: true, containers: { b: { kind: 'smart_button', status: 'ok' } } });
     await pick(el, 'b');
-    expect(line(el)).toBe('Output: On');
+    expect(q(el, '.props [data-field="output"]')).toBeNull();
     expect(coloured(el)).toEqual(['b']);
     const noData = () => [...el.shadowRoot!.querySelectorAll('svg.plan g.device.no-data')].map(g => g.getAttribute('data-id'));
     expect(noData()).toEqual(['w', 'k1', 'k2']);
@@ -530,8 +510,8 @@ describe('binding step: output line', () => {
 
     live.fire('ready');
     expect(live.subs.map(s => s.msg)).toEqual([0, 1].map(() => ({ type: 'plan_studio/containers/subscribe', plan_id: 'P1' })));
-    await push(el, live.subs[1], { full: true, containers: { b: { output: 'auto', fault: null, kind: 'smart_button' } } });
-    expect(line(el)).toBe('Output: Auto');
+    await push(el, live.subs[1], { full: true, containers: { b: { kind: 'smart_button', status: 'ok' } } });
+    expect(q(el, '.props [data-field="output"]')).toBeNull();
     expect(coloured(el)).toEqual(['b']);
     expect(noData()).toEqual(['w', 'k1', 'k2']);
   });
@@ -540,15 +520,15 @@ describe('binding step: output line', () => {
     const live = liveHass();
     const el = await open(live.hass);
     await push(el, live.subs[0], { full: true, containers: {
-      w: { output: 'on', fault: 'not_configured', kind: 'smart_button' },
-      b: { output: 'on', fault: null, kind: 'smart_button' },
+      w: { kind: 'smart_button', status: 'error', reason: 'not_configured' },
+      b: { kind: 'smart_button', status: 'ok' },
     } });
     await pick(el, 'w');
     expect(line(el)).toBe('Not saved yet');
     expect(coloured(el)).toEqual(['b']);
     expect(el.shadowRoot!.querySelectorAll('svg.plan .fault-mark')).toHaveLength(0);
     await pick(el, 'b');
-    expect(line(el)).toBe('Output: On');
+    expect(q(el, '.props [data-field="output"]')).toBeNull();
   });
 
   it('shows the feed error and keeps the plan neutral when the subscription fails', async () => {
@@ -572,7 +552,7 @@ describe('binding step: output line', () => {
   it('switching plans re-subscribes; removing the panel unsubscribes; re-attaching subscribes again', async () => {
     const live = liveHass();
     const el = await open(live.hass);
-    await push(el, live.subs[0], { full: true, containers: { b: { output: 'on', fault: null, kind: 'smart_button' } } });
+    await push(el, live.subs[0], { full: true, containers: { b: { kind: 'smart_button', status: 'ok' } } });
     expect(coloured(el)).toEqual(['b']);
     const data = JSON.parse(localStorage.getItem(STORAGE_KEY)!) as { plans: Record<string, unknown> };
     data.plans.P2 = { id: 'P2', name: 'Cottage', schemaVersion: 1, revision: 1, levels: [level()] };
@@ -597,9 +577,9 @@ describe('binding step: output line', () => {
     expect(live.subs[2].unsub).not.toHaveBeenCalled();
   });
 
-  it('the dev mock answers with every stored container at its default output, not configured', async () => {
+  it('the dev mock answers with every stored container as error, not configured', async () => {
     const devices = [
-      ...level().devices.map(d => (d.id === 'k1' ? { ...d, props: { ...d.props, defaultOutput: 'on' } as DeviceProps } : d)),
+      ...level().devices,
       dev('l', 'Lamp', 'wall_light', 4500),
     ];
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
@@ -608,9 +588,9 @@ describe('binding step: output line', () => {
     const el = await mount(createMockHass());
     await vi.waitFor(() => expect(el.feed.ready).toBe(true));
     expect(el.feed.error).toBeNull();
-    const nc = (output: string, kind = 'smart_button') => ({ output, fault: 'not_configured', kind });
+    const nc = (kind = 'smart_button') => ({ kind, status: 'error', reason: 'not_configured' });
     expect(['w', 'b', 'k1', 'k2', 'l'].map(id => el.feed.get(id)))
-      .toEqual([nc('off', 'wall_switch'), nc('off'), nc('on'), nc('off'), undefined]);
+      .toEqual([nc('wall_switch'), nc(), nc(), nc(), undefined]);
 
     await expect(createMockHass().connection.subscribeMessage!(() => undefined, { type: 'other/subscribe' }))
       .rejects.toMatchObject({ code: 'unknown_command' });
