@@ -17,14 +17,6 @@ export function orthoConstrain(from: Pt, p: Pt): Pt {
     : { x: from.x, y: p.y };
 }
 
-/** Integer mm > 0; spaces and NBSP are thousand separators; everything else is rejected. */
-export function parseLength(s: string): number | null {
-  const t = s.replace(/[  ]/g, '');
-  if (!/^\d+$/.test(t)) return null;
-  const n = Number(t);
-  return Number.isSafeInteger(n) && n > 0 ? n : null;
-}
-
 export function pointAlong(from: Pt, towards: Pt, length: number): Pt {
   return add(from, scale(norm(sub(towards, from)), length));
 }

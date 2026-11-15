@@ -1,16 +1,11 @@
 import type { Id, Pt } from '../../model/types';
 import { addWallSegment, nodePos, type Endpoint } from '../../model/ops';
-import { parseLength, pointAlong, snap, type SnapResult } from '../../geometry/snap';
+import { pointAlong, snap, type SnapResult } from '../../geometry/snap';
 import { dist } from '../../geometry/vec';
+import { parseWhole } from '../../panel/fields';
 import type { Preview, Tool, ToolContext, ToolEvent } from './types';
 
 const clean = (v: number): number => Math.round(v * 1000) / 1000 + 0;
-
-/** Angle in degrees, 0 = +X, counter-clockwise on screen (Y down). Digits only, 0 allowed. */
-function parseAngle(s: string): number | null {
-  const t = s.replace(/[\s ]/g, '');
-  return /^\d+$/.test(t) ? Number(t) : null;
-}
 
 /** Wall chain tool: DOM-free state machine. */
 export function createWallTool(ctx: ToolContext): Tool {
@@ -34,8 +29,9 @@ export function createWallTool(ctx: ToolContext): Tool {
   function target(): { pt: Pt; endpoint: Endpoint; snap: SnapResult } | null {
     if (!lastPt) return null;
     const s = snapAt(cursor, shift);
-    const len = parseLength(lengthBuf);
-    const ang = parseAngle(angleBuf);
+    const len = parseWhole(lengthBuf, { min: 1 });
+    // Angle in degrees, 0 = +X, counter-clockwise on screen (Y down); digits only, 0 allowed.
+    const ang = parseWhole(angleBuf);
     if (len === null && ang === null) return { pt: s.pt, endpoint: s.endpoint, snap: s };
     const length = len ?? dist(lastPt, s.pt);
     let towards = s.pt;

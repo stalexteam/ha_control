@@ -4,7 +4,7 @@ import type { Level, OpeningKind, Side } from '../model/types';
 import { OPENING_DEFAULT_WIDTH } from '../model/types';
 import type { OpeningDefaults } from '../editor/tools/types';
 import { t } from '../i18n';
-import { parseMm } from './toolbar';
+import { numField, row, select } from './fields';
 
 export type NextOpeningKind = 'door' | 'window' | 'opening';
 
@@ -52,14 +52,6 @@ export interface NextObjectOpts {
 export const isNextObjectTool = (tool: string): boolean =>
   tool === 'door' || tool === 'window' || tool === 'opening' || tool === 'zone';
 
-function sel<T extends string>(field: string, value: T, options: { v: T; label: string }[], on: (v: T) => void): TemplateResult {
-  return html`<select class="val" data-field=${field} @change=${(e: Event) => on((e.target as HTMLSelectElement).value as T)}>
-    ${options.map(op => html`<option value=${op.v} ?selected=${op.v === value}>${op.label}</option>`)}
-  </select>`;
-}
-
-const row = (label: string, field: TemplateResult): TemplateResult => html`<label class="row"><span>${label}</span>${field}</label>`;
-
 /** Panel section for the object the active door / window / opening / zone tool will create. */
 export function renderNextObject(o: NextObjectOpts): TemplateResult | typeof nothing {
   const n = o.next;
@@ -82,19 +74,14 @@ export function renderNextObject(o: NextObjectOpts): TemplateResult | typeof not
   const patch = (p: object) => o.setNext({ ...n, [kind]: { ...n[kind], ...p } });
   return html`
     <h4>${t(`props.next.${kind}`)}</h4>
-    ${row(`${t('props.width')}, ${t('unit.mm')}`, html`<input class="val" type="text" inputmode="numeric"
-      data-field="next-width" .value=${fieldValue(String(width))}
-      @change=${(e: Event) => {
-        const el = e.target as HTMLInputElement;
-        const v = parseMm(el.value);
-        if (v === null) { el.value = String(width); o.setNotice(t('props.badWidth')); return; }
-        o.setNotice(null);
-        if (v !== width) patch({ width: v });
-      }} />`)}
+    ${row(`${t('props.width')}, ${t('unit.mm')}`, numField({
+      value: width, rule: { min: 1 }, bad: 'props.badWidth', setNotice: o.setNotice, field: 'next-width', skipSame: true,
+      apply: v => { patch({ width: v }); },
+    }))}
     ${kind === 'door' ? html`
-      ${row(t('props.hinge'), sel('next-hinge', n.door.hinge,
-        (['start', 'end'] as const).map(v => ({ v, label: t(`hinge.${v}`) })), v => { if (v !== n.door.hinge) patch({ hinge: v }); }))}
-      ${row(t('props.swing'), sel('next-swing', n.door.swing, sides, v => { if (v !== n.door.swing) patch({ swing: v }); }))}` : nothing}
-    ${kind === 'window' ? row(t('props.outside'), sel('next-outside', n.window.outside, sides,
-      v => { if (v !== n.window.outside) patch({ outside: v }); })) : nothing}`;
+      ${row(t('props.hinge'), select(n.door.hinge,
+        (['start', 'end'] as const).map(v => ({ v, label: t(`hinge.${v}`) })), v => { if (v !== n.door.hinge) patch({ hinge: v }); }, 'next-hinge'))}
+      ${row(t('props.swing'), select(n.door.swing, sides, v => { if (v !== n.door.swing) patch({ swing: v }); }, 'next-swing'))}` : nothing}
+    ${kind === 'window' ? row(t('props.outside'), select(n.window.outside, sides,
+      v => { if (v !== n.window.outside) patch({ outside: v }); }, 'next-outside')) : nothing}`;
 }

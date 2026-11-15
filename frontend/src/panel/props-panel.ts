@@ -9,7 +9,7 @@ import { roomAreaM2 } from '../geometry/rooms';
 import type { Selection } from '../editor/tools/types';
 import { formatArea, formatMm } from '../render/plan-svg';
 import { t } from '../i18n';
-import { parseMm } from './toolbar';
+import { numField, row, select } from './fields';
 import type { ToolId } from './tool-factory';
 import { isNextObjectTool, renderNextObject, type NextObjects } from './next-object';
 
@@ -61,27 +61,16 @@ export function applyOpeningPatch(level: Level, id: string, patch: Partial<Openi
   };
 }
 
-function row(label: string, field: TemplateResult | string): TemplateResult {
-  return html`<label class="row"><span>${label}</span>${field}</label>`;
+/** Width/thickness field: a malformed value reverts with the width message. */
+function mmField(o: PropsOpts, value: number, apply: (v: number) => boolean | void): TemplateResult {
+  return numField({ value, rule: { min: 1 }, bad: 'props.badWidth', setNotice: o.setNotice, apply });
 }
 
-function select<T extends string>(value: T, options: { v: T; label: string }[], on: (v: T) => void, field?: string): TemplateResult {
-  return html`<select class="val" data-field=${field ?? nothing} @change=${(e: Event) => on((e.target as HTMLSelectElement).value as T)}>
-    ${options.map(op => html`<option value=${op.v} ?selected=${op.v === value}>${op.label}</option>`)}
-  </select>`;
-}
-
-/** Text field committing on change; `apply` returns false to reject (the field then reverts). */
-function mmField(value: number, apply: (v: number) => boolean, o: PropsOpts, badMsg: string): TemplateResult {
-  return html`<input class="val" type="text" inputmode="numeric" .value=${fieldValue(String(Math.round(value)))}
-    @change=${(e: Event) => {
-      const el = e.target as HTMLInputElement;
-      const v = parseMm(el.value);
-      if (v === null || !apply(v)) {
-        el.value = String(Math.round(value));
-        o.setNotice(t(v === null ? badMsg : 'props.noFit'));
-      } else o.setNotice(null);
-    }} />`;
+/** Commits an opening edit; the model returns the same level when the edit does not fit. */
+function commitIfChanged(o: PropsOpts, next: Level): boolean {
+  if (next === o.level) return false; // no "invalid" opening from typing
+  o.commit(next);
+  return true;
 }
 
 function wallProps(w: Wall, o: PropsOpts): TemplateResult {
@@ -92,7 +81,7 @@ function wallProps(w: Wall, o: PropsOpts): TemplateResult {
     <h4>${t('props.wall')}</h4>
     ${row(t('props.type'), select(w.type, types.map(v => ({ v, label: t(`walltype.${v}`) })),
       v => set({ type: v }), 'wall-type'))}
-    ${row(t('props.thickness'), mmField(w.thickness, v => { set({ thickness: v }); return true; }, o, 'props.badWidth'))}
+    ${row(t('props.thickness'), mmField(o, w.thickness, v => { set({ thickness: v }); }))}
     ${row(t('props.baseline'), select<Baseline>(w.baseline,
       (['center', 'left', 'right'] as Baseline[]).map(v => ({ v, label: t(`baseline.${v}`) })), v => set({ baseline: v })))}
     ${row(t('props.length'), html`<span class="val ro">${formatMm(len)} ${t('unit.mm')}</span>`)}
@@ -108,21 +97,11 @@ function openingProps(op: Opening, o: PropsOpts): TemplateResult {
   return html`
     <h4>${t(`kind.${op.kind}`)}</h4>
     ${row(t('props.kind'), select(op.kind, kinds.map(v => ({ v, label: t(`kind.${v}`) })), v => patch(kindPatch(op, v))))}
-    ${row(t('props.width'), mmField(op.width, v => {
-      const next = resizeOpening(o.level, op.id, v);
-      if (next === o.level) return false; // same rule as the offset field: no "invalid" opening from typing
-      o.commit(next);
-      return true;
-    }, o, 'props.badWidth'))}
-    ${row(t('props.offset'), html`<input class="val" type="text" inputmode="numeric" .value=${fieldValue(String(Math.round(op.offset)))}
-      @change=${(e: Event) => {
-        const el = e.target as HTMLInputElement;
-        const s = el.value.replace(/[\s ]/g, '');
-        const next = /^\d+$/.test(s) ? moveOpening(o.level, op.id, Number(s)) : o.level;
-        if (next === o.level) { el.value = String(Math.round(op.offset)); o.setNotice(t('props.noFit')); return; }
-        o.setNotice(null);
-        o.commit(next);
-      }} />`)}
+    ${row(t('props.width'), mmField(o, op.width, v => commitIfChanged(o, resizeOpening(o.level, op.id, v))))}
+    ${row(t('props.offset'), numField({
+      value: op.offset, rule: { min: 0 }, bad: 'props.noFit', setNotice: o.setNotice,
+      apply: v => commitIfChanged(o, moveOpening(o.level, op.id, v)),
+    }))}
     ${isDoor ? html`
       ${row(t('props.hinge'), select(op.hinge ?? 'start',
         (['start', 'end'] as const).map(v => ({ v, label: t(`hinge.${v}`) })), v => patch({ hinge: v })))}
@@ -158,15 +137,10 @@ function newWallProps(o: PropsOpts): TemplateResult {
       @change=${(e: Event) => o.setWallType((e.target as HTMLSelectElement).value as WallType)}>
       ${types.map(v => html`<option value=${v} ?selected=${v === o.wallType}>${t(`walltype.${v}`)}</option>`)}
     </select>`)}
-    ${row(`${t('props.thickness')}, ${t('unit.mm')}`, html`<input class="val" type="text" inputmode="numeric"
-      data-field="new-wall-thickness" .value=${fieldValue(String(o.thickness))}
-      @change=${(e: Event) => {
-        const el = e.target as HTMLInputElement;
-        const v = parseMm(el.value);
-        if (v === null) { el.value = String(o.thickness); o.setNotice(t('props.badWidth')); return; }
-        o.setNotice(null);
-        o.setThickness(v);
-      }} />`)}
+    ${row(`${t('props.thickness')}, ${t('unit.mm')}`, numField({
+      value: o.thickness, rule: { min: 1 }, bad: 'props.badWidth', setNotice: o.setNotice, field: 'new-wall-thickness',
+      apply: v => { o.setThickness(v); },
+    }))}
     ${o.tool === 'box' ? html`
       <div class="muted">${t('props.measure')}</div>
       <div class="seg">

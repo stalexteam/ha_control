@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { orthoConstrain, parseLength, pointAlong, snap } from '../../src/geometry/snap';
+import { orthoConstrain, pointAlong, snap } from '../../src/geometry/snap';
 import { rectRoomLevel } from '../fixtures';
 
 const level = rectRoomLevel(4000, 3000, 200);
@@ -75,17 +75,6 @@ describe('orthoConstrain', () => {
   it('locks to the nearest axis', () => {
     expect(orthoConstrain({ x: 0, y: 0 }, { x: 1000, y: 120 })).toEqual({ x: 1000, y: 0 });
     expect(orthoConstrain({ x: 0, y: 0 }, { x: -30, y: -900 })).toEqual({ x: 0, y: -900 });
-  });
-});
-
-describe('parseLength', () => {
-  it('parses valid input', () => {
-    expect(parseLength('3450')).toBe(3450);
-    expect(parseLength('3 450')).toBe(3450);
-    expect(parseLength('3 450')).toBe(3450);
-  });
-  it('rejects invalid input', () => {
-    for (const s of ['0', '-5', '+5', '3,45', '3.5', 'abc', '', '  ', '12mm']) expect(parseLength(s)).toBeNull();
   });
 });
 

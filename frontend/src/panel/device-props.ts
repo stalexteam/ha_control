@@ -6,7 +6,7 @@ import { AIM_MAX, deleteDevice, moveDevice, setDeviceProps } from '../model/devi
 import type { Selection } from '../editor/tools/types';
 import { deviceRoomId, withAim } from '../geometry/devices';
 import { t } from '../i18n';
-import { parseMm } from './toolbar';
+import { numField, row, select, type WholeRule } from './fields';
 import type { ToolId } from './tool-factory';
 
 const DEVICE_KINDS = Object.keys(DEVICE_PLACEMENTS) as DeviceKind[];
@@ -38,88 +38,37 @@ export interface DevicePropsOpts {
 
 type NumRule = 'mm' | 'angle' | 'rotation' | 'offset' | 'aim';
 
-const BAD: Record<NumRule, string> = {
-  mm: 'props.badNumber', angle: 'props.badAngle', rotation: 'props.badRotation', offset: 'props.badOffset', aim: 'props.badAim',
+/** Integer by rule: mm > 0, angle 1..360, rotation 0..359, offset >= 0, aim -90..90 (with the message for a bad value). */
+const NUM: Record<NumRule, { rule: WholeRule; bad: string }> = {
+  mm: { rule: { min: 1 }, bad: 'props.badNumber' },
+  angle: { rule: { min: 1, max: 360 }, bad: 'props.badAngle' },
+  rotation: { rule: { min: 0, max: 359 }, bad: 'props.badRotation' },
+  offset: { rule: { min: 0 }, bad: 'props.badOffset' },
+  aim: { rule: { min: -AIM_MAX, max: AIM_MAX, signed: true }, bad: 'props.badAim' },
 };
 
-/** Integer by rule: mm > 0, angle 1..360, rotation 0..359, offset >= 0, aim -90..90; else null. */
-export function parseNum(value: string, rule: NumRule): number | null {
-  if (rule === 'mm' || rule === 'angle') {
-    const v = parseMm(value);
-    return v === null || (rule === 'angle' && v > 360) ? null : v;
-  }
-  const s = value.replace(/[\s ]/g, '');
-  if (rule === 'aim') {
-    const m = /^[-−]?\d+$/.exec(s);
-    const a = m ? Number(s.replace('−', '-')) : NaN;
-    return Number.isNaN(a) || Math.abs(a) > AIM_MAX ? null : a;
-  }
-  if (!/^\d+$/.test(s)) return null;
-  const n = Number(s);
-  return rule === 'rotation' && n > 359 ? null : n;
-}
+const numProp = (o: DevicePropsOpts, field: string, value: number, rule: NumRule, apply: (v: number) => boolean) =>
+  numField({ ...NUM[rule], value, field, setNotice: o.onNotice, apply, skipSame: true });
 
-function row(label: string, field: TemplateResult): TemplateResult {
-  return html`<label class="row"><span>${label}</span>${field}</label>`;
-}
-
-function select<T extends string>(field: string, value: T, options: T[], prefix: string,
-  on: (v: T) => boolean | void): TemplateResult {
-  // A rejected change (on() returns false) puts the DOM back on the model value.
-  return html`<select class="val" data-field=${field} .value=${fieldValue(value)} @change=${(e: Event) => {
-    const el = e.target as HTMLSelectElement;
-    if (on(el.value as T) === false) el.value = value;
-  }}>
-    ${options.map(v => html`<option value=${v} ?selected=${v === value}>${t(`${prefix}.${v}`)}</option>`)}
-  </select>`;
-}
-
-/**
- * Whole-number field committing on change. A malformed value reverts it with the rule's message; `apply`
- * returning false (the edit was rejected) reverts it with "does not fit".
- */
-function numField(o: DevicePropsOpts, field: string, value: number, rule: NumRule, apply: (v: number) => boolean): TemplateResult {
-  const shown = String(Math.round(value));
-  return html`<input class="val" type="text" inputmode="numeric" data-field=${field} .value=${fieldValue(shown)}
-    @change=${(e: Event) => {
-      const el = e.target as HTMLInputElement;
-      const v = parseNum(el.value, rule);
-      if (v === null) { el.value = shown; o.onNotice?.(t(BAD[rule])); return; }
-      if (v === value) { o.onNotice?.(null); return; } // unchanged: no commit, no history entry
-      if (!apply(v)) { el.value = shown; o.onNotice?.(t('props.noFit')); return; }
-      o.onNotice?.(null);
-    }} />`;
-}
+const labelled = <T extends string>(values: T[], prefix: string) => values.map(v => ({ v, label: t(`${prefix}.${v}`) }));
 
 /** Kind-specific fields; `pre` prefixes data-field names ("next-" for the next-device defaults). */
 function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch: Partial<DeviceProps>) => boolean): TemplateResult {
   const mm = (name: string, label: string, v: number) =>
-    row(`${t(label)}, ${t('unit.mm')}`, numField(o, pre + name, v, 'mm', x => set({ [name]: x } as Partial<DeviceProps>)));
+    row(`${t(label)}, ${t('unit.mm')}`, numProp(o, pre + name, v, 'mm', x => set({ [name]: x } as Partial<DeviceProps>)));
   const deg = (name: string, label: string, v: number) =>
-    row(`${t(label)}, ${t('unit.deg')}`, numField(o, pre + name, v, 'angle', x => set({ [name]: x } as Partial<DeviceProps>)));
+    row(`${t(label)}, ${t('unit.deg')}`, numProp(o, pre + name, v, 'angle', x => set({ [name]: x } as Partial<DeviceProps>)));
   switch (p.kind) {
     case 'ceiling_light': {
-      const pool = p.poolRadius === null ? '' : String(p.poolRadius);
       return html`
-        ${row(t('props.shape'), select(`${pre}shape`, p.shape, ['round', 'linear', 'spot'], 'shape', v => set({ shape: v })))}
+        ${row(t('props.shape'), select(p.shape, labelled(['round', 'linear', 'spot'], 'shape'), v => set({ shape: v }), `${pre}shape`))}
         ${p.shape === 'linear'
           ? html`${mm('length', 'props.length', p.length)}${mm('width', 'props.width', p.width)}`
           : mm('diameter', 'props.diameter', p.diameter)}
-        ${row(`${t('props.poolRadius')}, ${t('unit.mm')}`, html`<input class="val" type="text" inputmode="numeric"
-          data-field=${`${pre}poolRadius`} placeholder=${t('props.poolHint')} title=${t('props.poolHint')}
-          .value=${fieldValue(pool)} @change=${(e: Event) => {
-            const el = e.target as HTMLInputElement;
-            if (el.value.trim() === '') {
-              if (p.poolRadius === null) { o.onNotice?.(null); return; }
-              if (set({ poolRadius: null })) o.onNotice?.(null);
-              return;
-            }
-            const v = parseNum(el.value, 'mm');
-            if (v === null) { el.value = pool; o.onNotice?.(t('props.badNumber')); return; }
-            if (v === p.poolRadius) { o.onNotice?.(null); return; }
-            if (!set({ poolRadius: v })) { el.value = pool; o.onNotice?.(t('props.noFit')); return; }
-            o.onNotice?.(null);
-          }} />`)}`;
+        ${row(`${t('props.poolRadius')}, ${t('unit.mm')}`, numField({
+          ...NUM.mm, value: p.poolRadius, field: `${pre}poolRadius`, placeholder: t('props.poolHint'), setNotice: o.onNotice,
+          skipSame: true, apply: v => set({ poolRadius: v }), onBlank: () => set({ poolRadius: null }),
+        }))}`;
     }
     case 'wall_light':
       return html`${deg('coneAngle', 'props.coneAngle', p.coneAngle)}${mm('coneRange', 'props.coneRange', p.coneRange)}`;
@@ -138,12 +87,12 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
       return pre === '' && o.device && o.level ? zoneFields(o.level, o.device, p.zoneIds, set) : nothing_();
     case 'equipment':
       return html`
-        ${row(t('props.shape'), select(`${pre}shape`, p.shape, ['rect', 'circle'], 'shape', v => set({ shape: v })))}
+        ${row(t('props.shape'), select(p.shape, labelled(['rect', 'circle'], 'shape'), v => set({ shape: v }), `${pre}shape`))}
         ${p.shape === 'rect'
           ? html`${mm('width', 'props.width', p.width)}${mm('depth', 'props.depth', p.depth)}`
           : mm('diameter', 'props.diameter', p.diameter)}
-        ${row(t('props.symbol'), select(`${pre}symbol`, p.symbol, ['boiler', 'pc', 'automation', 'other'], 'symbol',
-          v => set({ symbol: v })))}
+        ${row(t('props.symbol'), select(p.symbol, labelled(['boiler', 'pc', 'automation', 'other'], 'symbol'),
+          v => set({ symbol: v }), `${pre}symbol`))}
         ${row(t('props.label'), html`<input class="val wide" type="text" data-field=${`${pre}label`} .value=${fieldValue(p.label)}
           @change=${(e: Event) => {
             const label = (e.target as HTMLInputElement).value.trim();
@@ -174,15 +123,15 @@ function placementFields(o: DevicePropsOpts, d: Device): TemplateResult {
   const pl = d.placement;
   if (pl.mode === 'free') {
     return row(`${t('props.rotation')}, ${t('unit.deg')}`,
-      numField(o, 'rotation', pl.rotation, 'rotation', v => o.onPlacement({ ...pl, rotation: v })));
+      numProp(o, 'rotation', pl.rotation, 'rotation', v => o.onPlacement({ ...pl, rotation: v })));
   }
   const aims = d.props.kind === 'wall_light' || d.props.kind === 'motion_sensor' || d.props.kind === 'illuminance_sensor';
   return html`
-    ${row(t('props.side'), select<Side>('side', pl.side, ['left', 'right'], 'side', v => o.onPlacement({ ...pl, side: v })))}
-    ${row(`${t('props.offset')}, ${t('unit.mm')}`, numField(o, 'offset', pl.offset, 'offset',
+    ${row(t('props.side'), select<Side>(pl.side, labelled<Side>(['left', 'right'], 'side'), v => o.onPlacement({ ...pl, side: v }), 'side'))}
+    ${row(`${t('props.offset')}, ${t('unit.mm')}`, numProp(o, 'offset', pl.offset, 'offset',
       v => o.onPlacement({ ...pl, offset: v })))}
     ${aims ? row(`${t('props.aim')}, ${t('unit.deg')}`,
-      numField(o, 'aim', pl.aim ?? 0, 'aim', v => o.onPlacement(withAim(pl, v)))) : nothing}`;
+      numProp(o, 'aim', pl.aim ?? 0, 'aim', v => o.onPlacement(withAim(pl, v)))) : nothing}`;
 }
 
 function deviceProps(o: DevicePropsOpts, d: Device): TemplateResult {

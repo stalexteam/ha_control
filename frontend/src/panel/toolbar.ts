@@ -41,14 +41,6 @@ function saveLabel(o: TopBarOpts): string {
   }
 }
 
-/** Integer mm > 0, or null. */
-export function parseMm(value: string): number | null {
-  const s = value.replace(/[\s ]/g, '');
-  if (!/^\d+$/.test(s)) return null;
-  const n = Number(s);
-  return n > 0 ? n : null;
-}
-
 export function renderTopBar(o: TopBarOpts): TemplateResult {
   return html`
     <div class="top">

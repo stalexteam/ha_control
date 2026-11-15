@@ -1,6 +1,7 @@
 import type { Pt } from '../../model/types';
 import { addBox } from '../../model/ops';
-import { parseLength, snap } from '../../geometry/snap';
+import { snap } from '../../geometry/snap';
+import { parseWhole } from '../../panel/fields';
 import type { Preview, Tool, ToolContext, ToolEvent } from './types';
 
 /** Box (rectangular room) tool: DOM-free state machine. */
@@ -19,7 +20,7 @@ export function createBoxTool(ctx: ToolContext): Tool {
   function corner2(): Pt | null {
     if (!c1) return null;
     if (wBuf !== '' || dBuf !== '') {
-      const w = parseLength(wBuf), d = parseLength(dBuf);
+      const w = parseWhole(wBuf, { min: 1 }), d = parseWhole(dBuf, { min: 1 });
       if (w === null || d === null) return null;
       return { x: c1.x + (cursor.x >= c1.x ? w : -w), y: c1.y + (cursor.y >= c1.y ? d : -d) };
     }
