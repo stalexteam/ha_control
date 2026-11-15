@@ -14,11 +14,14 @@ function nearRing(p: Pt, ring: Pt[], tol: number): boolean {
   return ring.some((a, i) => distToSegment(p, a, ring[(i + 1) % ring.length]) <= tol);
 }
 
-/** Wall under p (inside its outline or within tol of it), or null. */
+/**
+ * Wall under p, or null: the wall whose outline contains p, else the first within tol of it (so a click inside a
+ * wall next to a junction picks that wall, not a neighbour whose edge is within tol).
+ */
 export function wallAt(level: Level, p: Pt, tol: number): Id | null {
-  for (const [id, ring] of wallOutlines(level)) {
-    if (pointInPolygon(p, ring) || nearRing(p, ring, tol)) return id;
-  }
+  const outlines = wallOutlines(level);
+  for (const [id, ring] of outlines) if (pointInPolygon(p, ring)) return id;
+  for (const [id, ring] of outlines) if (nearRing(p, ring, tol)) return id;
   return null;
 }
 

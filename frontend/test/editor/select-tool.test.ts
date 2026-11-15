@@ -208,6 +208,46 @@ describe('select tool', () => {
     expect(sel[sel.length - 1]).toEqual({ kind: 'wall', id: top.id });
   });
 
+  /** Host H (0,0)-(6000,0) with stems S1 and S2 hosted at x = 2000 and 4000, 200 mm thick; S1 is listed first. */
+  const junctions = (): Level => ({
+    ...empty(),
+    nodes: [
+      { id: 'h0', x: 0, y: 0 }, { id: 'h1', x: 6000, y: 0 },
+      { id: 't1', x: 2000, y: 0, host: { wallId: 'H', offset: 2000 } }, { id: 's1', x: 2000, y: 3000 },
+      { id: 't2', x: 4000, y: 0, host: { wallId: 'H', offset: 4000 } }, { id: 's2', x: 4000, y: 3000 },
+    ],
+    walls: [['S1', 't1', 's1'], ['H', 'h0', 'h1'], ['S2', 't2', 's2']]
+      .map(([id, a, b]) => ({ id, a, b, thickness: 200, type: 'partition' as const, baseline: 'center' as const })),
+  });
+
+  it('Ctrl+click inside a wall next to a junction trims that wall, not the stem within tolerance', () => {
+    const ctx = Object.assign(fakeContext(junctions()), { tolMm: () => 125 });
+    const t = createSelectTool(ctx);
+    // Inside H, 50 mm from the stem S1's face.
+    t.down(ev(2150, 0, { ctrl: true })); t.up(ev(2150, 0, { ctrl: true }));
+    expect(ctx.commits).toHaveLength(1);
+    const l = ctx.level();
+    expect(l.walls).toHaveLength(4);
+    expect(l.walls.find(w => w.id === 'S1')).toMatchObject({ a: 't1', b: 's1' });
+    expect(l.walls.find(w => w.id === 'S2')).toMatchObject({ a: 't2', b: 's2' });
+    expect(l.walls.find(w => w.id === 'H')).toMatchObject({ a: 'h0', b: 't1' });
+    expect(l.walls.some(w => w.a === 't2' && w.b === 'h1')).toBe(true);
+  });
+
+  it('a plain click inside a wall next to a junction selects that wall', () => {
+    const ctx = Object.assign(fakeContext(junctions()), { tolMm: () => 125 });
+    const sel: unknown[] = [];
+    ctx.select = s => { sel.push(s); };
+    const t = createSelectTool(ctx);
+    click(t, 2150, 0);
+    expect(sel[sel.length - 1]).toEqual({ kind: 'wall', id: 'H' });
+    click(t, 2000, 1000); // inside the stem
+    expect(sel[sel.length - 1]).toEqual({ kind: 'wall', id: 'S1' });
+    click(t, 2160, 1000); // beside the stem, within tolerance
+    expect(sel[sel.length - 1]).toEqual({ kind: 'wall', id: 'S1' });
+    expect(ctx.commits).toHaveLength(0);
+  });
+
   it('cancel also clears the editor selection', () => {
     const ctx = fakeContext(box());
     const sel: unknown[] = [];
