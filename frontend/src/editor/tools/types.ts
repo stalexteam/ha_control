@@ -65,7 +65,8 @@ export interface Preview {
 }
 
 export interface Tool {
-  readonly id: "select" | "box" | "wall" | "door" | "window" | "opening" | "zone" | "device-select" | "binding-select" | DeviceKind;
+  readonly id: "select" | "box" | "wall" | "door" | "window" | "opening" | "zone" | "device-select" | "binding-select"
+    | "zones-select" | "zone-room" | "zone-draw" | DeviceKind;
   down(e: ToolEvent): void;
   move(e: ToolEvent): void;
   up(e: ToolEvent): void;
