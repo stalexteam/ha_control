@@ -435,6 +435,17 @@ describe('binding step: container sections', () => {
     await type(el, 'off-slot', '1');
     expect(q(el, '.props [data-note="duplicate"]')).toBeNull();
   });
+
+  it('renders no settings block (no stray divider) unless the duplicate warning shows', async () => {
+    const el = await open();
+    await pick(el, 'w');
+    expect(q(el, '.props .cfields')).toBeNull();
+    await pick(el, 'b');
+    expect(q(el, '.props .cfields')).toBeNull();
+    await toggle(el, 'separateOff');
+    await chooseEvent(el, 'off', 'single');
+    expect(q(el, '.props .cfields [data-note="duplicate"]')).not.toBeNull();
+  });
 });
 
 type Sub = { msg: Record<string, unknown>; push(ev: unknown): void; unsub: ReturnType<typeof vi.fn> };

@@ -139,12 +139,8 @@ export function containerFlags(o: BindingPropsOpts, d: Device, role: BindingRole
   return html`${check('separateOff', t('binding.separateOff'), p.separateOff, separate)}${p.separateOff ? nothing : auto}`;
 }
 
-/** Container settings after all the roles: for a smart button, the duplicate-trigger warning. */
+/** After all the roles: for a smart button, the duplicate-trigger warning; nothing (no divider either) otherwise. */
 export function containerFields(d: Device): TemplateResult {
-  const p = d.props;
-  if (p.kind !== 'wall_switch' && p.kind !== 'smart_button') return html`${nothing}`;
-  return html`<div class="cfields">
-    ${p.kind === 'smart_button' && duplicateTriggers(d).length
-      ? html`<p class="warn" data-note="duplicate">${t('binding.duplicate')}</p>` : nothing}
-  </div>`;
+  if (d.props.kind !== 'smart_button' || !duplicateTriggers(d).length) return html`${nothing}`;
+  return html`<div class="cfields"><p class="warn" data-note="duplicate">${t('binding.duplicate')}</p></div>`;
 }
