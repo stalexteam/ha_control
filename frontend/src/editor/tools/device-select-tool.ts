@@ -1,6 +1,6 @@
 import type { DevicePlacement, Id, Level, Pt } from '../../model/types';
 import { deleteDevice, moveDevice } from '../../model/devices';
-import { deviceAt, devicePose } from '../../geometry/devices';
+import { angleOf, deviceAt, devicePose } from '../../geometry/devices';
 import { orthoConstrain } from '../../geometry/snap';
 import { wallFrame } from '../../geometry/walls';
 import { add, dist, dot, perpLeft, sub } from '../../geometry/vec';
@@ -34,8 +34,13 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
     // A free device keeps the grab offset so it does not jump to the pointer; a wall device follows the pointer.
     const pl = d.placement;
     const free = pl.mode === 'free';
-    const cand = deviceCandidate(ctx, original, d.props.kind, free ? add(p, drag.grab) : p, pl.mode === 'free' ? pl.rotation : 0);
-    working = cand ? moveDevice(original, d.id, wallStable(original, d.placement, cand, p)) : original;
+    // Leaving the wall keeps the world direction (as the free rotation) so the cone does not jump.
+    const pose = free ? null : devicePose(original, d);
+    const rot = pl.mode === 'free' ? pl.rotation : pose ? ((Math.round(angleOf(pose.dir)) % 360) + 360) % 360 : 0;
+    const cand = deviceCandidate(ctx, original, d.props.kind, free ? add(p, drag.grab) : p, rot);
+    // A wall candidate keeps the aim of a wall device; a free device landing on a wall starts at aim 0.
+    const keep = cand && cand.mode === 'wall' && pl.mode === 'wall' && pl.aim !== undefined ? { ...cand, aim: pl.aim } : cand;
+    working = keep ? moveDevice(original, d.id, wallStable(original, d.placement, keep, p)) : original;
   }
 
   /** On the same wall: keep the along-wall grab offset and the original side (flip only past the other face). */

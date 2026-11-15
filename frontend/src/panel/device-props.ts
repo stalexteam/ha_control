@@ -2,7 +2,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
 import type { Device, DeviceKind, DevicePlacement, DeviceProps, Level, Side } from '../model/types';
 import { DEVICE_PLACEMENTS, deviceDefaults } from '../model/types';
-import { deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
+import { AIM_MAX, deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
 import type { Selection } from '../editor/tools/types';
 import { t } from '../i18n';
 import { parseMm } from './toolbar';
@@ -34,19 +34,24 @@ export interface DevicePropsOpts {
   onNotice?(msg: string | null): void;
 }
 
-type NumRule = 'mm' | 'angle' | 'rotation' | 'offset';
+type NumRule = 'mm' | 'angle' | 'rotation' | 'offset' | 'aim';
 
 const BAD: Record<NumRule, string> = {
-  mm: 'props.badNumber', angle: 'props.badAngle', rotation: 'props.badRotation', offset: 'props.badOffset',
+  mm: 'props.badNumber', angle: 'props.badAngle', rotation: 'props.badRotation', offset: 'props.badOffset', aim: 'props.badAim',
 };
 
-/** Integer by rule: mm > 0, angle 1..360, rotation 0..359, offset >= 0; else null. */
+/** Integer by rule: mm > 0, angle 1..360, rotation 0..359, offset >= 0, aim -80..80; else null. */
 export function parseNum(value: string, rule: NumRule): number | null {
   if (rule === 'mm' || rule === 'angle') {
     const v = parseMm(value);
     return v === null || (rule === 'angle' && v > 360) ? null : v;
   }
   const s = value.replace(/[\s ]/g, '');
+  if (rule === 'aim') {
+    const m = /^[-−]?\d+$/.exec(s);
+    const a = m ? Number(s.replace('−', '-')) : NaN;
+    return Number.isNaN(a) || Math.abs(a) > AIM_MAX ? null : a;
+  }
   if (!/^\d+$/.test(s)) return null;
   const n = Number(s);
   return rule === 'rotation' && n > 359 ? null : n;
@@ -144,10 +149,13 @@ function placementFields(o: DevicePropsOpts, d: Device): TemplateResult {
     return row(`${t('props.rotation', lang)}, ${t('unit.deg', lang)}`,
       numField(o, 'rotation', pl.rotation, 'rotation', v => o.onPlacement({ ...pl, rotation: v })));
   }
+  const aims = d.props.kind === 'wall_light' || d.props.kind === 'motion_sensor' || d.props.kind === 'illuminance_sensor';
   return html`
     ${row(t('props.side', lang), select<Side>('side', pl.side, ['left', 'right'], 'side', lang, v => o.onPlacement({ ...pl, side: v })))}
     ${row(`${t('props.offset', lang)}, ${t('unit.mm', lang)}`, numField(o, 'offset', pl.offset, 'offset',
-      v => o.onPlacement({ ...pl, offset: v })))}`;
+      v => o.onPlacement({ ...pl, offset: v })))}
+    ${aims ? row(`${t('props.aim', lang)}, ${t('unit.deg', lang)}`,
+      numField(o, 'aim', pl.aim ?? 0, 'aim', v => o.onPlacement({ ...pl, aim: v }))) : nothing}`;
 }
 
 function deviceProps(o: DevicePropsOpts, d: Device): TemplateResult {

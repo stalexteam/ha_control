@@ -61,7 +61,7 @@ Units are millimetres and degrees. Y points down. Angles are measured as on scre
 Device
   id, name, kind
   placement:
-    { mode: "wall", wallId, side: "left" | "right", offset }   # offset along the wall from node A to the device centre
+    { mode: "wall", wallId, side: "left" | "right", offset, aim? }   # offset along the wall from node A to the device centre; aim in degrees
   | { mode: "free", x, y, rotation }                            # rotation in degrees
   props: kind-specific, see below
   invalid: bool          # wall-hosted device whose offset no longer fits the wall
@@ -70,8 +70,8 @@ Device
 | kind | allowed placement | props |
 |---|---|---|
 | `ceiling_light` | free | `shape`: round / linear / spot; `size`: diameter for round and spot, length × width for linear; `poolRadius` (light pool on the floor, optional) |
-| `wall_light` | wall (or free, for a floodlight on a post) | `coneAngle`, `coneRange` (cone drawn from the device into the room, perpendicular to the wall face, or along `rotation` when free) |
-| `motion_sensor` | free (ceiling) or wall | `zoneAngle` (default 360 for free, 110 for wall), `zoneRange`, direction: `rotation` for free; for wall, perpendicular to the face |
+| `wall_light` | wall (or free, for a floodlight on a post) | `coneAngle`, `coneRange` (cone drawn from the device into the room, perpendicular to the wall face, or along `rotation` when free; on a wall it may be turned by `aim`) |
+| `motion_sensor` | free (ceiling) or wall | `zoneAngle` (default 360 for free, 110 for wall), `zoneRange`, direction: `rotation` for free; for wall, the face normal turned by `aim` |
 | `illuminance_sensor` | free or wall | none |
 | `switch` | wall | none |
 | `socket` | wall | none |
@@ -84,6 +84,7 @@ Defaults are the document author's call; the owner may change any of them:
 - equipment: rect 600 × 600, symbol "other".
 
 Rules:
+- A wall device may be aimed: `aim` is an optional integer from -80 to 80 degrees (default 0, so stored plans without it stay valid) that turns its direction from the face normal, counter-clockwise on screen like `rotation`. The position stays on the face, and the clip room is still chosen from the face normal, not the aim. Moving along or between walls keeps the aim; leaving the wall sets `rotation` to the current world direction; free to wall sets aim 0.
 - A wall-hosted device behaves like an opening. It keeps its position in space when the wall's node A moves. It is marked `invalid` (shown red), never clipped or deleted, when the wall becomes too short. It is deleted together with its wall.
 - `side` selects the wall face. A device on the outer face of an outer wall faces outside, which is how the entrance floodlight is placed.
 - A device has no room link. Its room is derived from geometry when needed: the zone whose outline contains the point.

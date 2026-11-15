@@ -30,6 +30,38 @@ describe('devicePose', () => {
     expect(p.dir.y).toBeCloseTo(-1);
   });
 
+  it('wall aim +45 rotates dir counter-clockwise on screen', () => {
+    const d = dev('m', deviceDefaults('motion_sensor', 'wall'), { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500, aim: 45 });
+    const p = devicePose(box, d)!;
+    expect(p.pt.x).toBeCloseTo(1500);
+    expect(p.pt.y).toBeCloseTo(200);
+    expect(p.dir.x).toBeCloseTo(Math.SQRT1_2);
+    expect(p.dir.y).toBeCloseTo(Math.SQRT1_2);
+  });
+
+  it('wall aim -30 mirrors and missing aim is 0', () => {
+    const pl = { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 } as const;
+    const m = devicePose(box, dev('m', deviceDefaults('motion_sensor', 'wall'), { ...pl, aim: -30 }))!;
+    expect(m.dir.x).toBeCloseTo(-0.5);
+    const z = devicePose(box, dev('m', deviceDefaults('motion_sensor', 'wall'), pl))!;
+    expect(z.dir.x).toBeCloseTo(0);
+    expect(z.dir.y).toBeCloseTo(1);
+  });
+
+  it('aimed cone is centred on the rotated dir and the clip room does not change', () => {
+    const pl = { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 } as const;
+    const props = { kind: 'motion_sensor', zoneAngle: 60, zoneRange: 1000 } as const;
+    const shape = coneShape(box, dev('m', props, { ...pl, aim: 45 }))!;
+    const apex = shape[0];
+    const mid = shape[Math.floor(shape.length / 2)];
+    const ang = Math.atan2(mid.y - apex.y, mid.x - apex.x);
+    expect(ang).toBeCloseTo(Math.PI / 4, 1);
+    const a = clippedCone(box, dev('m', props, { ...pl, aim: 0 }));
+    const b = clippedCone(box, dev('m', props, { ...pl, aim: 80 }));
+    expect(a.length).toBeGreaterThan(0);
+    expect(b.length).toBeGreaterThan(0); // probe stays inside the room even at 80 degrees
+  });
+
   it('missing host wall gives null', () => {
     const d = dev('s', { kind: 'switch' }, { mode: 'wall', wallId: 'nope', side: 'left', offset: 0 });
     expect(devicePose(box, d)).toBeNull();

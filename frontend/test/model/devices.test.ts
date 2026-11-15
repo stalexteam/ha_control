@@ -32,6 +32,23 @@ describe('addDevice', () => {
   });
 });
 
+describe('aim', () => {
+  const aimed = (aim: number): DevicePlacement => ({ mode: 'wall', wallId: 'w0', side: 'right', offset: 1500, aim });
+  it('addDevice accepts -80..80, rejects 90 and fractions', () => {
+    const p = deviceDefaults('motion_sensor', 'wall');
+    expect(addDevice(room(), p, aimed(80), 'M').deviceId).not.toBeNull();
+    expect(addDevice(room(), p, aimed(-80), 'M').deviceId).not.toBeNull();
+    expect(addDevice(room(), p, aimed(90), 'M').deviceId).toBeNull();
+    expect(addDevice(room(), p, aimed(-81), 'M').deviceId).toBeNull();
+    expect(addDevice(room(), p, aimed(10.5), 'M').deviceId).toBeNull();
+  });
+  it('moveDevice rejects aim 90', () => {
+    const a = addDevice(room(), deviceDefaults('motion_sensor', 'wall'), onWall('w0', 1000), 'M');
+    expect(moveDevice(a.level, a.deviceId!, aimed(90))).toBe(a.level);
+    expect(moveDevice(a.level, a.deviceId!, aimed(-30)).devices[0].placement).toMatchObject({ aim: -30 });
+  });
+});
+
 describe('moveDevice', () => {
   it('wall light wall -> free', () => {
     const a = addDevice(room(), deviceDefaults('wall_light', 'wall'), onWall('w0', 1000), 'L');

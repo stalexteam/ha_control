@@ -3,6 +3,8 @@ import { DEVICE_PLACEMENTS, deviceDefaults, type Device, type DevicePlacement, t
 import { dist, norm, projectT, add, scale, sub } from '../geometry/vec';
 
 const EPS = 1e-6; // mm
+/** Largest aim of a wall device, degrees either way. */
+export const AIM_MAX = 80;
 
 /** Axis length of a wall, or null when the wall (or a node) is missing. */
 function wallLen(level: Level, wallId: Id): number | null {
@@ -22,6 +24,8 @@ function allowed(props: DeviceProps, placement: DevicePlacement): boolean {
 function fits(level: Level, props: DeviceProps, placement: DevicePlacement): boolean {
   if (!allowed(props, placement)) return false;
   if (placement.mode === 'free') return true;
+  const aim = placement.aim;
+  if (aim !== undefined && (!Number.isInteger(aim) || aim < -AIM_MAX || aim > AIM_MAX)) return false;
   const l = wallLen(level, placement.wallId);
   return l !== null && placement.offset >= -EPS && placement.offset <= l + EPS;
 }

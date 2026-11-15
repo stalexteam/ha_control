@@ -4,8 +4,8 @@ import { add, dist, dot, perpLeft, scale, sub } from './vec';
 import { wallFrame } from './walls';
 import { outlineFromHoles, roomHoles } from './rooms';
 
-/** pt: device centre; dir: unit facing direction. */
-export interface DevicePose { pt: Pt; dir: Pt }
+/** pt: device centre; dir: unit facing direction (a wall device's face normal turned by its aim); normal: the wall face normal, wall devices only. */
+export interface DevicePose { pt: Pt; dir: Pt; normal?: Pt }
 
 const SEGS_PER_90 = 32;
 const CIRCLE_PTS = 128;
@@ -17,7 +17,7 @@ function dirAt(a: number): Pt {
 }
 
 /** Screen angle (degrees, counter-clockwise, Y down) of a direction. */
-function angleOf(d: Pt): number {
+export function angleOf(d: Pt): number {
   return (Math.atan2(-d.y, d.x) * 180) / Math.PI;
 }
 
@@ -35,7 +35,7 @@ export function devicePose(level: Level, d: Device): DevicePose | null {
   const L = perpLeft(f.dir);
   const n = p.side === 'left' ? L : scale(L, -1);
   const off = p.side === 'left' ? f.leftOff : f.rightOff;
-  return { pt: add(add(f.a, scale(f.dir, p.offset)), scale(n, off)), dir: n };
+  return { pt: add(add(f.a, scale(f.dir, p.offset)), scale(n, off)), dir: p.aim ? dirAt(angleOf(n) + p.aim) : n, normal: n };
 }
 
 function circle(c: Pt, r: number): Pt[] {
@@ -74,7 +74,7 @@ const toPoly = (ring: Pt[]): Polygon => [ring.map(p => [p.x, p.y] as [number, nu
 
 /**
  * Cone clipped to the room the device is in (smallest room hole containing the probe point:
- * pt + dir for wall devices, pt for free ones). Unclipped when outside every room.
+ * pt + face normal for wall devices, pt for free ones). Unclipped when outside every room.
  * `holes` may be passed pre-computed (roomHoles(level)) to avoid recomputing per device.
  * Returns rings (outer rings and any holes, unclosed): render with fill-rule evenodd. [] when none.
  */
@@ -82,7 +82,7 @@ export function clippedCone(level: Level, d: Device, holes: Pt[][] = roomHoles(l
   const shape = coneShape(level, d);
   if (!shape) return [];
   const pose = devicePose(level, d)!;
-  const probe = d.placement.mode === 'wall' ? add(pose.pt, pose.dir) : pose.pt;
+  const probe = pose.normal ? add(pose.pt, pose.normal) : pose.pt; // the face normal, not the aim, so the room does not change with aim
   const room = outlineFromHoles(holes, probe);
   if (!room) return [shape];
   let mp: ReturnType<typeof polygonClipping.intersection>;

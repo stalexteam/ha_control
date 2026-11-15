@@ -83,6 +83,22 @@ describe('device select tool', () => {
     expect(ctx.level().devices[0].placement).toMatchObject({ mode: 'free', x: 1500, y: 2000 });
   });
 
+  it('dragging along the wall keeps aim', () => {
+    const { lv } = withDevice('motion_sensor', w => ({ mode: 'wall', wallId: w[0].id, side: 'right', offset: 1500, aim: 30 }));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    t.down(ev(1500, 50)); t.move(ev(1000, 10)); t.up(ev(1000, 10));
+    expect(ctx.level().devices[0].placement).toMatchObject({ mode: 'wall', offset: 1000, aim: 30 });
+  });
+
+  it('aimed wall device leaving the wall keeps its world direction as rotation', () => {
+    const { lv } = withDevice('wall_light', w => ({ mode: 'wall', wallId: w[0].id, side: 'right', offset: 1500, aim: 45 }));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    t.down(ev(1500, 50)); t.move(ev(1500, 2000)); t.up(ev(1500, 2000));
+    expect(ctx.level().devices[0].placement).toMatchObject({ mode: 'free', rotation: 315 });
+  });
+
   it('Delete removes the selected device; cancel clears selection', () => {
     const { lv } = withDevice('equipment', free(1000, 1000));
     const ctx = fakeContext(lv);

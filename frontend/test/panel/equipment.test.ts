@@ -127,6 +127,33 @@ describe('Equipment tab', () => {
     expect(f.value).toBe('90');
   });
 
+  it('aim field on a wall motion sensor accepts -30 and rejects 81', async () => {
+    const el = await mount();
+    await drawBox(el);
+    await tab(el, 'equipment');
+    await tool(el, 'motion_sensor');
+    click(el, 100, -100);
+    await el.updateComplete;
+    const f = () => $<HTMLInputElement>(el, '.props input[data-field="aim"]');
+    const aim = () => { const p = el.history!.current.devices[0].placement; return p.mode === 'wall' ? p.aim : NaN; };
+    f().value = '-30'; f().dispatchEvent(new Event('change')); await el.updateComplete;
+    expect(aim()).toBe(-30);
+    f().value = '81'; f().dispatchEvent(new Event('change')); await el.updateComplete;
+    expect(aim()).toBe(-30);
+    expect(f().value).toBe('-30');
+    expect(el.shadowRoot!.querySelector('.props .warn')).not.toBeNull();
+  });
+
+  it('aim field is hidden for a switch', async () => {
+    const el = await mount();
+    await drawBox(el);
+    await tab(el, 'equipment');
+    await tool(el, 'switch');
+    click(el, 100, -100);
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.props input[data-field="aim"]')).toBeNull();
+  });
+
   it('device properties edit the selected device and Delete removes it', async () => {
     const el = await mount();
     await tab(el, 'equipment');
