@@ -122,3 +122,48 @@ describe('opening Passes light field', () => {
     expect('passesLight' in el.history!.current.openings[0]).toBe(false);
   });
 });
+
+describe('opening Passes PIR field', () => {
+  beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
+
+  it('the Passes PIR checkbox sits after Passes light, toggles passesPir and undo restores it', async () => {
+    const { mount, undo, $ } = await import('./helpers');
+    const el = await mount();
+    const r = addOpening(rectRoomLevel(4000, 3000, 400), 'w0', 'window', 2000);
+    el.history!.push(r.level);
+    el.selection = { kind: 'opening', id: r.openingId! };
+    await el.updateComplete;
+    const box = () => $<HTMLInputElement>(el, '.props input[data-field="passesPir"]');
+    expect(box().type).toBe('checkbox');
+    expect(box().checked).toBe(false);
+    expect(el.shadowRoot!.querySelector('.props')!.textContent).toContain('Passes PIR');
+    const light = $<HTMLInputElement>(el, '.props input[data-field="passesLight"]');
+    expect(light.compareDocumentPosition(box()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    box().checked = true;
+    box().dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.history!.current.openings[0].passesPir).toBe(true);
+    expect(box().checked).toBe(true);
+    await undo(el);
+    expect('passesPir' in el.history!.current.openings[0]).toBe(false);
+  });
+
+  it('a plain opening is checked by default; unchecking stores false, re-checking drops the key', async () => {
+    const { mount, $ } = await import('./helpers');
+    const el = await mount();
+    const r = addOpening(rectRoomLevel(4000, 3000, 400), 'w0', 'opening', 2000);
+    el.history!.push(r.level);
+    el.selection = { kind: 'opening', id: r.openingId! };
+    await el.updateComplete;
+    const box = () => $<HTMLInputElement>(el, '.props input[data-field="passesPir"]');
+    expect(box().checked).toBe(true);
+    box().checked = false;
+    box().dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.history!.current.openings[0].passesPir).toBe(false);
+    box().checked = true;
+    box().dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect('passesPir' in el.history!.current.openings[0]).toBe(false);
+  });
+});

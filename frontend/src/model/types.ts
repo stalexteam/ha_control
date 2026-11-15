@@ -39,6 +39,8 @@ export interface Opening {
   outside?: Side;
   /** Light passes through (line of sight of lamps); missing = the kind's default (see passesLight in model/openings). */
   passesLight?: boolean;
+  /** PIR motion passes through (line of sight of motion sensors); missing = the kind's default (see passesPir in model/openings). */
+  passesPir?: boolean;
   invalid: boolean;
 }
 

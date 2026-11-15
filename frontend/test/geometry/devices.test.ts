@@ -245,6 +245,16 @@ describe('clippedCone: line of sight', () => {
     expect(covers(rings, { x: 2000, y: 1500 })).toBe(true);
   });
 
+  it("a window with Passes PIR lets a motion sensor's zone through; without it the zone is blocked", () => {
+    const pir = twoRoomsLevel([midGap('window', { passesPir: true })]);
+    expect(covers(clippedCone(pir, motion(freeAt(1000, 1500))), { x: 4500, y: 1500 })).toBe(true);
+    expect(covers(clippedCone(pir, wallLight(freeAt(1000, 1500))), { x: 4500, y: 1500 })).toBe(false);
+    const plain = twoRoomsLevel([midGap('window')]);
+    expect(covers(clippedCone(plain, motion(freeAt(1000, 1500))), { x: 4500, y: 1500 })).toBe(false);
+    const blind = twoRoomsLevel([midGap('opening', { passesPir: false })]);
+    expect(covers(clippedCone(blind, motion(freeAt(1000, 1500))), { x: 4500, y: 1500 })).toBe(false);
+  });
+
   it('a door blocks like a wall', () => {
     const lv = twoRoomsLevel([midGap('door')]);
     for (const d of [motion(freeAt(1000, 1500)), wallLight(freeAt(1000, 1500)), pool(freeAt(1000, 1500))]) {

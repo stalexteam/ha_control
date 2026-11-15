@@ -167,6 +167,7 @@ const en: Dict = {
   'props.swing': 'Opens to',
   'props.outside': 'Outside',
   'props.passesLight': 'Passes light',
+  'props.passesPir': 'Passes PIR',
   'props.invalidOpening': 'Out of the wall or overlapping another opening',
   'props.badWidth': 'Width must be a whole number of mm above 0',
   'props.noFit': 'Does not fit the wall at this position',

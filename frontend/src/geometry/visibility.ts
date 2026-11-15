@@ -1,5 +1,5 @@
 import type { Level, Opening, Pt } from '../model/types';
-import { passesLight } from '../model/openings';
+import { passesLight, passesPir } from '../model/openings';
 import { add, dist, dot, scale, sub } from './vec';
 import { unionOf, wallPieces } from './walls';
 
@@ -18,10 +18,10 @@ const T_EPS = 1e-9;
 /** Tolerance at a segment's ends (fraction of its length), so a ray aimed at a corner hits it. */
 const U_EPS = 1e-9;
 
-/** Openings each medium passes: light through an effective passesLight, motion only through a plain opening (a gap). */
+/** Openings each medium passes: light through an effective passesLight, motion through an effective passesPir. */
 const PASSES: Record<Medium, (o: Opening) => boolean> = {
   light: passesLight,
-  motion: o => o.kind === 'opening',
+  motion: passesPir,
 };
 
 /**

@@ -82,7 +82,18 @@ describe('lineOfSightObstacles', () => {
     expect(clearPath(through, beyond, lineOfSightObstacles(dark, 'motion'))).toBe(true);
   });
 
-  it('an invalid opening never cuts', () => {
+  it('passesPir opens the gap for motion only; a plain opening with passesPir false blocks motion', () => {
+    const win = twoRooms([gap('window', { passesPir: true })]);
+    expect(clearPath(through, beyond, lineOfSightObstacles(win, 'motion'))).toBe(true);
+    expect(clearPath(through, beyond, lineOfSightObstacles(win, 'light'))).toBe(false);
+    const blind = twoRooms([gap('opening', { passesPir: false })]);
+    expect(clearPath(through, beyond, lineOfSightObstacles(blind, 'motion'))).toBe(false);
+    expect(clearPath(through, beyond, lineOfSightObstacles(blind, 'light'))).toBe(true);
+    const bare = twoRooms([gap('window')]);
+    expect(clearPath(through, beyond, lineOfSightObstacles(bare, 'motion'))).toBe(false);
+  });
+
+  it('an invalid opening with passesPir true never cuts', () => {
     const lv = twoRooms([gap('opening', { invalid: true })]);
     for (const m of ['light', 'motion'] as const) expect(clearPath(through, beyond, lineOfSightObstacles(lv, m))).toBe(false);
   });

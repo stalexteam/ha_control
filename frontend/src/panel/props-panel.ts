@@ -3,7 +3,7 @@ import { fieldValue } from './field-value';
 import type { Baseline, Level, Opening, OpeningKind, Side, Wall, WallType } from '../model/types';
 import { deleteWall, setWallProps } from '../model/ops';
 import {
-  DOOR_KINDS, deleteOpening, kindPatch, moveOpening, passesLight, passesLightByDefault, resizeOpening, setOpeningProps,
+  DOOR_KINDS, deleteOpening, kindPatch, moveOpening, passesLight, passesLightByDefault, passesPir, passesPirByDefault, resizeOpening, setOpeningProps,
   type OpeningPatch,
 } from '../model/openings';
 import { deleteZone, renameZone } from '../model/zones';
@@ -89,6 +89,11 @@ function openingProps(op: Opening, o: PropsOpts): TemplateResult {
       @change=${(e: Event) => {
         const v = (e.target as HTMLInputElement).checked;
         patch({ passesLight: v === passesLightByDefault(op.kind) ? undefined : v }); // the kind default is stored as no key
+      }} />`)}
+    ${row(t('props.passesPir'), html`<input type="checkbox" data-field="passesPir" .checked=${fieldValue(passesPir(op))}
+      @change=${(e: Event) => {
+        const v = (e.target as HTMLInputElement).checked;
+        patch({ passesPir: v === passesPirByDefault(op.kind) ? undefined : v }); // the kind default is stored as no key
       }} />`)}
     ${op.invalid ? html`<p class="warn">${t('props.invalidOpening')}</p>` : nothing}
     <button class="btn danger" data-action="delete-opening" @click=${() => o.commit(deleteOpening(o.level, op.id))}>

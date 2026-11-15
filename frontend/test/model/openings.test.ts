@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Level, Opening } from '../../src/model/types';
 import {
-  addOpening, deleteOpening, fits, kindPatch, moveOpening, passesLight, refreshOpenings, setOpeningProps,
+  addOpening, deleteOpening, fits, kindPatch, moveOpening, passesLight, passesPir, refreshOpenings, setOpeningProps,
 } from '../../src/model/openings';
 import { rectRoomLevel } from '../fixtures';
 import { deleteWall, moveNode } from '../../src/model/ops';
@@ -167,5 +167,23 @@ describe('passesLight', () => {
     expect(on.openings[0].passesLight).toBe(true);
     const off = setOpeningProps(on, r.openingId!, { passesLight: undefined });
     expect('passesLight' in off.openings[0]).toBe(false);
+  });
+});
+
+describe('passesPir', () => {
+  const o = (kind: Opening['kind'], extra: Partial<Opening> = {}): Opening =>
+    ({ id: 'o', wallId: 'w', kind, offset: 0, width: 900, invalid: false, ...extra });
+  it('defaults: opening true, door/window/gate/wicket false; an explicit value wins', () => {
+    expect(passesPir(o('opening'))).toBe(true);
+    for (const k of ['door', 'window', 'gate', 'wicket'] as const) expect(passesPir(o(k))).toBe(false);
+    expect(passesPir(o('opening', { passesPir: false }))).toBe(false);
+    for (const k of ['door', 'window', 'gate', 'wicket'] as const) expect(passesPir(o(k, { passesPir: true }))).toBe(true);
+  });
+  it('setOpeningProps stores passesPir and removes it when patched to undefined', () => {
+    const r = addOpening(oneWall(), 'w', 'window', 1500);
+    const on = setOpeningProps(r.level, r.openingId!, { passesPir: true });
+    expect(on.openings[0].passesPir).toBe(true);
+    const off = setOpeningProps(on, r.openingId!, { passesPir: undefined });
+    expect('passesPir' in off.openings[0]).toBe(false);
   });
 });
