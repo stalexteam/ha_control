@@ -125,6 +125,21 @@ Further rules:
   - red ring: missing entity;
   - primary-colour ring: selected.
 
+### Equipment icons from MDI (owner request 2026-11-15)
+The owner called the old four-value `symbol` a meagre choice.
+
+- An equipment block's symbol becomes any MDI icon, stored as `props.icon = "mdi:<name>"`.
+- It is chosen in the Equipment step's properties with HA's `ha-icon-picker`, which searches all `mdi:` icons. The fallback is a text field that validates the `mdi:` prefix.
+- It is drawn on the plan with HA's `ha-icon` inside an SVG `foreignObject`, centred in the block and sized in screen px. HA serves the icon set, so the bundle uses no CDN. When `ha-icon` is not registered (dev harness), a small bundled fallback glyph is drawn.
+- Migration happens on load in `normalizeLevel`. A legacy `symbol` maps to:
+  - `boiler` → `mdi:water-boiler`
+  - `pc` → `mdi:desktop-tower`
+  - `automation` → `mdi:server`
+  - `other` → `mdi:cube-outline`
+
+  The old field is then dropped. `schemaVersion` stays 1, because this is an additive change with a fallback.
+- The other device kinds keep their schematic drawing symbols, so the plan still reads as a drawing (the document author's call).
+
 ## 5. Binding tab UI
 
 - Tab switch "Plan | Equipment | Binding". Switching cancels the active tool and clears the selection, like the stage 2a switch.
