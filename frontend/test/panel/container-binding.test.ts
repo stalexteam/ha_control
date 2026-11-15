@@ -78,6 +78,25 @@ async function type(el: PlanStudioPanel, field: string, v: string): Promise<void
   await el.updateComplete;
 }
 
+const OTHER = '__other';
+const evSelect = (el: PlanStudioPanel, role: string) => $<HTMLSelectElement>(el, `.props select[data-field="${role}-event"]`);
+/** The option marked selected in the markup (happy-dom reports a wrong `value` for a freshly rendered select). */
+const markedEvent = (el: PlanStudioPanel, role: string) => evSelect(el, role).querySelector('option[selected]')!.getAttribute('value');
+const customInput = (el: PlanStudioPanel, role: string) => input(el, `${role}-event-custom`);
+
+function evOptions(el: PlanStudioPanel, role: string): { v: string[]; labels: string[] } {
+  const opts = [...evSelect(el, role).options];
+  return { v: opts.map(o => o.value), labels: opts.map(o => o.textContent!.trim()) };
+}
+
+/** Picks an option of a role's event select. */
+async function chooseEvent(el: PlanStudioPanel, role: string, v: string): Promise<void> {
+  const f = evSelect(el, role);
+  f.value = v;
+  f.dispatchEvent(new Event('change', { bubbles: true }));
+  await el.updateComplete;
+}
+
 async function toggle(el: PlanStudioPanel, field: string): Promise<void> {
   input(el, field).click();
   await el.updateComplete;
@@ -155,21 +174,70 @@ describe('binding step: container sections', () => {
     expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single' });
     expect(el.notice).toBeNull();
 
-    const ev = () => input(el, 'on-event');
-    expect(ev().value).toBe('single');
-    expect(ev().closest('label')!.textContent).toContain('Event');
-    const list = $<HTMLDataListElement>(el, `datalist#${ev().getAttribute('list')}`);
-    expect([...list.querySelectorAll('option')].map(o => o.value)).toEqual(['single', 'double', 'hold']);
-    await type(el, 'on-event', ' single_left ');
-    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single_left' });
-    expect(ev().value).toBe('single_left');
-    await type(el, 'on-event', '   ');
-    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single_left' });
-    expect(ev().value).toBe('single_left');
-    expect(el.notice).toBe('Event cannot be empty.');
-    await type(el, 'on-event', 'hold');
+    expect(evSelect(el, 'on').closest('label')!.textContent).toContain('Event');
+    expect(evSelect(el, 'on').value).toBe('single');
+    expect(customInput(el, 'on').hidden).toBe(true);
+    expect(evOptions(el, 'on')).toEqual({ v: ['single', 'double', 'hold', OTHER], labels: ['single', 'double', 'hold', 'Other…'] });
+    expect(q(el, '.props datalist')).toBeNull();
+  });
+
+  it('choosing a standard event stores it in one undo step', async () => {
+    const el = await open();
+    await pick(el, 'b');
+    await chooseEvent(el, 'on', 'hold');
     expect(props(el, 'b').on).toEqual({ slot: 0, event: 'hold' });
+    expect(customInput(el, 'on').hidden).toBe(true);
+    await undo(el);
+    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single' });
+    expect(evSelect(el, 'on').value).toBe('single');
+  });
+
+  it('Other… reveals a text input without changing the event; a value commits, blank reverts with the notice', async () => {
+    const el = await open();
+    await pick(el, 'b');
+    await chooseEvent(el, 'on', OTHER);
+    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single' });
+    expect(evSelect(el, 'on').value).toBe(OTHER);
+    expect(customInput(el, 'on').hidden).toBe(false);
+    expect(customInput(el, 'on').value).toBe('');
+    await type(el, 'on-event-custom', '   ');
+    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single' });
+    expect(el.notice).toBe('Event cannot be empty.');
+    await type(el, 'on-event-custom', ' single_left ');
+    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single_left' });
     expect(el.notice).toBeNull();
+    expect(evSelect(el, 'on').value).toBe(OTHER);
+    expect(customInput(el, 'on').value).toBe('single_left');
+    await type(el, 'on-event-custom', '');
+    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single_left' });
+    expect(customInput(el, 'on').value).toBe('single_left');
+    expect(el.notice).toBe('Event cannot be empty.');
+  });
+
+  it('a stored custom event shows Other… with its text; a standard option hides the input again', async () => {
+    const el = await open();
+    await pick(el, 'b');
+    await chooseEvent(el, 'on', OTHER);
+    await type(el, 'on-event-custom', 'single_left');
+    expect(evSelect(el, 'on').value).toBe(OTHER);
+    await pick(el, 'k1');
+    await pick(el, 'b');
+    expect(evSelect(el, 'on').value).toBe(OTHER);
+    expect(customInput(el, 'on').hidden).toBe(false);
+    expect(customInput(el, 'on').value).toBe('single_left');
+    await chooseEvent(el, 'on', 'double');
+    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'double' });
+    expect(evSelect(el, 'on').value).toBe('double');
+    expect(customInput(el, 'on').hidden).toBe(true);
+  });
+
+  it('Other… then back to the stored standard event hides the input without a commit', async () => {
+    const el = await open();
+    await pick(el, 'b');
+    await chooseEvent(el, 'on', OTHER);
+    await chooseEvent(el, 'on', 'single');
+    expect(customInput(el, 'on').hidden).toBe(true);
+    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single' });
   });
 
   it('Separate Off adds the Off section prefilled with the On entity; unchecking drops the off binding; undo restores it', async () => {
@@ -183,7 +251,7 @@ describe('binding step: container sections', () => {
     expect(label(el, 'off')).toBe('Off');
     expect(combo(el, 'off').value).toBe('sensor.wc_action');
     expect(input(el, 'off-slot').value).toBe('0');
-    expect(input(el, 'off-event').value).toBe('hold');
+    expect(markedEvent(el, 'off')).toBe('hold');
     // Turning it on is one step.
     await undo(el);
     expect(props(el, 'b').separateOff).toBe(false);
@@ -235,7 +303,7 @@ describe('binding step: container sections', () => {
     expect(roles(el)).toEqual(['on', 'auto', 'final']);
     expect(['on', 'auto', 'final'].map(r => label(el, r))).toEqual(['On / Off', 'Auto', 'Final state']);
     expect(input(el, 'auto-slot').value).toBe('0');
-    expect(input(el, 'auto-event').value).toBe('double');
+    expect(markedEvent(el, 'auto')).toBe('double');
     expect(outputs(el)).toEqual({ v: ['off', 'on', 'auto', 'error'], labels: ['Off', 'On', 'Auto', 'Error'] });
 
     const sel = $<HTMLSelectElement>(el, '.props select[data-field="defaultOutput"]');
@@ -278,7 +346,7 @@ describe('binding step: container sections', () => {
     expect(order()).toEqual(['role:on', 'separateOff', 'role:off', 'autoEnabled', 'defaultOutput']);
     await toggle(el, 'autoEnabled');
     expect(order()).toEqual(['role:on', 'separateOff', 'role:off', 'autoEnabled', 'role:auto', 'defaultOutput']);
-    await type(el, 'off-event', 'single');
+    await chooseEvent(el, 'off', 'single');
     expect(order()).toEqual(['role:on', 'separateOff', 'role:off', 'autoEnabled', 'role:auto', 'defaultOutput', 'note:duplicate']);
     await toggle(el, 'separateOff');
     expect(order()).toEqual(['role:on', 'separateOff', 'autoEnabled', 'role:auto', 'role:final', 'defaultOutput']);
@@ -290,7 +358,7 @@ describe('binding step: container sections', () => {
     expect(q(el, '.props [data-note="also"]')).toBeNull();
     await type(el, 'on-slot', '1');
     expect($(el, '.props [data-role="on"] [data-note="also"]').textContent!.trim()).toBe('Also bound to: WC light key');
-    await type(el, 'on-event', 'double');
+    await chooseEvent(el, 'on', 'double');
     expect(q(el, '.props [data-note="also"]')).toBeNull();
   });
 
@@ -299,7 +367,7 @@ describe('binding step: container sections', () => {
     await pick(el, 'b');
     await toggle(el, 'separateOff');
     expect(q(el, '.props [data-note="duplicate"]')).toBeNull();
-    await type(el, 'off-event', 'single');
+    await chooseEvent(el, 'off', 'single');
     expect($(el, '.props [data-note="duplicate"]').textContent!.trim())
       .toBe('Two triggers of this device are identical; the first one (On, Off, Auto) wins.');
     await type(el, 'off-slot', '1');

@@ -69,6 +69,7 @@ const en: Dict = {
   'binding.onOff': 'On / Off',
   'binding.slot': 'Slot',
   'binding.event': 'Event',
+  'binding.eventOther': 'Other…',
   'binding.separateOff': 'Separate Off',
   'binding.autoEnabled': 'Auto',
   'binding.autoByDoubleToggle': 'Auto by double toggle',

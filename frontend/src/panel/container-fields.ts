@@ -1,4 +1,6 @@
 import { html, nothing, type TemplateResult } from 'lit';
+import { live } from 'lit/directives/live.js';
+import { createRef, ref } from 'lit/directives/ref.js';
 import {
   TRIGGER_EVENTS, allowedOutputs, type BindingRole, type ContainerOutput, type Device, type DeviceProps, type Level,
   type Trigger,
@@ -43,31 +45,60 @@ function defaultOutputRow(o: BindingPropsOpts, d: Device, p: DeviceProps & { def
     select<ContainerOutput>(p.defaultOutput, options, v => setProps(o, d, { defaultOutput: v }), 'defaultOutput'));
 }
 
+/** Select value of the "Other…" option; no event can be stored under it. */
+const OTHER = '__other';
+/** Triggers whose "Other…" input was opened (by device and role) while the stored event is still a standard one. */
+const customOpen = new Set<string>();
+
 /**
- * A smart button trigger under its role's combobox: Slot (0..9) and Event (`single`, `double`, `hold` offered,
- * any other non-empty text accepted). A malformed slot or a blank event reverts with a notice.
+ * The Event control: a select of `single` / `double` / `hold` / "Other…" and, under "Other…", a text input for
+ * any other non-empty event. Opening "Other…" changes nothing in the model; a blank custom value reverts with a notice.
+ */
+function eventField(o: BindingPropsOpts, d: Device, role: TriggerRole, event: string, set: (ev: string) => boolean): TemplateResult {
+  const key = `${d.id}:${role}`;
+  const standard = (TRIGGER_EVENTS as readonly string[]).includes(event);
+  const custom = !standard || customOpen.has(key);
+  const box = createRef<HTMLInputElement>();
+  const options = [...TRIGGER_EVENTS.map(v => ({ v: v as string, label: v as string })), { v: OTHER, label: t('binding.eventOther') }];
+  const choose = (v: string): void => {
+    if (v === OTHER) {
+      customOpen.add(key);
+      if (box.value) { box.value.hidden = false; box.value.focus(); }
+      return;
+    }
+    customOpen.delete(key);
+    if (box.value) box.value.hidden = true;
+    if (v !== event) set(v);
+    else o.setNotice(null);
+  };
+  return html`<span class="evfield">${select<string>(custom ? OTHER : event, options, choose, `${role}-event`)}
+    <input class="val wide" type="text" ${ref(box)} data-field=${`${role}-event-custom`} ?hidden=${live(!custom)}
+      .value=${fieldValue(standard ? '' : event)} @change=${(e: Event) => {
+        const el = e.target as HTMLInputElement;
+        const v = el.value.trim();
+        if (!v) { el.value = standard ? '' : event; o.setNotice(t('props.badEvent')); return; }
+        el.value = v;
+        o.setNotice(null);
+        if (v !== event) set(v);
+        if (!(TRIGGER_EVENTS as readonly string[]).includes(v)) customOpen.delete(key);
+      }} /></span>`;
+}
+
+/**
+ * A smart button trigger under its role's combobox: Slot (0..9) and Event (a select of `single`, `double`, `hold`
+ * or "Other…" with a text input for any other non-empty event). A malformed slot or a blank event reverts with a notice.
  */
 export function triggerFields(o: BindingPropsOpts, d: Device, role: TriggerRole): TemplateResult {
   const p = d.props;
   if (p.kind !== 'smart_button') return html`${nothing}`;
   const cur = p[role];
   const set = (patch: Partial<Trigger>): boolean => setProps(o, d, { [role]: { ...cur, ...patch } } as Partial<DeviceProps>);
-  const list = `ps-events-${role}`;
   return html`<div class="trigger" data-trigger=${role}>
     ${row(t('binding.slot'), numField({
       value: cur.slot, rule: SLOT, bad: 'props.badSlot', field: `${role}-slot`, skipSame: true,
       setNotice: msg => o.setNotice(msg), apply: v => set({ slot: v }),
     }))}
-    ${row(t('binding.event'), html`<input class="val wide" type="text" list=${list} data-field=${`${role}-event`}
-      .value=${fieldValue(cur.event)} @change=${(e: Event) => {
-        const el = e.target as HTMLInputElement;
-        const v = el.value.trim();
-        if (!v) { el.value = cur.event; o.setNotice(t('props.badEvent')); return; }
-        el.value = v;
-        o.setNotice(null);
-        if (v !== cur.event) set({ event: v });
-      }} />`)}
-    <datalist id=${list}>${TRIGGER_EVENTS.map(v => html`<option value=${v}></option>`)}</datalist>
+    ${row(t('binding.event'), eventField(o, d, role, cur.event, ev => set({ event: ev })))}
   </div>`;
 }
 
