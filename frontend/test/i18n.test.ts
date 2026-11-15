@@ -6,7 +6,7 @@ import { DEVICE_PLACEMENTS, WALL_PRESETS, OPENING_DEFAULT_WIDTH } from '../src/m
 import { LIGHT_SHAPES, EQUIPMENT_SHAPES } from '../src/panel/device-props';
 import { LIST_FILTERS } from '../src/panel/binding-list';
 import { ROLE_SPECS } from '../src/model/bindings';
-import { EQUIPMENT_TOOL_IDS, PLAN_TOOL_IDS, ZONES_TOOL_IDS } from '../src/panel/tool-factory';
+import { EQUIPMENT_TOOL_IDS, PLAN_TOOL_IDS, POWER_TOOL_IDS, ZONES_TOOL_IDS } from '../src/panel/tool-factory';
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap(n => {
@@ -81,9 +81,11 @@ describe('i18n', () => {
       side: ['left', 'right'],
       hinge: ['start', 'end'],
       baseline: ['center', 'left', 'right'],
-      mode: ['plan', 'equipment', 'binding', 'zones', 'automation'],
+      mode: ['plan', 'equipment', 'binding', 'zones', 'power', 'automation'],
       // The tools with a rail button (the Binding step's only tool has none).
-      tool: [...PLAN_TOOL_IDS, ...EQUIPMENT_TOOL_IDS, ...ZONES_TOOL_IDS],
+      tool: [...PLAN_TOOL_IDS, ...EQUIPMENT_TOOL_IDS, ...ZONES_TOOL_IDS, ...POWER_TOOL_IDS],
+      'power.err': ['missing', 'same-block', 'direction', 'port-taken', 'dc-mismatch', 'second-remainder', 'loop'],
+      'power.help': ['select', 'place', 'device'],
       'zones.kind': ['room', 'polygon'],
       'zones.invalid': ['room', 'lost', 'wall', 'self'],
       'binding.filter': LIST_FILTERS,

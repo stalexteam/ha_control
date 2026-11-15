@@ -10,7 +10,9 @@ export type InputHost = Pick<PlanStudioPanel,
 const MODIFIER_KEYS = ['Shift', 'Control', 'Alt', 'Meta'];
 
 /** The select tool an unconsumed Esc returns to, per step; the Binding step has no other tool. */
-const HOME_TOOL: Partial<Record<EditorMode, ToolId>> = { plan: 'select', equipment: 'device-select', zones: 'zones-select' };
+const HOME_TOOL: Partial<Record<EditorMode, ToolId>> = {
+  plan: 'select', equipment: 'device-select', zones: 'zones-select', power: 'power-select',
+};
 
 function inField(e: KeyboardEvent): boolean {
   const el = e.composedPath()[0] as HTMLElement | undefined;
@@ -72,7 +74,8 @@ export class EditorInput {
     if (this.panFrom) { this.panFrom = null; return; }
     if (!this.pointerActive) return; // e.g. the lostpointercapture that follows a normal pointerup
     this.pointerActive = false;
-    if (this.h.activeTool.preview().level) this.h.activeTool.cancel();
+    const pv = this.h.activeTool.preview();
+    if (pv.level || pv.power || pv.wireDraft) this.h.activeTool.cancel();
     this.h.requestUpdate();
   };
 

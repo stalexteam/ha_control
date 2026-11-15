@@ -12,13 +12,16 @@ import { bindingStatus, type BindStatus } from '../model/bindings';
 import { presence } from '../binding/ha-meta';
 import { devicePose } from '../geometry/devices';
 import { History } from '../editor/history';
-import { defaultPower, type PlanDoc, type PowerSchema } from '../model/power';
+import { defaultPower, deleteBlock, deleteWire, type PlanDoc, type Position, type PowerSchema } from '../model/power';
+import { schemaBounds } from '../geometry/power';
 import { SaveController } from '../editor/save';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
 import type { HassLike, PlanSummary } from '../api';
 import { renderLevel } from '../render/plan-svg';
+import { renderPower } from '../render/power-svg';
 import { paletteFor } from '../render/theme';
 import { t } from '../i18n';
+import { messageOf } from '../errors';
 import { renderTopBar } from './toolbar';
 import { renderSteps } from './steps';
 import { nextUnbound, type ListFilter } from './binding-list';
@@ -33,7 +36,7 @@ import { initialNextProps } from './device-props';
 import { renderStatusBar } from './statusbar';
 import { renderTracker, trackerLive } from './tracker';
 import { panelStyles, paletteVars } from './styles';
-import { fitView, renderGrid, revealPt, screenToMm, type View } from './viewport';
+import { fitRect, fitView, renderGrid, revealPt, screenToMm, type View } from './viewport';
 import { EditorInput } from './input';
 import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
@@ -54,7 +57,7 @@ export class PlanStudioPanel extends LitElement {
   @state() thickness = WALL_PRESETS.bearing;
   @state() boxMeasure: BoxMeasure = 'inner';
   @state() grid = true;
-  /** Wizard step: Plan / Equipment / Binding / Zones (per session, not saved); cones: device cones and zones are drawn. */
+  /** Wizard step: Plan / Equipment / Binding / Zones / Power (per session, not saved); cones: device cones and zones are drawn. */
   @state() mode: EditorMode = 'plan';
   /** Binding step device list: Not bound / Bound / All and the text filter. */
   @state() bindFilter: ListFilter = 'unbound';
@@ -69,7 +72,11 @@ export class PlanStudioPanel extends LitElement {
   @state() nextProps = initialNextProps();
   /** "Next object" parameters of the door / window / opening / zone tools. */
   @state() nextObj = initialNext();
-  @state() view: View = { x: -1000, y: -1000, scale: 0.08 };
+  /** The plan's view (mm) and the power schematic's own view (units: 1 unit = 1 screen px at scale 1). */
+  @state() planView: View = { x: -1000, y: -1000, scale: 0.08 };
+  @state() powerView: View = { x: -40, y: -40, scale: 1 };
+  /** Power step: the plan device the Plan device tool places next (armed in the device list); null when none. */
+  @state() placeDeviceId: Id | null = null;
   @state() private size = { w: 0, h: 0 };
   /** The open modal dialog; Escape closes it (the restore prompt then leaves a non-modal banner). */
   @state() dialog: Dialog | null = null;
@@ -94,6 +101,8 @@ export class PlanStudioPanel extends LitElement {
   activeTool: Tool;
   loading = false;
   needFit = false;
+  /** The next entry to the Power step fits the schematic (set when a plan is adopted). */
+  needPowerFit = false;
   readonly drafts = new DraftStore();
   private readonly input: EditorInput;
   private resizeObs: ResizeObserver | null = null;
@@ -164,7 +173,9 @@ export class PlanStudioPanel extends LitElement {
 
   protected willUpdate(changed: PropertyValues): void {
     if (changed.has('hass') && this.hass && !this.plan && !this.loading && !this.loadError) void this.session.load();
-    if (this.needFit && this.size.w > 0 && this.size.h > 0) { this.needFit = false; this.fit(); }
+    const sized = this.size.w > 0 && this.size.h > 0;
+    if (this.needFit && sized) { this.needFit = false; this.fit(); }
+    if (this.needPowerFit && sized && this.mode === 'power') { this.needPowerFit = false; this.fitPower(); }
     // A detached panel still updates when handed a new hass: it keeps no subscription until it is attached again.
     this.feed.watch(this.isConnected ? this.plan?.id ?? null : null);
   }
@@ -212,17 +223,38 @@ export class PlanStudioPanel extends LitElement {
 
   /**
    * Delete/Backspace: remove the selected element (commit() drops the tool state and the selection). Not in the
-   * Binding step; the Zones step deletes an automation zone only, and no other step deletes one.
+   * Binding step; the Zones step deletes an automation zone only, and no other step deletes one; the Power step
+   * deletes power blocks and wires only.
    */
   deleteSelection(): boolean {
     const s = this.selection;
     const level = this.level;
     if (this.mode === 'binding' || !s || !level || s.kind === 'node' || !selectionExists(level, s, this.power)) return false;
+    if (this.mode === 'power') return this.deletePower(s);
+    if (s.kind === 'powerBlock' || s.kind === 'powerWire') return false;
     if ((this.mode === 'zones') !== (s.kind === 'automationZone')) return false;
     this.commit(s.kind === 'wall' ? deleteWall(level, s.id) : s.kind === 'opening' ? deleteOpening(level, s.id)
       : s.kind === 'device' ? deleteDevice(level, s.id) : s.kind === 'automationZone' ? deleteAutomationZone(level, s.id)
       : deleteZone(level, s.id));
     return true;
+  }
+
+  /** Power step: the selected wire, or the selected block with its wires; the grid source stays (with a notice). */
+  private deletePower(s: Selection): boolean {
+    const p = this.power;
+    if (s.kind === 'powerWire') { this.commitPower(deleteWire(p, s.id)); return true; }
+    if (s.kind !== 'powerBlock') return false;
+    const next = deleteBlock(p, s.id);
+    if (next === p) this.notice = t('power.gridKeep'); else this.commitPower(next);
+    return true;
+  }
+
+  /** Sets a transfer switch position live on the server (not saved with the plan); a failure shows as the notice. */
+  setPowerPosition(blockId: Id, p: Position): void {
+    const conn = this.hass?.connection;
+    if (!conn || !this.plan) return;
+    conn.sendMessagePromise({ type: 'plan_studio/power/set_position', plan_id: this.plan.id, block_id: blockId, position: p })
+      .catch((err: unknown) => { this.notice = messageOf(err); });
   }
 
   undo(): void { this.step(() => this.history?.undo() ?? null); }
@@ -251,6 +283,7 @@ export class PlanStudioPanel extends LitElement {
     this.selection = null;
     this.notice = null;
     this.fieldNotice = null;
+    this.placeDeviceId = null;
     if (id === 'box') this.wallType = 'bearing';
     this.toolId = id;
     this.activeTool = createTool(id, this.ctx);
@@ -261,7 +294,7 @@ export class PlanStudioPanel extends LitElement {
     if (mode === this.mode) return;
     this.mode = mode;
     this.pickTool(toolIdsFor(mode)[0]);
-    if (mode === 'binding') this.haMeta.enter();
+    if (mode === 'binding' || mode === 'power') this.haMeta.enter();
   }
 
   /** Selects a device (binding list, Next unbound device) and pans the plan to it when it is off-screen. */
@@ -291,11 +324,21 @@ export class PlanStudioPanel extends LitElement {
 
   // ---- view / pointer ----
 
+  /** The canvas view of the active step: the Power step has its own, so the plan view is kept meanwhile. */
+  get view(): View { return this.mode === 'power' ? this.powerView : this.planView; }
+  set view(v: View) { if (this.mode === 'power') this.powerView = v; else this.planView = v; }
+
   private svgEl(): SVGSVGElement | null { return this.renderRoot.querySelector('svg.plan'); }
 
   toMm(e: { clientX: number; clientY: number }): Pt { return screenToMm(this.svgEl(), this.view, e); }
 
-  private fit(): void { this.view = fitView(this.level?.nodes ?? [], this.size.w, this.size.h); }
+  private fit(): void { this.planView = fitView(this.level?.nodes ?? [], this.size.w, this.size.h); }
+
+  /** The whole schematic with a 40-unit margin, at most 150 %. */
+  private fitPower(): void {
+    const b = schemaBounds(this.power, this.ctx.geo());
+    if (b) this.powerView = fitRect(b, this.size.w, this.size.h, 40, 1.5);
+  }
 
   /**
    * After a chrome button is clicked, give focus back to the panel: otherwise Enter / Space typed for the
@@ -344,13 +387,14 @@ export class PlanStudioPanel extends LitElement {
     const { x, y, scale } = this.view;
     const w = Math.max(1, this.size.w) / scale, h = Math.max(1, this.size.h) / scale;
     const s = this.save;
+    const power = this.mode === 'power';
     return html`
       <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : this.mode === 'zones' ? ' zones' : ''}"
         style=${paletteVars(pal)}
         @click=${this.refocus} @change=${this.refocusAfterChange}>
         ${renderTopBar({
           steps: renderSteps({
-            mode: this.mode, level, status: this.bindStatus, planName: this.plan.name,
+            mode: this.mode, level, status: this.bindStatus, power: this.power, planName: this.plan.name,
             onRename: name => { this.plan = { ...this.plan!, name }; s.markDirty(); },
             onMode: m => this.setMode(m),
           }),
@@ -370,8 +414,10 @@ export class PlanStudioPanel extends LitElement {
             @pointerdown=${this.input.pointerDown} @pointermove=${this.input.pointerMove}
             @pointerup=${this.input.pointerUp} @pointercancel=${this.input.pointerAbort}
             @lostpointercapture=${this.input.pointerAbort} @wheel=${this.input.wheel} @contextmenu=${(e: Event) => e.preventDefault()}>
-            ${this.grid ? renderGrid(this.view, w, h, pal) : nothing}
-            ${renderLevel(level, {
+            ${this.grid ? renderGrid(this.view, w, h, pal, power ? 0.1 : 1) : nothing}
+            ${this.mode === 'power' ? renderPower(this.power, {
+              palette: pal, selection: this.selection, preview, scale, frame: null, geo: this.ctx.geo(),
+            }) : renderLevel(level, {
               palette: pal, selection: this.selection, preview, scale, mode: this.mode, showCones: this.cones,
               bindingStatus: this.bindStatus,
               containerState: d => this.feed.stateOf(d), containerFlash: d => this.feed.flash(d.id),
@@ -387,10 +433,10 @@ export class PlanStudioPanel extends LitElement {
           }) : nothing}
         </div>
         ${renderStatusBar({
-          grid: this.grid, zoomPct: Math.round(scale * 1000),
+          grid: this.grid, zoomPct: Math.round(scale * (power ? 100 : 1000)),
           snap: preview.snap && preview.snap.kind !== 'none' ? t(`snap.${preview.snap.kind}`) : null,
           onGrid: on => { this.grid = on; }, cones: this.cones, onCones: on => { this.cones = on; },
-          binding: this.mode === 'binding',
+          binding: this.mode === 'binding' || power, power,
         })}
         ${this.renderDialog()}
       </div>`;

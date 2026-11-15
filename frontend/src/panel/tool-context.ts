@@ -1,8 +1,8 @@
-import { emptyLevel, type Level } from '../model/types';
-import type { Selection, ToolContext } from '../editor/tools/types';
+import { emptyLevel, type Id, type Level } from '../model/types';
+import type { Selection, Tool, ToolContext } from '../editor/tools/types';
 import type { DeviceKind, DeviceProps, WallType, OpeningKind } from '../model/types';
 import type { History } from '../editor/history';
-import type { PlanDoc, PowerSchema } from '../model/power';
+import type { PlanDoc, Position, PowerSchema } from '../model/power';
 import { defaultZoneName, openingDefaults, type NextObjects } from './next-object';
 import type { BoxMeasure } from './props-panel';
 import type { View } from './viewport';
@@ -26,6 +26,10 @@ export interface ToolHost {
   commit(next: Level): void;
   readonly power: PowerSchema;
   commitPower(next: PowerSchema): void;
+  /** Power step: the plan device the Plan device tool places next (armed in the device list). */
+  placeDeviceId: Id | null;
+  setPowerPosition(blockId: Id, p: Position): void;
+  pickTool(id: Tool['id']): void;
 }
 
 export function createToolContext(h: ToolHost): ToolContext {
@@ -47,5 +51,13 @@ export function createToolContext(h: ToolHost): ToolContext {
     zoneName: () => h.nextObj.zoneName ?? defaultZoneName(h.history?.current.level ?? EMPTY_LEVEL),
     /** A custom zone name is single-use: the next default is "Room N" again. */
     zonePlaced: () => { h.nextObj = { ...h.nextObj, zoneName: null }; },
+    geo: () => {
+      const devices = (h.history?.current.level ?? EMPTY_LEVEL).devices;
+      return { device: id => devices.find(d => d.id === id) };
+    },
+    placeDeviceId: () => h.placeDeviceId,
+    setPosition: (blockId, p) => h.setPowerPosition(blockId, p),
+    notify: msg => { h.notice = msg; },
+    pickTool: id => h.pickTool(id),
   };
 }

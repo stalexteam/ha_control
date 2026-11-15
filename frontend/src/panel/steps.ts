@@ -1,17 +1,20 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { levelZones, type Device, type Level } from '../model/types';
 import { countNotBound, type BindStatus } from '../model/bindings';
+import { stepDone, type PowerSchema } from '../model/power';
 import { t } from '../i18n';
 import { fieldValue } from './field-value';
 import type { EditorMode } from './tool-factory';
 
-/** Wizard steps in order; a fifth one (Automation) is shown after them but not available yet. */
-const MODES: readonly EditorMode[] = ['plan', 'equipment', 'binding', 'zones'];
+/** Wizard steps in order; a sixth one (Automation) is shown after them but not available yet. */
+const MODES: readonly EditorMode[] = ['plan', 'equipment', 'binding', 'zones', 'power'];
 
 export interface StepsOpts {
   mode: EditorMode;
   level: Level;
   status: (d: Device) => BindStatus;
+  /** The power schematic (a default one while the plan has none). */
+  power: PowerSchema;
   /** The title cell holds the plan name (editable) above "Plan Studio". */
   planName: string;
   onRename(name: string): void;
@@ -22,7 +25,8 @@ export interface StepsOpts {
 export const countText = (n: number, one: string, other: string): string => t(n === 1 ? one : other).replace('{n}', String(n));
 
 /** Live status line of a step and whether the step is finished. */
-export function stepState(mode: EditorMode, level: Level, status: (d: Device) => BindStatus): { text: string; done: boolean } {
+export function stepState(mode: EditorMode, level: Level, status: (d: Device) => BindStatus, power: PowerSchema):
+{ text: string; done: boolean } {
   const { walls, zones, devices } = level;
   switch (mode) {
     case 'plan':
@@ -39,6 +43,8 @@ export function stepState(mode: EditorMode, level: Level, status: (d: Device) =>
       const n = levelZones(level).length;
       return { text: countText(n, 'steps.zone', 'steps.zones'), done: n > 0 };
     }
+    case 'power':
+      return { text: countText(power.blocks.length, 'steps.block', 'steps.blocks'), done: stepDone(power) };
   }
 }
 
@@ -60,7 +66,7 @@ export function renderSteps(o: StepsOpts): TemplateResult {
         <span class="app">${t('steps.app')}</span>
       </div>
       ${MODES.map((m, n) => {
-        const s = stepState(m, o.level, o.status);
+        const s = stepState(m, o.level, o.status, o.power);
         const current = m === o.mode;
         return html`<button class="step${current ? ' current' : ''}${s.done ? ' done' : ''}" data-mode=${m}
           aria-current=${current ? 'step' : nothing} @click=${() => o.onMode(m)}>

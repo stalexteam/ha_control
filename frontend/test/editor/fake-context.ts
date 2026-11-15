@@ -23,5 +23,10 @@ export function fakeContext(level?: Level): ToolContext & { commits: Level[] } {
     deviceDefaults: k => deviceDefaults(k, 'free'),
     openingDefaults: k => (k === 'door' ? { width: 900, hinge: 'start', swing: 'left' } : k === 'window' ? { width: 1200, outside: 'left' } : { width: 900 }),
     zoneName: () => defaultZoneName(current),
+    geo: () => ({ device: id => current.devices.find(d => d.id === id) }),
+    placeDeviceId: () => null,
+    setPosition: () => {},
+    notify: () => {},
+    pickTool: () => {},
   };
 }

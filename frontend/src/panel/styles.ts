@@ -69,7 +69,7 @@ export const panelStyles = css`
   .save-state.conflict, .save-state.error { color: var(--ch-error); }
 
   /* Wizard steps as a drawing title block: ruled cells, tabular numerals, sentence case. */
-  .steps { display: grid; grid-template-columns: minmax(150px, 1.2fr) repeat(5, minmax(100px, 1fr)) auto;
+  .steps { display: grid; grid-template-columns: minmax(150px, 1.2fr) repeat(6, minmax(96px, 1fr)) auto;
     border-top: 1px solid var(--ch-divider); font-variant-numeric: tabular-nums; }
   .steps > * { min-width: 0; border-right: 1px solid var(--ch-divider); }
   .steps .title { display: flex; flex-direction: column; justify-content: center; gap: 1px; padding: 6px 12px; }
@@ -91,7 +91,7 @@ export const panelStyles = css`
   .step.current::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--ch-primary); }
   .steps .nav { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 6px 12px; border-right: 0; }
   @media (max-width: 900px) {
-    .steps { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    .steps { grid-template-columns: repeat(6, minmax(0, 1fr)); }
     .steps .title, .steps .nav { grid-column: 1 / -1; border-right: 0; }
     .steps .title { border-bottom: 1px solid var(--ch-divider); }
     .steps .nav { border-top: 1px solid var(--ch-divider); }

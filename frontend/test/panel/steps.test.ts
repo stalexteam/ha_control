@@ -5,6 +5,7 @@ import { renderSteps } from '../../src/panel/steps';
 import type { EditorMode } from '../../src/panel/tool-factory';
 import type { BindStatus } from '../../src/model/bindings';
 import { deviceDefaults, emptyLevel, type AutomationZone, type Device, type Level, type Wall, type Zone } from '../../src/model/types';
+import type { PowerSchema } from '../../src/model/power';
 
 const dev = (id: string): Device =>
   ({ id, name: id, invalid: false, placement: { mode: 'free', x: 0, y: 0, rotation: 0 }, props: deviceDefaults('socket', 'free') });
@@ -22,13 +23,15 @@ function level(walls: number, zones: number, devices: number, automationZones = 
   };
 }
 
-function draw(mode: EditorMode, lv: Level, bound: string[] = []) {
+const GRID_ONLY: PowerSchema = { blocks: [{ id: 'g', kind: 'grid', x: 0, y: 0 }], wires: [] };
+
+function draw(mode: EditorMode, lv: Level, bound: string[] = [], power: PowerSchema = GRID_ONLY) {
   const onMode = vi.fn();
   const onRename = vi.fn();
   const status = (d: Device): BindStatus => (bound.includes(d.id) ? 'bound' : 'unbound');
   const host = document.createElement('div');
   document.body.appendChild(host);
-  render(renderSteps({ mode, level: lv, status, planName: 'Home', onRename, onMode }), host);
+  render(renderSteps({ mode, level: lv, status, power, planName: 'Home', onRename, onMode }), host);
   const q = <T extends Element>(sel: string) => host.querySelector<T>(sel);
   const text = (sel: string) => q(sel)?.textContent?.replace(/\s+/g, ' ').trim() ?? null;
   return { host, q, text, onMode, onRename };
@@ -47,18 +50,21 @@ describe('renderSteps', () => {
     expect(s.onRename).toHaveBeenCalledWith('Flat');
   });
 
-  it('cell statuses read "15 walls, 6 rooms", "3 devices", "1 of 3 bound", "0 zones", "Comes later"', () => {
+  it('cell statuses read "15 walls, 6 rooms", "3 devices", "1 of 3 bound", "0 zones", "1 block", "Comes later"', () => {
     const s = draw('plan', level(15, 6, 3), ['d1']);
     expect(s.text('[data-mode="plan"] .state')).toBe('15 walls, 6 rooms');
     expect(s.text('[data-mode="equipment"] .state')).toBe('3 devices');
     expect(s.text('[data-mode="binding"] .state')).toBe('1 of 3 bound');
     expect(s.text('[data-mode="zones"] .state')).toBe('0 zones');
+    expect(s.text('[data-mode="power"] .state')).toBe('1 block');
     expect(s.text('[data-step="automation"] .state')).toBe('Comes later');
     expect(s.text('[data-mode="binding"] .name')).toBe('Binding');
     expect(s.text('[data-mode="binding"] .n')).toBe('3');
     expect(s.text('[data-mode="zones"] .name')).toBe('Zones');
     expect(s.text('[data-mode="zones"] .n')).toBe('4');
-    expect(s.text('[data-step="automation"] .n')).toBe('5');
+    expect(s.text('[data-mode="power"] .name')).toBe('Power');
+    expect(s.text('[data-mode="power"] .n')).toBe('5');
+    expect(s.text('[data-step="automation"] .n')).toBe('6');
   });
 
   it('the Zones cell counts every zone (invalid ones too) and is done with one or more', () => {
@@ -68,6 +74,18 @@ describe('renderSteps', () => {
     expect(one.text('[data-mode="zones"] .state')).toBe('1 zone');
     expect(done(one)).toBe(true);
     expect(draw('plan', level(0, 0, 0, 2)).text('[data-mode="zones"] .state')).toBe('2 zones');
+  });
+
+  it('the Power cell counts blocks and is done once the grid has a power entity and a wire exists', () => {
+    const done = (s: ReturnType<typeof draw>) => s.q('[data-mode="power"]')!.classList.contains('done');
+    const two: PowerSchema = { blocks: [...GRID_ONLY.blocks, { id: 'r', kind: 'remainder', x: 0, y: 100 }], wires: [] };
+    const wired: PowerSchema = { ...two, wires: [{ id: 'w', from: { block: 'g', port: 'OUT' }, to: { block: 'r', port: 'IN' } }] };
+    const metered = (s: PowerSchema): PowerSchema =>
+      ({ ...s, blocks: s.blocks.map(b => (b.kind === 'grid' ? { ...b, power: 'sensor.grid' } : b)) });
+    expect(draw('plan', level(0, 0, 0), [], two).text('[data-mode="power"] .state')).toBe('2 blocks');
+    expect(done(draw('plan', level(0, 0, 0), [], wired))).toBe(false);
+    expect(done(draw('plan', level(0, 0, 0), [], metered(two)))).toBe(false);
+    expect(done(draw('plan', level(0, 0, 0), [], metered(wired)))).toBe(true);
   });
 
   it('singular counts read "1 wall, 1 room" and "1 device"', () => {
@@ -131,13 +149,19 @@ describe('renderSteps', () => {
     expect(s.onMode).toHaveBeenCalledWith('equipment');
   });
 
-  it('Zones, the last step, has "Back: Binding" and no Next', () => {
+  it('Zones has "Back: Binding" and "Next: Power"; Power, the last step, has "Back: Zones" and no Next', () => {
     const s = draw('zones', level(4, 1, 2));
     expect(s.q('[data-mode="zones"]')!.getAttribute('aria-current')).toBe('step');
     expect(s.text('[data-nav="back"]')).toBe('Back: Binding');
-    expect(s.q('[data-nav="next"]')).toBeNull();
+    expect(s.text('[data-nav="next"]')).toBe('Next: Power');
     s.q<HTMLButtonElement>('[data-nav="back"]')!.click();
     expect(s.onMode).toHaveBeenCalledWith('binding');
+    s.q<HTMLButtonElement>('[data-nav="next"]')!.click();
+    expect(s.onMode).toHaveBeenCalledWith('power');
+    const p = draw('power', level(4, 1, 2));
+    expect(p.q('[data-mode="power"]')!.getAttribute('aria-current')).toBe('step');
+    expect(p.text('[data-nav="back"]')).toBe('Back: Zones');
+    expect(p.q('[data-nav="next"]')).toBeNull();
   });
 
   it('labels are sentence case (no all-caps text)', () => {

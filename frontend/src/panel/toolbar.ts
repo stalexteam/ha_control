@@ -70,10 +70,13 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
     </div>${o.steps}</div>`;
 }
 
-/** The step's tool buttons (with a separator before the room tool and the first device tool). */
+/** Tools that start a group on the rail: the room tool, the first device tool, the Plan device and the service blocks. */
+const GROUP_STARTS: ToolId[] = ['zone', 'ceiling_light', 'power-device', 'power-meter'];
+
+/** The step's tool buttons (with a separator before each group). */
 export function toolButtons(mode: EditorMode, active: ToolId, onPick: (id: ToolId) => void): TemplateResult[] {
   return toolIdsFor(mode).map(id => html`
-    ${id === 'zone' || id === 'ceiling_light' ? html`<div class="tool-sep"></div>` : nothing}
+    ${GROUP_STARTS.includes(id) ? html`<div class="tool-sep"></div>` : nothing}
     <button class="tool ${active === id ? 'on' : ''}" data-tool=${id} @click=${() => onPick(id)}>
       ${t(`tool.${id}`)}</button>`);
 }

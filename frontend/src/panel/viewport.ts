@@ -33,6 +33,13 @@ export function fitView(nodes: PlanNode[], w: number, h: number): View {
   return { x: (x0 + x1) / 2 - w / scale / 2, y: (y0 + y1) / 2 - h / scale / 2, scale };
 }
 
+/** View that shows rect r (canvas units) with `margin` units around it, centred, at a scale of at most maxScale. */
+export function fitRect(r: { x: number; y: number; w: number; h: number }, wPx: number, hPx: number,
+  margin: number, maxScale: number): View {
+  const scale = clampScale(Math.min(maxScale, wPx / (r.w + 2 * margin), hPx / (r.h + 2 * margin)));
+  return { x: r.x + r.w / 2 - wPx / scale / 2, y: r.y + r.h / 2 - hPx / scale / 2, scale };
+}
+
 /** Zoom keeping plan point p under the cursor. */
 export function zoomAt(v: View, p: Pt, deltaY: number): View {
   const ns = clampScale(v.scale * Math.exp(-deltaY * 0.0015));
@@ -50,17 +57,22 @@ export function revealPt(v: View, p: Pt, wPx: number, hPx: number): View {
   return { ...v, x: p.x - w / 2, y: p.y - h / 2 };
 }
 
-/** Background grid over the visible area (w x h in mm): 100 mm cells when large enough, 1 m lines always. */
-export function renderGrid(v: View, w: number, h: number, pal: PlanPalette): SVGTemplateResult | typeof nothing {
-  const minor = 100 * v.scale >= 6 ? 100 : 1000;
+/**
+ * Background grid over the visible area (w x h in canvas units): 100-unit cells when large enough, 1000-unit lines
+ * always (100 mm and 1 m on the plan). `unit` scales both: the power schematic uses 0.1, so at 100 % zoom its grid
+ * looks like the plan's and its minor cell is the block snap step.
+ */
+export function renderGrid(v: View, w: number, h: number, pal: PlanPalette, unit = 1): SVGTemplateResult | typeof nothing {
+  const major = 1000 * unit;
+  const minor = 100 * unit * v.scale >= 6 ? 100 * unit : major;
   const sw = 1 / v.scale;
   return svg`
     <defs>
       <pattern id="grid-minor" patternUnits="userSpaceOnUse" width=${minor} height=${minor}>
         <path d=${`M${minor} 0H0V${minor}`} fill="none" stroke=${pal.grid} stroke-width=${sw}></path></pattern>
-      <pattern id="grid-major" patternUnits="userSpaceOnUse" width="1000" height="1000">
-        <rect width="1000" height="1000" fill="url(#grid-minor)"></rect>
-        <path d="M1000 0H0V1000" fill="none" stroke=${pal.gridMajor} stroke-width=${sw}></path></pattern>
+      <pattern id="grid-major" patternUnits="userSpaceOnUse" width=${major} height=${major}>
+        <rect width=${major} height=${major} fill="url(#grid-minor)"></rect>
+        <path d=${`M${major} 0H0V${major}`} fill="none" stroke=${pal.gridMajor} stroke-width=${sw}></path></pattern>
     </defs>
     <rect x=${v.x} y=${v.y} width=${w} height=${h} fill="url(#grid-major)" pointer-events="none"></rect>`;
 }

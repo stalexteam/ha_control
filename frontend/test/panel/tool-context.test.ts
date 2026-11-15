@@ -7,6 +7,7 @@ function host(): ToolHost {
     history: null, view: { x: 0, y: 0, scale: 0.1 }, grid: true, wallType: 'partition', thickness: 250, boxMeasure: 'axis',
     nextProps: {} as ToolHost['nextProps'], nextObj: initialNext(), selection: null, notice: 'x', fieldNotice: 'f', mode: 'plan',
     commit: () => {}, power: { blocks: [], wires: [] }, commitPower: () => {},
+    placeDeviceId: null, setPowerPosition: () => {}, pickTool: () => {},
   };
 }
 
@@ -39,6 +40,25 @@ describe('createToolContext', () => {
     expect(c.selection()).toBeNull();
     h.selection = { kind: 'automationZone', id: 'z' };
     expect(c.selection()).toEqual({ kind: 'automationZone', id: 'z' });
+  });
+
+  it('Power services: armed device, notice, position and tool switch go through the host', () => {
+    const h = host();
+    const calls: unknown[] = [];
+    h.setPowerPosition = (id, p) => { calls.push(['position', id, p]); };
+    h.pickTool = id => { calls.push(['tool', id]); };
+    const c = createToolContext(h);
+    expect(c.placeDeviceId()).toBeNull();
+    h.placeDeviceId = 'd1';
+    expect(c.placeDeviceId()).toBe('d1');
+    c.notify('careful');
+    expect(h.notice).toBe('careful');
+    c.notify(null);
+    expect(h.notice).toBeNull();
+    c.setPosition('ts', '0');
+    c.pickTool('power-select');
+    expect(calls).toEqual([['position', 'ts', '0'], ['tool', 'power-select']]);
+    expect(c.geo().device('d1')).toBeUndefined(); // no plan open
   });
 
   it('select clears the field notice in every mode; in Binding the session notice stays', () => {

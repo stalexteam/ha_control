@@ -164,6 +164,7 @@ export class PlanSession {
     this.h.selection = null;
     this.h.fieldNotice = null;
     this.h.needFit = true;
+    this.h.needPowerFit = true;
   }
 
   makeDraft(): Draft {

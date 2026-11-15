@@ -15,6 +15,9 @@ export const MIN_W = 120;
 export const STUB = 14;
 export const GRID = 10;
 
+/** v rounded to the schematic grid (never -0). */
+export const snapToGrid = (v: number): number => Math.round(v / GRID) * GRID || 0;
+
 const CHIP_W = 24;
 const CHIP_GAP = 6;
 /** Room per port along a side: a port circle plus a gap. */

@@ -10,8 +10,10 @@ export interface StatusOpts {
   /** Cones and zones of devices are drawn. */
   cones: boolean;
   onCones(on: boolean): void;
-  /** Binding step: no drawing hints; Esc clears the selection. */
+  /** Binding and Power steps: no drawing hints (Shift, digits, Tab); Esc clears the selection. */
   binding: boolean;
+  /** Power step: the grid is the schematic's (not in mm) and there are no cones to toggle. */
+  power?: boolean;
 }
 
 export function renderStatusBar(o: StatusOpts): TemplateResult {
@@ -27,12 +29,12 @@ export function renderStatusBar(o: StatusOpts): TemplateResult {
       <span>${o.zoomPct}%</span>
       <label class="grid-toggle">
         <input type="checkbox" .checked=${o.grid} @change=${(e: Event) => o.onGrid((e.target as HTMLInputElement).checked)} />
-        ${t('status.grid')}
+        ${t(o.power ? 'status.gridSchematic' : 'status.grid')}
       </label>
-      <label class="grid-toggle">
+      ${o.power ? nothing : html`<label class="grid-toggle">
         <input type="checkbox" data-toggle="cones" .checked=${o.cones}
           @change=${(e: Event) => o.onCones((e.target as HTMLInputElement).checked)} />
         ${t('status.cones')}
-      </label>
+      </label>`}
     </div>`;
 }

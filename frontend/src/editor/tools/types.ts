@@ -1,7 +1,8 @@
 import type { Pt, Id, Level, OpeningKind, DeviceKind, DevicePlacement, DeviceProps } from "../../model/types";
-import type { PowerSchema } from "../../model/power";
+import type { Position, PowerKind, PowerSchema } from "../../model/power";
 import type { WallProps } from "../../model/ops";
 import type { SnapResult } from "../../geometry/snap";
+import type { GeoCtx } from "../../geometry/power";
 
 /** Pointer event in plan coordinates (mm). `pt` is not snapped. */
 export interface ToolEvent {
@@ -43,6 +44,16 @@ export interface ToolContext {
   zoneName(): string;
   /** Called after the zone tool placed a zone (the automatic name advances). */
   zonePlaced?(): void;
+  /** Plan devices for the power schematic geometry (device block names and lines). */
+  geo(): GeoCtx;
+  /** The plan device the Power step's Plan device tool places next (armed in the device list), or null. */
+  placeDeviceId(): Id | null;
+  /** Sets a transfer switch position live (not part of the plan document). */
+  setPosition(blockId: Id, p: Position): void;
+  /** Shows (or clears with null) the panel notice. */
+  notify(msg: string | null): void;
+  /** Activates another tool of the step, as the tool rail does (the selection is cleared). */
+  pickTool(id: Tool["id"]): void;
 }
 
 export interface OpeningDefaults {
@@ -75,9 +86,12 @@ export interface Preview {
   wireDraft?: { from: Pt; to: Pt; ok: boolean };
 }
 
+/** The Power step's place tools: one per block kind except the grid (it always exists). */
+export type PowerPlaceToolId = `power-${Exclude<PowerKind, "grid">}`;
+
 export interface Tool {
   readonly id: "select" | "box" | "wall" | "door" | "window" | "opening" | "zone" | "device-select" | "binding-select"
-    | "zones-select" | "zone-room" | "zone-draw" | DeviceKind;
+    | "zones-select" | "zone-room" | "zone-draw" | DeviceKind | "power-select" | PowerPlaceToolId;
   down(e: ToolEvent): void;
   move(e: ToolEvent): void;
   up(e: ToolEvent): void;
