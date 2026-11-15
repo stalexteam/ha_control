@@ -17,6 +17,7 @@ import { renderToolRail, renderTopBar } from './toolbar';
 import { createTool, selectionExists, toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
 import type { BoxMeasure } from './props-panel';
 import { initialNext } from './next-object';
+import { PlanSession } from './plan-session';
 import { createToolContext } from './tool-context';
 import { renderSide } from './side-panel';
 import { initialNextProps } from './device-props';
@@ -39,7 +40,7 @@ export class PlanStudioPanel extends LitElement {
   @property({ attribute: false }) panel: unknown;
 
   @state() plan: Plan | null = null;
-  @state() private loadError: string | null = null;
+  @state() loadError: string | null = null;
   @state() selection: Selection | null = null;
   @state() toolId: ToolId = 'select';
   @state() wallType: WallType = 'bearing';
@@ -61,11 +62,11 @@ export class PlanStudioPanel extends LitElement {
    * Local draft found on load, waiting for Restore / Discard. While it is undecided and belongs to the open
    * plan, no new draft is written under its key (that would overwrite it).
    */
-  @state() private pendingDraft: Draft | null = null;
+  @state() pendingDraft: Draft | null = null;
   /** The modal restore prompt is shown; Escape hides it and leaves a non-modal banner instead. */
   @state() restoreOpen = false;
   /** Stored plans for the selector. */
-  @state() private plans: PlanSummary[] = [];
+  @state() plans: PlanSummary[] = [];
   /** Plan the user picked while the current one is dirty: waiting for confirmation. */
   @state() switchTo: Id | null = null;
 
@@ -74,17 +75,21 @@ export class PlanStudioPanel extends LitElement {
   /** Confirmation for "Delete plan" is open. */
   @state() deleteConfirm = false;
   /** A delete request is running. */
-  @state() private deleting = false;
+  @state() deleting = false;
 
   history: History<Level> | null = null;
   readonly save: SaveController;
   activeTool: Tool;
-  private loading = false;
-  private needFit = false;
+  loading = false;
+  needFit = false;
   readonly drafts = new DraftStore();
   private readonly input: EditorInput;
   private resizeObs: ResizeObserver | null = null;
-  private readonly ctx: ToolContext;
+  readonly ctx: ToolContext;
+  readonly session = new PlanSession(this);
+
+  load(): Promise<void> { return this.session.load(); }
+  doSave(): Promise<void> { return this.session.doSave(); }
 
   constructor() {
     super();
@@ -96,7 +101,7 @@ export class PlanStudioPanel extends LitElement {
       get themes() { return self.hass?.themes; },
     };
     this.save = new SaveController(hassProxy, () => {
-      if (this.save.dirty && this.plan && !this.draftBlocked()) this.drafts.schedule(() => this.makeDraft());
+      if (this.save.dirty && this.plan && !this.session.draftBlocked()) this.drafts.schedule(() => this.session.makeDraft());
       this.requestUpdate();
     });
     this.ctx = createToolContext(this);
@@ -136,14 +141,14 @@ export class PlanStudioPanel extends LitElement {
     window.removeEventListener('beforeunload', this.onBeforeUnload);
     window.removeEventListener('pagehide', this.onPageHide);
     // In-app navigation removes the panel without beforeunload: keep dirty edits as a local draft.
-    if (this.plan && this.save.dirty && !this.draftBlocked()) this.drafts.write(this.makeDraft());
+    if (this.plan && this.save.dirty && !this.session.draftBlocked()) this.drafts.write(this.session.makeDraft());
     this.drafts.cancel();
     this.resizeObs?.disconnect();
     this.resizeObs = null;
   }
 
   protected willUpdate(changed: PropertyValues): void {
-    if (changed.has('hass') && this.hass && !this.plan && !this.loading && !this.loadError) void this.load();
+    if (changed.has('hass') && this.hass && !this.plan && !this.loading && !this.loadError) void this.session.load();
     if (this.needFit && this.size.w > 0 && this.size.h > 0) { this.needFit = false; this.fit(); }
   }
 
@@ -158,194 +163,9 @@ export class PlanStudioPanel extends LitElement {
     }
   }
 
-  async load(): Promise<void> {
-    if (!this.hass) return;
-    this.loading = true;
-    this.loadError = null;
-    try {
-      const list = await listPlans(this.hass);
-      this.plans = list;
-      if (list.length === 0) {
-        this.save.reset(null);
-        this.adopt(emptyPlan(t('plan.default', this.uiLang)));
-        this.offerDraft(this.drafts.latest());
-      } else {
-        // Prefer the plan opened / saved last (e.g. one saved as new), else the first one.
-        const last = this.drafts.lastPlanId();
-        await this.openPlan(list.some(p => p.id === last) ? last! : list[0].id);
-      }
-    } catch (err) {
-      this.loadError = errorText(err);
-    } finally {
-      this.loading = false;
-    }
-  }
-
-  /** Loads a stored plan from the server and makes it the open one. */
-  private async openPlan(id: Id): Promise<void> {
-    const plan = await getPlan(this.hass!, id);
-    this.drafts.cancel();
-    this.save.reset(plan.revision);
-    this.adopt(plan);
-    this.drafts.setLastPlanId(plan.id);
-    this.offerDraft(this.drafts.read(plan.id));
-  }
-
-  private offerDraft(d: Draft | null): void {
-    this.pendingDraft = d;
-    this.restoreOpen = !!d;
-  }
-
-  private async refreshPlans(): Promise<void> {
-    if (!this.hass) return;
-    try { this.plans = await listPlans(this.hass); } catch { /* keep the old list */ }
-  }
-
-  /** Options of the plan selector: stored plans plus the open (maybe unsaved or renamed) one. */
-  private planOptions(): { id: Id; name: string }[] {
-    const cur = this.plan!;
-    const opts = this.plans.map(p => ({ id: p.id, name: p.id === cur.id ? cur.name : p.name }));
-    if (!opts.some(p => p.id === cur.id)) opts.push({ id: cur.id, name: cur.name });
-    return opts;
-  }
-
-  private pickPlan(id: Id): void {
-    if (!this.plan || id === this.plan.id || this.save.state === 'saving') return;
-    if (this.save.dirty) { this.switchTo = id; return; }
-    void this.switchPlan(id);
-  }
-
-  private async switchPlan(id: Id): Promise<void> {
-    try {
-      await this.openPlan(id);
-    } catch (err) {
-      this.notice = errorText(err);
-    }
-  }
-
-  /** "Discard and open": drop the unsaved edits (and their draft, unless it is an undecided older one). */
-  private confirmSwitch(): void {
-    const id = this.switchTo;
-    this.switchTo = null;
-    if (!id || !this.plan) return;
-    this.drafts.cancel();
-    if (!this.draftBlocked()) this.drafts.clear(this.plan.id);
-    void this.switchPlan(id);
-  }
-
   // ---- new / delete ----
 
-  private busy(): boolean { return this.save.state === 'saving' || this.deleting; }
-
-  private requestNewPlan(): void {
-    if (!this.plan || this.busy()) return;
-    if (this.save.dirty) { this.newConfirm = true; return; }
-    this.startNewPlan();
-  }
-
-  /** Replaces the open plan with a fresh unsaved one (tool, selection and history are reset by adopt). */
-  private startNewPlan(): void {
-    this.newConfirm = false;
-    this.drafts.cancel();
-    if (this.plan && !this.draftBlocked()) this.drafts.clear(this.plan.id);
-    this.openFresh();
-  }
-
-  private openFresh(): void {
-    this.toolId = toolIdsFor(this.mode)[0];
-    this.notice = null;
-    this.save.reset(null);
-    this.adopt(emptyPlan(t('plan.default', this.uiLang)));
-    this.offerDraft(null);
-  }
-
-  private requestDelete(): void {
-    if (!this.plan || this.busy()) return;
-    this.deleteConfirm = true;
-  }
-
-  private async confirmDelete(): Promise<void> {
-    this.deleteConfirm = false;
-    const plan = this.plan;
-    if (!plan || !this.hass || this.busy()) return;
-    this.deleting = true;
-    try {
-      if (this.save.baseRevision !== null) {
-        try {
-          await deletePlan(this.hass, plan.id);
-        } catch (err) {
-          this.save.state = 'error';
-          this.save.errorMessage = errorText(err);
-          return;
-        }
-      }
-      this.drafts.cancel();
-      this.drafts.clear(plan.id);
-      this.drafts.clearLastPlanId(plan.id);
-      if (this.pendingDraft?.planId === plan.id) this.offerDraft(null);
-      let list: PlanSummary[] = [];
-      try { list = await listPlans(this.hass); this.plans = list; } catch { list = []; }
-      const next = list.find(x => x.id !== plan.id);
-      if (next) {
-        try { await this.openPlan(next.id); return; } catch (err) { this.notice = errorText(err); }
-      }
-      this.openFresh();
-    } finally {
-      this.deleting = false;
-    }
-  }
-
-  private adopt(input: Plan): void {
-    // A plan without levels (foreign or hand-edited data) gets one empty floor instead of crashing the editor.
-    const plan: Plan = Array.isArray(input.levels) && input.levels.length > 0 ? input : {
-      ...input,
-      levels: [{ id: newId(), name: 'Level 1', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] }],
-    };
-    this.plan = { ...plan, levels: plan.levels.map(normalizeLevel) };
-    this.history = new History<Level>(this.plan.levels[0]);
-    this.activeTool.cancel();
-    this.activeTool = createTool(this.toolId, this.ctx);
-    this.selection = null;
-    this.needFit = true;
-  }
-
   // ---- local draft ----
-
-  private makeDraft(): Draft {
-    return { planId: this.plan!.id, baseRevision: this.save.baseRevision, plan: this.currentPlan(), savedAt: Date.now() };
-  }
-
-  /** True while an undecided draft of the open plan must not be overwritten. */
-  private draftBlocked(): boolean {
-    return !!this.pendingDraft && !!this.plan && this.pendingDraft.planId === this.plan.id;
-  }
-
-  private restoreDraft(d: Draft): void {
-    this.pendingDraft = null;
-    this.restoreOpen = false;
-    this.adopt(d.plan);
-    this.save.baseRevision = d.baseRevision;
-    this.save.markDirty(); // the next save goes through the normal revision / conflict flow
-  }
-
-  private discardDraft(d: Draft): void {
-    this.pendingDraft = null;
-    this.restoreOpen = false;
-    this.drafts.clear(d.planId);
-    // Edits made while the decision was pending are drafted from now on.
-    if (this.save.dirty && this.plan) this.drafts.schedule(() => this.makeDraft());
-  }
-
-  /** After a successful save: drop drafts of the given ids unless edits made meanwhile keep the plan dirty. */
-  private afterSaved(...ids: string[]): void {
-    if (this.save.state !== 'saved') return;
-    this.drafts.setLastPlanId(this.plan!.id);
-    void this.refreshPlans();
-    this.drafts.cancel();
-    // An undecided older draft stays until the user restores or discards it.
-    for (const id of ids) if (this.pendingDraft?.planId !== id) this.drafts.clear(id);
-    if (this.save.dirty && !this.draftBlocked()) this.drafts.schedule(() => this.makeDraft());
-  }
 
   // ---- editing ----
 
@@ -406,35 +226,6 @@ export class PlanStudioPanel extends LitElement {
 
   // ---- saving ----
 
-  private currentPlan(): Plan {
-    const plan = this.plan!;
-    const levels = plan.levels.map((l, i) => (i === 0 ? this.history!.current : l));
-    return { ...plan, levels, revision: this.save.baseRevision ?? 0 };
-  }
-
-  async doSave(): Promise<void> {
-    if (!this.plan || this.save.state === 'saving') return;
-    await this.save.save(this.currentPlan());
-    this.afterSaved(this.plan.id);
-    if (this.save.state === 'conflict') this.dialog = 'conflict';
-  }
-
-  private async doOverwrite(): Promise<void> {
-    if (!this.plan || this.save.state === 'saving') return;
-    await this.save.overwrite(this.currentPlan());
-    this.afterSaved(this.plan.id);
-    // A second conflict (e.g. the plan was deleted elsewhere) leaves only "Save as new".
-    this.dialog = this.save.state === 'conflict' ? 'conflict-again' : 'none';
-  }
-
-  private async doSaveAsNew(): Promise<void> {
-    if (!this.plan || this.save.state === 'saving') return;
-    const name = `${this.plan.name} ${t('plan.copySuffix', this.uiLang)}`;
-    const oldId = this.plan.id;
-    const res = await this.save.saveAsNew(this.currentPlan(), name);
-    if (res) { this.plan = res; this.dialog = 'none'; this.afterSaved(oldId, res.id); } else if (this.save.state === 'error') this.dialog = 'none';
-  }
-
   // ---- view / pointer ----
 
   private svgEl(): SVGSVGElement | null { return this.renderRoot.querySelector('svg.plan'); }
@@ -471,10 +262,10 @@ export class PlanStudioPanel extends LitElement {
       lang: this.uiLang, draft: this.pendingDraft, restoreOpen: this.restoreOpen, newConfirm: this.newConfirm,
       deleteConfirm: this.deleteConfirm, switchTo: this.switchTo, dialog: this.dialog, planName: this.plan?.name ?? '',
       saving: this.save.state === 'saving', message: this.save.errorMessage,
-      restore: d => this.restoreDraft(d), discard: d => this.discardDraft(d), startNew: () => this.startNewPlan(),
-      cancelNew: () => { this.newConfirm = false; }, confirmDelete: () => { void this.confirmDelete(); },
-      cancelDelete: () => { this.deleteConfirm = false; }, confirmSwitch: () => this.confirmSwitch(),
-      cancelSwitch: () => { this.switchTo = null; }, overwrite: () => this.doOverwrite(), saveAsNew: () => this.doSaveAsNew(),
+      restore: d => this.session.restoreDraft(d), discard: d => this.session.discardDraft(d), startNew: () => this.session.startNewPlan(),
+      cancelNew: () => { this.newConfirm = false; }, confirmDelete: () => { void this.session.confirmDelete(); },
+      cancelDelete: () => { this.deleteConfirm = false; }, confirmSwitch: () => this.session.confirmSwitch(),
+      cancelSwitch: () => { this.switchTo = null; }, overwrite: () => this.session.doOverwrite(), saveAsNew: () => this.session.doSaveAsNew(),
       cancelConflict: () => { this.dialog = 'none'; },
     });
   }
@@ -484,7 +275,7 @@ export class PlanStudioPanel extends LitElement {
     if (!this.plan || !this.history) {
       return html`<div class="center">${this.loadError
         ? html`<span>${t('load.error', lang)}: ${this.loadError}</span>
-            <button @click=${() => this.load()}>${t('action.retry', lang)}</button>`
+            <button @click=${() => this.session.load()}>${t('action.retry', lang)}</button>`
         : t('load.loading', lang)}</div>`;
     }
     const pal = paletteFor(!!this.hass?.themes?.darkMode);
@@ -496,14 +287,14 @@ export class PlanStudioPanel extends LitElement {
     return html`
       <div class="ed" style=${paletteVars(pal)} @click=${this.refocus} @change=${this.refocusAfterChange}>
         ${renderTopBar({
-          lang, mode: this.mode, onMode: m => this.setMode(m), planName: this.plan.name, planId: this.plan.id, plans: this.planOptions(),
+          lang, mode: this.mode, onMode: m => this.setMode(m), planName: this.plan.name, planId: this.plan.id, plans: this.session.planOptions(),
           canUndo: this.history.canUndo, canRedo: this.history.canRedo,
           saveState: s.state, dirty: s.dirty, errorMessage: s.errorMessage,
           lead: this.narrow ? html`<ha-menu-button .hass=${this.hass} .narrow=${this.narrow}></ha-menu-button>` : nothing,
           onRename: name => { this.plan = { ...this.plan!, name }; s.markDirty(); },
-          onPickPlan: id => this.pickPlan(id),
-          onNewPlan: () => this.requestNewPlan(), onDeletePlan: () => this.requestDelete(), busy: this.deleting,
-          onUndo: () => this.undo(), onRedo: () => this.redo(), onSave: () => this.doSave(),
+          onPickPlan: id => this.session.pickPlan(id),
+          onNewPlan: () => this.session.requestNewPlan(), onDeletePlan: () => this.session.requestDelete(), busy: this.deleting,
+          onUndo: () => this.undo(), onRedo: () => this.redo(), onSave: () => this.session.doSave(),
         })}
         ${renderToolRail(this.mode, this.toolId, lang, id => this.pickTool(id))}
         ${renderSide(this, level)}
@@ -522,7 +313,7 @@ export class PlanStudioPanel extends LitElement {
           </svg>
           ${this.pendingDraft && !this.restoreOpen ? renderDraftBanner({
             lang, savedAt: this.pendingDraft.savedAt,
-            onRestore: () => this.restoreDraft(this.pendingDraft!), onDiscard: () => this.discardDraft(this.pendingDraft!),
+            onRestore: () => this.session.restoreDraft(this.pendingDraft!), onDiscard: () => this.session.discardDraft(this.pendingDraft!),
           }) : nothing}
         </div>
         ${renderStatusBar({
