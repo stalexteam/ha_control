@@ -1,14 +1,7 @@
 import type { Id, Level, Pt } from '../model/types';
 import { wallFrame, wallLocal, wallOutlines } from '../geometry/walls';
-import { dist, dot, pointInPolygon, sub } from '../geometry/vec';
+import { dist, distToSegment, pointInPolygon } from '../geometry/vec';
 import type { Selection } from './tools/types';
-
-function distToSegment(p: Pt, a: Pt, b: Pt): number {
-  const ab = sub(b, a);
-  const l2 = dot(ab, ab);
-  const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, dot(sub(p, a), ab) / l2));
-  return dist(p, { x: a.x + ab.x * t, y: a.y + ab.y * t });
-}
 
 function nearRing(p: Pt, ring: Pt[], tol: number): boolean {
   return ring.some((a, i) => distToSegment(p, a, ring[(i + 1) % ring.length]) <= tol);

@@ -52,6 +52,20 @@ export interface Zone {
   broken: boolean;
 }
 
+/**
+ * A corner of a custom automation zone. `x, y` of an anchored vertex are a cache of its last resolved position.
+ * free: a plain point; lost = it was anchored and the anchor disappeared. node: a wall corner or end. wall: a point on
+ * a wall face, offset along the axis from node A, side = the face (left = the left face looking from A to B).
+ */
+export type ZoneVertex =
+  | { kind: 'free'; x: number; y: number; lost?: true }
+  | { kind: 'node'; nodeId: Id; x: number; y: number }
+  | { kind: 'wall'; wallId: Id; offset: number; side: Side; x: number; y: number };
+/** room: the outline of that room (`Level.zones`); polygon: three or more vertices. */
+export type ZoneShape = { kind: 'room'; roomId: Id } | { kind: 'polygon'; vertices: ZoneVertex[] };
+/** An automation zone; `invalid` is derived (see zoneInvalidReason in geometry/zones). */
+export interface AutomationZone { id: Id; name: string; shape: ZoneShape; invalid: boolean }
+
 /** A smart button trigger: slot 0..9 (0 = a one-button device) and a non-empty event (`single`, `double`, `hold` or free text). */
 export interface Trigger { slot: number; event: string }
 /** Input containers: kinds with a live output. */
@@ -87,7 +101,11 @@ export const TRIGGER_EVENTS = ['single', 'double', 'hold'] as const;
 export type BindingRole = 'control' | 'motion' | 'illuminance' | 'temperature' | 'humidity' | 'state' | 'power'
   | 'on' | 'off' | 'auto';
 
-export interface Device { id: Id; name: string; placement: DevicePlacement; props: DeviceProps; invalid: boolean; bindings?: Partial<Record<BindingRole, string>> }
+/** zoneBlacklist: automation zones the device opts out of (missing = []; the field is removed when it becomes empty). */
+export interface Device {
+  id: Id; name: string; placement: DevicePlacement; props: DeviceProps; invalid: boolean;
+  bindings?: Partial<Record<BindingRole, string>>; zoneBlacklist?: Id[];
+}
 
 export interface Level {
   id: Id;
@@ -97,8 +115,16 @@ export interface Level {
   nodes: PlanNode[];
   walls: Wall[];
   openings: Opening[];
+  /** Rooms (the stored key stays `zones`). */
   zones: Zone[];
   devices: Device[];
+  /** Missing = []: read it through levelZones. */
+  automationZones?: AutomationZone[];
+}
+
+/** The level's automation zones (a missing field means none). */
+export function levelZones(level: Level): AutomationZone[] {
+  return level.automationZones ?? [];
 }
 
 export interface Plan {

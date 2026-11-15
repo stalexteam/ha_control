@@ -1,6 +1,6 @@
 import type { Level, Opening, Pt } from '../model/types';
 import { passesLight, passesPir } from '../model/openings';
-import { add, dist, dot, scale, sub } from './vec';
+import { dist, distToSegment } from './vec';
 import { unionOf, wallPieces } from './walls';
 
 /** What a device's cone carries: light (wall and ceiling lights) or motion (motion sensors). */
@@ -38,16 +38,9 @@ export function lineOfSightObstacles(level: Level, medium: Medium): Segment[] {
   return segs;
 }
 
-function distToSegment(p: Pt, [a, b]: Segment): number {
-  const ab = sub(b, a);
-  const l2 = dot(ab, ab);
-  const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, dot(sub(p, a), ab) / l2));
-  return dist(p, add(a, scale(ab, t)));
-}
-
 /** The obstacles that come within `radius` of `origin`. */
 export function obstaclesWithin(origin: Pt, obstacles: Segment[], radius: number): Segment[] {
-  return obstacles.filter(s => distToSegment(origin, s) <= radius);
+  return obstacles.filter(([a, b]) => distToSegment(origin, a, b) <= radius);
 }
 
 /** Angle wrapped to [-pi, pi). */

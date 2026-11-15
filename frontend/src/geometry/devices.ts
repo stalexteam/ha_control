@@ -1,6 +1,7 @@
 import polygonClipping from 'polygon-clipping';
 import {
   AIM_KINDS, AIM_MAX, type Device, type DeviceKind, type DevicePlacement, type DeviceProps, type Id, type Level, type Pt,
+  type Side,
 } from '../model/types';
 import { add, cross, dist, dot, perpLeft, pointInPolygon, polygonArea, scale, sub } from './vec';
 import { fromRing, toPoly, wallFrame } from './walls';
@@ -36,20 +37,36 @@ export function wrap180(a: number): number {
 }
 
 /**
+ * A point on a wall face: the axis point at offset (from node A, not clamped), moved onto the face of its side;
+ * normal = that face's outward normal (left = perpLeft(wall dir)). Null when the wall or one of its nodes is missing.
+ */
+function wallFace(level: Level, wallId: Id, side: Side, offset: number): { pt: Pt; normal: Pt } | null {
+  const wall = level.walls.find(w => w.id === wallId);
+  if (!wall) return null;
+  let f;
+  try { f = wallFrame(level, wall); } catch { return null; } // a node is missing
+  const L = perpLeft(f.dir);
+  const n = side === 'left' ? L : scale(L, -1);
+  const off = side === 'left' ? f.leftOff : f.rightOff;
+  return { pt: add(add(f.a, scale(f.dir, offset)), scale(n, off)), normal: n };
+}
+
+/** The face point of a wall placement (the rule of wall devices, see devicePose); null when the wall or a node is missing. */
+export function facePoint(level: Level, wallId: Id, side: Side, offset: number): Pt | null {
+  return wallFace(level, wallId, side, offset)?.pt ?? null;
+}
+
+/**
  * Wall device: axis point at offset, moved onto the face of its side; dir = that face's outward normal
  * (left = perpLeft(wall dir)). Free device: (x, y) facing (cos r, -sin r). Null when the host wall is missing.
  */
 export function devicePose(level: Level, d: Device): DevicePose | null {
   const p = d.placement;
   if (p.mode === 'free') return { pt: { x: p.x, y: p.y }, dir: dirAt(p.rotation) };
-  const wall = level.walls.find(w => w.id === p.wallId);
-  if (!wall) return null;
-  let f;
-  try { f = wallFrame(level, wall); } catch { return null; } // a node is missing
-  const L = perpLeft(f.dir);
-  const n = p.side === 'left' ? L : scale(L, -1);
-  const off = p.side === 'left' ? f.leftOff : f.rightOff;
-  return { pt: add(add(f.a, scale(f.dir, p.offset)), scale(n, off)), dir: p.aim ? dirAt(angleOf(n) + p.aim) : n, normal: n };
+  const face = wallFace(level, p.wallId, p.side, p.offset);
+  if (!face) return null;
+  const n = face.normal;
+  return { pt: face.pt, dir: p.aim ? dirAt(angleOf(n) + p.aim) : n, normal: n };
 }
 
 function circle(c: Pt, r: number): Pt[] {

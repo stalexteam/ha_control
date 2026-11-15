@@ -36,6 +36,14 @@ export function projectT(p: Pt, a: Pt, b: Pt): number {
   return dot(sub(p, a), ab) / l2;
 }
 
+/** Distance from p to the segment a-b. */
+export function distToSegment(p: Pt, a: Pt, b: Pt): number {
+  const ab = sub(b, a);
+  const l2 = dot(ab, ab);
+  const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, dot(sub(p, a), ab) / l2));
+  return dist(p, add(a, scale(ab, t)));
+}
+
 /** Ray-casting point-in-polygon test. */
 export function pointInPolygon(p: Pt, ring: Pt[]): boolean {
   let inside = false;
