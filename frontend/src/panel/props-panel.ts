@@ -122,7 +122,8 @@ function newWallProps(o: PropsOpts): TemplateResult {
       <div class="muted">${t('props.measure')}</div>
       <div class="seg">
         ${(['inner', 'axis', 'outer'] as BoxMeasure[]).map(m => html`
-          <button class="tab ${o.boxMeasure === m ? 'on' : ''}" data-measure=${m} @click=${() => o.setBoxMeasure(m)}>
+          <button class=${o.boxMeasure === m ? 'on' : ''} aria-pressed=${String(o.boxMeasure === m)} data-measure=${m}
+            @click=${() => o.setBoxMeasure(m)}>
             ${t(`measure.${m}`)}</button>`)}
       </div>` : nothing}`;
 }

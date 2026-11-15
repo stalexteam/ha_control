@@ -33,9 +33,11 @@ export const panelStyles = css`
     font-size: 14px; font-family: var(--ha-font-family-body, Roboto, "Noto Sans", system-ui, sans-serif);
   }
   .ed.binding { grid-template-columns: 250px 300px 1fr; }
+  .ed.binding.rail-off { grid-template-columns: 36px 300px 1fr; }
   @media (max-width: 700px) {
     .ed { grid-template-columns: 54px 170px 1fr; }
     .ed.binding { grid-template-columns: 170px 200px 1fr; }
+    .ed.binding.rail-off { grid-template-columns: 36px 200px 1fr; }
     .props .row { flex-wrap: wrap; }
     .props .val { max-width: 100%; }
   }
@@ -57,8 +59,6 @@ export const panelStyles = css`
   .btn.primary { border-color: var(--ch-primary); background: var(--ch-primary); color: var(--ch-on-primary); font-weight: 500; }
   .btn.primary:hover:not(:disabled) { background: var(--ch-primary); filter: brightness(1.08); }
   .btn.danger { margin-top: 14px; color: var(--ch-error); border-color: var(--ch-error); }
-  .tab { padding: 5px 10px; border-radius: 6px; border: 0; background: transparent; color: var(--ch-muted); }
-  .tab.on { background: var(--ch-tint); color: var(--ch-primary); }
   input, select { font: inherit; color: var(--ch-text); background: var(--ch-bg);
     border: 1px solid var(--ch-divider); border-radius: 6px; padding: 3px 6px; }
   input:focus-visible, select:focus-visible { outline: none; border-color: var(--ch-primary); box-shadow: 0 0 0 1px var(--ch-primary); }
@@ -107,7 +107,8 @@ export const panelStyles = css`
   .tool-sep { height: 1px; width: 36px; background: var(--ch-divider); margin: 4px 0; }
   .blist { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ch-card);
     border-right: 1px solid var(--ch-divider); }
-  .filter-seg { display: grid; grid-template-columns: repeat(3, 1fr); margin: 10px 10px 0;
+  .bhead { display: flex; align-items: center; gap: 4px; margin: 10px 6px 0 10px; }
+  .filter-seg { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(3, 1fr);
     border: 1px solid var(--ch-divider); border-radius: 8px; overflow: hidden; }
   .filter-seg button { border: 0; border-right: 1px solid var(--ch-divider); background: none; color: var(--ch-muted);
     padding: 6px 4px; font-size: 12.5px; }
@@ -128,6 +129,10 @@ export const panelStyles = css`
   .dot.missing { border: 2px solid #f43f5e; }
   .dot.bound { border: 2px solid var(--ch-muted); background: var(--ch-muted); }
   .empty { margin: 14px 12px; color: var(--ch-muted); font-size: 13px; }
+  .rail-toggle { flex: none; width: 26px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none;
+    color: var(--ch-muted); font-size: 20px; line-height: 1; }
+  .rail-toggle:hover { background: var(--ch-hover); color: var(--ch-text); }
+  .blist.collapsed { align-items: center; padding-top: 10px; }
 
   /* Canvas: the drawing keeps the blueprint palette. */
   .canvas { position: relative; min-width: 0; min-height: 0; touch-action: none; }
@@ -147,7 +152,26 @@ export const panelStyles = css`
   .val.ro { padding: 2px 6px; }
   .num { width: 56px; text-align: right; }
   .seg { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .seg button { padding: 5px 10px; border-radius: 6px; border: 0; background: transparent; color: var(--ch-muted); }
+  .seg button.on { background: var(--ch-tint); color: var(--ch-primary); }
   .warn { color: var(--ch-error); font-size: 12px; }
+
+  /* Binding properties: stacked fields like HA forms. */
+  .bprops h4 { margin-bottom: 2px; font-size: 16px; }
+  .bprops .kind { margin: 0 0 12px; }
+  .bfield { display: flex; flex-direction: column; gap: 4px; margin: 0 0 6px; }
+  .bfield > span, .role-label { color: var(--ch-muted); font-size: 12px; }
+  .bfield .val { max-width: none; width: 100%; text-align: left; padding: 6px; }
+  .role { margin-top: 14px; }
+  .role-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .showall { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ch-muted); cursor: pointer; }
+  .note { margin: 4px 0 0; color: var(--ch-muted); font-size: 12px; }
+  .bprops .warn { margin: 4px 0 0; }
+  .reg-error { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 8px;
+    border: 1px solid var(--ch-error); border-radius: 8px; }
+  .reg-error .warn { flex: 1; margin: 0; }
+  .bfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 18px;
+    padding-top: 10px; border-top: 1px solid var(--ch-divider); color: var(--ch-muted); }
 
   /* Status bar and dialogs. */
   .status { grid-column: 1 / 4; background: var(--ch-card); border-top: 1px solid var(--ch-divider); display: flex;

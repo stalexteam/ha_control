@@ -20,6 +20,9 @@ export interface BindingListOpts {
   onFilter(f: ListFilter): void;
   onQuery(q: string): void;
   onPick(id: Id): void;
+  /** The rail is folded to a narrow strip that holds only the expand toggle. */
+  collapsed: boolean;
+  onCollapse(collapsed: boolean): void;
 }
 
 const orderCache = new WeakMap<Level, Device[]>();
@@ -49,8 +52,18 @@ function emptyText(o: BindingListOpts, total: number, q: string): string {
   return t(o.filter === 'unbound' ? 'binding.allBound' : 'binding.noneBound');
 }
 
-/** The Binding step rail: a Not bound / Bound / All switch with counts, a text filter and one row per device. */
+function railToggle(o: BindingListOpts): TemplateResult {
+  const label = t(o.collapsed ? 'binding.expand' : 'binding.collapse');
+  return html`<button class="rail-toggle" data-action="toggle-rail" aria-expanded=${String(!o.collapsed)} aria-label=${label}
+    title=${label} @click=${() => o.onCollapse(!o.collapsed)}>${o.collapsed ? '›' : '‹'}</button>`;
+}
+
+/**
+ * The Binding step rail: a Not bound / Bound / All switch with counts, a text filter and one row per device.
+ * Collapsed, it is a narrow strip with the expand toggle only.
+ */
 export function renderBindingList(o: BindingListOpts): TemplateResult {
+  if (o.collapsed) return html`<div class="blist collapsed">${railToggle(o)}</div>`;
   const items = listOrder(o.level).map(d => ({ d, st: o.status(d) }));
   const counts: Record<ListFilter, number> = {
     unbound: items.filter(x => x.st !== 'bound').length, bound: items.filter(x => x.st === 'bound').length, all: items.length,
@@ -61,9 +74,12 @@ export function renderBindingList(o: BindingListOpts): TemplateResult {
   const sel = o.selection?.kind === 'device' ? o.selection.id : null;
   return html`
     <div class="blist">
-      <div class="filter-seg" role="radiogroup" aria-label=${t('binding.show')}>
-        ${LIST_FILTERS.map(f => html`<button role="radio" aria-checked=${String(f === o.filter)} data-filter=${f}
-          @click=${() => o.onFilter(f)}>${t(`binding.filter.${f}`)} <span class="count">${counts[f]}</span></button>`)}
+      <div class="bhead">
+        <div class="filter-seg" role="radiogroup" aria-label=${t('binding.show')}>
+          ${LIST_FILTERS.map(f => html`<button role="radio" aria-checked=${String(f === o.filter)} data-filter=${f}
+            @click=${() => o.onFilter(f)}>${t(`binding.filter.${f}`)} <span class="count">${counts[f]}</span></button>`)}
+        </div>
+        ${railToggle(o)}
       </div>
       <input class="list-search" type="search" placeholder=${t('binding.search')} aria-label=${t('binding.search')}
         .value=${fieldValue(o.query)} @input=${(e: Event) => o.onQuery((e.target as HTMLInputElement).value)} />

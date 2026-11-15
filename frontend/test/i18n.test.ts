@@ -6,6 +6,7 @@ import { DEVICE_PLACEMENTS, WALL_PRESETS, OPENING_DEFAULT_WIDTH } from '../src/m
 import { LIGHT_SHAPES, EQUIPMENT_SHAPES } from '../src/panel/device-props';
 import { STEPS } from '../src/panel/steps';
 import { LIST_FILTERS } from '../src/panel/binding-list';
+import { ROLE_SPECS } from '../src/model/bindings';
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap(n => {
@@ -77,6 +78,7 @@ describe('i18n', () => {
       mode: STEPS,
       'binding.filter': LIST_FILTERS,
       bindstatus: ['bound', 'partial', 'unbound', 'missing'],
+      role: [...new Set(Object.values(ROLE_SPECS).flat().map(s => s.role))],
     };
     const missing = Object.entries(sets).flatMap(([pre, members]) => members.map(m => `${pre}.${m}`)).filter(k => !keys.has(k));
     expect(missing).toEqual([]);

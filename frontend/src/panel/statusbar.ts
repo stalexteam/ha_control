@@ -1,4 +1,4 @@
-import { html, type TemplateResult } from 'lit';
+import { html, nothing, type TemplateResult } from 'lit';
 import { t } from '../i18n';
 
 export interface StatusOpts {
@@ -10,15 +10,18 @@ export interface StatusOpts {
   /** Cones and zones of devices are drawn. */
   cones: boolean;
   onCones(on: boolean): void;
+  /** Binding step: no drawing hints; Esc clears the selection. */
+  binding: boolean;
 }
 
 export function renderStatusBar(o: StatusOpts): TemplateResult {
   return html`
     <div class="status">
-      <span><span class="kbd">Shift</span> ${t('hint.shift')}</span>
-      <span><span class="kbd">${t('hint.digits')}</span> ${t('hint.length')}</span>
-      <span><span class="kbd">Tab</span> ${t('hint.tab')}</span>
-      <span><span class="kbd">Esc</span> ${t('hint.esc')}</span>
+      ${o.binding ? nothing : html`
+        <span><span class="kbd">Shift</span> ${t('hint.shift')}</span>
+        <span><span class="kbd">${t('hint.digits')}</span> ${t('hint.length')}</span>
+        <span><span class="kbd">Tab</span> ${t('hint.tab')}</span>`}
+      <span><span class="kbd">Esc</span> ${t(o.binding ? 'hint.deselect' : 'hint.esc')}</span>
       <span class="sp"></span>
       ${o.snap ? html`<span class="snap-kind">${o.snap}</span>` : ''}
       <span>${o.zoomPct}%</span>

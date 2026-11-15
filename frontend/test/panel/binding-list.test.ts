@@ -25,19 +25,20 @@ function sample(): Level {
 const STATUS: Record<string, BindStatus> = { k: 'partial', h: 'missing', d: 'bound', b: 'unbound', w: 'bound' };
 const status = (d: Device): BindStatus => STATUS[d.id];
 
-function draw(o: { level?: Level; filter?: ListFilter; query?: string; selection?: Selection | null } = {}) {
-  const onFilter = vi.fn(), onQuery = vi.fn(), onPick = vi.fn();
+function draw(o: { level?: Level; filter?: ListFilter; query?: string; selection?: Selection | null; collapsed?: boolean } = {}) {
+  const onFilter = vi.fn(), onQuery = vi.fn(), onPick = vi.fn(), onCollapse = vi.fn();
   const host = document.createElement('div');
   document.body.appendChild(host);
   render(renderBindingList({
     level: o.level ?? sample(), selection: o.selection ?? null, status,
     filter: o.filter ?? 'unbound', query: o.query ?? '', onFilter, onQuery, onPick,
+    collapsed: o.collapsed ?? false, onCollapse,
   }), host);
   const rows = () => [...host.querySelectorAll<HTMLElement>('.brow')];
   const names = () => rows().map(r => r.querySelector('.name')!.textContent!.trim());
   const count = (f: ListFilter) => host.querySelector(`[data-filter="${f}"] .count`)!.textContent!.trim();
   const empty = () => host.querySelector('.empty')?.textContent?.trim() ?? null;
-  return { host, rows, names, count, empty, onFilter, onQuery, onPick };
+  return { host, rows, names, count, empty, onFilter, onQuery, onPick, onCollapse };
 }
 
 describe('renderBindingList', () => {
@@ -96,6 +97,29 @@ describe('renderBindingList', () => {
     expect(draw({ filter: 'unbound', query: 'zzz' }).empty()).toBe('No devices match this filter.');
     expect(draw({ level: emptyLevel('e'), filter: 'unbound' }).empty()).toBe('No devices on the plan yet. Place them in the Equipment step.');
     expect(draw().empty()).toBeNull();
+  });
+});
+
+describe('collapsible device list', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+
+  it('expanded: the toggle collapses; collapsed: a strip with only the expand toggle', () => {
+    const open = draw();
+    const t1 = open.host.querySelector<HTMLButtonElement>('[data-action="toggle-rail"]')!;
+    expect(t1.getAttribute('aria-expanded')).toBe('true');
+    expect(t1.getAttribute('aria-label')).toBe('Collapse the device list');
+    t1.click();
+    expect(open.onCollapse).toHaveBeenCalledWith(true);
+    const shut = draw({ collapsed: true });
+    expect(shut.host.querySelector('.blist')!.classList.contains('collapsed')).toBe(true);
+    expect(shut.rows()).toHaveLength(0);
+    expect(shut.host.querySelector('.filter-seg')).toBeNull();
+    expect(shut.host.querySelector('input.list-search')).toBeNull();
+    const t2 = shut.host.querySelector<HTMLButtonElement>('[data-action="toggle-rail"]')!;
+    expect(t2.getAttribute('aria-expanded')).toBe('false');
+    expect(t2.getAttribute('aria-label')).toBe('Expand the device list');
+    t2.click();
+    expect(shut.onCollapse).toHaveBeenCalledWith(false);
   });
 });
 

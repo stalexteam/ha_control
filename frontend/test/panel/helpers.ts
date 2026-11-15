@@ -2,6 +2,7 @@ import { expect, vi } from 'vitest';
 import '../../src/panel/plan-studio-panel';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 import type { Plan } from '../../src/model/types';
+import type { HassLike } from '../../src/api';
 import { createMockHass, STORAGE_KEY } from '../../dev/mock-hass';
 
 export function stored(): Plan[] {
@@ -9,9 +10,9 @@ export function stored(): Plan[] {
   return raw ? Object.values((JSON.parse(raw) as { plans: Record<string, Plan> }).plans) : [];
 }
 
-export async function mount(): Promise<PlanStudioPanel> {
+export async function mount(hass: HassLike = createMockHass()): Promise<PlanStudioPanel> {
   const el = document.createElement('plan-studio-panel');
-  el.hass = createMockHass();
+  el.hass = hass;
   document.body.appendChild(el);
   await vi.waitFor(() => expect(el.plan).not.toBeNull());
   await el.updateComplete;

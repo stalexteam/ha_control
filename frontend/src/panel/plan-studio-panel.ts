@@ -7,7 +7,7 @@ import { deleteOpening } from '../model/openings';
 import { deleteDevice } from '../model/devices';
 import { deleteZone } from '../model/zones';
 import { bindingStatus, type BindStatus } from '../model/bindings';
-import { metaFromStates, presence, type HaMeta } from '../binding/ha-meta';
+import { presence } from '../binding/ha-meta';
 import { devicePose } from '../geometry/devices';
 import { History } from '../editor/history';
 import { SaveController } from '../editor/save';
@@ -23,6 +23,7 @@ import { createTool, selectionExists, toolIdsFor, type EditorMode, type ToolId }
 import type { BoxMeasure } from './props-panel';
 import { initialNext } from './next-object';
 import { PlanSession } from './plan-session';
+import { MetaSource } from './meta-source';
 import { createToolContext } from './tool-context';
 import { renderRail, renderSide } from './side-panel';
 import { initialNextProps } from './device-props';
@@ -54,6 +55,9 @@ export class PlanStudioPanel extends LitElement {
   /** Binding step device list: Not bound / Bound / All and the text filter. */
   @state() bindFilter: ListFilter = 'unbound';
   @state() bindQuery = '';
+  /** Binding step: the device list rail is folded to a strip; "Show all" per role (both per session). */
+  @state() railCollapsed = false;
+  @state() showAll: Record<string, boolean> = {};
   @state() private cones = true;
   /** "Next device" props per kind; they drive ctx.deviceDefaults. */
   @state() nextProps = initialNextProps();
@@ -84,17 +88,11 @@ export class PlanStudioPanel extends LitElement {
   private resizeObs: ResizeObserver | null = null;
   readonly ctx: ToolContext;
   readonly session = new PlanSession(this);
-  private metaMemo: { states: HassLike['states']; meta: HaMeta } | null = null;
+  /** HA states merged with the registries (loaded on the first entry to the Binding step). */
+  readonly haMeta = new MetaSource(this);
 
-  /** HA metadata from hass.states, rebuilt only when HA hands over a new states object. */
-  private haMeta(): HaMeta {
-    const states = this.hass?.states;
-    if (!this.metaMemo || this.metaMemo.states !== states) this.metaMemo = { states, meta: metaFromStates(states) };
-    return this.metaMemo.meta;
-  }
-
-  /** Binding status of a device. Without the registries no entity is Missing (its presence is unknown). */
-  readonly bindStatus = (d: Device): BindStatus => bindingStatus(d, eid => presence(this.haMeta(), eid));
+  /** Binding status of a device. Until the registries are loaded no entity is Missing (its presence is unknown). */
+  readonly bindStatus = (d: Device): BindStatus => bindingStatus(d, eid => presence(this.haMeta.get(), eid));
 
   doSave(): Promise<void> { return this.session.doSave(); }
 
@@ -214,6 +212,7 @@ export class PlanStudioPanel extends LitElement {
     if (mode === this.mode) return;
     this.mode = mode;
     this.pickTool(toolIdsFor(mode)[0]);
+    if (mode === 'binding') this.haMeta.enter();
   }
 
   /** Selects a device (binding list, Next unbound device) and pans the plan to it when it is off-screen. */
@@ -289,7 +288,7 @@ export class PlanStudioPanel extends LitElement {
     const w = Math.max(1, this.size.w) / scale, h = Math.max(1, this.size.h) / scale;
     const s = this.save;
     return html`
-      <div class="ed${this.mode === 'binding' ? ' binding' : ''}" style=${paletteVars(pal)}
+      <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : ''}" style=${paletteVars(pal)}
         @click=${this.refocus} @change=${this.refocusAfterChange}>
         ${renderTopBar({
           steps: renderSteps({
@@ -332,6 +331,7 @@ export class PlanStudioPanel extends LitElement {
           grid: this.grid, zoomPct: Math.round(scale * 1000),
           snap: preview.snap && preview.snap.kind !== 'none' ? t(`snap.${preview.snap.kind}`) : null,
           onGrid: on => { this.grid = on; }, cones: this.cones, onCones: on => { this.cones = on; },
+          binding: this.mode === 'binding',
         })}
         ${this.renderDialog()}
       </div>`;

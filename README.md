@@ -29,7 +29,7 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 
 ### Equipment tab
 
-- Switch between "Plan" and "Equipment" in the top bar. Walls, openings and rooms are dimmed and locked in the Equipment tab; devices are dimmed and locked in the Plan tab.
+- The steps Plan, Equipment and Binding sit in the title block under the top bar: click any step, or use Back / Next. Walls, openings and rooms are dimmed and locked in the Equipment step; devices are dimmed and locked in the Plan step.
 - Tools: Select, Ceiling light, Wall light, Motion sensor, Illuminance sensor, Climate sensor, Switch, Socket, Exhaust fan, Equipment. One click places one device.
 - Switches and sockets snap to the nearest wall face. Wall lights and sensors go on a wall face near the cursor, otherwise at a free grid point. Ceiling lights and equipment blocks are always free.
 - Climate sensor (wall or free): temperature and humidity; checks the rooms it applies to, none checked means the room it stands in.
@@ -39,6 +39,24 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 - A newly placed device is selected, so the left panel shows its properties. Press Esc (or click empty space with the Select tool) to get back to the next-device defaults.
 - Deleting a wall also deletes the devices on it; Ctrl+Z brings both back.
 - "Cones & zones" in the status bar shows or hides light pools, wall-light cones and motion zones.
+
+### Binding
+
+Binding links every device on the plan to Home Assistant entities, one field per role.
+
+- Layout: device list | properties | plan. The list filters Not bound / Bound / All and by text; its arrow button folds it to a narrow strip.
+- Steps:
+  1. Select a device on the plan or in the list, or press "Next unbound device".
+  2. Optional: choose its "Home Assistant device". Every empty role with exactly one matching entity on that device is filled in one undoable step. Roles with several matches stay empty, and the panel says how many matched. Filled roles are never overwritten.
+  3. Fill or change each role in its search field (for example Control and Power for a socket, Temperature and Humidity for a climate sensor). The clear button empties a role; Ctrl+Z undoes.
+- Filter rules: candidates are chosen only by domain, device class and unit, never by guessing from entity ids or names. The strict list needs the role's domain and a matching device class; an entity without a device class matches by unit, and a conflicting device class excludes it (a battery % sensor is never a humidity candidate). Hidden, disabled, config and diagnostic entities are left out. "Show all" keeps only the domain filter.
+- Status:
+  - Bound: the primary role is set (Control for lights, sockets, fans and equipment; Motion, Illuminance or Button events for sensors and switches; Temperature or Humidity for a climate sensor).
+  - Partly bound: some role is set, but not the primary one.
+  - Missing (red): a bound entity is neither in the live states nor in the entity registry. A disabled or unavailable entity is only noted; the device still counts as bound. Nothing is ever removed automatically.
+- One entity may be bound to several devices; the field then says "Also bound to".
+- The entity, device and area registries load once, when the Binding step first opens. If that fails, a notice offers Retry; the fields keep working from the live states and nothing is flagged Missing.
+- Delete does nothing in this step. Bindings are saved with the plan.
 
 ## Development
 
