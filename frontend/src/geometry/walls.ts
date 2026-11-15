@@ -23,7 +23,8 @@ export function wallFrame(level: Level, wall: Wall): WallFrame {
 }
 
 type CornerKey = 'al' | 'ar' | 'bl' | 'br';
-interface Body { wall: Wall; f: WallFrame; c: Record<CornerKey, Pt>; extraA?: Pt; extraB?: Pt }
+/** extraA/extraB: extra end points, ordered from the end's left corner to its right corner. */
+interface Body { wall: Wall; f: WallFrame; c: Record<CornerKey, Pt>; extraA?: Pt[]; extraB?: Pt[] }
 
 /** One wall end seen from its node: u points away from the node; faces named relative to u. */
 interface End {
@@ -90,15 +91,58 @@ function miter(ends: End[], n: Pt): void {
     wj.body.c[wj.leftKey] = p;
   }
   if (ends.length < 3) return;
+  const done = stepAcrossParallel(ends, n, limit);
   // Fill the concave gap: add the node point when it lies outside the end edge (opposite the wall body).
   for (const e of ends) {
+    if (done.has(e)) continue;
     const lc = e.body.c[e.leftKey], rc = e.body.c[e.rightKey];
     const edge = sub(rc, lc);
     const sn = cross(edge, sub(n, lc)), sf = cross(edge, sub(e.far, lc));
-    if (sn * sf < 0) {
-      if (e.end === 'a') e.body.extraA = n; else e.body.extraB = n;
-    }
+    if (sn * sf < 0) setExtra(e, [n]);
   }
+}
+
+function setExtra(e: End, pts: Pt[]): void {
+  if (e.end === 'a') e.body.extraA = pts; else e.body.extraB = pts;
+}
+
+/**
+ * A 180-degree gap between collinear-opposite ends (k >= 3): the faces are parallel, so there is no miter.
+ * When the faces are offset, the wider end's face runs on past the node to the far face of the next wall
+ * beyond the narrower end, the narrower end stops on that same face line, and the wider end takes the
+ * whole hub (node, narrower end edge, step) so the narrower one never pokes into the thick body.
+ */
+function stepAcrossParallel(ends: End[], n: Pt, limit: number): Set<End> {
+  const k = ends.length;
+  for (let i = 0; i < k; i++) {
+    const wi = ends[i], wj = ends[(i + 1) % k];
+    if (Math.abs(cross(wi.u, wj.u)) > 1e-9 || dot(wi.u, wj.u) > 0) continue;
+    const d = wi.offR - wj.offL;
+    if (Math.abs(d) < 1e-9) continue;
+    if (d > 0) {
+      // wi wider: its right face meets the left face of wk, the wall after wj.
+      const wk = ends[(i + 2) % k];
+      const P = lineIntersect(rightFace(wi), wi.u, leftFace(wk), wk.u);
+      const Q = lineIntersect(leftFace(wj), wj.u, leftFace(wk), wk.u);
+      if (!within(P, n, limit) || !within(Q, n, limit)) continue;
+      const jr = wj.body.c[wj.rightKey];
+      wi.body.c[wi.rightKey] = P;
+      wj.body.c[wj.leftKey] = Q;
+      setExtra(wi, [n, jr, Q]);
+    } else {
+      // wj wider: its left face meets the right face of wh, the wall before wi.
+      const wh = ends[(i - 1 + k) % k];
+      const Q = lineIntersect(leftFace(wj), wj.u, rightFace(wh), wh.u);
+      const P = lineIntersect(rightFace(wi), wi.u, rightFace(wh), wh.u);
+      if (!within(P, n, limit) || !within(Q, n, limit)) continue;
+      const il = wi.body.c[wi.leftKey];
+      wi.body.c[wi.rightKey] = P;
+      wj.body.c[wj.leftKey] = Q;
+      setExtra(wj, [P, il, n]);
+    }
+    return new Set([wi, wj]);
+  }
+  return new Set();
 }
 
 function joinedBodies(level: Level): Body[] {
@@ -119,11 +163,7 @@ function joinedBodies(level: Level): Body[] {
 }
 
 function ring(b: Body): Pt[] {
-  const r = [b.c.ar, b.c.br];
-  if (b.extraB) r.push(b.extraB);
-  r.push(b.c.bl, b.c.al);
-  if (b.extraA) r.push(b.extraA);
-  return r;
+  return [b.c.ar, b.c.br, ...(b.extraB ?? []), b.c.bl, b.c.al, ...(b.extraA ?? [])];
 }
 
 /** Wall contours with joins, no opening cut-outs. */

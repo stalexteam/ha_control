@@ -73,6 +73,89 @@ describe('wallOutlines', () => {
   });
 });
 
+describe('nodes with collinear-opposite walls and a side wall', () => {
+  const area = (l: Level) => {
+    const u = wallsUnion(l, false);
+    expect(u).toHaveLength(1);
+    expect(u[0]).toHaveLength(1);
+    return Math.abs(polygonArea(u[0][0]));
+  };
+  const inUnion = (l: Level, p: Pt) => {
+    const ring = wallsUnion(l, false)[0][0];
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const a = ring[i], b = ring[j];
+      if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+    }
+    return inside;
+  };
+
+  // Every outline stays a simple polygon (hit-testing relies on it).
+  const simple = (l: Level) => {
+    for (const ring of wallOutlines(l).values()) {
+      const m = ring.length;
+      const seg = (i: number): [Pt, Pt] => [ring[i], ring[(i + 1) % m]];
+      const o = (a: Pt, b: Pt, c: Pt) => Math.sign((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+      for (let i = 0; i < m; i++) for (let j = i + 2; j < m; j++) {
+        if (i === 0 && j === m - 1) continue;
+        const [p1, p2] = seg(i), [p3, p4] = seg(j);
+        const crosses = o(p1, p2, p3) * o(p1, p2, p4) < 0 && o(p3, p4, p1) * o(p3, p4, p2) < 0;
+        expect(crosses).toBe(false);
+      }
+    }
+  };
+
+  // Live-plan node (9890, 890): bearing 220 going +X and +Y, railing 40 going -Y.
+  const liveNode = () => {
+    const l = lvl([
+      { id: 'n', x: 9890, y: 890 }, { id: 'e', x: 12890, y: 890 },
+      { id: 's', x: 9890, y: 2890 }, { id: 'u', x: 9890, y: -610 },
+    ], [
+      { ...wall('w1', 'n', 'e', 220), type: 'bearing' },
+      { ...wall('w2', 'n', 's', 220), type: 'bearing' },
+      { ...wall('w3', 'n', 'u', 40), type: 'railing' },
+    ]);
+    return l;
+  };
+
+  it('thick L with a railing on top: clean outer corner, no notch or sliver', () => {
+    const l = liveNode();
+    expect(inUnion(l, { x: 9800, y: 800 })).toBe(true);
+    expect(inUnion(l, { x: 9890, y: 850 })).toBe(true);
+    // L: (3000 + 110) x 220 + (2000 + 110) x 220 - 220 x 220; railing above y = 780: 40 x (1500 - 110).
+    const expected = 3110 * 220 + 2110 * 220 - 220 * 220 + 40 * 1390;
+    expect(Math.abs(area(l) - expected)).toBeLessThan(1);
+    simple(l);
+  });
+  it('the railing end stays outside the thick body (ends on its face y = 780)', () => {
+    const ring = wallOutlines(liveNode()).get('w3')!;
+    for (const q of ring) expect(q.y).toBeLessThanOrEqual(780 + 1e-6);
+  });
+  it('straight wall split into 300 and 100 with a perpendicular 200 at the split: no notch', () => {
+    const l = lvl([
+      { id: 'a', x: 0, y: 0 }, { id: 'm', x: 2000, y: 0 }, { id: 'b', x: 4000, y: 0 }, { id: 's', x: 2000, y: 2000 },
+    ], [wall('w1', 'a', 'm', 300), wall('w2', 'm', 'b', 100), wall('w3', 'm', 's', 200)]);
+    // Thick part reaches the far face of the perpendicular wall (x = 2100).
+    const expected = 2100 * 300 + 1900 * 100 + 200 * 1850;
+    expect(Math.abs(area(l) - expected)).toBeLessThan(1);
+    simple(l);
+  });
+  it('same split mirrored (thin first, thick second): no notch', () => {
+    const l = lvl([
+      { id: 'a', x: 0, y: 0 }, { id: 'm', x: 2000, y: 0 }, { id: 'b', x: 4000, y: 0 }, { id: 's', x: 2000, y: 2000 },
+    ], [wall('w1', 'a', 'm', 100), wall('w2', 'm', 'b', 300), wall('w3', 'm', 's', 200)]);
+    const expected = 2100 * 300 + 1900 * 100 + 200 * 1850;
+    expect(Math.abs(area(l) - expected)).toBeLessThan(1);
+    simple(l);
+  });
+  it('T made of three equal walls at one node is exactly the T', () => {
+    const l = lvl([
+      { id: 'a', x: 0, y: 0 }, { id: 'm', x: 2000, y: 0 }, { id: 'b', x: 4000, y: 0 }, { id: 's', x: 2000, y: 2000 },
+    ], [wall('w1', 'a', 'm', 200), wall('w2', 'm', 'b', 200), wall('w3', 'm', 's', 200)]);
+    expect(Math.abs(area(l) - (4000 * 200 + 200 * 1900))).toBeLessThan(1);
+  });
+});
+
 describe('wallPieces', () => {
   it('opening 900 at offset 1000 in a 3000 wall -> pieces of axis length 1000 and 1100', () => {
     const l = lvl([{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 3000, y: 0 }], [wall('w', 'a', 'b', 200)],
