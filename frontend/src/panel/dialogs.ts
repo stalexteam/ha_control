@@ -1,5 +1,6 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { t } from '../i18n';
+import type { Draft } from '../editor/draft';
 
 export interface ConflictOpts {
   lang: string;
@@ -134,4 +135,45 @@ export function renderDeleteDialog(o: DeletePlanOpts): TemplateResult {
         </div>
       </div>
     </div>`;
+}
+
+/** State and handlers of the panel's modal dialogs; renderActiveDialog picks the one that is open. */
+export interface ActiveDialogOpts {
+  lang: string;
+  draft: Draft | null;
+  restoreOpen: boolean;
+  newConfirm: boolean;
+  deleteConfirm: boolean;
+  switchTo: string | null;
+  dialog: 'none' | 'conflict' | 'conflict-again';
+  planName: string;
+  saving: boolean;
+  message: string | null;
+  restore(d: Draft): void;
+  discard(d: Draft): void;
+  startNew(): void;
+  cancelNew(): void;
+  confirmDelete(): void;
+  cancelDelete(): void;
+  confirmSwitch(): void;
+  cancelSwitch(): void;
+  overwrite(): void;
+  saveAsNew(): void;
+  cancelConflict(): void;
+}
+
+export function renderActiveDialog(o: ActiveDialogOpts): TemplateResult | typeof nothing {
+  const lang = o.lang;
+  const d = o.draft;
+  if (d && o.restoreOpen) {
+    return renderRestoreDialog({ lang, savedAt: d.savedAt, onRestore: () => o.restore(d), onDiscard: () => o.discard(d) });
+  }
+  if (o.newConfirm) return renderNewPlanDialog({ lang, onDiscard: o.startNew, onCancel: o.cancelNew });
+  if (o.deleteConfirm) return renderDeleteDialog({ lang, name: o.planName, onDelete: o.confirmDelete, onCancel: o.cancelDelete });
+  if (o.switchTo) return renderSwitchDialog({ lang, onDiscard: o.confirmSwitch, onCancel: o.cancelSwitch });
+  if (o.dialog === 'none') return nothing;
+  return renderConflictDialog({
+    lang, mode: o.dialog === 'conflict' ? 'conflict' : 'again', busy: o.saving, message: o.message,
+    onOverwrite: o.overwrite, onSaveAsNew: o.saveAsNew, onCancel: o.cancelConflict,
+  });
 }

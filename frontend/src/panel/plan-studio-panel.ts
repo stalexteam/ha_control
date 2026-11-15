@@ -15,15 +15,18 @@ import { paletteFor, renderLevel } from '../render/plan-svg';
 import { t } from '../i18n';
 import { renderToolRail, renderTopBar } from './toolbar';
 import { createTool, selectionExists, toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
-import { renderProps, type BoxMeasure } from './props-panel';
-import { defaultZoneName, initialNext, openingDefaults } from './next-object';
-import { initialNextProps, renderEquipmentProps } from './device-props';
+import type { BoxMeasure } from './props-panel';
+import { initialNext } from './next-object';
+import { createToolContext } from './tool-context';
+import { renderSide } from './side-panel';
+import { initialNextProps } from './device-props';
 import { renderStatusBar } from './statusbar';
 import { renderTracker, trackerLive } from './tracker';
 import { panelStyles, paletteVars } from './styles';
 import { fitView, renderGrid, screenToMm, type View } from './viewport';
-import { EditorInput, type InputHost } from './input';
-import { renderConflictDialog, renderDeleteDialog, renderDraftBanner, renderNewPlanDialog, renderRestoreDialog, renderSwitchDialog } from './dialogs';
+import { EditorInput } from './input';
+import { createInputHost } from './input-host';
+import { renderActiveDialog, renderDraftBanner } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 
 const EMPTY_LEVEL: Level = { id: '', name: '', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] };
@@ -41,8 +44,8 @@ export class PlanStudioPanel extends LitElement {
   @state() toolId: ToolId = 'select';
   @state() wallType: WallType = 'bearing';
   @state() thickness = WALL_PRESETS.bearing;
-  @state() private boxMeasure: BoxMeasure = 'inner';
-  @state() private grid = true;
+  @state() boxMeasure: BoxMeasure = 'inner';
+  @state() grid = true;
   /** Plan / Equipment tab (per session, not saved); cones: device cones and zones are drawn. */
   @state() mode: EditorMode = 'plan';
   @state() private cones = true;
@@ -50,26 +53,26 @@ export class PlanStudioPanel extends LitElement {
   @state() nextProps = initialNextProps();
   /** "Next object" parameters of the door / window / opening / zone tools. */
   @state() nextObj = initialNext();
-  @state() private view: View = { x: -1000, y: -1000, scale: 0.08 };
+  @state() view: View = { x: -1000, y: -1000, scale: 0.08 };
   @state() private size = { w: 0, h: 0 };
-  @state() private dialog: 'none' | 'conflict' | 'conflict-again' = 'none';
-  @state() private notice: string | null = null;
+  @state() dialog: 'none' | 'conflict' | 'conflict-again' = 'none';
+  @state() notice: string | null = null;
   /**
    * Local draft found on load, waiting for Restore / Discard. While it is undecided and belongs to the open
    * plan, no new draft is written under its key (that would overwrite it).
    */
   @state() private pendingDraft: Draft | null = null;
   /** The modal restore prompt is shown; Escape hides it and leaves a non-modal banner instead. */
-  @state() private restoreOpen = false;
+  @state() restoreOpen = false;
   /** Stored plans for the selector. */
   @state() private plans: PlanSummary[] = [];
   /** Plan the user picked while the current one is dirty: waiting for confirmation. */
-  @state() private switchTo: Id | null = null;
+  @state() switchTo: Id | null = null;
 
   /** Confirmation for "New plan" (current plan is dirty) is open. */
-  @state() private newConfirm = false;
+  @state() newConfirm = false;
   /** Confirmation for "Delete plan" is open. */
-  @state() private deleteConfirm = false;
+  @state() deleteConfirm = false;
   /** A delete request is running. */
   @state() private deleting = false;
 
@@ -96,44 +99,13 @@ export class PlanStudioPanel extends LitElement {
       if (this.save.dirty && this.plan && !this.draftBlocked()) this.drafts.schedule(() => this.makeDraft());
       this.requestUpdate();
     });
-    this.ctx = {
-      level: () => this.history?.current ?? EMPTY_LEVEL,
-      commit: next => this.commit(next),
-      tolMm: () => 10 / this.view.scale,
-      grid: () => (this.grid ? 100 : null),
-      wallProps: () => ({ type: this.wallType, thickness: this.thickness, baseline: 'center' }),
-      boxMeasure: () => this.boxMeasure,
-      select: s => { this.selection = s; this.notice = null; },
-      lang: () => this.uiLang,
-      deviceDefaults: k => this.nextProps[k],
-      openingDefaults: k => openingDefaults(this.nextObj, k),
-      zoneName: () => this.nextObj.zoneName ?? defaultZoneName(this.history?.current ?? EMPTY_LEVEL, this.uiLang),
-      zonePlaced: () => { this.nextObj = { ...this.nextObj, zoneName: null }; },
-    };
+    this.ctx = createToolContext(this);
     this.activeTool = createTool('select', this.ctx);
-    const host: InputHost = {
-      tool: () => this.activeTool,
-      get view() { return self.view; },
-      set view(v: View) { self.view = v; },
-      ready: () => !!this.history,
-      modal: () => this.restoreOpen || this.dialog !== 'none' || this.switchTo !== null
-        || this.newConfirm || this.deleteConfirm,
-      // Escape on the restore prompt = decide later: the draft is kept and a banner keeps offering it.
-      closeModal: () => { this.restoreOpen = false; this.dialog = 'none'; this.switchTo = null;
-        this.newConfirm = false; this.deleteConfirm = false; },
-      toMm: e => this.toMm(e),
-      focus: () => this.focus(),
-      update: () => this.requestUpdate(),
-      undo: () => this.undo(),
-      redo: () => this.redo(),
-      save: () => { void this.doSave(); },
-      deleteSelection: () => this.deleteSelection(),
-      clearSelection: () => { this.activeTool.cancel(); this.selection = null; },
-    };
+    const host = createInputHost(this);
     this.input = new EditorInput(host);
   }
 
-  private get uiLang(): string { return this.hass?.language ?? 'en'; }
+  get uiLang(): string { return this.hass?.language ?? 'en'; }
 
   // ---- lifecycle ----
 
@@ -377,7 +349,7 @@ export class PlanStudioPanel extends LitElement {
 
   // ---- editing ----
 
-  private commit(next: Level): void {
+  commit(next: Level): void {
     if (!this.history) return;
     this.history.push(next);
     this.save.markDirty();
@@ -386,13 +358,13 @@ export class PlanStudioPanel extends LitElement {
   }
 
   /** Commit from outside the tool that removes the selected element. */
-  private commitRemoval(next: Level): void {
+  commitRemoval(next: Level): void {
     this.activeTool.cancel();
     this.selection = null;
     this.commit(next);
   }
 
-  private deleteSelection(): boolean {
+  deleteSelection(): boolean {
     const s = this.selection;
     const level = this.history?.current;
     if (!s || !level || s.kind === 'node' || !selectionExists(level, s)) return false;
@@ -467,7 +439,7 @@ export class PlanStudioPanel extends LitElement {
 
   private svgEl(): SVGSVGElement | null { return this.renderRoot.querySelector('svg.plan'); }
 
-  private toMm(e: { clientX: number; clientY: number }): Pt { return screenToMm(this.svgEl(), this.view, e); }
+  toMm(e: { clientX: number; clientY: number }): Pt { return screenToMm(this.svgEl(), this.view, e); }
 
   private fit(): void { this.view = fitView(this.history?.current.nodes ?? [], this.size.w, this.size.h); }
 
@@ -495,34 +467,15 @@ export class PlanStudioPanel extends LitElement {
   // ---- render ----
 
   private renderDialog(): TemplateResult | typeof nothing {
-    const d = this.pendingDraft;
-    if (d && this.restoreOpen) {
-      return renderRestoreDialog({
-        lang: this.uiLang, savedAt: d.savedAt, onRestore: () => this.restoreDraft(d), onDiscard: () => this.discardDraft(d),
-      });
-    }
-    if (this.newConfirm) {
-      return renderNewPlanDialog({
-        lang: this.uiLang, onDiscard: () => this.startNewPlan(), onCancel: () => { this.newConfirm = false; },
-      });
-    }
-    if (this.deleteConfirm) {
-      return renderDeleteDialog({
-        lang: this.uiLang, name: this.plan?.name ?? '',
-        onDelete: () => { void this.confirmDelete(); }, onCancel: () => { this.deleteConfirm = false; },
-      });
-    }
-    if (this.switchTo) {
-      return renderSwitchDialog({
-        lang: this.uiLang, onDiscard: () => this.confirmSwitch(), onCancel: () => { this.switchTo = null; },
-      });
-    }
-    if (this.dialog === 'none') return nothing;
-    return renderConflictDialog({
-      lang: this.uiLang, mode: this.dialog === 'conflict' ? 'conflict' : 'again',
-      busy: this.save.state === 'saving', message: this.save.errorMessage,
-      onOverwrite: () => this.doOverwrite(), onSaveAsNew: () => this.doSaveAsNew(),
-      onCancel: () => { this.dialog = 'none'; },
+    return renderActiveDialog({
+      lang: this.uiLang, draft: this.pendingDraft, restoreOpen: this.restoreOpen, newConfirm: this.newConfirm,
+      deleteConfirm: this.deleteConfirm, switchTo: this.switchTo, dialog: this.dialog, planName: this.plan?.name ?? '',
+      saving: this.save.state === 'saving', message: this.save.errorMessage,
+      restore: d => this.restoreDraft(d), discard: d => this.discardDraft(d), startNew: () => this.startNewPlan(),
+      cancelNew: () => { this.newConfirm = false; }, confirmDelete: () => { void this.confirmDelete(); },
+      cancelDelete: () => { this.deleteConfirm = false; }, confirmSwitch: () => this.confirmSwitch(),
+      cancelSwitch: () => { this.switchTo = null; }, overwrite: () => this.doOverwrite(), saveAsNew: () => this.doSaveAsNew(),
+      cancelConflict: () => { this.dialog = 'none'; },
     });
   }
 
@@ -553,17 +506,7 @@ export class PlanStudioPanel extends LitElement {
           onUndo: () => this.undo(), onRedo: () => this.redo(), onSave: () => this.doSave(),
         })}
         ${renderToolRail(this.mode, this.toolId, lang, id => this.pickTool(id))}
-        ${this.mode === 'equipment' ? renderEquipmentProps({
-          level, selection: this.selection, toolId: this.toolId, nextProps: this.nextProps, lang, notice: this.notice,
-          commit: next => this.commit(next), remove: next => this.commitRemoval(next),
-          setNextProps: np => { this.nextProps = np; }, setNotice: msg => { this.notice = msg; },
-        }) : renderProps({
-          level, selection: this.selection, tool: this.toolId, boxMeasure: this.boxMeasure, lang, notice: this.notice,
-          wallType: this.wallType, thickness: this.thickness, next: this.nextObj, setNext: n => { this.nextObj = n; },
-          setWallType: wt => this.setWallType(wt), setThickness: mm => { this.thickness = mm; },
-          commit: next => this.commit(next), remove: next => this.commitRemoval(next),
-          setBoxMeasure: m => { this.boxMeasure = m; }, setNotice: msg => { this.notice = msg; },
-        })}
+        ${renderSide(this, level)}
         <div class="canvas">
           <svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox=${`${x} ${y} ${w} ${h}`}
             preserveAspectRatio="xMinYMin meet" style=${`background:${pal.background}`}

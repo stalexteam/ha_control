@@ -66,8 +66,8 @@ function row(label: string, field: TemplateResult | string): TemplateResult {
   return html`<label class="row"><span>${label}</span>${field}</label>`;
 }
 
-function select<T extends string>(value: T, options: { v: T; label: string }[], on: (v: T) => void): TemplateResult {
-  return html`<select class="val" @change=${(e: Event) => on((e.target as HTMLSelectElement).value as T)}>
+function select<T extends string>(value: T, options: { v: T; label: string }[], on: (v: T) => void, field?: string): TemplateResult {
+  return html`<select class="val" data-field=${field ?? nothing} @change=${(e: Event) => on((e.target as HTMLSelectElement).value as T)}>
     ${options.map(op => html`<option value=${op.v} ?selected=${op.v === value}>${op.label}</option>`)}
   </select>`;
 }
@@ -93,7 +93,7 @@ function wallProps(w: Wall, o: PropsOpts): TemplateResult {
   return html`
     <h4>${t('props.wall', lang)}</h4>
     ${row(t('props.type', lang), select(w.type, types.map(v => ({ v, label: t(`walltype.${v}`, lang) })),
-      v => set({ type: v })))}
+      v => set({ type: v }), 'wall-type'))}
     ${row(t('props.thickness', lang), mmField(w.thickness, v => { set({ thickness: v }); return true; }, o, 'props.badWidth'))}
     ${row(t('props.baseline', lang), select<Baseline>(w.baseline,
       (['center', 'left', 'right'] as Baseline[]).map(v => ({ v, label: t(`baseline.${v}`, lang) })), v => set({ baseline: v })))}

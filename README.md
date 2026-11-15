@@ -14,7 +14,7 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 
 - Tools: walls, doors, windows, zones, select/move; pick from the toolbar.
 - Wall type (bearing / partition / railing) is only a visual style; thickness is a separate field and never changes when you pick a type. Both live in the left properties panel.
-- With a placement tool active and nothing selected, the left panel shows the parameters of the next object (door: width, hinge, swing; window: width, outside side; opening: width; room: name, default "Room N"). Values are remembered per tool for the session.
+- With a placement tool active and nothing selected, the left panel shows the parameters of the next object (door: width, hinge, swing; window: width, outside side; opening: width; room: name, default "Room N"). Values are remembered per tool for the session; a custom room name is used once, then the default returns to the smallest unused "Room N".
 - Layout: tool rail, properties panel, plan.
 - Hold Shift while drawing to snap to 90 degrees.
 - Type a length in millimetres and press Enter to set the exact segment length.

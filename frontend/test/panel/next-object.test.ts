@@ -3,6 +3,11 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { $, click, mount } from './helpers';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 import { addBox } from '../../src/model/ops';
+import { deleteZone } from '../../src/model/zones';
+import { defaultZoneName } from '../../src/panel/next-object';
+import type { Level } from '../../src/model/types';
+
+const emptyLevel = () => ({ id: 'l', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] });
 
 async function tool(el: PlanStudioPanel, id: string): Promise<void> {
   $<HTMLButtonElement>(el, `button[data-tool="${id}"]`).click();
@@ -45,11 +50,68 @@ describe('wall type vs thickness', () => {
     const w = el.history!.current.walls[0];
     el.selection = { kind: 'wall', id: w.id };
     await el.updateComplete;
-    const sel = $<HTMLSelectElement>(el, '.props select');
+    const sel = $<HTMLSelectElement>(el, '.props select[data-field="wall-type"]');
     sel.value = 'bearing';
     sel.dispatchEvent(new Event('change'));
     await el.updateComplete;
     expect(el.history!.current.walls[0]).toMatchObject({ type: 'bearing', thickness: 100 });
+  });
+});
+
+describe('box keeps thickness', () => {
+  beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
+
+  it('Partition + 250, then Box: type bearing, thickness 250', async () => {
+    const el = await mount();
+    await tool(el, 'wall');
+    await setField(el, 'new-wall-type', 'partition');
+    await setField(el, 'new-wall-thickness', '250');
+    await tool(el, 'box');
+    expect(el.wallType).toBe('bearing');
+    expect(el.thickness).toBe(250);
+  });
+});
+
+describe('zone names', () => {
+  beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
+  const nameField = (el: PlanStudioPanel) => $<HTMLInputElement>(el, '.props [data-field="next-zone-name"]').value;
+
+  it('two default zones are Room 1, Room 2; deleting Room 1 frees the name', async () => {
+    const el = await mount();
+    const l = addBox(el.history!.current, { x: 0, y: 0 }, { x: 4000, y: 3000 }, { type: 'partition', thickness: 100, baseline: 'center' }, 'axis');
+    el.history!.push(addBox(l, { x: 5000, y: 0 }, { x: 8000, y: 3000 }, { type: 'partition', thickness: 100, baseline: 'center' }, 'axis'));
+    el.requestUpdate();
+    await tool(el, 'zone');
+    click(el, 2000, 1500);
+    await el.updateComplete;
+    el.selection = null;
+    click(el, 6500, 1500);
+    await el.updateComplete;
+    el.selection = null;
+    await el.updateComplete;
+    expect(el.history!.current.zones.map(z => z.name)).toEqual(['Room 1', 'Room 2']);
+    expect(nameField(el)).toBe('Room 3');
+    const first = el.history!.current.zones[0];
+    el.history!.push(deleteZone(el.history!.current, first.id));
+    el.requestUpdate();
+    await el.updateComplete;
+    expect(nameField(el)).toBe('Room 1');
+  });
+
+  it('renaming a zone to Room 3 makes the default skip 3', () => {
+    const lvl = { ...emptyLevel(), zones: [{ id: 'a', name: 'Room 3' }, { id: 'b', name: 'Room 1' }] } as unknown as Level;
+    expect(defaultZoneName(lvl, 'en')).toBe('Room 2');
+  });
+});
+
+describe('defaultZoneName', () => {
+  const lv = (...names: string[]) => ({ ...emptyLevel(), zones: names.map((name, i) => ({ id: String(i), name })) }) as unknown as Level;
+  it('smallest unused N', () => {
+    expect(defaultZoneName(lv(), 'en')).toBe('Room 1');
+    expect(defaultZoneName(lv('Room 1', 'Room 2'), 'en')).toBe('Room 3');
+    expect(defaultZoneName(lv('Room 2'), 'en')).toBe('Room 1');
+    expect(defaultZoneName(lv('Room 1', 'Room 3'), 'en')).toBe('Room 2');
+    expect(defaultZoneName(lv('Kitchen'), 'en')).toBe('Room 1');
   });
 });
 

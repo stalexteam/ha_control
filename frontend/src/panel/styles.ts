@@ -16,7 +16,11 @@ export const panelStyles = css`
     height: 100vh; overflow: hidden; position: relative;
     background: var(--ps-background); color: var(--ps-text); font: 13px system-ui, sans-serif;
   }
-  @media (max-width: 700px) { .ed { grid-template-columns: 54px 170px 1fr; } }
+  @media (max-width: 700px) {
+    .ed { grid-template-columns: 54px 170px 1fr; }
+    .props .row { flex-wrap: wrap; }
+    .props .val { max-width: 100%; }
+  }
   .center { display: flex; align-items: center; justify-content: center; gap: 12px; height: 100vh;
     font: 14px system-ui, sans-serif; }
   .top { grid-column: 1 / 4; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 10px;
