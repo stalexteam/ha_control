@@ -4,7 +4,7 @@ import { panBy, zoomAt } from './viewport';
 
 /** The panel members the pointer / keyboard handlers use. */
 export type InputHost = Pick<PlanStudioPanel,
-  'activeTool' | 'view' | 'history' | 'selection' | 'dialog' | 'toMm' | 'focus' | 'requestUpdate' | 'undo' | 'redo' | 'doSave' | 'deleteSelection'>;
+  'activeTool' | 'view' | 'history' | 'selection' | 'dialog' | 'toMm' | 'focus' | 'requestUpdate' | 'undo' | 'redo' | 'doSave' | 'deleteSelection' | 'mode' | 'toolId' | 'pickTool'>;
 
 const MODIFIER_KEYS = ['Shift', 'Control', 'Alt', 'Meta'];
 
@@ -101,7 +101,13 @@ export class EditorInput {
     }
     let consumed = this.h.activeTool.key(e.key, { shift: e.shiftKey });
     if (!consumed && (e.key === 'Delete' || e.key === 'Backspace')) consumed = this.h.deleteSelection();
-    if (!consumed && e.key === 'Escape') { this.h.activeTool.cancel(); this.h.selection = null; consumed = true; }
+    if (!consumed && e.key === 'Escape') {
+      // Nothing to cancel: leave a placement tool for the step's select tool.
+      const home = this.h.mode === 'plan' ? 'select' : this.h.mode === 'equipment' ? 'device-select' : null;
+      if (home && this.h.toolId !== home) this.h.pickTool(home);
+      else { this.h.activeTool.cancel(); this.h.selection = null; }
+      consumed = true;
+    }
     if (consumed) e.preventDefault();
     this.h.requestUpdate();
   };
