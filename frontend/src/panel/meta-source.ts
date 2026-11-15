@@ -1,13 +1,16 @@
-import { loadRegistries, mergeMeta, metaFromStates, type HaMeta, type Registries } from '../binding/ha-meta';
+import { loadRegistries, mergeMeta, metaFromStates, sameStructure, type HaMeta, type Registries, type States } from '../binding/ha-meta';
 import { messageOf } from '../errors';
 import { t } from '../i18n';
 import type { PlanStudioPanel } from './plan-studio-panel';
 
 /**
  * HA metadata for the Binding step: entities from `hass.states`, merged with the entity, device and area
- * registries once they are loaded. The registries load on the first entry to the Binding step; a failure keeps
- * the states-only metadata (nothing is flagged Missing) and leaves a notice until Retry succeeds. The merged
- * metadata is memoised on the identity of `hass.states` and of the loaded registries.
+ * registries once they are loaded.
+ * - The metadata is structural (names, classes, units, devices, areas). HA hands over a new `hass.states` on every
+ *   state change; the metadata, and with it the memoised candidate lists, keep their identity unless the entity
+ *   set or a structural attribute changed. Live values (state text, "unavailable") are read from `hass.states`.
+ * - The registries load on the first entry to the Binding step. A failure keeps the states-only metadata (nothing
+ *   is flagged Missing) and leaves a notice until Retry succeeds.
  */
 export class MetaSource {
   /** User-facing registry load failure, or null. */
@@ -15,17 +18,25 @@ export class MetaSource {
   private regs: Registries | null = null;
   private tried = false;
   private pending = false;
-  private memo: { states: unknown; regs: Registries | null; meta: HaMeta } | null = null;
+  /** States-only metadata and the latest states it is known to match. */
+  private base: { states: States; meta: HaMeta } | null = null;
+  private merged: { base: HaMeta; regs: Registries | null; meta: HaMeta } | null = null;
 
   constructor(private readonly h: Pick<PlanStudioPanel, 'hass' | 'requestUpdate'>) {}
 
+  /** A registry load is in progress. */
+  get loading(): boolean { return this.pending; }
+
   get(): HaMeta {
     const states = this.h.hass?.states;
-    const m = this.memo;
-    if (m && m.states === states && m.regs === this.regs) return m.meta;
-    const base = metaFromStates(states);
+    const b = this.base;
+    if (!b || !sameStructure(b.states, states)) this.base = { states, meta: metaFromStates(states) };
+    else b.states = states;
+    const base = this.base!.meta;
+    const m = this.merged;
+    if (m && m.base === base && m.regs === this.regs) return m.meta;
     const meta = this.regs ? mergeMeta(base, this.regs) : base;
-    this.memo = { states, regs: this.regs, meta };
+    this.merged = { base, regs: this.regs, meta };
     return meta;
   }
 
@@ -34,12 +45,13 @@ export class MetaSource {
     if (!this.tried) this.retry();
   }
 
-  /** Loads the registries unless they are loaded or loading; the panel re-renders when the load settles. */
+  /** Loads the registries unless they are loaded or loading; the panel re-renders when the load starts and settles. */
   retry(): void {
     const hass = this.h.hass;
     if (this.regs || this.pending || !hass) return;
     this.tried = true;
     this.pending = true;
+    this.h.requestUpdate();
     void loadRegistries(hass).then(
       regs => { this.regs = regs; this.error = null; },
       err => { this.error = t('binding.registryError').replace('{error}', messageOf(err)); },

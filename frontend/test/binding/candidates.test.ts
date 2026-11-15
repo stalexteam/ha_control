@@ -39,6 +39,12 @@ describe('haDevicesFor', () => {
     expect(haDevicesFor(fixtureMeta(), 'climate_sensor').map(d => d.id)).toEqual(['dev1']);
     expect(haDevicesFor(fixtureMeta(), 'socket')).toEqual([]);
   });
+
+  it('is memoised per meta and kind', () => {
+    const meta = fixtureMeta();
+    expect(haDevicesFor(meta, 'climate_sensor')).toBe(haDevicesFor(meta, 'climate_sensor'));
+    expect(haDevicesFor(fixtureMeta(), 'climate_sensor')).not.toBe(haDevicesFor(meta, 'climate_sensor'));
+  });
 });
 
 describe('autoFill', () => {

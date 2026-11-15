@@ -1,5 +1,6 @@
 import type { HassLike } from '../src/api';
 import type { Plan } from '../src/model/types';
+import { DEMO_REGISTRY, DEMO_STATES } from './demo-ha';
 
 /** localStorage key holding { plans: { [id]: Plan } } — same shape as the HA Store data. */
 export const STORAGE_KEY = 'plan_studio/plans';
@@ -27,13 +28,17 @@ const fail = (code: string, message: string) => Promise.reject({ code, message }
  * revision rules of the Python PlanRepo: a new plan needs expected_revision null and gets revision 1;
  * an existing plan needs expected_revision == current unless force; a missing plan with a non-null
  * expected_revision is a conflict even with force.
+ * With `demo` it also has live states and answers the entity, device and area registry commands with a small
+ * sample (dev harness); without it those commands are unknown, so tests bring their own HA data.
  */
-export function createMockHass(opts: { darkMode?: boolean; storage?: Storage } = {}): HassLike {
+export function createMockHass(opts: { darkMode?: boolean; storage?: Storage; demo?: boolean } = {}): HassLike {
   const storage = opts.storage ?? localStorage;
   return {
     themes: { darkMode: opts.darkMode ?? true },
+    ...(opts.demo ? { states: DEMO_STATES } : {}),
     connection: {
       sendMessagePromise<T>(msg: Record<string, unknown>): Promise<T> {
+        if (opts.demo && String(msg.type) in DEMO_REGISTRY) return Promise.resolve(structuredClone(DEMO_REGISTRY[String(msg.type)]) as T);
         const data = read(storage);
         switch (msg.type) {
           case 'plan_studio/plans/list':

@@ -91,8 +91,8 @@ export class PlanStudioPanel extends LitElement {
   /** HA states merged with the registries (loaded on the first entry to the Binding step). */
   readonly haMeta = new MetaSource(this);
 
-  /** Binding status of a device. Until the registries are loaded no entity is Missing (its presence is unknown). */
-  readonly bindStatus = (d: Device): BindStatus => bindingStatus(d, eid => presence(this.haMeta.get(), eid));
+  /** Binding status of a device, from live states. Until the registries are loaded no entity is Missing (its presence is unknown). */
+  readonly bindStatus = (d: Device): BindStatus => bindingStatus(d, eid => presence(this.haMeta.get(), eid, this.hass?.states));
 
   doSave(): Promise<void> { return this.session.doSave(); }
 
@@ -186,10 +186,13 @@ export class PlanStudioPanel extends LitElement {
   undo(): void { this.step(() => this.history?.undo() ?? null); }
   redo(): void { this.step(() => this.history?.redo() ?? null); }
 
+  /** Undo / redo drop the selection, except in the Binding step, which keeps the selected device while it exists. */
   private step(op: () => Level | null): void {
     this.activeTool.cancel();
-    this.selection = null;
     if (op()) this.save.markDirty();
+    const s = this.selection, level = this.history?.current;
+    this.selection = this.mode === 'binding' && s && level && selectionExists(level, s) ? s : null;
+    if (this.mode === 'binding') this.notice = null;
     this.requestUpdate();
   }
 

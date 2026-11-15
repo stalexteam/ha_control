@@ -2,16 +2,19 @@ import { html, nothing, type TemplateResult } from 'lit';
 import type { BindingRole, Device, Level } from '../model/types';
 import { ROLE_SPECS, alsoBoundTo, setBinding, type BindStatus, type RoleSpec } from '../model/bindings';
 import { autoFill, candidates, haDevicesFor } from '../binding/candidates';
-import { presence, type HaMeta } from '../binding/ha-meta';
+import { presence, type HaMeta, type States } from '../binding/ha-meta';
 import '../binding/entity-combo';
+import '../binding/device-combo';
 import { t } from '../i18n';
-import { select } from './fields';
 
 export interface BindingPropsOpts {
   level: Level;
   /** The selected device, or null. */
   device: Device | null;
+  /** Structural HA metadata; live values come from `states`. */
   meta: HaMeta;
+  /** hass.states: live state values (shown on rows, and "unavailable"). */
+  states: States;
   status: (d: Device) => BindStatus;
   /** "Show all" per role, for the session. */
   showAll: Record<string, boolean>;
@@ -21,8 +24,10 @@ export interface BindingPropsOpts {
   /** Report of the last HA device auto-fill, or null. */
   notice: string | null;
   setNotice(msg: string | null): void;
-  /** Registry load failure text, shown with Retry; null when loaded or loading. */
+  /** Registry load failure text, shown with Retry; null when loaded or not tried yet. */
   registryError: string | null;
+  /** A registry load is running: Retry shows "Loading…" and is disabled. */
+  registryLoading: boolean;
   onRetry(): void;
 }
 
@@ -39,17 +44,12 @@ function fillReport(filled: BindingRole[], several: { role: BindingRole; n: numb
 }
 
 /**
- * A select of the HA devices with a strict match for any role of the kind. Choosing one fills the empty roles
- * that have exactly one match on it, in one commit, and reports the result; the select then returns to its prompt.
+ * A searchable picker of the HA devices with a strict match for any role of the kind (by name, model and area).
+ * Choosing one fills the empty roles that have exactly one match on it, in one commit, and reports the result.
  */
 function haDevicePicker(o: BindingPropsOpts, d: Device): TemplateResult {
   const devices = haDevicesFor(o.meta, d.props.kind);
-  const options = [
-    { v: '', label: t(devices.length ? 'binding.haDevicePick' : 'binding.haDeviceNone') },
-    ...devices.map(x => ({ v: x.id, label: x.model ? `${x.name} (${x.model})` : x.name })),
-  ];
-  const fill = (haId: string): false => {
-    if (!haId) return false;
+  const fill = (haId: string): void => {
     const r = autoFill(o.level, d.id, haId, o.meta);
     const specs = ROLE_SPECS[d.props.kind];
     const several = r.ambiguous.map(role => ({
@@ -57,14 +57,19 @@ function haDevicePicker(o: BindingPropsOpts, d: Device): TemplateResult {
     }));
     if (r.level !== o.level) o.commit(r.level);
     o.setNotice(fillReport(r.filled, several));
-    return false; // an action, not a value: the select goes back to its prompt
   };
-  return html`<label class="bfield"><span>${t('binding.haDevice')}</span>${select('', options, fill, 'ha-device')}</label>`;
+  return html`<div class="bfield"><span>${t('binding.haDevice')}</span>
+    <ps-device-combo data-field="ha-device" .meta=${o.meta} .devices=${devices} .label=${t('binding.haDevice')}
+      .placeholder=${t(devices.length ? 'binding.haDevicePick' : 'binding.haDeviceNone')}
+      @value-changed=${(e: CustomEvent<{ value: string | null }>) => {
+        e.stopPropagation();
+        if (e.detail.value) fill(e.detail.value);
+      }}></ps-device-combo></div>`;
 }
 
 /** Notes under a bound field: missing or unavailable in HA, and the other devices bound to the same entity. */
 function notes(o: BindingPropsOpts, d: Device, eid: string): TemplateResult {
-  const p = presence(o.meta, eid);
+  const p = presence(o.meta, eid, o.states);
   const others = alsoBoundTo(o.level, eid, d.id);
   return html`
     ${p === 'missing' ? html`<p class="warn" data-note="missing">${t('binding.missing')}</p>` : nothing}
@@ -84,7 +89,7 @@ function roleField(o: BindingPropsOpts, d: Device, spec: RoleSpec): TemplateResu
       <label class="showall"><input type="checkbox" data-showall=${role} .checked=${all}
         @change=${() => o.onShowAll(role)} />${t('binding.showAll')}</label>
     </div>
-    <ps-entity-combo data-role=${role} .meta=${o.meta} .items=${candidates(o.meta, spec, all)} .value=${eid}
+    <ps-entity-combo data-role=${role} .meta=${o.meta} .states=${o.states} .items=${candidates(o.meta, spec, all)} .value=${eid}
       .label=${roleLabel(role)} @value-changed=${(e: CustomEvent<{ value: string | null }>) => {
         e.stopPropagation();
         const next = setBinding(o.level, d.id, role, e.detail.value);
@@ -106,7 +111,8 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
   const open = o.level.devices.filter(x => o.status(x) !== 'bound').length;
   return html`<div class="props bprops">
     ${o.registryError ? html`<div class="reg-error" data-notice="registry"><p class="warn">${o.registryError}</p>
-      <button class="btn" data-action="retry-registry" @click=${() => o.onRetry()}>${t('action.retry')}</button></div>` : nothing}
+      <button class="btn" data-action="retry-registry" ?disabled=${o.registryLoading}
+        @click=${() => o.onRetry()}>${t(o.registryLoading ? 'load.loading' : 'action.retry')}</button></div>` : nothing}
     ${d ? html`
       <h4>${d.name}</h4>
       <p class="muted kind">${t(`device.${d.props.kind}`)}</p>

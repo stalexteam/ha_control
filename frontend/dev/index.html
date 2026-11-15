@@ -29,7 +29,7 @@
     document.body.style.background = dark ? '#0b1220' : '#f3efe8';
 
     const panel = document.getElementById('panel');
-    panel.hass = createMockHass({ darkMode: dark });
+    panel.hass = createMockHass({ darkMode: dark, demo: true });
 
     const reload = () => {
       params.set('dark', document.getElementById('dark').checked ? '1' : '0');

@@ -22,11 +22,11 @@ function bindingSide(h: PlanStudioPanel, level: Level): TemplateResult {
   const s = h.selection;
   return renderBindingProps({
     level, device: s?.kind === 'device' ? level.devices.find(x => x.id === s.id) ?? null : null,
-    meta: h.haMeta.get(), status: h.bindStatus,
+    meta: h.haMeta.get(), states: h.hass?.states, status: h.bindStatus,
     showAll: h.showAll, onShowAll: role => { h.showAll = { ...h.showAll, [role]: !h.showAll[role] }; },
     commit: next => h.commit(next), onNextUnbound: () => h.nextUnboundDevice(),
     notice: h.notice, setNotice: msg => { h.notice = msg; },
-    registryError: h.haMeta.error, onRetry: () => h.haMeta.retry(),
+    registryError: h.haMeta.error, registryLoading: h.haMeta.loading, onRetry: () => h.haMeta.retry(),
   });
 }
 

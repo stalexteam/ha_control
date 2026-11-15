@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadRegistries, mergeMeta, metaFromStates, presence } from '../../src/binding/ha-meta';
+import { loadRegistries, mergeMeta, metaFromStates, presence, sameStructure, stateOf } from '../../src/binding/ha-meta';
 import { candidates } from '../../src/binding/candidates';
 import { ROLE_SPECS } from '../../src/model/bindings';
 import { ent, makeMeta } from './fixtures';
@@ -11,22 +11,61 @@ describe('metaFromStates', () => {
       'sensor.x': { state: 'unavailable', attributes: {} },
     });
     expect(m.registryLoaded).toBe(false);
-    expect(m.entities.get('sensor.h')).toMatchObject({ domain: 'sensor', name: 'H', deviceClass: 'humidity', unit: '%', state: '40' });
+    expect(m.entities.get('sensor.h')).toMatchObject({ domain: 'sensor', name: 'H', deviceClass: 'humidity', unit: '%' });
+    expect(m.entities.get('sensor.h')).not.toHaveProperty('state');
     expect(candidates(m, ROLE_SPECS.climate_sensor[1], false).map(e => e.entityId)).toEqual(['sensor.h']);
     expect(metaFromStates(undefined).entities.size).toBe(0);
   });
 });
 
 describe('presence', () => {
-  it('present / unavailable / missing / unknown', () => {
-    const loaded = makeMeta([ent('light.a'), ent('light.u', { state: 'unavailable' }), ent('light.d', { disabled: true })]);
-    expect(presence(loaded, 'light.d')).toBe('unavailable');
-    expect(presence(loaded, 'light.a')).toBe('present');
-    expect(presence(loaded, 'light.u')).toBe('unavailable');
-    expect(presence(loaded, 'light.zzz')).toBe('missing');
+  const live = { 'light.a': { state: 'on' }, 'light.u': { state: 'unavailable' }, 'light.d': { state: 'on' } };
+  it('present / unavailable / missing / unknown, from the live states', () => {
+    const loaded = makeMeta([ent('light.a'), ent('light.u'), ent('light.d', { disabled: true }), ent('light.reg')]);
+    expect(presence(loaded, 'light.d', live)).toBe('unavailable');
+    expect(presence(loaded, 'light.a', live)).toBe('present');
+    expect(presence(loaded, 'light.u', live)).toBe('unavailable');
+    expect(presence(loaded, 'light.reg', live)).toBe('unavailable'); // registry only: not in the states
+    expect(presence(loaded, 'light.zzz', live)).toBe('missing');
     const notLoaded = makeMeta([ent('light.a')], [], [], false);
-    expect(presence(notLoaded, 'light.a')).toBe('present');
-    expect(presence(notLoaded, 'light.zzz')).toBe('unknown');
+    expect(presence(notLoaded, 'light.a', live)).toBe('present');
+    expect(presence(notLoaded, 'light.zzz', live)).toBe('unknown');
+  });
+
+  it('follows a state flipping to unavailable with the same meta', () => {
+    const meta = makeMeta([ent('light.a')]);
+    expect(presence(meta, 'light.a', { 'light.a': { state: 'on' } })).toBe('present');
+    expect(presence(meta, 'light.a', { 'light.a': { state: 'unavailable' } })).toBe('unavailable');
+  });
+
+  it('stateOf reads the live state text; null when the entity has no state', () => {
+    expect(stateOf({ 'sensor.t': { state: '21.5' } }, 'sensor.t')).toBe('21.5');
+    expect(stateOf({ 'sensor.n': { state: 7 } }, 'sensor.n')).toBe('7');
+    expect(stateOf({}, 'sensor.t')).toBeNull();
+    expect(stateOf(undefined, 'sensor.t')).toBeNull();
+  });
+});
+
+describe('sameStructure', () => {
+  const a = {
+    'sensor.t': { state: '21', attributes: { friendly_name: 'T', device_class: 'temperature', unit_of_measurement: '°C' } },
+    'light.k': { state: 'on', attributes: { friendly_name: 'Kitchen', brightness: 10 } },
+  };
+  it('state values and other attributes do not change the structure', () => {
+    expect(sameStructure(a, a)).toBe(true);
+    expect(sameStructure(a, { ...a, 'sensor.t': { ...a['sensor.t'], state: '22' } })).toBe(true);
+    expect(sameStructure(a, { ...a, 'light.k': { state: 'off', attributes: { friendly_name: 'Kitchen', brightness: 99 } } })).toBe(true);
+    expect(sameStructure(undefined, {})).toBe(true);
+  });
+  it('a new or removed entity, or a changed name, class, unit or icon, does', () => {
+    const attrs = a['sensor.t'].attributes;
+    expect(sameStructure(a, { ...a, 'sensor.new': { state: '1', attributes: {} } })).toBe(false);
+    expect(sameStructure(a, { 'sensor.t': a['sensor.t'] })).toBe(false);
+    expect(sameStructure(a, { ...a, 'sensor.t': { state: '21', attributes: { ...attrs, device_class: 'humidity' } } })).toBe(false);
+    expect(sameStructure(a, { ...a, 'sensor.t': { state: '21', attributes: { ...attrs, unit_of_measurement: '°F' } } })).toBe(false);
+    expect(sameStructure(a, { ...a, 'sensor.t': { state: '21', attributes: { ...attrs, friendly_name: 'T2' } } })).toBe(false);
+    expect(sameStructure(a, { ...a, 'sensor.t': { state: '21', attributes: { ...attrs, icon: 'mdi:x' } } })).toBe(false);
+    expect(sameStructure(a, undefined)).toBe(false);
   });
 });
 
@@ -51,7 +90,7 @@ describe('loadRegistries / mergeMeta', () => {
     const r = await loadRegistries(hass);
     expect([...calls].sort()).toEqual(['config/area_registry/list', 'config/device_registry/list', 'config/entity_registry/list']);
     expect(r.entities.get('sensor.t')).toMatchObject({ name: 'T reg', deviceId: 'd1', category: 'diagnostic', icon: 'mdi:thermometer', hidden: false, disabled: false });
-    expect(r.entities.get('light.off')).toMatchObject({ hidden: true, disabled: true, icon: 'mdi:x', areaId: 'a1', name: 'Off light', state: 'unavailable' });
+    expect(r.entities.get('light.off')).toMatchObject({ hidden: true, disabled: true, icon: 'mdi:x', areaId: 'a1', name: 'Off light' });
     expect(r.devices.get('d1')).toEqual({ id: 'd1', name: 'My dev', model: 'M1', areaId: 'a2' });
     expect(r.areas.get('a1')).toBe('Hall');
   });
@@ -64,24 +103,24 @@ describe('loadRegistries / mergeMeta', () => {
     await expect(loadRegistries(hass)).rejects.toThrow('boom');
   });
 
-  it('merge sets registryLoaded; registry fields win, live state kept', async () => {
+  it('merge sets registryLoaded; registry fields win, live class and unit kept', async () => {
     const regs = await loadRegistries(fakeHass().hass);
-    const base = metaFromStates({ 'sensor.t': { state: '99', attributes: { device_class: 'temperature', unit_of_measurement: '°C' } }, 'sensor.only': { state: '1', attributes: {} } });
-    const m = mergeMeta(base, regs);
+    const states = { 'sensor.t': { state: '99', attributes: { device_class: 'temperature', unit_of_measurement: '°C' } }, 'sensor.only': { state: '1', attributes: {} } };
+    const m = mergeMeta(metaFromStates(states), regs);
     expect(m.registryLoaded).toBe(true);
     expect(m.entities.get('sensor.orig')!.name).toBe('X');
-    expect(m.entities.get('sensor.t')).toMatchObject({ name: 'T reg', state: '99', category: 'diagnostic', deviceId: 'd1' });
+    expect(m.entities.get('sensor.t')).toMatchObject({ name: 'T reg', deviceClass: 'temperature', unit: '°C', category: 'diagnostic', deviceId: 'd1' });
     expect(m.entities.has('sensor.only')).toBe(true);
     expect(m.entities.has('light.off')).toBe(true);
-    expect(presence(m, 'light.off')).toBe('unavailable');
-    expect(presence(m, 'sensor.t')).toBe('present');
+    expect(presence(m, 'light.off', states)).toBe('unavailable');
+    expect(presence(m, 'sensor.t', states)).toBe('present');
   });
 
   it('name precedence: live friendly_name, registry name, original_name, entity id', () => {
     const regs = {
       entities: new Map([
-        ['light.k', ent('light.k', { name: 'light.k', state: 'unavailable' })],
-        ['light.foo', ent('light.foo', { name: 'Foo', state: 'unavailable' })],
+        ['light.k', ent('light.k', { name: 'light.k' })],
+        ['light.foo', ent('light.foo', { name: 'Foo' })],
       ]),
       devices: new Map(), areas: new Map(),
     };

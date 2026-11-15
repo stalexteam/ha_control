@@ -161,7 +161,6 @@ export const panelStyles = css`
   .bprops .kind { margin: 0 0 12px; }
   .bfield { display: flex; flex-direction: column; gap: 4px; margin: 0 0 6px; }
   .bfield > span, .role-label { color: var(--ch-muted); font-size: 12px; }
-  .bfield .val { max-width: none; width: 100%; text-align: left; padding: 6px; }
   .role { margin-top: 14px; }
   .role-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
   .showall { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ch-muted); cursor: pointer; }

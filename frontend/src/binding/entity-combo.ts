@@ -1,11 +1,11 @@
-import { LitElement, css, html, svg, nothing, type TemplateResult } from 'lit';
-import { ifDefined } from 'lit/directives/if-defined.js';
-import { property, state } from 'lit/decorators.js';
+import { html, nothing, type TemplateResult } from 'lit';
+import { property } from 'lit/decorators.js';
 import { t } from '../i18n';
 import { entityLabel } from './candidates';
-import type { EntityMeta, HaMeta } from './ha-meta';
+import { stateOf, type EntityMeta, type HaMeta, type States } from './ha-meta';
+import { ComboBase, mdiIcon, type ComboRow } from './combo-base';
 
-/** Bundled MDI paths (24x24), so the combobox needs no icon font. */
+/** Bundled MDI paths (24x24) by entity class or domain. */
 const ICONS = {
   power: 'M7,2V13H10V22L17,10H13L17,2H7Z',
   temperature: 'M15 13V5A3 3 0 0 0 9 5V13A5 5 0 1 0 15 13M12 4A1 1 0 0 1 13 5V8H11V5A1 1 0 0 1 12 4Z',
@@ -31,8 +31,7 @@ function iconFor(e: EntityMeta | undefined, eid: string): IconName {
   return BY_DOMAIN[e?.domain ?? eid.split('.')[0]] ?? 'generic';
 }
 
-const icon = (name: IconName): TemplateResult =>
-  html`<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${svg`<path d=${ICONS[name]}></path>`}</svg>`;
+const icon = (name: IconName): TemplateResult => mdiIcon(ICONS[name]);
 
 function domainLabel(domain: string): string {
   switch (domain) {
@@ -46,166 +45,44 @@ function domainLabel(domain: string): string {
   }
 }
 
-const MAX_ROWS = 100;
-let nextUid = 0;
+interface EntityRow extends ComboRow { e: EntityMeta }
 
-interface Row { e: EntityMeta; name: string; context: string }
-interface Shown { rows: Row[]; more: boolean }
-
-/** Self-contained entity combobox laid out like Home Assistant's entity picker. Fires `value-changed` ({ value }). */
-export class EntityCombo extends LitElement {
+/**
+ * Entity combobox laid out like Home Assistant's entity picker. The rows come from `items` (structural metadata);
+ * the state shown on each row is read live from `states`.
+ */
+export class EntityCombo extends ComboBase<EntityRow> {
   @property({ attribute: false }) meta!: HaMeta;
   @property({ attribute: false }) items: readonly EntityMeta[] = [];
-  @property() value: string | null = null;
-  @property() label = '';
-  @state() private isOpen = false;
-  @state() private query = '';
-  @state() private active = 0;
-  private readonly uid = `psec${nextUid++}`;
-  private shown: { key: [unknown, unknown, string]; value: Shown } | null = null;
+  /** hass.states: the live state shown on each row. */
+  @property({ attribute: false }) states: States = undefined;
 
-  private readonly onOutside = (e: Event): void => {
-    if (!e.composedPath().includes(this)) this.close();
-  };
+  protected rowDeps(): readonly unknown[] { return [this.items, this.meta]; }
 
-  static styles = css`
-    :host {
-      display: block; position: relative;
-      --c-text: var(--primary-text-color, #e8eaed);
-      --c-muted: var(--secondary-text-color, #9aa3b2);
-      --c-divider: var(--divider-color, #2c313a);
-      --c-surface: var(--card-background-color, #1c1f26);
-      --c-primary: var(--primary-color, #03a9f4);
-      --c-hover: rgba(var(--rgb-primary-color, 3, 169, 244), .08);
-      --c-tint: rgba(var(--rgb-primary-color, 3, 169, 244), .16);
-    }
-    .field { display: flex; align-items: center; background: var(--c-surface); border-bottom: 1px solid var(--c-muted); border-radius: 6px 6px 0 0; padding-right: 6px; }
-    .field:hover { background: var(--c-hover); }
-    .cbox { flex: 1; min-width: 0; display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 6px; padding: 8px 4px 8px 10px; cursor: pointer; min-height: 52px; color: var(--c-text); }
-    .cbox:focus-visible, .x:focus-visible { outline: 2px solid var(--c-primary); outline-offset: -2px; }
-    .ico { width: 22px; height: 22px; fill: var(--c-muted); }
-    .cbox b, .opt b { display: block; font-weight: 500; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .cbox small, .opt small { display: block; color: var(--c-muted); font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ph { color: var(--c-muted); }
-    .x, .car { color: var(--c-muted); padding: 2px 4px; font-size: 16px; background: none; border: 0; font-family: inherit; cursor: pointer; }
-    .x:hover { color: var(--c-text); }
-    .drop { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px); background: var(--c-surface); color: var(--c-text); border-radius: 8px; box-shadow: 0 8px 28px rgba(0, 0, 0, .45); overflow: hidden; }
-    .srch { margin: 10px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--c-muted); border-radius: 8px; padding: 7px 10px; }
-    .srch:focus-within { border-color: var(--c-primary); }
-    .srch input { flex: 1; min-width: 0; background: none; border: 0; color: var(--c-text); font: inherit; outline: none; }
-    .opts { max-height: 300px; overflow: auto; border-top: 1px solid var(--c-divider); }
-    .opt { display: grid; grid-template-columns: 28px 1fr auto; gap: 8px; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--c-divider); cursor: pointer; }
-    .opt:hover { background: var(--c-hover); }
-    .opt.on { background: var(--c-tint); }
-    .side { text-align: right; font-size: 12.5px; color: var(--c-muted); }
-    .hint { padding: 8px 12px; color: var(--c-muted); font-size: 12.5px; }
-    .empty { padding: 12px; color: var(--c-muted); }
-  `;
-
-  connectedCallback(): void { super.connectedCallback(); document.addEventListener('pointerdown', this.onOutside, true); }
-  disconnectedCallback(): void { document.removeEventListener('pointerdown', this.onOutside, true); super.disconnectedCallback(); }
-
-  private close(): void { if (this.isOpen) { this.isOpen = false; this.query = ''; } }
-
-  private openList(): void {
-    this.isOpen = true; this.query = ''; this.active = 0;
-    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLInputElement>('.srch input')?.focus());
-  }
-
-  private pick(value: string | null): void {
-    this.close();
-    this.focusBox();
-    this.dispatchEvent(new CustomEvent('value-changed', { detail: { value }, bubbles: true, composed: true }));
-  }
-
-  /** Search runs over all items; at most MAX_ROWS rows are rendered. Cached per items, meta and query. */
-  private filtered(): Shown {
-    const key: [unknown, unknown, string] = [this.items, this.meta, this.query.trim().toLowerCase()];
-    const c = this.shown;
-    if (c && c.key[0] === key[0] && c.key[1] === key[1] && c.key[2] === key[2]) return c.value;
-    const rows: Row[] = [];
-    let more = false;
+  protected *allRows(): Iterable<EntityRow> {
     for (const e of this.items) {
       const { name, context } = entityLabel(this.meta, e.entityId);
-      if (key[2] && !`${name}
-${e.entityId}
-${context}`.toLowerCase().includes(key[2])) continue;
-      if (rows.length === MAX_ROWS) { more = true; break; }
-      rows.push({ e, name, context });
+      yield { id: e.entityId, name, context, search: `${name}\n${e.entityId}\n${context}`.toLowerCase(), e };
     }
-    const value = { rows, more };
-    this.shown = { key, value };
-    return value;
   }
 
-  private optId(i: number): string { return `${this.uid}-opt-${i}`; }
-
-  /** The active row index kept inside the rows (the items can shrink while the list is open). */
-  private clamped(rows: readonly Row[]): number { return Math.min(this.active, Math.max(rows.length - 1, 0)); }
-
-  private onSearchKey(e: KeyboardEvent): void {
-    const { rows } = this.filtered();
-    if (e.key === 'ArrowDown') { e.preventDefault(); this.active = Math.max(0, Math.min(this.active + 1, rows.length - 1)); this.scrollActive(); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); this.active = Math.max(this.active - 1, 0); this.scrollActive(); }
-    else if (e.key === 'Enter') { e.preventDefault(); const r = rows[this.clamped(rows)]; if (r) this.pick(r.e.entityId); }
-    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.close(); this.focusBox(); }
-  }
-
-  private onFocusOut(e: FocusEvent): void {
-    const to = e.relatedTarget as Node | null;
-    if (this.isOpen && !(to && this.shadowRoot?.contains(to))) this.close();
-  }
-
-  private scrollActive(): void {
-    void this.updateComplete.then(() => (this.renderRoot.querySelector('.opt.on') as HTMLElement | null)?.scrollIntoView?.({ block: 'nearest' }));
-  }
-
-  private focusBox(): void { void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('.cbox')?.focus()); }
-
-  private onBoxKey(e: KeyboardEvent): void {
-    if (e.target !== e.currentTarget) return;
-    if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') { e.preventDefault(); this.openList(); }
-  }
-
-  private renderBox(): TemplateResult {
+  protected renderBox(): TemplateResult {
     const eid = this.value;
-    const e = eid ? this.meta.entities.get(eid) : undefined;
     const lab = eid ? entityLabel(this.meta, eid) : null;
-    return html`<div class="field"><div class="cbox" tabindex="0" role="combobox" aria-haspopup="listbox" aria-expanded=${this.isOpen ? 'true' : 'false'}
-        aria-controls=${`${this.uid}-lb`} aria-label=${ifDefined(this.label || undefined)} @click=${() => (this.isOpen ? this.close() : this.openList())} @keydown=${this.onBoxKey}>
-      ${icon(eid ? iconFor(e, eid) : 'generic')}
+    return html`${icon(eid ? iconFor(this.meta.entities.get(eid), eid) : 'generic')}
       ${lab ? html`<span><b>${lab.name}</b>${lab.context !== lab.name ? html`<small>${lab.context}</small>` : nothing}</span>`
-        : html`<span class="ph">${t('combo.none')}</span>`}
-      <span class="car" aria-hidden="true">▾</span>
-    </div>${eid ? html`<button class="x" type="button" title=${t('combo.clear')} aria-label=${t('combo.clear')}
-          @click=${() => this.pick(null)}>✕</button>` : nothing}</div>`;
+        : html`<span class="ph">${t('combo.none')}</span>`}`;
   }
 
-  private renderDrop(): TemplateResult {
-    const { rows, more } = this.filtered();
-    const active = this.clamped(rows);
-    return html`<div class="drop" @pointerdown=${(e: Event) => { if ((e.target as HTMLElement).tagName !== 'INPUT') e.preventDefault(); }}>
-      <div class="srch"><input type="text" role="searchbox" placeholder=${t('combo.search')} aria-label=${t('combo.search')}
-        aria-controls=${`${this.uid}-lb`} aria-activedescendant=${ifDefined(rows.length ? this.optId(active) : undefined)}
-        .value=${this.query} @input=${(e: Event) => { this.query = (e.target as HTMLInputElement).value; this.active = 0; }}
-        @keydown=${this.onSearchKey}></div>
-      <div class="opts" id=${`${this.uid}-lb`} role="listbox" aria-label=${this.label || t('combo.search')}>
-        ${rows.map(({ e, name, context }, i) =>
-          html`<div class="opt ${i === active ? 'on' : ''}" id=${this.optId(i)} role="option" aria-selected=${e.entityId === this.value ? 'true' : 'false'}
-              data-id=${e.entityId} @click=${() => this.pick(e.entityId)} @pointerenter=${() => { this.active = i; }}>
-            ${icon(iconFor(e, e.entityId))}
-            <span><b>${name}</b><small>${context}</small></span>
-            <span class="side">${domainLabel(e.domain)}<br>${e.state}${e.unit ? ` ${e.unit}` : ''}</span>
-          </div>`)}
-      </div>
-      ${rows.length === 0 ? html`<div class="empty">${t('combo.empty')}</div>` : nothing}
-      ${more ? html`<div class="hint">${t('combo.more')}</div>` : nothing}
-    </div>`;
+  protected renderRow({ e, name, context }: EntityRow): TemplateResult {
+    const state = stateOf(this.states, e.entityId) ?? 'unavailable';
+    return html`${icon(iconFor(e, e.entityId))}
+      <span><b>${name}</b><small>${context}</small></span>
+      <span class="side">${domainLabel(e.domain)}<br>${state}${e.unit ? ` ${e.unit}` : ''}</span>`;
   }
 
-  render(): TemplateResult {
-    return html`<div @focusout=${this.onFocusOut}>${this.renderBox()}${this.isOpen ? this.renderDrop() : nothing}</div>`;
-  }
+  protected searchLabel(): string { return t('combo.search'); }
+  protected emptyText(): string { return t('combo.empty'); }
 }
 
 if (!customElements.get('ps-entity-combo')) customElements.define('ps-entity-combo', EntityCombo);

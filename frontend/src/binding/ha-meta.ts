@@ -1,13 +1,16 @@
 import type { HassLike } from '../api';
 import type { Presence } from '../model/bindings';
 
+/** Structural entity metadata. Live state values are not part of it: read them from hass.states (`stateOf`). */
 export interface EntityMeta {
-  entityId: string; domain: string; name: string; state: string; deviceClass: string | null; unit: string | null;
+  entityId: string; domain: string; name: string; deviceClass: string | null; unit: string | null;
   deviceId: string | null; areaId: string | null; hidden: boolean; disabled: boolean; category: string | null; icon: string | null;
 }
 export interface DeviceMeta { id: string; name: string; model: string | null; areaId: string | null }
 export interface HaMeta { entities: Map<string, EntityMeta>; devices: Map<string, DeviceMeta>; areas: Map<string, string>; registryLoaded: boolean }
 export type Registries = Pick<HaMeta, 'entities' | 'devices' | 'areas'>;
+/** `hass.states`. */
+export type States = Record<string, unknown> | undefined;
 
 interface StateObj { state?: unknown; attributes?: Record<string, unknown> }
 interface RegEntity {
@@ -21,22 +24,51 @@ interface RegArea { area_id: string; name: string }
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 const domainOf = (eid: string): string => eid.split('.')[0];
 
+/** The state attributes the metadata is built from; any other attribute (and the state value) is live data. */
+const STRUCT_ATTRS = ['friendly_name', 'device_class', 'unit_of_measurement', 'icon'] as const;
+
 function fromState(eid: string, s: StateObj): EntityMeta {
   const a = s.attributes ?? {};
   return {
-    entityId: eid, domain: domainOf(eid), name: str(a.friendly_name) ?? eid, state: typeof s.state === 'string' ? s.state : String(s.state ?? ''),
+    entityId: eid, domain: domainOf(eid), name: str(a.friendly_name) ?? eid,
     deviceClass: str(a.device_class), unit: str(a.unit_of_measurement),
     deviceId: null, areaId: null, hidden: false, disabled: false, category: null, icon: str(a.icon),
   };
 }
 
-export function metaFromStates(states: Record<string, unknown> | undefined): HaMeta {
+export function metaFromStates(states: States): HaMeta {
   const entities = new Map<string, EntityMeta>();
   for (const [eid, s] of Object.entries(states ?? {})) entities.set(eid, fromState(eid, (s ?? {}) as StateObj));
   return { entities, devices: new Map(), areas: new Map(), registryLoaded: false };
 }
 
-/** One websocket load of the three registries (states come from hass.states). Registry entities get state "unavailable" until mergeMeta applies a live state. */
+/**
+ * True when `b` yields the same metadata as `a`: the same entity ids, and per entity the same structural
+ * attributes. State values and other attributes are ignored. Unchanged state objects are skipped by identity.
+ */
+export function sameStructure(a: States, b: States): boolean {
+  if (a === b) return true;
+  if (!a || !b) return Object.keys(a ?? b ?? {}).length === 0;
+  let n = 0;
+  for (const eid in b) {
+    n++;
+    const p = a[eid] as StateObj | undefined, q = b[eid] as StateObj | undefined;
+    if (p === q) continue;
+    if (!p || !q) return false;
+    const pa = p.attributes ?? {}, qa = q.attributes ?? {};
+    if (pa !== qa && STRUCT_ATTRS.some(k => pa[k] !== qa[k])) return false;
+  }
+  return n === Object.keys(a).length;
+}
+
+/** The live state text of an entity; null when it has no state (not in hass.states). */
+export function stateOf(states: States, eid: string): string | null {
+  const s = states?.[eid] as StateObj | undefined;
+  if (!s) return null;
+  return typeof s.state === 'string' ? s.state : String(s.state ?? '');
+}
+
+/** One websocket load of the three registries (states come from hass.states). */
 export async function loadRegistries(hass: HassLike): Promise<Registries> {
   const send = <T>(type: string) => hass.connection.sendMessagePromise<T>({ type });
   const [ents, devs, areas] = await Promise.all([
@@ -46,7 +78,7 @@ export async function loadRegistries(hass: HassLike): Promise<Registries> {
   ]);
   const entities = new Map<string, EntityMeta>();
   for (const r of ents) {
-    const base = fromState(r.entity_id, { state: 'unavailable' });
+    const base = fromState(r.entity_id, {});
     entities.set(r.entity_id, {
       ...base,
       name: str(r.name) ?? str(r.original_name) ?? base.name,
@@ -64,18 +96,23 @@ export async function loadRegistries(hass: HassLike): Promise<Registries> {
   };
 }
 
-/** Per field: state, deviceClass, unit from the live state when present; name = live friendly_name, else registry name, else original_name, else entity id; hidden, disabled, category, deviceId, areaId from the registry; icon = registry icon, falling back to the live icon. */
+/** Per field: deviceClass, unit from the live state when present; name = live friendly_name, else registry name, else original_name, else entity id; hidden, disabled, category, deviceId, areaId from the registry; icon = registry icon, falling back to the live icon. */
 export function mergeMeta(states: HaMeta, regs: Registries): HaMeta {
   const entities = new Map(regs.entities);
   for (const [eid, live] of states.entities) {
     const reg = regs.entities.get(eid);
-    entities.set(eid, reg ? { ...reg, state: live.state, name: live.name !== eid ? live.name : reg.name, deviceClass: live.deviceClass ?? reg.deviceClass, unit: live.unit ?? reg.unit, icon: reg.icon ?? live.icon } : live);
+    entities.set(eid, reg ? { ...reg, name: live.name !== eid ? live.name : reg.name, deviceClass: live.deviceClass ?? reg.deviceClass, unit: live.unit ?? reg.unit, icon: reg.icon ?? live.icon } : live);
   }
   return { entities, devices: regs.devices, areas: regs.areas, registryLoaded: true };
 }
 
-export function presence(meta: HaMeta, eid: string): Presence {
+/**
+ * Presence of a bound entity, with live `states`: a disabled entity, one without a state (registry only) or one
+ * whose state is "unavailable" is unavailable. An unknown id is missing once the registry is loaded, else unknown.
+ */
+export function presence(meta: HaMeta, eid: string, states: States): Presence {
   const e = meta.entities.get(eid);
-  if (e) return e.disabled || e.state === 'unavailable' ? 'unavailable' : 'present';
-  return meta.registryLoaded ? 'missing' : 'unknown';
+  if (!e) return meta.registryLoaded ? 'missing' : 'unknown';
+  const s = e.disabled ? null : stateOf(states, eid);
+  return s === null || s === 'unavailable' ? 'unavailable' : 'present';
 }

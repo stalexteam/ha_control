@@ -5,15 +5,16 @@ import type { EntityCombo } from '../../src/binding/entity-combo';
 import { ent, makeMeta } from './fixtures';
 
 const entities = [
-  ent('sensor.t_wc', { name: 'Temp WC', deviceClass: 'temperature', unit: '°C', state: '21.5', deviceId: 'dev1' }),
-  ent('sensor.t_kit', { name: 'Temp Kitchen', deviceClass: 'temperature', unit: '°C', state: '22' }),
-  ent('light.main', { name: 'Main light', state: 'on' }),
+  ent('sensor.t_wc', { name: 'Temp WC', deviceClass: 'temperature', unit: '°C', deviceId: 'dev1' }),
+  ent('sensor.t_kit', { name: 'Temp Kitchen', deviceClass: 'temperature', unit: '°C' }),
+  ent('light.main', { name: 'Main light' }),
 ];
+const states = { 'sensor.t_wc': { state: '21.5' }, 'sensor.t_kit': { state: '22' }, 'light.main': { state: 'on' } };
 const meta = makeMeta(entities, [{ id: 'dev1', name: 'Sensor WC', model: null, areaId: 'a1' }], [['a1', 'Main']]);
 
 async function mount(value: string | null, items = entities, m = meta): Promise<EntityCombo> {
   const el = document.createElement('ps-entity-combo') as EntityCombo;
-  el.meta = m; el.items = items; el.value = value; el.label = 'Temperature';
+  el.meta = m; el.items = items; el.value = value; el.label = 'Temperature'; el.states = states;
   document.body.appendChild(el);
   await el.updateComplete;
   return el;
@@ -111,6 +112,21 @@ describe('ps-entity-combo', () => {
     expect(rows(el)).toHaveLength(100);
     await type(el, 'sensor.s2999');
     expect(rows(el)).toHaveLength(1);
+  });
+
+  it('rows show the live state from the states property; a new states object updates them in place', async () => {
+    const el = await mount(null);
+    await open(el);
+    const side = () => rows(el)[0].querySelector('.side')!.textContent!;
+    expect(side()).toContain('Sensor');
+    expect(side()).toContain('21.5 °C');
+    el.states = { ...states, 'sensor.t_wc': { state: '23' } };
+    await el.updateComplete;
+    expect(side()).toContain('23 °C');
+    expect(side()).not.toContain('21.5');
+    el.states = { 'sensor.t_kit': { state: '22' } };
+    await el.updateComplete;
+    expect(side()).toContain('unavailable °C');
   });
 
   it('a value missing from items shows its id', async () => {

@@ -2,7 +2,7 @@ import type { HaMeta, EntityMeta, DeviceMeta } from '../../src/binding/ha-meta';
 
 export function ent(entityId: string, o: Partial<EntityMeta> = {}): EntityMeta {
   return {
-    entityId, domain: entityId.split('.')[0], name: entityId, state: 'on', deviceClass: null, unit: null,
+    entityId, domain: entityId.split('.')[0], name: entityId, deviceClass: null, unit: null,
     deviceId: null, areaId: null, hidden: false, disabled: false, category: null, icon: null, ...o,
   };
 }

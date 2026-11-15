@@ -26,11 +26,20 @@ export function candidates(meta: HaMeta, spec: RoleSpec, showAll: boolean): read
   return list;
 }
 
-export function haDevicesFor(meta: HaMeta, kind: DeviceKind): DeviceMeta[] {
+const deviceCache = new WeakMap<HaMeta, Map<DeviceKind, readonly DeviceMeta[]>>();
+
+/** HA devices with a strict candidate for any role of the kind, by name then id. Memoised per meta and kind. */
+export function haDevicesFor(meta: HaMeta, kind: DeviceKind): readonly DeviceMeta[] {
+  let byKind = deviceCache.get(meta);
+  if (!byKind) deviceCache.set(meta, (byKind = new Map()));
+  const hit = byKind.get(kind);
+  if (hit) return hit;
   const ids = new Set<string>();
   for (const spec of ROLE_SPECS[kind]) for (const e of candidates(meta, spec, false)) if (e.deviceId) ids.add(e.deviceId);
-  return [...ids].map(id => meta.devices.get(id)).filter((d): d is DeviceMeta => !!d)
+  const list = [...ids].map(id => meta.devices.get(id)).filter((d): d is DeviceMeta => !!d)
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  byKind.set(kind, list);
+  return list;
 }
 
 /** Fills empty roles from the HA device's strict candidates. One candidate fills; several are ambiguous. Filled roles are never touched. */

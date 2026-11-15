@@ -231,6 +231,8 @@ const en: Dict = {
   'tracker.depth': 'D',
 
   'combo.search': 'Search entities',
+  'combo.searchDevices': 'Search devices',
+  'combo.emptyDevices': 'No matching devices',
   'combo.empty': 'No matching entities',
   'combo.none': 'Select an entity',
   'combo.more': 'Showing the first 100 — keep typing to narrow',

@@ -3,6 +3,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createMockHass, STORAGE_KEY } from '../../dev/mock-hass';
 import type { HassLike } from '../../src/api';
 import type { EntityCombo } from '../../src/binding/entity-combo';
+import type { DeviceCombo } from '../../src/binding/device-combo';
+import { candidates, haDevicesFor } from '../../src/binding/candidates';
+import { loadRegistries, mergeMeta, metaFromStates } from '../../src/binding/ha-meta';
+import { ROLE_SPECS } from '../../src/model/bindings';
 import { deviceDefaults, type Device, type DeviceKind, type DevicePlacement, type Level } from '../../src/model/types';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 import { rectRoomLevel } from '../fixtures';
@@ -40,26 +44,30 @@ const REGISTRY: Record<string, unknown> = {
   'config/device_registry/list': [
     { id: 'plug1', name: 'Smart plug', model: 'P1' },
     { id: 'th1', name: 'WC sensor', area_id: 'wc' },
-    { id: 'th2', name: 'Twin sensor' },
+    { id: 'th2', name: 'Twin sensor', model: 'TH-200' },
     { id: 'lamp1', name: 'Desk lamp' },
   ],
   'config/area_registry/list': [{ area_id: 'wc', name: 'WC' }],
 };
 
+/** Registry answers: rejected while `on`; held until `gate` resolves when one is set. */
+interface Fail { on: boolean; gate?: Promise<void> }
+
 /** Mock hass with live states; the registry commands are counted and answered, or rejected while `fail.on`. */
-function haHass(fail = { on: false }): { hass: HassLike; calls: string[] } {
+function haHass(fail: Fail = { on: false }): { hass: HassLike; calls: string[] } {
   const base = createMockHass();
   const calls: string[] = [];
   const hass: HassLike = {
     ...base,
     states: STATES,
     connection: {
-      sendMessagePromise<T>(msg: Record<string, unknown>): Promise<T> {
+      async sendMessagePromise<T>(msg: Record<string, unknown>): Promise<T> {
         const type = String(msg.type);
         if (!(type in REGISTRY)) return base.connection.sendMessagePromise<T>(msg);
         calls.push(type);
-        return fail.on ? Promise.reject({ code: 'unauthorized', message: 'Unauthorized' })
-          : Promise.resolve(structuredClone(REGISTRY[type]) as T);
+        await fail.gate;
+        if (fail.on) throw { code: 'unauthorized', message: 'Unauthorized' };
+        return structuredClone(REGISTRY[type]) as T;
       },
     },
   };
@@ -99,7 +107,7 @@ const device = (el: PlanStudioPanel, id: string) => el.history!.current.devices.
 const combo = (el: PlanStudioPanel, role: string) => $<EntityCombo>(el, `.props ps-entity-combo[data-role="${role}"]`);
 
 /** Opens the stored plan with the HA mock and enters the Binding step; resolves once the registry load settled. */
-async function open(fail = { on: false }): Promise<{ el: PlanStudioPanel; calls: string[] }> {
+async function open(fail: Fail = { on: false }): Promise<{ el: PlanStudioPanel; calls: string[] }> {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     plans: { P1: { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level()] } },
   }));
@@ -132,16 +140,37 @@ async function choose(el: PlanStudioPanel, role: string, eid: string): Promise<v
   await el.updateComplete;
 }
 
-async function haDevice(el: PlanStudioPanel, id: string): Promise<HTMLSelectElement> {
-  const sel = $<HTMLSelectElement>(el, '.props select[data-field="ha-device"]');
-  sel.value = id;
-  sel.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+const deviceCombo = (el: PlanStudioPanel) => $<DeviceCombo>(el, '.props ps-device-combo[data-field="ha-device"]');
+
+/** Opens the HA device picker and types `query`; returns the ids of the rows shown. */
+async function searchDevices(el: PlanStudioPanel, query: string): Promise<string[]> {
+  const c = deviceCombo(el);
+  if (!c.shadowRoot!.querySelector('.srch')) {
+    c.shadowRoot!.querySelector<HTMLElement>('.cbox')!.click();
+    await c.updateComplete;
+  }
+  const input = c.shadowRoot!.querySelector<HTMLInputElement>('.srch input')!;
+  input.value = query;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  await c.updateComplete;
+  return [...c.shadowRoot!.querySelectorAll('.opt')].map(r => r.getAttribute('data-id')!);
+}
+
+/** Picks the first HA device matching `query` with Enter. */
+async function haDevice(el: PlanStudioPanel, query: string): Promise<void> {
+  await searchDevices(el, query);
+  const c = deviceCombo(el);
+  c.shadowRoot!.querySelector('.srch input')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await c.updateComplete;
   await el.updateComplete;
-  return sel;
 }
 
 const undo = async (el: PlanStudioPanel) => {
   key(el, 'keydown', 'z', { ctrlKey: true, code: 'KeyZ' });
+  await el.updateComplete;
+};
+const redo = async (el: PlanStudioPanel) => {
+  key(el, 'keydown', 'y', { ctrlKey: true, code: 'KeyY' });
   await el.updateComplete;
 };
 
@@ -162,7 +191,7 @@ describe('binding step', () => {
   });
 
   it('a failed registry load shows the notice with Retry, flags nothing as Missing and fields still work; Retry loads again', async () => {
-    const fail = { on: true };
+    const fail: Fail = { on: true };
     const { el, calls } = await open(fail);
     expect(notice(el)!.textContent).toContain("Couldn't load the Home Assistant registries: Unauthorized");
     await pick(el, 's');
@@ -176,8 +205,14 @@ describe('binding step', () => {
     expect(calls).toHaveLength(3);
     expect(notice(el)).not.toBeNull();
     fail.on = false;
+    let release!: () => void;
+    fail.gate = new Promise<void>(r => { release = r; });
     await press(el, '[data-action="retry-registry"]');
-    await vi.waitFor(() => expect(calls).toHaveLength(6));
+    const retry = $<HTMLButtonElement>(el, '[data-action="retry-registry"]');
+    expect(retry.disabled).toBe(true);
+    expect(retry.textContent!.trim()).toBe('Loading…');
+    expect(calls).toHaveLength(6);
+    release();
     await vi.waitFor(() => expect(notice(el)).toBeNull());
     await press(el, '.blist [data-filter="all"]');
     expect(dot(el, 'g')).toContain('missing');
@@ -223,6 +258,31 @@ describe('binding step', () => {
     expect(el.bindStatus(device(el, 's'))).toBe('unbound');
   });
 
+  it('Undo and Redo in the binding step keep the selected device and its properties', async () => {
+    const { el } = await open();
+    await pick(el, 's');
+    await choose(el, 'control', 'switch.plug');
+    await undo(el);
+    expect(el.selection).toEqual({ kind: 'device', id: 's' });
+    expect($(el, '.props h4').textContent!.trim()).toBe('Hall socket');
+    expect(combo(el, 'control').value).toBeNull();
+    await redo(el);
+    expect(device(el, 's').bindings).toEqual({ control: 'switch.plug' });
+    expect(el.selection).toEqual({ kind: 'device', id: 's' });
+    expect(combo(el, 'control').value).toBe('switch.plug');
+  });
+
+  it('a state flipping to unavailable shows the note without rebuilding the candidate lists', async () => {
+    const { el } = await open();
+    await pick(el, 'd');
+    const items = combo(el, 'control').items;
+    expect(el.shadowRoot!.querySelector('.props [data-note="unavailable"]')).toBeNull();
+    el.hass = { ...el.hass!, states: { ...STATES, 'light.desk': st('unavailable', { friendly_name: 'Desk lamp' }) } };
+    await el.updateComplete;
+    expect($(el, '.props [data-note="unavailable"]').textContent!.trim()).toBe('Unavailable in Home Assistant');
+    expect(combo(el, 'control').items).toBe(items);
+  });
+
   it('clearing a field removes the role', async () => {
     const { el } = await open();
     await pick(el, 'd');
@@ -262,31 +322,42 @@ describe('binding step', () => {
     expect(el.shadowRoot!.querySelector('.props [data-note="unavailable"]')).toBeNull();
   });
 
-  it('the HA device picker fills the empty climate roles in one undoable commit', async () => {
+  it('the HA device picker is searchable by name, model and area', async () => {
     const { el } = await open();
     await pick(el, 'c');
-    const sel = $<HTMLSelectElement>(el, '.props select[data-field="ha-device"]');
-    expect([...sel.options].map(o => o.value)).toEqual(['', 'th2', 'th1']);
-    expect([...sel.options].map(o => o.textContent!.trim()).slice(1)).toEqual(['Twin sensor', 'WC sensor']);
-    await haDevice(el, 'th1');
+    expect(deviceCombo(el).shadowRoot!.querySelector('.cbox')!.textContent).toContain('Choose one to fill the empty roles');
+    expect(await searchDevices(el, '')).toEqual(['th2', 'th1']);
+    expect(await searchDevices(el, 'th-2')).toEqual(['th2']);
+    expect(await searchDevices(el, 'wc')).toEqual(['th1']);
+    expect(await searchDevices(el, 'plug')).toEqual([]);
+  });
+
+  it('the HA device picker fills the empty climate roles in one undoable commit; the selection stays', async () => {
+    const { el } = await open();
+    await pick(el, 'c');
+    const commit = vi.spyOn(el, 'commit');
+    await haDevice(el, 'WC sensor');
+    expect(commit).toHaveBeenCalledTimes(1);
     expect(device(el, 'c').bindings).toEqual({ temperature: 'sensor.t_wc', humidity: 'sensor.h_wc' });
     expect($(el, '.props [data-notice="fill"]').textContent!.trim()).toBe('Filled: Temperature, Humidity');
-    expect($<HTMLSelectElement>(el, '.props select[data-field="ha-device"]').value).toBe('');
+    expect(deviceCombo(el).value).toBeNull();
     await undo(el);
     expect(device(el, 'c').bindings).toBeUndefined();
+    expect(el.selection).toEqual({ kind: 'device', id: 'c' });
+    expect(el.shadowRoot!.querySelector('.props [data-notice="fill"]')).toBeNull();
   });
 
   it('the HA device picker leaves ambiguous roles empty and says how many matched', async () => {
     const { el } = await open();
     await pick(el, 'c');
-    await haDevice(el, 'th2');
+    await haDevice(el, 'TH-200');
     expect(device(el, 'c').bindings).toEqual({ humidity: 'sensor.h_b' });
     expect($(el, '.props [data-notice="fill"]').textContent!.trim()).toBe('Filled: Humidity; several matches for: Temperature (2)');
     // Filled roles are never overwritten.
-    await haDevice(el, 'th1');
+    await haDevice(el, 'WC sensor');
     expect(device(el, 'c').bindings).toEqual({ humidity: 'sensor.h_b', temperature: 'sensor.t_wc' });
     expect($(el, '.props [data-notice="fill"]').textContent!.trim()).toBe('Filled: Temperature');
-    await haDevice(el, 'th2');
+    await haDevice(el, 'Twin');
     expect($(el, '.props [data-notice="fill"]').textContent!.trim()).toBe('Nothing to fill: no empty role matches an entity of this device.');
     expect(el.history!.canUndo).toBe(true);
   });
@@ -341,5 +412,20 @@ describe('binding step', () => {
     await press(el, '.blist [data-action="toggle-rail"]');
     expect($(el, '.ed').classList.contains('rail-off')).toBe(false);
     expect(el.shadowRoot!.querySelector('.blist .brow')).not.toBeNull();
+  });
+});
+
+describe('dev harness mock', () => {
+  it('demo mode answers the registries and has states: every device kind has an HA device and candidates', async () => {
+    const hass = createMockHass({ demo: true });
+    const meta = mergeMeta(metaFromStates(hass.states), await loadRegistries(hass));
+    for (const kind of Object.keys(ROLE_SPECS) as DeviceKind[]) {
+      expect(haDevicesFor(meta, kind).length, kind).toBeGreaterThan(0);
+      for (const spec of ROLE_SPECS[kind]) expect(candidates(meta, spec, false).length, `${kind}.${spec.role}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('without demo the registry commands are rejected, so tests do not depend on the sample', async () => {
+    await expect(loadRegistries(createMockHass())).rejects.toMatchObject({ code: 'unknown_command' });
   });
 });
