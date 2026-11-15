@@ -74,4 +74,18 @@ describe('loadRegistries / mergeMeta', () => {
     expect(presence(m, 'light.off')).toBe('unavailable');
     expect(presence(m, 'sensor.t')).toBe('present');
   });
+
+  it('name precedence: live friendly_name, registry name, original_name, entity id', () => {
+    const regs = {
+      entities: new Map([
+        ['light.k', ent('light.k', { name: 'light.k', state: 'unavailable' })],
+        ['light.foo', ent('light.foo', { name: 'Foo', state: 'unavailable' })],
+      ]),
+      devices: new Map(), areas: new Map(),
+    };
+    const base = metaFromStates({ 'light.k': { state: 'on', attributes: { friendly_name: 'Kitchen light' } } });
+    const m = mergeMeta(base, regs);
+    expect(m.entities.get('light.k')!.name).toBe('Kitchen light');
+    expect(m.entities.get('light.foo')!.name).toBe('Foo');
+  });
 });

@@ -64,12 +64,12 @@ export async function loadRegistries(hass: HassLike): Promise<Registries> {
   };
 }
 
-/** Registry fields win; the live state of `states` is kept. */
+/** Per field: state, name (friendly_name), deviceClass, unit come from the live state when present; hidden, disabled, category, deviceId, areaId, icon come from the registry. */
 export function mergeMeta(states: HaMeta, regs: Registries): HaMeta {
   const entities = new Map(regs.entities);
   for (const [eid, live] of states.entities) {
     const reg = regs.entities.get(eid);
-    entities.set(eid, reg ? { ...reg, state: live.state, deviceClass: live.deviceClass ?? reg.deviceClass, unit: live.unit ?? reg.unit, icon: reg.icon ?? live.icon } : live);
+    entities.set(eid, reg ? { ...reg, state: live.state, name: live.name !== eid ? live.name : reg.name, deviceClass: live.deviceClass ?? reg.deviceClass, unit: live.unit ?? reg.unit, icon: reg.icon ?? live.icon } : live);
   }
   return { entities, devices: regs.devices, areas: regs.areas, registryLoaded: true };
 }
