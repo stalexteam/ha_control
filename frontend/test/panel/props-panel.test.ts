@@ -33,7 +33,7 @@ describe('opening width field', () => {
     let notice: string | null = null;
     const opts = {
       level: r.level, selection: { kind: 'opening' as const, id: r.openingId! }, tool: 'select' as const,
-      boxMeasure: 'inner' as const, wallType: 'bearing' as const, thickness: 400, lang: 'en', notice: null,
+      boxMeasure: 'inner' as const, wallType: 'bearing' as const, thickness: 400, notice: null,
       commit: (n: unknown) => commits.push(n), remove: () => {}, setBoxMeasure: () => {}, setWallType: () => {}, setThickness: () => {}, next: initialNext(), setNext: () => {},
       setNotice: (m: string | null) => { notice = m; },
     };
@@ -65,7 +65,7 @@ describe('aim field', () => {
     const got: Record<string, unknown>[] = [];
     const host = document.createElement('div');
     render(renderDeviceProps({
-      device: dev, nextKind: null, nextProps: null, lang: 'en', onDevice: () => true,
+      device: dev, nextKind: null, nextProps: null, onDevice: () => true,
       onPlacement: p => { got.push(p as never); return true; }, onNext: () => {}, onDelete: () => {},
     }), host);
     const el = host.querySelector('input[data-field="aim"]') as HTMLInputElement;

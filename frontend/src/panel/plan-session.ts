@@ -12,7 +12,6 @@ import type { ToolContext } from '../editor/tools/types';
 /** Panel state the plan session reads and writes (the panel itself satisfies this). */
 export interface SessionHost {
   hass?: HassLike;
-  readonly uiLang: string;
   plan: Plan | null;
   plans: PlanSummary[];
   loadError: string | null;
@@ -49,7 +48,7 @@ export class PlanSession {
       this.h.plans = list;
       if (list.length === 0) {
         this.h.save.reset(null);
-        this.adopt(emptyPlan(t('plan.default', this.h.uiLang)));
+        this.adopt(emptyPlan(t('plan.default')));
         this.offerDraft(this.h.drafts.latest());
       } else {
         // Prefer the plan opened / saved last (e.g. one saved as new), else the first one.
@@ -135,7 +134,7 @@ export class PlanSession {
     this.h.toolId = toolIdsFor(this.h.mode)[0];
     this.h.notice = null;
     this.h.save.reset(null);
-    this.adopt(emptyPlan(t('plan.default', this.h.uiLang)));
+    this.adopt(emptyPlan(t('plan.default')));
     this.offerDraft(null);
   }
 
@@ -243,7 +242,7 @@ export class PlanSession {
 
   async doSaveAsNew(): Promise<void> {
     if (!this.h.plan || this.h.save.state === 'saving') return;
-    const name = `${this.h.plan.name} ${t('plan.copySuffix', this.h.uiLang)}`;
+    const name = `${this.h.plan.name} ${t('plan.copySuffix')}`;
     const oldId = this.h.plan.id;
     const res = await this.h.save.saveAsNew(this.currentPlan(), name);
     if (res) { this.h.plan = res; this.h.dialog = 'none'; this.afterSaved(oldId, res.id); } else if (this.h.save.state === 'error') this.h.dialog = 'none';

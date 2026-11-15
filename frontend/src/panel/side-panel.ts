@@ -18,7 +18,7 @@ export interface SideHost extends ToolHost {
 /** The properties panel of the active tab (Plan or Equipment). */
 export function renderSide(h: SideHost, level: Level): TemplateResult {
   const common = {
-    level, selection: h.selection, lang: h.uiLang, notice: h.notice,
+    level, selection: h.selection, notice: h.notice,
     commit: (next: Level) => h.commit(next), remove: (next: Level) => h.commitRemoval(next),
     setNotice: (msg: string | null) => { h.notice = msg; },
   };

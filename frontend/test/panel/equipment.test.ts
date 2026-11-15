@@ -292,7 +292,7 @@ describe('Equipment tab: typing survives re-renders', () => {
     f.focus();
     expect(el.shadowRoot!.activeElement).toBe(f);
     f.value = '15';
-    el.hass = createMockHass({ language: 'en' });
+    el.hass = createMockHass();
     await el.updateComplete;
     el.requestUpdate();
     await el.updateComplete;
@@ -309,7 +309,7 @@ describe('Equipment tab: typing survives re-renders', () => {
     const f = $<HTMLInputElement>(el, '.props input[data-field="new-wall-thickness"]');
     f.focus();
     f.value = '12';
-    el.hass = createMockHass({ language: 'en' });
+    el.hass = createMockHass();
     await el.updateComplete;
     el.requestUpdate();
     await el.updateComplete;

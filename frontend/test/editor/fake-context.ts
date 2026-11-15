@@ -15,9 +15,8 @@ export function fakeContext(level?: Level): ToolContext & { commits: Level[] } {
     wallProps: () => ({ type: 'partition', thickness: 100, baseline: 'center' }),
     boxMeasure: () => 'inner',
     select: () => {},
-    lang: () => 'en',
     deviceDefaults: k => deviceDefaults(k, 'free'),
     openingDefaults: k => (k === 'door' ? { width: 900, hinge: 'start', swing: 'left' } : k === 'window' ? { width: 1200, outside: 'left' } : { width: 900 }),
-    zoneName: () => defaultZoneName(current, 'en'),
+    zoneName: () => defaultZoneName(current),
   };
 }

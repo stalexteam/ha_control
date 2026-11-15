@@ -6,7 +6,6 @@ import type { HassLike } from "../../src/api";
 function fakeHass(handler: (msg: Record<string, unknown>) => Promise<unknown>) {
   const sent: Record<string, unknown>[] = [];
   const hass = {
-    language: "en",
     connection: {
       sendMessagePromise: (msg: Record<string, unknown>) => {
         sent.push(msg);

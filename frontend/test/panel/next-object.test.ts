@@ -100,18 +100,18 @@ describe('zone names', () => {
 
   it('renaming a zone to Room 3 makes the default skip 3', () => {
     const lvl = { ...emptyLevel(), zones: [{ id: 'a', name: 'Room 3' }, { id: 'b', name: 'Room 1' }] } as unknown as Level;
-    expect(defaultZoneName(lvl, 'en')).toBe('Room 2');
+    expect(defaultZoneName(lvl)).toBe('Room 2');
   });
 });
 
 describe('defaultZoneName', () => {
   const lv = (...names: string[]) => ({ ...emptyLevel(), zones: names.map((name, i) => ({ id: String(i), name })) }) as unknown as Level;
   it('smallest unused N', () => {
-    expect(defaultZoneName(lv(), 'en')).toBe('Room 1');
-    expect(defaultZoneName(lv('Room 1', 'Room 2'), 'en')).toBe('Room 3');
-    expect(defaultZoneName(lv('Room 2'), 'en')).toBe('Room 1');
-    expect(defaultZoneName(lv('Room 1', 'Room 3'), 'en')).toBe('Room 2');
-    expect(defaultZoneName(lv('Kitchen'), 'en')).toBe('Room 1');
+    expect(defaultZoneName(lv())).toBe('Room 1');
+    expect(defaultZoneName(lv('Room 1', 'Room 2'))).toBe('Room 3');
+    expect(defaultZoneName(lv('Room 2'))).toBe('Room 1');
+    expect(defaultZoneName(lv('Room 1', 'Room 3'))).toBe('Room 2');
+    expect(defaultZoneName(lv('Kitchen'))).toBe('Room 1');
   });
 });
 

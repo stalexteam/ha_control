@@ -68,14 +68,12 @@ describe("polygon", () => {
 });
 
 describe("i18n t()", () => {
-  it("returns English regardless of language", () => {
-    expect(t("tool.wall", "en-GB")).toBe("Wall");
-    expect(t("tool.wall", "ru")).toBe("Wall");
+  it("returns English", () => {
     expect(t("tool.wall")).toBe("Wall");
   });
 
   it("returns the key for unknown keys", () => {
-    expect(t("no.such.key", "en")).toBe("no.such.key");
+    expect(t("no.such.key")).toBe("no.such.key");
   });
 
   it("seeds tool names", () => {

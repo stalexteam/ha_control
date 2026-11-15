@@ -20,7 +20,6 @@ export interface ToolContext {
   wallProps(): WallProps;
   boxMeasure(): "inner" | "axis" | "outer";
   select(sel: Selection | null): void;
-  lang(): string;
   /** The panel's "next device" props for the free mode. */
   deviceDefaults(kind: DeviceKind): DeviceProps;
   /** The panel's "next opening" values for the door / window / opening tool. */

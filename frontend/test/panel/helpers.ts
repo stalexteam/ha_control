@@ -11,7 +11,7 @@ export function stored(): Plan[] {
 
 export async function mount(): Promise<PlanStudioPanel> {
   const el = document.createElement('plan-studio-panel');
-  el.hass = createMockHass({ language: 'en' });
+  el.hass = createMockHass();
   document.body.appendChild(el);
   await vi.waitFor(() => expect(el.plan).not.toBeNull());
   await el.updateComplete;

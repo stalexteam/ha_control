@@ -26,7 +26,6 @@ export interface DevicePropsOpts {
   nextKind: DeviceKind | null;
   /** The panel's defaults for the next device of `nextKind`. */
   nextProps: DeviceProps | null;
-  lang: string;
   /** Returns false when the edit was rejected (nothing changed). */
   onDevice(patch: Partial<DeviceProps>, name?: string): boolean;
   /** Returns false when the placement was rejected (e.g. the offset is outside the wall). */
@@ -64,14 +63,14 @@ function row(label: string, field: TemplateResult): TemplateResult {
   return html`<label class="row"><span>${label}</span>${field}</label>`;
 }
 
-function select<T extends string>(field: string, value: T, options: T[], prefix: string, lang: string,
+function select<T extends string>(field: string, value: T, options: T[], prefix: string,
   on: (v: T) => boolean | void): TemplateResult {
   // A rejected change (on() returns false) puts the DOM back on the model value.
   return html`<select class="val" data-field=${field} .value=${fieldValue(value)} @change=${(e: Event) => {
     const el = e.target as HTMLSelectElement;
     if (on(el.value as T) === false) el.value = value;
   }}>
-    ${options.map(v => html`<option value=${v} ?selected=${v === value}>${t(`${prefix}.${v}`, lang)}</option>`)}
+    ${options.map(v => html`<option value=${v} ?selected=${v === value}>${t(`${prefix}.${v}`)}</option>`)}
   </select>`;
 }
 
@@ -85,30 +84,29 @@ function numField(o: DevicePropsOpts, field: string, value: number, rule: NumRul
     @change=${(e: Event) => {
       const el = e.target as HTMLInputElement;
       const v = parseNum(el.value, rule);
-      if (v === null) { el.value = shown; o.onNotice?.(t(BAD[rule], o.lang)); return; }
+      if (v === null) { el.value = shown; o.onNotice?.(t(BAD[rule])); return; }
       if (v === value) { o.onNotice?.(null); return; } // unchanged: no commit, no history entry
-      if (!apply(v)) { el.value = shown; o.onNotice?.(t('props.noFit', o.lang)); return; }
+      if (!apply(v)) { el.value = shown; o.onNotice?.(t('props.noFit')); return; }
       o.onNotice?.(null);
     }} />`;
 }
 
 /** Kind-specific fields; `pre` prefixes data-field names ("next-" for the next-device defaults). */
 function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch: Partial<DeviceProps>) => boolean): TemplateResult {
-  const lang = o.lang;
   const mm = (name: string, label: string, v: number) =>
-    row(`${t(label, lang)}, ${t('unit.mm', lang)}`, numField(o, pre + name, v, 'mm', x => set({ [name]: x } as Partial<DeviceProps>)));
+    row(`${t(label)}, ${t('unit.mm')}`, numField(o, pre + name, v, 'mm', x => set({ [name]: x } as Partial<DeviceProps>)));
   const deg = (name: string, label: string, v: number) =>
-    row(`${t(label, lang)}, ${t('unit.deg', lang)}`, numField(o, pre + name, v, 'angle', x => set({ [name]: x } as Partial<DeviceProps>)));
+    row(`${t(label)}, ${t('unit.deg')}`, numField(o, pre + name, v, 'angle', x => set({ [name]: x } as Partial<DeviceProps>)));
   switch (p.kind) {
     case 'ceiling_light': {
       const pool = p.poolRadius === null ? '' : String(p.poolRadius);
       return html`
-        ${row(t('props.shape', lang), select(`${pre}shape`, p.shape, ['round', 'linear', 'spot'], 'shape', lang, v => set({ shape: v })))}
+        ${row(t('props.shape'), select(`${pre}shape`, p.shape, ['round', 'linear', 'spot'], 'shape', v => set({ shape: v })))}
         ${p.shape === 'linear'
           ? html`${mm('length', 'props.length', p.length)}${mm('width', 'props.width', p.width)}`
           : mm('diameter', 'props.diameter', p.diameter)}
-        ${row(`${t('props.poolRadius', lang)}, ${t('unit.mm', lang)}`, html`<input class="val" type="text" inputmode="numeric"
-          data-field=${`${pre}poolRadius`} placeholder=${t('props.poolHint', lang)} title=${t('props.poolHint', lang)}
+        ${row(`${t('props.poolRadius')}, ${t('unit.mm')}`, html`<input class="val" type="text" inputmode="numeric"
+          data-field=${`${pre}poolRadius`} placeholder=${t('props.poolHint')} title=${t('props.poolHint')}
           .value=${fieldValue(pool)} @change=${(e: Event) => {
             const el = e.target as HTMLInputElement;
             if (el.value.trim() === '') {
@@ -117,9 +115,9 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
               return;
             }
             const v = parseNum(el.value, 'mm');
-            if (v === null) { el.value = pool; o.onNotice?.(t('props.badNumber', lang)); return; }
+            if (v === null) { el.value = pool; o.onNotice?.(t('props.badNumber')); return; }
             if (v === p.poolRadius) { o.onNotice?.(null); return; }
-            if (!set({ poolRadius: v })) { el.value = pool; o.onNotice?.(t('props.noFit', lang)); return; }
+            if (!set({ poolRadius: v })) { el.value = pool; o.onNotice?.(t('props.noFit')); return; }
             o.onNotice?.(null);
           }} />`)}`;
     }
@@ -128,7 +126,7 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
     case 'motion_sensor':
       return html`${deg('zoneAngle', 'props.zoneAngle', p.zoneAngle)}${mm('zoneRange', 'props.zoneRange', p.zoneRange)}`;
     case 'exhaust_fan':
-      return row(`${t('props.diameter', lang)}, ${t('unit.mm', lang)}`, html`<select class="val" data-field=${`${pre}diameter`}
+      return row(`${t('props.diameter')}, ${t('unit.mm')}`, html`<select class="val" data-field=${`${pre}diameter`}
         .value=${fieldValue(String(p.diameter))} @change=${(e: Event) => {
           const el = e.target as HTMLSelectElement;
           const v = Number(el.value) as FanDiameter;
@@ -137,33 +135,32 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
         ${FAN_DIAMETERS.map(v => html`<option value=${String(v)} ?selected=${v === p.diameter}>${v}</option>`)}
       </select>`);
     case 'climate_sensor':
-      return pre === '' && o.device && o.level ? zoneFields(o, o.level, o.device, p.zoneIds, set) : nothing_();
+      return pre === '' && o.device && o.level ? zoneFields(o.level, o.device, p.zoneIds, set) : nothing_();
     case 'equipment':
       return html`
-        ${row(t('props.shape', lang), select(`${pre}shape`, p.shape, ['rect', 'circle'], 'shape', lang, v => set({ shape: v })))}
+        ${row(t('props.shape'), select(`${pre}shape`, p.shape, ['rect', 'circle'], 'shape', v => set({ shape: v })))}
         ${p.shape === 'rect'
           ? html`${mm('width', 'props.width', p.width)}${mm('depth', 'props.depth', p.depth)}`
           : mm('diameter', 'props.diameter', p.diameter)}
-        ${row(t('props.symbol', lang), select(`${pre}symbol`, p.symbol, ['boiler', 'pc', 'automation', 'other'], 'symbol', lang,
+        ${row(t('props.symbol'), select(`${pre}symbol`, p.symbol, ['boiler', 'pc', 'automation', 'other'], 'symbol',
           v => set({ symbol: v })))}
-        ${row(t('props.label', lang), html`<input class="val wide" type="text" data-field=${`${pre}label`} .value=${fieldValue(p.label)}
+        ${row(t('props.label'), html`<input class="val wide" type="text" data-field=${`${pre}label`} .value=${fieldValue(p.label)}
           @change=${(e: Event) => {
             const label = (e.target as HTMLInputElement).value.trim();
             if (label !== p.label) set({ label });
           }} />`)}`;
     default:
-      return html`<p class="muted">${t('props.noSettings', lang)}</p>`;
+      return html`<p class="muted">${t('props.noSettings')}</p>`;
   }
 }
 
 const nothing_ = (): TemplateResult => html`${nothing}`;
 
 /** All rooms of the level as checkboxes; with none checked the derived ("auto") room is named. */
-function zoneFields(o: DevicePropsOpts, level: Level, d: Device, ids: string[], set: (patch: Partial<DeviceProps>) => boolean): TemplateResult {
-  const lang = o.lang;
+function zoneFields(level: Level, d: Device, ids: string[], set: (patch: Partial<DeviceProps>) => boolean): TemplateResult {
   const auto = ids.length === 0 ? level.zones.find(z => z.id === deviceRoomId(level, d))?.name : undefined;
-  return html`<fieldset class="zones" data-field="zoneIds"><legend>${t('props.zones', lang)}${ids.length === 0
-      ? html` (${t('props.zonesAuto', lang)}${auto ? `: ${auto}` : ''})` : nothing}</legend>
+  return html`<fieldset class="zones" data-field="zoneIds"><legend>${t('props.zones')}${ids.length === 0
+      ? html` (${t('props.zonesAuto')}${auto ? `: ${auto}` : ''})` : nothing}</legend>
     ${level.zones.map(z => html`<label class="row"><input type="checkbox" data-zone=${z.id} .checked=${ids.includes(z.id)}
       @change=${(e: Event) => {
         const on = (e.target as HTMLInputElement).checked;
@@ -174,26 +171,24 @@ function zoneFields(o: DevicePropsOpts, level: Level, d: Device, ids: string[], 
 }
 
 function placementFields(o: DevicePropsOpts, d: Device): TemplateResult {
-  const lang = o.lang;
   const pl = d.placement;
   if (pl.mode === 'free') {
-    return row(`${t('props.rotation', lang)}, ${t('unit.deg', lang)}`,
+    return row(`${t('props.rotation')}, ${t('unit.deg')}`,
       numField(o, 'rotation', pl.rotation, 'rotation', v => o.onPlacement({ ...pl, rotation: v })));
   }
   const aims = d.props.kind === 'wall_light' || d.props.kind === 'motion_sensor' || d.props.kind === 'illuminance_sensor';
   return html`
-    ${row(t('props.side', lang), select<Side>('side', pl.side, ['left', 'right'], 'side', lang, v => o.onPlacement({ ...pl, side: v })))}
-    ${row(`${t('props.offset', lang)}, ${t('unit.mm', lang)}`, numField(o, 'offset', pl.offset, 'offset',
+    ${row(t('props.side'), select<Side>('side', pl.side, ['left', 'right'], 'side', v => o.onPlacement({ ...pl, side: v })))}
+    ${row(`${t('props.offset')}, ${t('unit.mm')}`, numField(o, 'offset', pl.offset, 'offset',
       v => o.onPlacement({ ...pl, offset: v })))}
-    ${aims ? row(`${t('props.aim', lang)}, ${t('unit.deg', lang)}`,
+    ${aims ? row(`${t('props.aim')}, ${t('unit.deg')}`,
       numField(o, 'aim', pl.aim ?? 0, 'aim', v => o.onPlacement(withAim(pl, v)))) : nothing}`;
 }
 
 function deviceProps(o: DevicePropsOpts, d: Device): TemplateResult {
-  const lang = o.lang;
   return html`
-    <h4>${t(`device.${d.props.kind}`, lang)}</h4>
-    ${row(t('props.name', lang), html`<input class="val wide" type="text" data-field="name" .value=${fieldValue(d.name)}
+    <h4>${t(`device.${d.props.kind}`)}</h4>
+    ${row(t('props.name'), html`<input class="val wide" type="text" data-field="name" .value=${fieldValue(d.name)}
       @change=${(e: Event) => {
         const el = e.target as HTMLInputElement;
         const name = el.value.trim();
@@ -202,8 +197,8 @@ function deviceProps(o: DevicePropsOpts, d: Device): TemplateResult {
       }} />`)}
     ${kindFields(o, d.props, '', patch => o.onDevice(patch))}
     ${placementFields(o, d)}
-    ${d.invalid ? html`<p class="warn">${t('props.invalidDevice', lang)}</p>` : nothing}
-    <button class="btn danger" data-action="delete-device" @click=${() => o.onDelete()}>${t('action.delete', lang)}</button>`;
+    ${d.invalid ? html`<p class="warn">${t('props.invalidDevice')}</p>` : nothing}
+    <button class="btn danger" data-action="delete-device" @click=${() => o.onDelete()}>${t('action.delete')}</button>`;
 }
 
 /** Right panel of the Equipment tab: the selected device, or the defaults of the next device to place. */
@@ -211,10 +206,10 @@ export function renderDeviceProps(o: DevicePropsOpts): TemplateResult {
   if (o.device) return deviceProps(o, o.device);
   if (o.nextKind && o.nextProps) {
     return html`
-      <h4>${t('props.nextDevice', o.lang)}: ${t(`device.${o.nextKind}`, o.lang)}</h4>
+      <h4>${t('props.nextDevice')}: ${t(`device.${o.nextKind}`)}</h4>
       ${kindFields(o, o.nextProps, 'next-', patch => { o.onNext(patch); return true; })}`;
   }
-  return html`<p class="muted">${t('props.none', o.lang)}</p>`;
+  return html`<p class="muted">${t('props.none')}</p>`;
 }
 
 export interface EquipmentPropsOpts {
@@ -222,7 +217,6 @@ export interface EquipmentPropsOpts {
   selection: Selection | null;
   toolId: ToolId;
   nextProps: Record<DeviceKind, DeviceProps>;
-  lang: string;
   notice: string | null;
   commit(next: Level): void;
   /** Commits a level in which the selected device was deleted. */
@@ -238,14 +232,14 @@ export function renderEquipmentProps(o: EquipmentPropsOpts): TemplateResult {
   const nextKind = isDeviceKind(o.toolId) ? o.toolId : null;
   /** Commits `next`; a rejected edit (same level back) keeps the level and shows "does not fit". */
   const edit = (next: Level): boolean => {
-    if (next === level) { o.setNotice(t('props.noFit', o.lang)); return false; }
+    if (next === level) { o.setNotice(t('props.noFit')); return false; }
     o.setNotice(null);
     o.commit(next);
     return true;
   };
   return html`<div class="props">
     ${renderDeviceProps({
-      device, level, nextKind, nextProps: nextKind ? o.nextProps[nextKind] : null, lang: o.lang,
+      device, level, nextKind, nextProps: nextKind ? o.nextProps[nextKind] : null,
       onDevice: (patch, name) => !!device && edit(setDeviceProps(level, device.id, patch, name)),
       onPlacement: p => !!device && edit(moveDevice(level, device.id, p)),
       onNext: patch => {

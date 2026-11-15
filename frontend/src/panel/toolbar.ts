@@ -5,7 +5,6 @@ import { t } from '../i18n';
 import { toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
 
 export interface TopBarOpts {
-  lang: string;
   /** Plan or Equipment tab; the wall type settings show only in the Plan tab. */
   mode: EditorMode;
   onMode(mode: EditorMode): void;
@@ -33,12 +32,12 @@ export interface TopBarOpts {
 
 function saveLabel(o: TopBarOpts): string {
   switch (o.saveState) {
-    case 'saving': return t('save.saving', o.lang);
-    case 'conflict': return t('save.conflict', o.lang);
-    case 'error': return t('save.error', o.lang);
+    case 'saving': return t('save.saving');
+    case 'conflict': return t('save.conflict');
+    case 'error': return t('save.error');
     default:
-      if (o.dirty) return t('save.dirty', o.lang);
-      return t(o.saveState === 'saved' ? 'save.saved' : 'save.clean', o.lang);
+      if (o.dirty) return t('save.dirty');
+      return t(o.saveState === 'saved' ? 'save.saved' : 'save.clean');
   }
 }
 
@@ -51,12 +50,11 @@ export function parseMm(value: string): number | null {
 }
 
 export function renderTopBar(o: TopBarOpts): TemplateResult {
-  const lang = o.lang;
   return html`
     <div class="top">
       ${o.lead ?? nothing}
       ${o.plans.length > 1 ? html`
-        <select class="plan-pick" aria-label=${t('plan.pick', lang)} title=${t('plan.pick', lang)}
+        <select class="plan-pick" aria-label=${t('plan.pick')} title=${t('plan.pick')}
           ?disabled=${o.saveState === 'saving'} .value=${fieldValue(o.planId)}
           @change=${(e: Event) => {
             const el = e.target as HTMLSelectElement;
@@ -66,35 +64,35 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
           }}>
           ${o.plans.map(p => html`<option value=${p.id} ?selected=${p.id === o.planId}>${p.name}</option>`)}
         </select>` : nothing}
-      <button class="btn" data-action="new-plan" title=${t('plan.new', lang)} aria-label=${t('plan.new', lang)}
+      <button class="btn" data-action="new-plan" title=${t('plan.new')} aria-label=${t('plan.new')}
         ?disabled=${o.busy || o.saveState === 'saving'} @click=${o.onNewPlan}>+</button>
-      <button class="btn" data-action="delete-plan" title=${t('plan.delete', lang)} aria-label=${t('plan.delete', lang)}
+      <button class="btn" data-action="delete-plan" title=${t('plan.delete')} aria-label=${t('plan.delete')}
         ?disabled=${o.busy || o.saveState === 'saving'} @click=${o.onDeletePlan}>&#128465;</button>
-      <input class="plan-name" .value=${fieldValue(o.planName)} aria-label=${t('plan.name', lang)} title=${t('plan.name', lang)}
+      <input class="plan-name" .value=${fieldValue(o.planName)} aria-label=${t('plan.name')} title=${t('plan.name')}
         @change=${(e: Event) => o.onRename((e.target as HTMLInputElement).value)} />
       <span class="seg mode-tabs">
         ${(['plan', 'equipment'] as EditorMode[]).map(m => html`
           <button class="tab ${o.mode === m ? 'on' : ''}" data-mode=${m} @click=${() => o.onMode(m)}>
-            ${t(`mode.${m}`, lang)}</button>`)}
+            ${t(`mode.${m}`)}</button>`)}
       </span>
       <span class="sp"></span>
-      <button class="btn" title=${t('action.undo', lang)} aria-label=${t('action.undo', lang)} ?disabled=${!o.canUndo}
+      <button class="btn" title=${t('action.undo')} aria-label=${t('action.undo')} ?disabled=${!o.canUndo}
         @click=${o.onUndo}>↶</button>
-      <button class="btn" title=${t('action.redo', lang)} aria-label=${t('action.redo', lang)} ?disabled=${!o.canRedo}
+      <button class="btn" title=${t('action.redo')} aria-label=${t('action.redo')} ?disabled=${!o.canRedo}
         @click=${o.onRedo}>↷</button>
       <span class="save-state ${o.saveState}" title=${o.saveState === 'error' ? o.errorMessage ?? '' : ''}>
         ${saveLabel(o)}${o.saveState === 'error' && o.errorMessage ? html`: ${o.errorMessage}` : nothing}</span>
       <button class="btn primary" data-action="save" ?disabled=${o.saveState === 'saving'} @click=${o.onSave}>
-        ${t('action.save', lang)}</button>
+        ${t('action.save')}</button>
     </div>`;
 }
 
-export function renderToolRail(mode: EditorMode, active: ToolId, lang: string, onPick: (id: ToolId) => void): TemplateResult {
+export function renderToolRail(mode: EditorMode, active: ToolId, onPick: (id: ToolId) => void): TemplateResult {
   return html`
     <div class="tools">
       ${toolIdsFor(mode).map(id => html`
         ${id === 'zone' || id === 'ceiling_light' ? html`<div class="tool-sep"></div>` : nothing}
         <button class="tool ${active === id ? 'on' : ''}" data-tool=${id} @click=${() => onPick(id)}>
-          ${t(`tool.${id}`, lang)}</button>`)}
+          ${t(`tool.${id}`)}</button>`)}
     </div>`;
 }

@@ -15,7 +15,6 @@ export interface DeviceRenderOpts {
   selection: Selection | null;
   showCones: boolean;
   dim: boolean;
-  lang: string;
   preview?: Preview['device'];
 }
 

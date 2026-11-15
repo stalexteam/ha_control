@@ -28,10 +28,9 @@ const fail = (code: string, message: string) => Promise.reject({ code, message }
  * an existing plan needs expected_revision == current unless force; a missing plan with a non-null
  * expected_revision is a conflict even with force.
  */
-export function createMockHass(opts: { language?: string; darkMode?: boolean; storage?: Storage } = {}): HassLike {
+export function createMockHass(opts: { darkMode?: boolean; storage?: Storage } = {}): HassLike {
   const storage = opts.storage ?? localStorage;
   return {
-    language: opts.language ?? 'en',
     themes: { darkMode: opts.darkMode ?? true },
     connection: {
       sendMessagePromise<T>(msg: Record<string, unknown>): Promise<T> {

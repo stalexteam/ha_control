@@ -186,7 +186,7 @@ const en: Dict = {
   'unit.deg': '°',
 };
 
-export function t(key: string, _lang?: string): string {
+export function t(key: string): string {
   return en[key] ?? key;
 }
 

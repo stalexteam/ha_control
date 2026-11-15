@@ -105,8 +105,6 @@ export class PlanStudioPanel extends LitElement {
     this.input = new EditorInput(host);
   }
 
-  get uiLang(): string { return this.hass?.language ?? 'en'; }
-
   // ---- lifecycle ----
 
   private onBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -248,7 +246,7 @@ export class PlanStudioPanel extends LitElement {
 
   private renderDialog(): TemplateResult | typeof nothing {
     return renderActiveDialog({
-      lang: this.uiLang, draft: this.pendingDraft, restoreOpen: this.restoreOpen, newConfirm: this.newConfirm,
+      draft: this.pendingDraft, restoreOpen: this.restoreOpen, newConfirm: this.newConfirm,
       deleteConfirm: this.deleteConfirm, switchTo: this.switchTo, dialog: this.dialog, planName: this.plan?.name ?? '',
       saving: this.save.state === 'saving', message: this.save.errorMessage,
       restore: d => this.session.restoreDraft(d), discard: d => this.session.discardDraft(d), startNew: () => this.session.startNewPlan(),
@@ -260,12 +258,11 @@ export class PlanStudioPanel extends LitElement {
   }
 
   render() {
-    const lang = this.uiLang;
     if (!this.plan || !this.history) {
       return html`<div class="center">${this.loadError
-        ? html`<span>${t('load.error', lang)}: ${this.loadError}</span>
-            <button @click=${() => this.session.load()}>${t('action.retry', lang)}</button>`
-        : t('load.loading', lang)}</div>`;
+        ? html`<span>${t('load.error')}: ${this.loadError}</span>
+            <button @click=${() => this.session.load()}>${t('action.retry')}</button>`
+        : t('load.loading')}</div>`;
     }
     const pal = paletteFor(!!this.hass?.themes?.darkMode);
     const level = this.history.current;
@@ -276,7 +273,7 @@ export class PlanStudioPanel extends LitElement {
     return html`
       <div class="ed" style=${paletteVars(pal)} @click=${this.refocus} @change=${this.refocusAfterChange}>
         ${renderTopBar({
-          lang, mode: this.mode, onMode: m => this.setMode(m), planName: this.plan.name, planId: this.plan.id, plans: this.session.planOptions(),
+          mode: this.mode, onMode: m => this.setMode(m), planName: this.plan.name, planId: this.plan.id, plans: this.session.planOptions(),
           canUndo: this.history.canUndo, canRedo: this.history.canRedo,
           saveState: s.state, dirty: s.dirty, errorMessage: s.errorMessage,
           lead: this.narrow ? html`<ha-menu-button .hass=${this.hass} .narrow=${this.narrow}></ha-menu-button>` : nothing,
@@ -285,7 +282,7 @@ export class PlanStudioPanel extends LitElement {
           onNewPlan: () => this.session.requestNewPlan(), onDeletePlan: () => this.session.requestDelete(), busy: this.deleting,
           onUndo: () => this.undo(), onRedo: () => this.redo(), onSave: () => this.session.doSave(),
         })}
-        ${renderToolRail(this.mode, this.toolId, lang, id => this.pickTool(id))}
+        ${renderToolRail(this.mode, this.toolId, id => this.pickTool(id))}
         ${renderSide(this, level)}
         <div class="canvas">
           <svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox=${`${x} ${y} ${w} ${h}`}
@@ -294,20 +291,20 @@ export class PlanStudioPanel extends LitElement {
             @pointerup=${this.input.pointerUp} @pointercancel=${this.input.pointerAbort}
             @lostpointercapture=${this.input.pointerAbort} @wheel=${this.input.wheel} @contextmenu=${(e: Event) => e.preventDefault()}>
             ${this.grid ? renderGrid(this.view, w, h, pal) : nothing}
-            ${renderLevel(level, { palette: pal, selection: this.selection, preview, scale, lang, mode: this.mode, showCones: this.cones })}
+            ${renderLevel(level, { palette: pal, selection: this.selection, preview, scale, mode: this.mode, showCones: this.cones })}
             ${preview.tracker ? renderTracker(preview.tracker, {
-              palette: pal, scale, lang, mode: this.toolId === 'box' ? 'box' : 'wall',
+              palette: pal, scale, mode: this.toolId === 'box' ? 'box' : 'wall',
               live: trackerLive(preview, this.toolId === 'box' ? 'box' : 'wall', this.boxMeasure, this.thickness),
             }) : nothing}
           </svg>
           ${this.pendingDraft && !this.restoreOpen ? renderDraftBanner({
-            lang, savedAt: this.pendingDraft.savedAt,
+            savedAt: this.pendingDraft.savedAt,
             onRestore: () => this.session.restoreDraft(this.pendingDraft!), onDiscard: () => this.session.discardDraft(this.pendingDraft!),
           }) : nothing}
         </div>
         ${renderStatusBar({
-          lang, grid: this.grid, zoomPct: Math.round(scale * 1000),
-          snap: preview.snap && preview.snap.kind !== 'none' ? t(`snap.${preview.snap.kind}`, lang) : null,
+          grid: this.grid, zoomPct: Math.round(scale * 1000),
+          snap: preview.snap && preview.snap.kind !== 'none' ? t(`snap.${preview.snap.kind}`) : null,
           onGrid: on => { this.grid = on; }, cones: this.cones, onCones: on => { this.cones = on; },
         })}
         ${this.renderDialog()}

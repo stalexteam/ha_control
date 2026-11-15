@@ -2,7 +2,6 @@ import type { Id, Plan } from './model/types';
 
 export interface HassLike {
   connection: { sendMessagePromise<T>(msg: Record<string, unknown>): Promise<T> };
-  language: string;
   themes?: { darkMode?: boolean };
 }
 

@@ -20,7 +20,6 @@ export interface ToolHost {
   nextObj: NextObjects;
   selection: Selection | null;
   notice: string | null;
-  readonly uiLang: string;
   commit(next: Level): void;
 }
 
@@ -33,10 +32,9 @@ export function createToolContext(h: ToolHost): ToolContext {
     wallProps: () => ({ type: h.wallType, thickness: h.thickness, baseline: 'center' }),
     boxMeasure: () => h.boxMeasure,
     select: s => { h.selection = s; h.notice = null; },
-    lang: () => h.uiLang,
     deviceDefaults: k => h.nextProps[k],
     openingDefaults: (k: OpeningKind) => openingDefaults(h.nextObj, k),
-    zoneName: () => h.nextObj.zoneName ?? defaultZoneName(h.history?.current ?? EMPTY_LEVEL, h.uiLang),
+    zoneName: () => h.nextObj.zoneName ?? defaultZoneName(h.history?.current ?? EMPTY_LEVEL),
     /** A custom zone name is single-use: the next default is "Room N" again. */
     zonePlaced: () => { h.nextObj = { ...h.nextObj, zoneName: null }; },
   };

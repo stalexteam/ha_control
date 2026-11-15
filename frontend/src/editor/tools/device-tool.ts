@@ -92,7 +92,7 @@ export function createDeviceTool(ctx: ToolContext, kind: DeviceKind): Tool {
       const pr = probe();
       if (!pr || pr.invalid) return;
       const level = ctx.level();
-      const base = t(`device.${kind}`, ctx.lang());
+      const base = t(`device.${kind}`);
       const used = new Set(level.devices.filter(d => d.props.kind === kind).map(d => d.name));
       let n = 1;
       while (used.has(`${base} ${n}`)) n++;

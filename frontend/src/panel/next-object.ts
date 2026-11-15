@@ -33,8 +33,8 @@ export function openingDefaults(n: NextObjects, kind: OpeningKind): OpeningDefau
 }
 
 /** "Room N" with the smallest N not used by a zone name on the level. */
-export function defaultZoneName(level: Level, lang: string): string {
-  const base = t('zone.default', lang);
+export function defaultZoneName(level: Level): string {
+  const base = t('zone.default');
   const used = new Set(level.zones.map(z => z.name));
   let n = 1;
   while (used.has(`${base} ${n}`)) n++;
@@ -45,7 +45,6 @@ export interface NextObjectOpts {
   tool: string;
   level: Level;
   next: NextObjects;
-  lang: string;
   setNext(n: NextObjects): void;
   setNotice(msg: string | null): void;
 }
@@ -63,13 +62,12 @@ const row = (label: string, field: TemplateResult): TemplateResult => html`<labe
 
 /** Panel section for the object the active door / window / opening / zone tool will create. */
 export function renderNextObject(o: NextObjectOpts): TemplateResult | typeof nothing {
-  const lang = o.lang;
   const n = o.next;
   if (o.tool === 'zone') {
-    const shown = n.zoneName ?? defaultZoneName(o.level, lang);
+    const shown = n.zoneName ?? defaultZoneName(o.level);
     return html`
-      <h4>${t('props.nextZone', lang)}</h4>
-      ${row(t('props.name', lang), html`<input class="val wide" type="text" data-field="next-zone-name" .value=${fieldValue(shown)}
+      <h4>${t('props.nextZone')}</h4>
+      ${row(t('props.name'), html`<input class="val wide" type="text" data-field="next-zone-name" .value=${fieldValue(shown)}
         @change=${(e: Event) => {
           const el = e.target as HTMLInputElement;
           const name = el.value.trim();
@@ -80,23 +78,23 @@ export function renderNextObject(o: NextObjectOpts): TemplateResult | typeof not
   if (o.tool !== 'door' && o.tool !== 'window' && o.tool !== 'opening') return nothing;
   const kind: NextOpeningKind = o.tool;
   const width = n[kind].width;
-  const sides = (['left', 'right'] as Side[]).map(v => ({ v, label: t(`side.${v}`, lang) }));
+  const sides = (['left', 'right'] as Side[]).map(v => ({ v, label: t(`side.${v}`) }));
   const patch = (p: object) => o.setNext({ ...n, [kind]: { ...n[kind], ...p } });
   return html`
-    <h4>${t(`props.next.${kind}`, lang)}</h4>
-    ${row(`${t('props.width', lang)}, ${t('unit.mm', lang)}`, html`<input class="val" type="text" inputmode="numeric"
+    <h4>${t(`props.next.${kind}`)}</h4>
+    ${row(`${t('props.width')}, ${t('unit.mm')}`, html`<input class="val" type="text" inputmode="numeric"
       data-field="next-width" .value=${fieldValue(String(width))}
       @change=${(e: Event) => {
         const el = e.target as HTMLInputElement;
         const v = parseMm(el.value);
-        if (v === null) { el.value = String(width); o.setNotice(t('props.badWidth', lang)); return; }
+        if (v === null) { el.value = String(width); o.setNotice(t('props.badWidth')); return; }
         o.setNotice(null);
         if (v !== width) patch({ width: v });
       }} />`)}
     ${kind === 'door' ? html`
-      ${row(t('props.hinge', lang), sel('next-hinge', n.door.hinge,
-        (['start', 'end'] as const).map(v => ({ v, label: t(`hinge.${v}`, lang) })), v => { if (v !== n.door.hinge) patch({ hinge: v }); }))}
-      ${row(t('props.swing', lang), sel('next-swing', n.door.swing, sides, v => { if (v !== n.door.swing) patch({ swing: v }); }))}` : nothing}
-    ${kind === 'window' ? row(t('props.outside', lang), sel('next-outside', n.window.outside, sides,
+      ${row(t('props.hinge'), sel('next-hinge', n.door.hinge,
+        (['start', 'end'] as const).map(v => ({ v, label: t(`hinge.${v}`) })), v => { if (v !== n.door.hinge) patch({ hinge: v }); }))}
+      ${row(t('props.swing'), sel('next-swing', n.door.swing, sides, v => { if (v !== n.door.swing) patch({ swing: v }); }))}` : nothing}
+    ${kind === 'window' ? row(t('props.outside'), sel('next-outside', n.window.outside, sides,
       v => { if (v !== n.window.outside) patch({ outside: v }); })) : nothing}`;
 }

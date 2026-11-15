@@ -19,7 +19,7 @@ function sample(): Level {
 }
 
 function draw(level: Level, selection: Selection | null = null, preview: Preview = {}): SVGSVGElement {
-  const content = renderLevel(level, { palette: paletteFor(true), selection, preview, scale: 0.1, lang: 'en' });
+  const content = renderLevel(level, { palette: paletteFor(true), selection, preview, scale: 0.1 });
   const host = document.createElement('div');
   document.body.appendChild(host);
   render(html`<svg xmlns="http://www.w3.org/2000/svg">${content}</svg>`, host);
@@ -95,7 +95,7 @@ describe('renderLevel', () => {
   it('sizes snap markers in screen pixels', () => {
     const at = (scale: number) => {
       document.body.innerHTML = '';
-      const content = renderLevel(sample(), { palette: paletteFor(true), selection: null, preview: snapOf('node'), scale, lang: 'en' });
+      const content = renderLevel(sample(), { palette: paletteFor(true), selection: null, preview: snapOf('node'), scale });
       const host = document.createElement('div');
       document.body.appendChild(host);
       render(html`<svg xmlns="http://www.w3.org/2000/svg">${content}</svg>`, host);
@@ -124,7 +124,7 @@ describe('renderLevel', () => {
     const pal = paletteFor(true);
     const host = document.createElement('div');
     document.body.appendChild(host);
-    render(html`<svg xmlns="http://www.w3.org/2000/svg">${renderLevel(sample(), { palette: pal, selection: null, preview: {}, scale: 0.1, lang: 'en', mode: 'equipment' })}</svg>`, host);
+    render(html`<svg xmlns="http://www.w3.org/2000/svg">${renderLevel(sample(), { palette: pal, selection: null, preview: {}, scale: 0.1, mode: 'equipment' })}</svg>`, host);
     const svg = host.querySelector('svg')!;
     expect(svg.querySelector('g.wall-breaks')!.getAttribute('opacity')).toBe(String(pal.dimOpacity));
     expect(svg.querySelector('path.walls')!.getAttribute('opacity')).toBe(String(pal.dimOpacity));

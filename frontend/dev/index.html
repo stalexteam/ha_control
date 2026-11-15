@@ -14,7 +14,6 @@
 </head>
 <body>
   <div id="bar">
-    <select id="lang"><option value="en">en</option></select>
     <label><input type="checkbox" id="dark" checked /> dark</label>
     <button id="foreign" title="Bump stored revision as if another tab saved">foreign save</button>
     <button id="wipe" title="Delete stored plans">delete stored</button>
@@ -25,21 +24,17 @@
     import { createMockHass, simulateForeignSave, clearPlans } from './mock-hass.ts';
 
     const params = new URLSearchParams(location.search);
-    const lang = params.get('lang') ?? 'en';
     const dark = params.get('dark') !== '0';
-    document.getElementById('lang').value = lang;
     document.getElementById('dark').checked = dark;
     document.body.style.background = dark ? '#0b1220' : '#f3efe8';
 
     const panel = document.getElementById('panel');
-    panel.hass = createMockHass({ language: lang, darkMode: dark });
+    panel.hass = createMockHass({ darkMode: dark });
 
     const reload = () => {
-      params.set('lang', document.getElementById('lang').value);
       params.set('dark', document.getElementById('dark').checked ? '1' : '0');
       location.search = params.toString();
     };
-    document.getElementById('lang').addEventListener('change', reload);
     document.getElementById('dark').addEventListener('change', reload);
     document.getElementById('foreign').addEventListener('click', () => simulateForeignSave());
     document.getElementById('wipe').addEventListener('click', () => clearPlans());

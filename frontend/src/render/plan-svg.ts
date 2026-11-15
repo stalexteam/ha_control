@@ -15,7 +15,6 @@ export interface RenderOpts {
   preview: Preview;
   /** Screen pixels per millimetre; used to keep strokes, text and handles a constant on-screen size. */
   scale: number;
-  lang: string;
   /** plan: devices dimmed; equipment: walls, openings and rooms dimmed. Default plan. */
   mode?: 'plan' | 'equipment';
   /** Default true. */
@@ -29,9 +28,9 @@ export function formatMm(v: number): string {
   return n < 0 ? `-${s}` : s;
 }
 
-export function formatArea(m2: number, lang: string): string {
+export function formatArea(m2: number): string {
   const s = m2.toFixed(2);
-  return `${s} ${t('unit.m2', lang)}`;
+  return `${s} ${t('unit.m2')}`;
 }
 
 // Geometry is cached per level object: levels are immutable snapshots.
@@ -122,7 +121,7 @@ function renderZone(z: Zone, o: RenderOpts, selected: boolean): SVGTemplateResul
     <text class="zone-label" x=${at.x} y=${at.y} text-anchor="middle" font-size=${fs}
       fill=${z.broken ? p.invalid : p.zoneLabel} font-family="system-ui, sans-serif">
       <tspan x=${at.x} dy=${-0.2 * fs}>${z.name}</tspan>
-      <tspan x=${at.x} dy=${1.2 * fs} font-size=${fs * 0.9}>${formatArea(roomAreaM2(z.outline), o.lang)}</tspan>
+      <tspan x=${at.x} dy=${1.2 * fs} font-size=${fs * 0.9}>${formatArea(roomAreaM2(z.outline))}</tspan>
     </text>`;
 }
 
@@ -307,7 +306,7 @@ function renderSnap(level: Level, o: RenderOpts): SVGTemplateResult | typeof not
       <path d=${d} fill="none" stroke=${halo.stroke} stroke-width="4" stroke-linecap="round" vector-effect=${NS}></path>
       <path d=${d} fill="none" stroke=${p.snap} stroke-width="1.5" stroke-linecap="round" vector-effect=${NS}></path></g>`;
   }
-  const label = t(`snapmark.${s.kind}`, o.lang);
+  const label = t(`snapmark.${s.kind}`);
   return svg`
     ${hl}${anchor}${marker}
     <text class="snap-label" x=${x + px(9)} y=${y - px(9)} font-size=${px(11)} fill=${p.snap} stroke=${p.background}
@@ -342,7 +341,7 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
     <g class="openings" opacity=${dimOp}>${lv.openings.map(op => renderOpening(lv, op, o))}</g>
     <g class="wall-breaks" opacity=${dimOp}>${renderWallBreaks(lv, o)}</g>
     <g class="devices-layer">${renderDevices(lv, {
-      palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: !equip, lang: o.lang, preview: o.preview.device,
+      palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: !equip, preview: o.preview.device,
     })}</g>
     <g class="selection">${renderSelection(lv, o)}</g>
     <g class="preview">${renderPreview(lv, o)}</g>`;

@@ -28,7 +28,7 @@ function levelWithAll(): Level {
 }
 
 type DevOpts = Parameters<typeof renderDevices>[1];
-const base = { palette: paletteFor(true), selection: null, showCones: true, dim: false, lang: 'en' };
+const base = { palette: paletteFor(true), selection: null, showCones: true, dim: false };
 
 function mount(content: unknown): SVGSVGElement {
   const host = document.createElement('div');
@@ -39,7 +39,7 @@ function mount(content: unknown): SVGSVGElement {
 const drawDevs = (level: Level, o: Partial<DevOpts> = {}, scale = 0.1) =>
   mount(renderDevices(level, { ...base, scale, ...o } as DevOpts));
 const drawLevel = (level: Level, o: Record<string, unknown> = {}, scale = 0.1) =>
-  mount(renderLevel(level, { palette: paletteFor(true), selection: null, preview: {}, scale, lang: 'en', ...o }));
+  mount(renderLevel(level, { palette: paletteFor(true), selection: null, preview: {}, scale, ...o }));
 
 describe('renderDevices', () => {
   beforeEach(() => { document.body.innerHTML = ''; });
