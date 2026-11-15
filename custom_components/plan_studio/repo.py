@@ -61,6 +61,9 @@ class PlanRepo:
             for p in self._plans.values()
         ]
 
+    def plans(self) -> list[dict]:
+        return list(self._plans.values())
+
     def get(self, plan_id: str) -> dict | None:
         plan = self._plans.get(plan_id)
         return copy.deepcopy(plan) if plan is not None else None

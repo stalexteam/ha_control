@@ -20,6 +20,9 @@ class PlanStore:
     def list(self) -> list[dict]:
         return self._repo.list()
 
+    def plans(self) -> list[dict]:
+        return self._repo.plans()
+
     def get(self, plan_id: str) -> dict | None:
         return self._repo.get(plan_id)
 

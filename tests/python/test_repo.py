@@ -54,3 +54,6 @@ def test_snapshot_restore_undoes_a_save():
     r.save(plan("p1", name="Changed"), 1); r.save(plan("p2"), None)
     r.restore(snap)
     assert r.list() == [{"id": "p1", "name": "P", "revision": 1}]
+def test_repo_plans_returns_stored_plans():
+    r = PlanRepo(None); r.save(plan("p1"), None); r.save(plan("p2"), None)
+    assert {p["id"] for p in r.plans()} == {"p1", "p2"}
