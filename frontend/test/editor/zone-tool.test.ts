@@ -6,7 +6,7 @@ import { fakeContext } from './fake-context';
 
 const ev = (x: number, y: number) => ({ pt: { x, y }, shift: false, alt: false, ctrl: false });
 const props = { type: 'partition', thickness: 100, baseline: 'center' } as const;
-const empty = (): Level => ({ id: 'l0', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [] });
+const empty = (): Level => ({ id: 'l0', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] });
 const box = () => addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 4000 }, props, 'axis');
 
 describe('zone tool', () => {

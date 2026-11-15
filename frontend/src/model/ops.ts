@@ -2,6 +2,7 @@ import { newId } from './ids';
 import type { Baseline, Id, Level, PlanNode, Pt, Wall, WallType } from './types';
 import { add, dist, lerp, norm, projectT, scale, sub } from '../geometry/vec';
 import { refreshOpenings } from './openings';
+import { reanchorDevices, refreshDevices } from './devices';
 import { refreshZones } from './zones';
 
 /** Result of snapping a cursor point (see Task 7 SnapResult). */
@@ -83,8 +84,11 @@ function settleNodes(out: Level): void {
  */
 function postEdit(out: Level, before?: Level): Level {
   settleNodes(out);
-  if (before) reanchorOpenings(before, out);
-  return refreshZones(refreshOpenings(out));
+  if (before) {
+    reanchorOpenings(before, out);
+    reanchorDevices(before, out);
+  }
+  return refreshZones(refreshDevices(refreshOpenings(out)));
 }
 
 /** Post-edit step for a level already edited by the caller; `before` enables opening re-anchoring. */
@@ -225,6 +229,7 @@ export function mergeNodes(level: Level, fromId: Id, intoId: Id): Level {
   const dead = new Set(out.walls.filter(w => w.a === w.b).map(w => w.id));
   out.walls = out.walls.filter(w => !dead.has(w.id));
   out.openings = out.openings.filter(o => !dead.has(o.wallId));
+  out.devices = (out.devices ?? []).filter(d => d.placement.mode !== 'wall' || !dead.has(d.placement.wallId));
   for (const n of out.nodes) if (n.host && dead.has(n.host.wallId)) delete n.host;
   out.nodes = out.nodes.filter(n => n.id !== fromId);
   dropOrphans(out);
@@ -235,6 +240,7 @@ export function deleteWall(level: Level, wallId: Id): Level {
   const out = clone(level);
   out.walls = out.walls.filter(w => w.id !== wallId);
   out.openings = out.openings.filter(o => o.wallId !== wallId);
+  out.devices = (out.devices ?? []).filter(d => d.placement.mode !== 'wall' || d.placement.wallId !== wallId);
   for (const n of out.nodes) if (n.host?.wallId === wallId) delete n.host;
   dropOrphans(out);
   return finalize(out, level);

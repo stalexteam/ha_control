@@ -8,7 +8,7 @@ const oneWall = (): Level => ({
   id: 'l', name: 'L', kind: 'floor', order: 0,
   nodes: [{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 3000, y: 0 }],
   walls: [{ id: 'w', a: 'a', b: 'b', thickness: 200, type: 'partition', baseline: 'center' }],
-  openings: [], zones: [],
+  openings: [], zones: [], devices: [],
 });
 
 describe('addOpening', () => {

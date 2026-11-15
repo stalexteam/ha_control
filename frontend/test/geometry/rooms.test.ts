@@ -11,7 +11,7 @@ import { rectRoomLevel } from '../fixtures';
 
 const part: WallProps = { type: 'partition', thickness: 100, baseline: 'center' };
 const bearing: WallProps = { type: 'bearing', thickness: 400, baseline: 'center' };
-const empty = (): Level => ({ id: 'l', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [] });
+const empty = (): Level => ({ id: 'l', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] });
 const free = (x: number, y: number) => ({ kind: 'free' as const, pt: { x, y } });
 const wall = (id: string, a: string, b: string, thickness: number): Wall =>
   ({ id, a, b, thickness, type: 'partition', baseline: 'center' });

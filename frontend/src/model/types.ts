@@ -47,6 +47,20 @@ export interface Zone {
   broken: boolean;
 }
 
+export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | 'switch' | 'socket' | 'equipment';
+export type DevicePlacement =
+  | { mode: 'wall'; wallId: Id; side: Side; offset: number } // offset: along axis from node A to device centre
+  | { mode: 'free'; x: number; y: number; rotation: number }; // rotation in degrees
+export type DeviceProps =
+  | { kind: 'ceiling_light'; shape: 'round' | 'linear' | 'spot'; diameter: number; length: number; width: number; poolRadius: number | null }
+  | { kind: 'wall_light'; coneAngle: number; coneRange: number }
+  | { kind: 'motion_sensor'; zoneAngle: number; zoneRange: number }
+  | { kind: 'illuminance_sensor' } | { kind: 'switch' } | { kind: 'socket' }
+  | { kind: 'equipment'; shape: 'rect' | 'circle'; width: number; depth: number; diameter: number;
+      symbol: 'boiler' | 'pc' | 'automation' | 'other'; label: string };
+
+export interface Device { id: Id; name: string; placement: DevicePlacement; props: DeviceProps; invalid: boolean }
+
 export interface Level {
   id: Id;
   name: string;
@@ -56,6 +70,7 @@ export interface Level {
   walls: Wall[];
   openings: Opening[];
   zones: Zone[];
+  devices: Device[];
 }
 
 export interface Plan {
@@ -88,7 +103,37 @@ export function emptyPlan(name: string): Plan {
     schemaVersion: 1,
     revision: 0,
     levels: [
-      { id: newId(), name: 'Level 1', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [] },
+      { id: newId(), name: 'Level 1', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] },
     ],
   };
+}
+
+export const DEVICE_PLACEMENTS: Record<DeviceKind, ('wall' | 'free')[]> = {
+  ceiling_light: ['free'],
+  wall_light: ['wall', 'free'],
+  motion_sensor: ['free', 'wall'],
+  illuminance_sensor: ['free', 'wall'],
+  switch: ['wall'],
+  socket: ['wall'],
+  equipment: ['free'],
+};
+
+export function deviceDefaults(kind: DeviceKind, mode: 'wall' | 'free'): DeviceProps {
+  switch (kind) {
+    case 'ceiling_light':
+      return { kind, shape: 'round', diameter: 300, length: 1200, width: 100, poolRadius: null };
+    case 'wall_light':
+      return { kind, coneAngle: 90, coneRange: 2000 };
+    case 'motion_sensor':
+      return { kind, zoneAngle: mode === 'free' ? 360 : 110, zoneRange: 5000 };
+    case 'equipment':
+      return { kind, shape: 'rect', width: 600, depth: 600, diameter: 600, symbol: 'other', label: '' };
+    default:
+      return { kind };
+  }
+}
+
+/** Stage-1 plans have no `devices`; a missing field means []. Same object back when already present. */
+export function normalizeLevel(level: Level): Level {
+  return level.devices ? level : { ...level, devices: [] };
 }

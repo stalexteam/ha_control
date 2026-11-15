@@ -1,7 +1,7 @@
 import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from 'lit';
 import { property, state } from 'lit/decorators.js';
 import type { Id, Level, Plan, Pt, WallType } from '../model/types';
-import { WALL_PRESETS, emptyPlan } from '../model/types';
+import { WALL_PRESETS, emptyPlan, normalizeLevel } from '../model/types';
 import { newId } from '../model/ids';
 import { deleteWall } from '../model/ops';
 import { deleteOpening } from '../model/openings';
@@ -27,7 +27,7 @@ import { EditorInput, type InputHost } from './input';
 import { renderConflictDialog, renderDeleteDialog, renderDraftBanner, renderNewPlanDialog, renderRestoreDialog, renderSwitchDialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 
-const EMPTY_LEVEL: Level = { id: '', name: '', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [] };
+const EMPTY_LEVEL: Level = { id: '', name: '', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] };
 
 function exists(level: Level, s: Selection): boolean {
   const list = s.kind === 'wall' ? level.walls : s.kind === 'node' ? level.nodes
@@ -341,10 +341,10 @@ export class PlanStudioPanel extends LitElement {
     // A plan without levels (foreign or hand-edited data) gets one empty floor instead of crashing the editor.
     const plan: Plan = Array.isArray(input.levels) && input.levels.length > 0 ? input : {
       ...input,
-      levels: [{ id: newId(), name: 'Level 1', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [] }],
+      levels: [{ id: newId(), name: 'Level 1', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] }],
     };
-    this.plan = plan;
-    this.history = new History<Level>(plan.levels[0]);
+    this.plan = { ...plan, levels: plan.levels.map(normalizeLevel) };
+    this.history = new History<Level>(this.plan.levels[0]);
     this.activeTool.cancel();
     this.activeTool = this.makeTool(this.toolId);
     this.selection = null;

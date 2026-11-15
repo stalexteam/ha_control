@@ -14,5 +14,5 @@ export function rectRoomLevel(w: number, d: number, thickness: number): Level {
     { id: 'w2', a: 'n2', b: 'n3', thickness, type: 'bearing', baseline: 'center' },
     { id: 'w3', a: 'n3', b: 'n0', thickness, type: 'bearing', baseline: 'center' },
   ];
-  return { id: 'l0', name: 'Level 1', kind: 'floor', order: 0, nodes, walls, openings: [], zones: [] };
+  return { id: 'l0', name: 'Level 1', kind: 'floor', order: 0, nodes, walls, openings: [], zones: [], devices: [] };
 }

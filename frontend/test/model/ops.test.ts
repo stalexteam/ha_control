@@ -9,7 +9,7 @@ import { rectRoomLevel } from '../fixtures';
 
 const bearing400: WallProps = { type: 'bearing', thickness: 400, baseline: 'center' };
 const part100: WallProps = { type: 'partition', thickness: 100, baseline: 'center' };
-const empty = (): Level => ({ id: 'l', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [] });
+const empty = (): Level => ({ id: 'l', name: 'L', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [], devices: [] });
 const pts = (l: Level) => l.nodes.map(n => ({ x: n.x, y: n.y }));
 
 describe('addBox', () => {

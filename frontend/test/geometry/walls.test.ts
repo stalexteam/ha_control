@@ -5,7 +5,7 @@ import { polygonArea } from '../../src/geometry/vec';
 import { rectRoomLevel } from '../fixtures';
 
 const lvl = (nodes: Level['nodes'], walls: Wall[], openings: Level['openings'] = []): Level =>
-  ({ id: 'l', name: 'L', kind: 'floor', order: 0, nodes, walls, openings, zones: [] });
+  ({ id: 'l', name: 'L', kind: 'floor', order: 0, nodes, walls, openings, zones: [], devices: [] });
 const wall = (id: string, a: string, b: string, thickness: number, baseline: Wall['baseline'] = 'center'): Wall =>
   ({ id, a, b, thickness, type: thickness >= 400 ? 'bearing' : 'partition', baseline });
 const has = (ring: Pt[], p: Pt) => ring.some(q => Math.abs(q.x - p.x) < 1e-6 && Math.abs(q.y - p.y) < 1e-6);
