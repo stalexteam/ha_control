@@ -1,4 +1,5 @@
 import { LitElement, css, html, svg, nothing, type TemplateResult } from 'lit';
+import { ifDefined } from 'lit/directives/if-defined.js';
 import { property, state } from 'lit/decorators.js';
 import { t } from '../i18n';
 import { entityLabel } from './candidates';
@@ -46,6 +47,10 @@ function domainLabel(domain: string): string {
 }
 
 const MAX_ROWS = 100;
+let nextUid = 0;
+
+interface Row { e: EntityMeta; name: string; context: string }
+interface Shown { rows: Row[]; more: boolean }
 
 /** Self-contained entity combobox laid out like Home Assistant's entity picker. Fires `value-changed` ({ value }). */
 export class EntityCombo extends LitElement {
@@ -56,6 +61,8 @@ export class EntityCombo extends LitElement {
   @state() private isOpen = false;
   @state() private query = '';
   @state() private active = 0;
+  private readonly uid = `psec${nextUid++}`;
+  private shown: { key: [unknown, unknown, string]; value: Shown } | null = null;
 
   private readonly onOutside = (e: Event): void => {
     if (!e.composedPath().includes(this)) this.close();
@@ -72,8 +79,9 @@ export class EntityCombo extends LitElement {
       --c-hover: rgba(var(--rgb-primary-color, 3, 169, 244), .08);
       --c-tint: rgba(var(--rgb-primary-color, 3, 169, 244), .16);
     }
-    .cbox { display: grid; grid-template-columns: 28px 1fr auto auto; align-items: center; gap: 6px; background: var(--c-surface); border-bottom: 1px solid var(--c-muted); border-radius: 6px 6px 0 0; padding: 8px 10px; cursor: pointer; min-height: 52px; color: var(--c-text); }
-    .cbox:hover { background: var(--c-hover); }
+    .field { display: flex; align-items: center; background: var(--c-surface); border-bottom: 1px solid var(--c-muted); border-radius: 6px 6px 0 0; padding-right: 6px; }
+    .field:hover { background: var(--c-hover); }
+    .cbox { flex: 1; min-width: 0; display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 6px; padding: 8px 4px 8px 10px; cursor: pointer; min-height: 52px; color: var(--c-text); }
     .cbox:focus-visible, .x:focus-visible { outline: 2px solid var(--c-primary); outline-offset: -2px; }
     .ico { width: 22px; height: 22px; fill: var(--c-muted); }
     .cbox b, .opt b { display: block; font-weight: 500; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -90,6 +98,7 @@ export class EntityCombo extends LitElement {
     .opt:hover { background: var(--c-hover); }
     .opt.on { background: var(--c-tint); }
     .side { text-align: right; font-size: 12.5px; color: var(--c-muted); }
+    .hint { padding: 8px 12px; color: var(--c-muted); font-size: 12.5px; }
     .empty { padding: 12px; color: var(--c-muted); }
   `;
 
@@ -105,30 +114,43 @@ export class EntityCombo extends LitElement {
 
   private pick(value: string | null): void {
     this.close();
+    this.focusBox();
     this.dispatchEvent(new CustomEvent('value-changed', { detail: { value }, bubbles: true, composed: true }));
   }
 
-  /** Search runs over all items; at most MAX_ROWS rows are rendered. */
-  private filtered(): EntityMeta[] {
-    const q = this.query.trim().toLowerCase();
-    const out: EntityMeta[] = [];
+  /** Search runs over all items; at most MAX_ROWS rows are rendered. Cached per items, meta and query. */
+  private filtered(): Shown {
+    const key: [unknown, unknown, string] = [this.items, this.meta, this.query.trim().toLowerCase()];
+    const c = this.shown;
+    if (c && c.key[0] === key[0] && c.key[1] === key[1] && c.key[2] === key[2]) return c.value;
+    const rows: Row[] = [];
+    let more = false;
     for (const e of this.items) {
-      if (q) {
-        const hay = `${e.name}\n${e.entityId}\n${entityLabel(this.meta, e.entityId).context}`.toLowerCase();
-        if (!hay.includes(q)) continue;
-      }
-      out.push(e);
-      if (out.length === MAX_ROWS) break;
+      const { name, context } = entityLabel(this.meta, e.entityId);
+      if (key[2] && !`${name}
+${e.entityId}
+${context}`.toLowerCase().includes(key[2])) continue;
+      if (rows.length === MAX_ROWS) { more = true; break; }
+      rows.push({ e, name, context });
     }
-    return out;
+    const value = { rows, more };
+    this.shown = { key, value };
+    return value;
   }
 
+  private optId(i: number): string { return `${this.uid}-opt-${i}`; }
+
   private onSearchKey(e: KeyboardEvent): void {
-    const rows = this.filtered();
-    if (e.key === 'ArrowDown') { e.preventDefault(); this.active = Math.min(this.active + 1, rows.length - 1); this.scrollActive(); }
+    const { rows } = this.filtered();
+    if (e.key === 'ArrowDown') { e.preventDefault(); this.active = Math.max(0, Math.min(this.active + 1, rows.length - 1)); this.scrollActive(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); this.active = Math.max(this.active - 1, 0); this.scrollActive(); }
-    else if (e.key === 'Enter') { e.preventDefault(); const r = rows[this.active]; if (r) this.pick(r.entityId); }
+    else if (e.key === 'Enter') { e.preventDefault(); const r = rows[this.active]; if (r) this.pick(r.e.entityId); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.close(); this.focusBox(); }
+  }
+
+  private onFocusOut(e: FocusEvent): void {
+    const to = e.relatedTarget as Node | null;
+    if (this.isOpen && !(to && this.shadowRoot?.contains(to))) this.close();
   }
 
   private scrollActive(): void {
@@ -146,40 +168,39 @@ export class EntityCombo extends LitElement {
     const eid = this.value;
     const e = eid ? this.meta.entities.get(eid) : undefined;
     const lab = eid ? entityLabel(this.meta, eid) : null;
-    return html`<div class="cbox" tabindex="0" role="combobox" aria-haspopup="listbox" aria-expanded=${this.isOpen ? 'true' : 'false'}
-        aria-label=${this.label} @click=${() => (this.isOpen ? this.close() : this.openList())} @keydown=${this.onBoxKey}>
+    return html`<div class="field"><div class="cbox" tabindex="0" role="combobox" aria-haspopup="listbox" aria-expanded=${this.isOpen ? 'true' : 'false'}
+        aria-controls=${`${this.uid}-lb`} aria-label=${ifDefined(this.label || undefined)} @click=${() => (this.isOpen ? this.close() : this.openList())} @keydown=${this.onBoxKey}>
       ${icon(eid ? iconFor(e, eid) : 'generic')}
       ${lab ? html`<span><b>${lab.name}</b>${lab.context !== lab.name ? html`<small>${lab.context}</small>` : nothing}</span>`
         : html`<span class="ph">${t('combo.none')}</span>`}
-      ${eid ? html`<button class="x" type="button" title=${t('combo.clear')} aria-label=${t('combo.clear')}
-          @click=${(ev: Event) => { ev.stopPropagation(); this.pick(null); }}>✕</button>` : html`<span></span>`}
       <span class="car" aria-hidden="true">▾</span>
-    </div>`;
+    </div>${eid ? html`<button class="x" type="button" title=${t('combo.clear')} aria-label=${t('combo.clear')}
+          @click=${() => this.pick(null)}>✕</button>` : nothing}</div>`;
   }
 
   private renderDrop(): TemplateResult {
-    const rows = this.filtered();
+    const { rows, more } = this.filtered();
     const active = Math.min(this.active, Math.max(rows.length - 1, 0));
-    return html`<div class="drop">
+    return html`<div class="drop" @pointerdown=${(e: Event) => { if ((e.target as HTMLElement).tagName !== 'INPUT') e.preventDefault(); }}>
       <div class="srch"><input type="text" role="searchbox" placeholder=${t('combo.search')} aria-label=${t('combo.search')}
+        aria-controls=${`${this.uid}-lb`} aria-activedescendant=${ifDefined(rows.length ? this.optId(active) : undefined)}
         .value=${this.query} @input=${(e: Event) => { this.query = (e.target as HTMLInputElement).value; this.active = 0; }}
         @keydown=${this.onSearchKey}></div>
-      <div class="opts" role="listbox">
-        ${rows.length === 0 ? html`<div class="empty">${t('combo.empty')}</div>` : rows.map((e, i) => {
-          const lab = entityLabel(this.meta, e.entityId);
-          return html`<div class="opt ${i === active ? 'on' : ''}" role="option" aria-selected=${e.entityId === this.value ? 'true' : 'false'}
-              data-id=${e.entityId} @click=${() => this.pick(e.entityId)} @pointermove=${() => { this.active = i; }}>
+      <div class="opts" id=${`${this.uid}-lb`} role="listbox" aria-label=${ifDefined(this.label || undefined)}>
+        ${rows.length === 0 ? html`<div class="empty">${t('combo.empty')}</div>` : rows.map(({ e, name, context }, i) =>
+          html`<div class="opt ${i === active ? 'on' : ''}" id=${this.optId(i)} role="option" aria-selected=${e.entityId === this.value ? 'true' : 'false'}
+              data-id=${e.entityId} @click=${() => this.pick(e.entityId)} @pointerenter=${() => { this.active = i; }}>
             ${icon(iconFor(e, e.entityId))}
-            <span><b>${lab.name}</b><small>${lab.context}</small></span>
+            <span><b>${name}</b><small>${context}</small></span>
             <span class="side">${domainLabel(e.domain)}<br>${e.state}${e.unit ? ` ${e.unit}` : ''}</span>
-          </div>`;
-        })}
+          </div>`)}
+        ${more ? html`<div class="hint">${t('combo.more')}</div>` : nothing}
       </div>
     </div>`;
   }
 
   render(): TemplateResult {
-    return html`${this.renderBox()}${this.isOpen ? this.renderDrop() : nothing}`;
+    return html`<div @focusout=${this.onFocusOut}>${this.renderBox()}${this.isOpen ? this.renderDrop() : nothing}</div>`;
   }
 }
 

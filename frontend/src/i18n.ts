@@ -209,6 +209,7 @@ const en: Dict = {
   'combo.search': 'Search entities',
   'combo.empty': 'No matching entities',
   'combo.none': 'Select an entity',
+  'combo.more': 'Showing the first 100 — keep typing to narrow',
   'combo.clear': 'Clear',
   'combo.domain.sensor': 'Sensor',
   'combo.domain.binary_sensor': 'Binary sensor',

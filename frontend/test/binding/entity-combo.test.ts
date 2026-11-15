@@ -117,4 +117,89 @@ describe('ps-entity-combo', () => {
     const el = await mount('sensor.gone');
     expect(q(el, '.cbox b').textContent).toBe('sensor.gone');
   });
+  it('wires aria: listbox id, activedescendant, controls, active row', async () => {
+    const el = await mount(null);
+    await open(el);
+    const input = q<HTMLInputElement>(el, '.srch input');
+    const lb = q(el, '[role=listbox]');
+    expect(lb.id).toBeTruthy();
+    expect(lb.getAttribute('aria-label')).toBe('Temperature');
+    expect(input.getAttribute('aria-controls')).toBe(lb.id);
+    expect(q(el, '.cbox').getAttribute('aria-controls')).toBe(lb.id);
+    expect(rows(el).every(r => !!r.id)).toBe(true);
+    expect(input.getAttribute('aria-activedescendant')).toBe(rows(el)[0].id);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); await el.updateComplete;
+    expect(input.getAttribute('aria-activedescendant')).toBe(rows(el)[1].id);
+    expect(rows(el)[1].classList.contains('on')).toBe(true);
+  });
+
+  it('focus returns to the box after Enter and after a row click', async () => {
+    const el = await mount(null);
+    await open(el);
+    q<HTMLInputElement>(el, '.srch input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await el.updateComplete; await el.updateComplete;
+    expect(el.shadowRoot!.activeElement).toBe(q(el, '.cbox'));
+    q<HTMLElement>(el, '.cbox').blur();
+    await open(el);
+    (rows(el)[0] as HTMLElement).click();
+    await el.updateComplete; await el.updateComplete;
+    expect(el.shadowRoot!.activeElement).toBe(q(el, '.cbox'));
+  });
+
+  it('Esc returns focus to the box', async () => {
+    const el = await mount(null);
+    await open(el);
+    q<HTMLInputElement>(el, '.srch input').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await el.updateComplete; await el.updateComplete;
+    expect(el.shadowRoot!.activeElement).toBe(q(el, '.cbox'));
+  });
+
+  it('closes when focus leaves the component', async () => {
+    const el = await mount(null);
+    await open(el);
+    q<HTMLInputElement>(el, '.srch input').dispatchEvent(new FocusEvent('focusout', { bubbles: true, composed: true, relatedTarget: document.body }));
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.srch')).toBeNull();
+  });
+
+  it('x is a sibling of the combobox, not inside it', async () => {
+    const el = await mount('sensor.t_wc');
+    expect(q(el, '.cbox').querySelector('.x')).toBeNull();
+    expect(q(el, '.x')).toBeTruthy();
+  });
+
+  it('removes the document listener on disconnect while open', async () => {
+    const el = await mount(null);
+    await open(el);
+    el.remove();
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true, composed: true }));
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.srch')).not.toBeNull();
+  });
+
+  it('Enter with zero rows does nothing and active stays valid', async () => {
+    const el = await mount(null);
+    let n = 0;
+    el.addEventListener('value-changed', () => { n++; });
+    await open(el);
+    await type(el, 'zzzz');
+    const input = q<HTMLInputElement>(el, '.srch input');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await el.updateComplete;
+    expect(n).toBe(0);
+    await type(el, '');
+    expect(input.getAttribute('aria-activedescendant')).toBe(rows(el)[0].id);
+  });
+
+  it('shows a hint only when more than 100 rows match; no aria-label when label is empty', async () => {
+    const many = Array.from({ length: 150 }, (_, i) => ent(`sensor.s${i}`, { name: `Sensor ${i}` }));
+    const el = await mount(null, many, makeMeta(many));
+    el.label = '';
+    await open(el);
+    expect(el.shadowRoot!.querySelector('.hint')).not.toBeNull();
+    expect(q(el, '.cbox').hasAttribute('aria-label')).toBe(false);
+    await type(el, 'sensor.s14');
+    expect(el.shadowRoot!.querySelector('.hint')).toBeNull();
+  });
 });
