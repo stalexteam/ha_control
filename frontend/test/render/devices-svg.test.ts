@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { html, render } from 'lit';
 import { renderLevel } from '../../src/render/plan-svg';
 import { paletteFor } from '../../src/render/theme';
-import { renderDevices, ICON_PX } from '../../src/render/devices-svg';
+import { renderDevices, ICON_PX, equipmentLabelLayout } from '../../src/render/devices-svg';
 import { deviceDefaults, type ContainerKind, type Device, type DeviceKind, type Level } from '../../src/model/types';
 import { mdiAlert, mdiPower, mdiPowerOff, mdiRefreshAuto, mdiToggleSwitch } from '@mdi/js';
 import type { HassLike } from '../../src/api';
@@ -497,5 +497,69 @@ describe('container badges on the plan', () => {
       expect(badgeKind(root, 'sb')).toBe('alert');
       expect(badgeKind(root, 'ws')).toBe('auto');
     }
+  });
+});
+
+describe('equipmentLabelLayout', () => {
+  // Screen px: icon 24, label font 10.2, gap 4. Scale 1 means plan mm = screen px.
+  const rect = (w: number, d: number, label = 'Invertor', deg = 0, scale = 1) =>
+    equipmentLabelLayout({ shape: 'rect', width: w, depth: d, diameter: 0 }, label, deg, scale);
+  const HALF = (10.2 + 4) / 2;
+
+  it('stacked and centred in a tall body', () => {
+    const l = rect(100, 100);
+    expect(l.mode).toBe('stacked');
+    expect(l.iconX).toBe(0);
+    expect(l.iconY).toBeCloseTo(-HALF);
+    expect(l.labelX).toBe(0);
+    expect(l.labelAnchor).toBe('middle');
+    expect(l.labelY).toBeGreaterThan(l.iconY + 12);
+  });
+
+  it('one line in a flat wide body: icon left, label right of it, same y', () => {
+    const l = rect(200, 40);
+    expect(l.mode).toBe('line');
+    expect(l.iconX).toBeLessThan(0);
+    expect(l.labelAnchor).toBe('start');
+    expect(l.labelX).toBeGreaterThan(l.iconX + 12);
+    expect(l.labelY).toBe(l.iconY);
+    expect(l.iconY).toBe(0);
+  });
+
+  it('neither fits gives stacked and centred', () => {
+    const l = rect(40, 20);
+    expect(l.mode).toBe('stacked');
+    expect(l.iconY).toBeCloseTo(-HALF);
+  });
+
+  it('empty label: icon alone at the centre', () => {
+    const l = rect(100, 100, '');
+    expect(l.iconX).toBe(0);
+    expect(l.iconY).toBe(0);
+  });
+
+  it('a 90 degree rotation swaps the fit', () => {
+    expect(rect(40, 200, 'Invertor', 0).mode).toBe('stacked');
+    expect(rect(40, 200, 'Invertor', 90).mode).toBe('line');
+  });
+
+  it('circle uses its inscribed square', () => {
+    const c = (diameter: number) => equipmentLabelLayout({ shape: 'circle', width: 0, depth: 0, diameter }, 'Boiler', 0, 1);
+    expect(c(200).mode).toBe('stacked');
+    expect(c(60).mode).toBe('stacked'); // inscribed square 42: nothing fits
+    expect(c(60).iconY).toBeCloseTo(-HALF);
+  });
+
+  it('coordinates are in plan units: scale divides them', () => {
+    const l = rect(1000, 1000, 'Invertor', 0, 0.1);
+    expect(l.iconY).toBeCloseTo(-HALF / 0.1);
+  });
+
+  it('equipmentBlock puts the icon and label through the layout', () => {
+    const level = { ...rectRoomLevel(6000, 5000, 200), devices: [
+      free('eq', 'equipment', 2000, 3500, { label: 'Invertor', width: 200, depth: 40, shape: 'rect' }),
+    ] };
+    const eq = drawDevs(level, {}, 1).querySelector('g.device-equipment')!;
+    expect(eq.querySelector('.equipment-label')!.getAttribute('text-anchor')).toBe('start');
   });
 });

@@ -46,14 +46,64 @@ const CUBE_OUTLINE = 'M21,16.5C21,16.88 20.79,17.21 20.47,17.38L12.57,21.82C12.4
 /** Equipment icon size in screen pixels. */
 const EQUIPMENT_ICON_PX = 24;
 
-function equipmentIcon(icon: string, scale: number, color: string): SVGTemplateResult {
+/** Gap between the equipment icon and its label, and the padding kept inside the body, in screen pixels. */
+const EQ_GAP_PX = 4;
+const EQ_PAD_PX = 4;
+/** Label font size relative to ICON_PX, and the per-character width estimate (as in the power schematic). */
+const EQ_LABEL_FONT_PX = ICON_PX * 0.85;
+const EQ_CHAR_W = 0.58;
+
+export interface EquipmentLabelLayout {
+  mode: 'stacked' | 'line';
+  /** Icon centre and label anchor point, in plan units relative to the device centre. */
+  iconX: number;
+  iconY: number;
+  labelX: number;
+  labelY: number;
+  labelAnchor: 'middle' | 'start';
+}
+
+/**
+ * Lays out the equipment icon and label as one group at the current zoom. Stacked (icon above label) when it fits
+ * the rotated body's bounding box (circle: inscribed square), else one line (icon left, label right) when that fits,
+ * else stacked. An empty label leaves the icon alone at the centre. Label width is estimated, not measured.
+ */
+export function equipmentLabelLayout(
+  body: { shape: 'rect' | 'circle'; width: number; depth: number; diameter: number },
+  label: string, deg: number, scale: number,
+): EquipmentLabelLayout {
+  const icon = EQUIPMENT_ICON_PX;
+  if (!label) return { mode: 'stacked', iconX: 0, iconY: 0, labelX: 0, labelY: 0, labelAnchor: 'middle' };
+  const a = (deg * Math.PI) / 180;
+  const c = Math.abs(Math.cos(a));
+  const s = Math.abs(Math.sin(a));
+  const [w, h] = body.shape === 'circle'
+    ? [body.diameter / Math.SQRT2, body.diameter / Math.SQRT2]
+    : [body.width * c + body.depth * s, body.width * s + body.depth * c];
+  const availW = w * scale - 2 * EQ_PAD_PX;
+  const availH = h * scale - 2 * EQ_PAD_PX;
+  const textW = label.length * EQ_CHAR_W * EQ_LABEL_FONT_PX;
+  const stackH = icon + EQ_GAP_PX + EQ_LABEL_FONT_PX;
+  const lineW = icon + EQ_GAP_PX + textW;
+  const stackFits = Math.max(icon, textW) <= availW && stackH <= availH;
+  if (!stackFits && lineW <= availW && icon <= availH) {
+    const left = -lineW / 2;
+    return { mode: 'line', iconX: (left + icon / 2) / scale, iconY: 0,
+      labelX: (left + icon + EQ_GAP_PX) / scale, labelY: 0, labelAnchor: 'start' };
+  }
+  const top = -stackH / 2;
+  return { mode: 'stacked', iconX: 0, iconY: (top + icon / 2) / scale, labelX: 0,
+    labelY: (top + icon + EQ_GAP_PX + EQ_LABEL_FONT_PX / 2) / scale, labelAnchor: 'middle' };
+}
+
+function equipmentIcon(icon: string, scale: number, color: string, cx = 0, cy = 0): SVGTemplateResult {
   const size = EQUIPMENT_ICON_PX / scale;
   if (customElements.get('ha-icon')) {
-    return svg`<foreignObject class="equipment-icon" x=${-size / 2} y=${-size / 2} width=${size} height=${size}
+    return svg`<foreignObject class="equipment-icon" x=${cx - size / 2} y=${cy - size / 2} width=${size} height=${size}
       style="pointer-events:none">
       <ha-icon icon=${icon} style=${`--mdc-icon-size:${size}px;color:${color};display:block`}></ha-icon></foreignObject>`;
   }
-  return svg`<g class="equipment-icon" transform=${`translate(${-size / 2} ${-size / 2}) scale(${size / 24})`}>
+  return svg`<g class="equipment-icon" transform=${`translate(${cx - size / 2} ${cy - size / 2}) scale(${size / 24})`}>
     <path d=${CUBE_OUTLINE} fill=${color}></path></g>`;
 }
 const PREVIEW_ID = '__preview__';
@@ -155,7 +205,7 @@ function iconShape(d: Device, R: number, color: string, fill: string, dash?: str
 function equipmentBlock(d: Device, o: DeviceRenderOpts, color: string, deg: number): SVGTemplateResult {
   const pr = d.props;
   if (pr.kind !== 'equipment') return svg`${nothing}`;
-  const fs = ICON_PX / o.scale;
+  const lay = equipmentLabelLayout(pr, pr.label, deg, o.scale);
   const body = pr.shape === 'circle'
     ? svg`<circle class="equipment-body" r=${pr.diameter / 2} fill=${o.palette.deviceFill} stroke=${color}
         stroke-width="1.5" vector-effect=${NS}></circle>`
@@ -163,8 +213,9 @@ function equipmentBlock(d: Device, o: DeviceRenderOpts, color: string, deg: numb
         fill=${o.palette.deviceFill} stroke=${color} stroke-width="1.5" vector-effect=${NS}></rect>`;
   return svg`
     <g transform=${`rotate(${deg})`}>${body}</g>
-    ${equipmentIcon(pr.icon, o.scale, color)}
-    <text class="equipment-label" y=${EQUIPMENT_ICON_PX / o.scale / 2 + fs} text-anchor="middle" dominant-baseline="middle" font-size=${fs * 0.85}
+    ${equipmentIcon(pr.icon, o.scale, color, lay.iconX, lay.iconY)}
+    <text class="equipment-label" x=${lay.labelX} y=${lay.labelY} text-anchor=${lay.labelAnchor} dominant-baseline="middle"
+      font-size=${EQ_LABEL_FONT_PX / o.scale}
       fill=${color} font-family="system-ui, sans-serif">${pr.label}</text>
     <g class="equipment-data"></g>`;
 }
