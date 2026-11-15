@@ -101,12 +101,11 @@ async function run() {
     props: {
       kind: "smart_button", separateOff: false, autoEnabled: false,
       on: { slot: 0, event: "single" }, off: { slot: 0, event: "hold" }, auto: { slot: 0, event: "double" },
-      defaultOutput: "off",
     },
   };
   const wallSwitch = {
     id: `${id}-w`, name: "W", placement: { mode: "wall", wallId: `${id}-w0`, side: "right", offset: 500 }, invalid: false,
-    props: { kind: "wall_switch", autoByDoubleToggle: false, windowSec: 3, defaultOutput: "off" },
+    props: { kind: "wall_switch", autoByDoubleToggle: false, windowSec: 3 },
     bindings: { state: ENTITY },
   };
   const room = {
@@ -123,13 +122,17 @@ async function run() {
   same(await nextEvent(sub.id, "first containers event"), {
     full: true,
     containers: {
-      [`${id}-b`]: { output: "off", fault: "not_configured", kind: "smart_button" },
-      [`${id}-w`]: { output: "off", fault: null, kind: "wall_switch" },
+      [`${id}-b`]: { kind: "smart_button", status: "error", reason: "not_configured" },
+      [`${id}-w`]: { kind: "wall_switch", status: "ok" },
     },
   }, "first containers event");
   await setEntity("on");
-  same(await nextEvent(sub.id, "containers event after the entity turned on"),
-    { full: false, containers: { [`${id}-w`]: { output: "on", fault: null, kind: "wall_switch" } } },
+  // The manual change is a "set on" intent; its time comes from the server, so only its type is checked.
+  const turnedOn = await nextEvent(sub.id, "containers event after the entity turned on");
+  const at = turnedOn?.containers?.[`${id}-w`]?.last?.at;
+  if (typeof at !== "string" || at === "") fail(`intent time: expected a non-empty string, got ${JSON.stringify(at)}`);
+  same(turnedOn,
+    { full: false, containers: { [`${id}-w`]: { kind: "wall_switch", status: "ok", last: { action: "set", value: "on", at } } } },
     "containers event after the entity turned on");
   expectOk(await call({ type: "plan_studio/plans/delete", plan_id: id }), "delete");
   created.planId = null;
