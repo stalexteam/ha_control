@@ -68,6 +68,11 @@ def block_ports(block: dict) -> dict[str, str]:
 
 
 def device_bindings(plan: dict) -> dict[str, dict[str, str]]:
+    """The `power` and `control` bindings of every plan device, by device id.
+
+    Not used by the live feed (the panel sends the bindings with the draft); kept for the automation stage. Only
+    tests call it today.
+    """
     out: dict[str, dict[str, str]] = {}
     for level in _list(plan.get("levels")):
         for device in _list(level.get("devices")) if isinstance(level, dict) else []:
