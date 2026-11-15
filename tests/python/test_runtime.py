@@ -217,6 +217,15 @@ def test_reload_tells_listeners_about_changed_statuses_only():
     assert events[1:] == [("p1", "d", {"status": "error", "reason": "not_configured"})]
 
 
+def test_a_reentrant_listener_does_not_break_the_frames():
+    e = Env(sensor__b="")
+    e.rt.load_plans([plan(btn({"on": "sensor.b"}, did="c"))])
+    frames = e.frames()
+    e.rt.add_listener(lambda pid, did, ev: e.rt.load_plans([]))  # the container disappears mid-notification
+    e.set("sensor.b", "single")
+    assert frames[0] == (False, {"c": {**OK_BTN, "last": TOGGLE_1}})
+
+
 def test_own_context_a_registered_id_or_parent_id_is_not_a_press_for_a_wall_switch():
     e = Env(light__f="off")
     e.rt.load_plans([plan(wall())])

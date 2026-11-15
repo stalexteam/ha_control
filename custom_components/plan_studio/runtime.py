@@ -91,9 +91,10 @@ class Runtime:
         if not events:
             return
         frames: dict[str, dict[str, dict]] = {}
+        for key, _event in events:  # frames first: a listener may reload the plans under us
+            frames.setdefault(key[0], {})[key[1]] = self._public(key)
         for key, event in events:
             self._tell(key, event)
-            frames.setdefault(key[0], {})[key[1]] = self._public(key)
         for pid, containers in frames.items():
             self._notify(pid, False, containers)
 
