@@ -70,9 +70,10 @@ describe('cone caches', () => {
     draw(lv);
     expect(computed()).toEqual([]);
 
-    // A drag of a wall light and of a free sensor: the walls, nodes and openings are kept.
+    // A drag of a wall light and of a free sensor: the walls, nodes and openings are kept. The sensor's 5 m zone
+    // covers the whole room from (3000, 3000) but not from (1000, 1000), so its clipped cone changes.
     const moved = moveDevice(moveDevice(lv, 'wl2', { mode: 'wall', wallId: 'w0', side: 'right', offset: 4500 }),
-      'ms2', { mode: 'free', x: 2000, y: 3000, rotation: 90 });
+      'ms2', { mode: 'free', x: 1000, y: 1000, rotation: 90 });
     expect(moved.walls).toBe(lv.walls);
     cones.mockClear();
     obstacles.mockClear();

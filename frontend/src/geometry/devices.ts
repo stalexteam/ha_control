@@ -2,7 +2,7 @@ import polygonClipping from 'polygon-clipping';
 import {
   AIM_KINDS, AIM_MAX, type Device, type DeviceKind, type DevicePlacement, type DeviceProps, type Id, type Level, type Pt,
 } from '../model/types';
-import { add, dist, dot, perpLeft, pointInPolygon, polygonArea, scale, sub } from './vec';
+import { add, cross, dist, dot, perpLeft, pointInPolygon, polygonArea, scale, sub } from './vec';
 import { fromRing, toPoly, wallFrame } from './walls';
 import {
   FAN_STEP_DEG, lineOfSightObstacles, obstaclesWithin, visibilityPolygon, type Medium, type Segment,
@@ -125,15 +125,68 @@ export function deviceRoomId(level: Level, d: Device): Id | null {
   return best;
 }
 
+/** Even-odd: p lies inside the closed rings the segments form (inside the walls, for line-of-sight obstacles). */
+function insideSegments(p: Pt, segs: Segment[]): boolean {
+  let inside = false;
+  for (const [a, b] of segs) {
+    if ((a.y > p.y) !== (b.y > p.y) && p.x < a.x + ((p.y - a.y) * (b.x - a.x)) / (b.y - a.y)) inside = !inside;
+  }
+  return inside;
+}
+
+/** Distances along the ray from p in unit direction u (from 0 on) at which it meets the segments, ascending. */
+function crossings(p: Pt, u: Pt, segs: Segment[]): number[] {
+  const ts: number[] = [];
+  for (const [a, b] of segs) {
+    const e = sub(b, a), w = sub(a, p);
+    const den = cross(u, e);
+    if (Math.abs(den) < 1e-12) continue; // parallel
+    const t = cross(w, e) / den, s = cross(w, u) / den;
+    if (t >= -1e-9 && s >= -1e-9 && s <= 1 + 1e-9) ts.push(Math.max(0, t));
+  }
+  return ts.sort((x, y) => x - y);
+}
+
+/** A sight origin closer than this to a wall edge counts as on the wall (mm); the probe itself is 1 mm off its face. */
+const ORIGIN_CLEARANCE = 0.5;
+
+/**
+ * Where a device's sight starts: its probe point. A wall device whose probe lies inside the walls or on their edge
+ * (snapped to a room corner, where its face point is inside the perpendicular wall or on that wall's face) slides
+ * along its host face toward the host's middle to 1 mm past the first wall edge that leaves it clear.
+ */
+function sightOrigin(level: Level, d: Device, pose: DevicePose, obstacles: Segment[]): Pt {
+  const probe = probeOf(pose);
+  const pl = d.placement;
+  if (pl.mode !== 'wall') return probe;
+  const blocked = (p: Pt) => insideSegments(p, obstacles) || obstaclesWithin(p, obstacles, ORIGIN_CLEARANCE).length > 0;
+  if (!blocked(probe)) return probe;
+  const f = wallFrame(level, level.walls.find(w => w.id === pl.wallId)!);
+  const u = pl.offset <= f.len / 2 ? f.dir : scale(f.dir, -1);
+  for (const t of crossings(probe, u, obstacles)) {
+    if (t > f.len) break;
+    const q = add(probe, scale(u, t + 1));
+    if (!blocked(q)) return q;
+  }
+  return probe;
+}
+
 /** The fan's chords lie inside its radius by up to cos(step / 2): this factor makes the visibility polygon cover the cone. */
 const FAN_COVER = 1 / Math.cos((FAN_STEP_DEG / 2) * (Math.PI / 180));
 
 /**
+ * A ring rounded to 1e-3 mm. The cone's apex lies on the visibility polygon's edge (the host face), and float noise
+ * there (2899.999999999999 against 2900) makes polygon-clipping fail with "Unable to complete output ring".
+ */
+const snapRing = (ring: Pt[]): Pt[] => ring.map(p => ({ x: Math.round(p.x * 1e3) / 1e3, y: Math.round(p.y * 1e3) / 1e3 }));
+
+/**
  * Cone clipped to what the device sees from its probe point (pt + face normal for wall devices, so sight never
- * starts inside the host wall; pt for free ones): walls block it, openings let its medium through (CONE_MEDIUM).
- * Unclipped when no obstacle comes within reach. `obstaclesOf` may be a per-level cache of lineOfSightObstacles; it
- * runs only for a device with a cone. Returns rings (outer rings and any holes, unclosed): render with fill-rule
- * evenodd. [] when none.
+ * starts inside the host wall, moved off a wall it touches at a corner: see sightOrigin; pt for free ones): walls
+ * block it, openings let its medium through (CONE_MEDIUM). Unclipped when no obstacle comes within reach.
+ * `obstaclesOf` may be a per-level cache of lineOfSightObstacles; it runs only for a device with a cone. Returns rings
+ * (outer rings and any holes, unclosed): render with fill-rule evenodd. [] when none. If clipping still fails, the
+ * result is the visibility polygon itself: wider than the cone, but never through a wall.
  */
 export function clippedCone(
   level: Level, d: Device, obstaclesOf: (level: Level, medium: Medium) => Segment[] = lineOfSightObstacles,
@@ -141,16 +194,18 @@ export function clippedCone(
   const shape = coneShape(level, d);
   const medium = coneMedium(d.props.kind);
   if (!shape || !medium) return [];
-  const probe = probeOf(devicePose(level, d)!);
+  const obstacles = obstaclesOf(level, medium);
+  const probe = sightOrigin(level, d, devicePose(level, d)!, obstacles);
   const reach = Math.max(...shape.map(p => dist(p, probe))) * FAN_COVER;
-  const near = obstaclesWithin(probe, obstaclesOf(level, medium), reach);
+  const near = obstaclesWithin(probe, obstacles, reach);
   if (near.length === 0) return [shape];
+  const seen = visibilityPolygon(probe, near, reach);
   let mp: ReturnType<typeof polygonClipping.intersection>;
   try {
-    mp = polygonClipping.intersection(toPoly(shape), toPoly(visibilityPolygon(probe, near, reach)));
+    mp = polygonClipping.intersection(toPoly(snapRing(shape)), toPoly(snapRing(seen)));
   } catch {
-    // Degenerate geometry: never crash rendering; fall back to the unclipped shape.
-    return [shape];
+    // Degenerate geometry: never crash rendering, and never draw through a wall.
+    return [seen];
   }
   return mp.flatMap(poly => poly.map(fromRing));
 }

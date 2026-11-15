@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import polygonClipping from 'polygon-clipping';
 import {
   DEVICE_PLACEMENTS, deviceDefaults, type Device, type DeviceKind, type DevicePlacement, type DeviceProps, type Level, type Pt,
 } from '../../src/model/types';
@@ -9,6 +10,7 @@ import {
 } from '../../src/geometry/devices';
 import { lineOfSightObstacles, type Medium, type Segment } from '../../src/geometry/visibility';
 import { pointInPolygon, polygonArea } from '../../src/geometry/vec';
+import { fromRing, toPoly } from '../../src/geometry/walls';
 import { midGap, rectRoomLevel, twoRoomsLevel } from '../fixtures';
 
 const dev = (id: string, props: DeviceProps, placement: DevicePlacement): Device =>
@@ -375,5 +377,77 @@ describe('deviceRoomId and no-cone kinds', () => {
     expect(coneShape(box, c)).toBeNull();
     expect(coneShape(box, f)).toBeNull();
     expect(deviceAt(withDevs(box, f), { x: 1500, y: 200 }, 50)).toBe('f');
+  });
+});
+
+describe('clippedCone: robust clipping and corner devices', () => {
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  /** The room rectangle inside the inner faces of rectRoomLevel(w, d, t), corners clockwise from the top left. */
+  const innerRect = (w: number, d: number, t: number): Pt[] =>
+    [{ x: t / 2, y: t / 2 }, { x: w - t / 2, y: t / 2 }, { x: w - t / 2, y: d - t / 2 }, { x: t / 2, y: d - t / 2 }];
+  /** Every ring point lies inside the room rectangle (within eps mm). */
+  const inside = (rings: Pt[][], room: Pt[], eps = 0.01): boolean => rings.every(r => r.every(p =>
+    p.x >= room[0].x - eps && p.x <= room[2].x + eps && p.y >= room[0].y - eps && p.y <= room[2].y + eps));
+  /** A default wall device on the inner (right) face of a rectRoomLevel wall. */
+  const wallDev = (kind: 'motion_sensor' | 'wall_light', wallId: string, offset: number): Device =>
+    dev('d', deviceDefaults(kind, 'wall'), { mode: 'wall', wallId, side: 'right', offset });
+  /** lineOfSightObstacles cached per medium: the sweep clips hundreds of cones on one level. */
+  const cached = () => {
+    const m = new Map<Medium, Segment[]>();
+    return (l: Level, md: Medium): Segment[] => {
+      if (!m.has(md)) m.set(md, lineOfSightObstacles(l, md));
+      return m.get(md)!;
+    };
+  };
+
+  it('wall motion sensors and wall lights swept along every wall clip without a clipping failure and stay in the room', () => {
+    const spy = vi.spyOn(polygonClipping, 'intersection');
+    const outside: string[] = [];
+    for (const [w, d, t] of [[4000, 3000, 200], [5000, 3600, 250]]) {
+      const box = rectRoomLevel(w, d, t);
+      const room = innerRect(w, d, t);
+      const obstaclesOf = cached();
+      for (const wall of box.walls) {
+        const len = wall.id === 'w0' || wall.id === 'w2' ? w : d;
+        for (let off = t; off <= len - t; off += 10) {
+          for (const kind of ['motion_sensor', 'wall_light'] as const) {
+            const rings = clippedCone(box, wallDev(kind, wall.id, off), obstaclesOf);
+            if (rings.length === 0 || !inside(rings, room)) outside.push(`${w}x${d} ${kind} ${wall.id} ${off}`);
+          }
+        }
+      }
+    }
+    expect(spy).toHaveBeenCalled();
+    expect(spy.mock.results.filter(r => r.type === 'throw').length).toBe(0);
+    expect(outside).toEqual([]);
+  });
+
+  it('when clipping fails the cone falls back to what the device sees, never through the walls', () => {
+    vi.spyOn(polygonClipping, 'intersection').mockImplementation(() => { throw new Error('Unable to complete output ring'); });
+    const box = rectRoomLevel(4000, 3000, 200);
+    const rings = clippedCone(box, wallDev('motion_sensor', 'w0', 2000));
+    expect(rings.length).toBeGreaterThan(0);
+    expect(inside(rings, innerRect(4000, 3000, 200))).toBe(true);
+    expect(covers(rings, { x: 2000, y: 1500 })).toBe(true);
+  });
+
+  it('a sensor or light snapped to a room corner keeps its zone, inside the walls', () => {
+    const box = rectRoomLevel(4000, 3000, 200);
+    const room = innerRect(4000, 3000, 200);
+    // 0 and 4000: the ends the device tool snaps to (inside the perpendicular wall); 100 and 3900: the inner corners.
+    const bad: string[] = [];
+    for (const off of [0, 50, 100, 3900, 3950, 4000]) {
+      for (const kind of ['motion_sensor', 'wall_light'] as const) {
+        const d = wallDev(kind, 'w0', off);
+        const exact = area(polygonClipping.intersection(toPoly(coneShape(box, d)!), toPoly(room)).flatMap(p => p.map(fromRing)));
+        const rings = clippedCone(box, d);
+        const a = area(rings);
+        if (!inside(rings, room) || Math.abs(a - exact) / exact > 0.02) {
+          bad.push(`${kind} ${off}: ${(a / 1e6).toFixed(2)} m2 (expected ${(exact / 1e6).toFixed(2)}), inside ${inside(rings, room)}`);
+        }
+      }
+    }
+    expect(bad).toEqual([]);
   });
 });
