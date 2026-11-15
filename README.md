@@ -31,6 +31,7 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 - Switches and sockets snap to the nearest wall face. Wall lights and sensors go on a wall face near the cursor, otherwise at a free grid point. Ceiling lights and equipment blocks are always free.
 - Select: click a device to select it, drag to move it (Shift locks the axis). A wall device slides along its wall, can be dragged onto another wall, or into open space if its kind allows. Delete removes it.
 - Right panel: properties of the selected device (name, kind settings, rotation for free devices, side and offset for wall devices). With a placement tool active and nothing selected, it edits the defaults of the next device.
+- A newly placed device is selected, so the right panel shows its properties. Press Esc or click empty space to get back to the next-device defaults.
 - Deleting a wall also deletes the devices on it; Ctrl+Z brings both back.
 - "Cones & zones" in the status bar shows or hides light pools, wall-light cones and motion zones.
 

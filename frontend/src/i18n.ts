@@ -121,6 +121,7 @@ const en: Dict = {
   'props.badNumber': 'Must be a whole number above 0',
   'props.badAngle': 'Angle must be a whole number from 1 to 360',
   'props.badRotation': 'Rotation must be a whole number from 0 to 359',
+  'props.badOffset': 'Enter a whole number of mm, 0 or more',
   'props.invalidDevice': 'Outside its wall',
   'shape.round': 'Round',
   'shape.linear': 'Linear',

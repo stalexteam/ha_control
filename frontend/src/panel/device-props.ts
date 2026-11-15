@@ -24,8 +24,10 @@ export interface DevicePropsOpts {
   /** The panel's defaults for the next device of `nextKind`. */
   nextProps: DeviceProps | null;
   lang: string;
-  onDevice(patch: Partial<DeviceProps>, name?: string): void;
-  onPlacement(p: DevicePlacement): void;
+  /** Returns false when the edit was rejected (nothing changed). */
+  onDevice(patch: Partial<DeviceProps>, name?: string): boolean;
+  /** Returns false when the placement was rejected (e.g. the offset is outside the wall). */
+  onPlacement(p: DevicePlacement): boolean;
   onNext(patch: Partial<DeviceProps>): void;
   onDelete(): void;
   /** Validation message for a rejected field (null clears it). */
@@ -35,7 +37,7 @@ export interface DevicePropsOpts {
 type NumRule = 'mm' | 'angle' | 'rotation' | 'offset';
 
 const BAD: Record<NumRule, string> = {
-  mm: 'props.badNumber', angle: 'props.badAngle', rotation: 'props.badRotation', offset: 'props.noFit',
+  mm: 'props.badNumber', angle: 'props.badAngle', rotation: 'props.badRotation', offset: 'props.badOffset',
 };
 
 /** Integer by rule: mm > 0, angle 1..360, rotation 0..359, offset >= 0; else null. */
@@ -55,28 +57,34 @@ function row(label: string, field: TemplateResult): TemplateResult {
 }
 
 function select<T extends string>(field: string, value: T, options: T[], prefix: string, lang: string,
-  on: (v: T) => void): TemplateResult {
-  return html`<select class="val" data-field=${field} @change=${(e: Event) => on((e.target as HTMLSelectElement).value as T)}>
+  on: (v: T) => boolean | void): TemplateResult {
+  // A rejected change (on() returns false) puts the DOM back on the model value.
+  return html`<select class="val" data-field=${field} .value=${live(value)} @change=${(e: Event) => {
+    const el = e.target as HTMLSelectElement;
+    if (on(el.value as T) === false) el.value = value;
+  }}>
     ${options.map(v => html`<option value=${v} ?selected=${v === value}>${t(`${prefix}.${v}`, lang)}</option>`)}
   </select>`;
 }
 
-/** Whole-number field committing on change; a bad value (or `apply` returning false) reverts it. */
-function numField(o: DevicePropsOpts, field: string, value: number, rule: NumRule, apply: (v: number) => boolean | void): TemplateResult {
+/**
+ * Whole-number field committing on change. A malformed value reverts it with the rule's message; `apply`
+ * returning false (the edit was rejected) reverts it with "does not fit".
+ */
+function numField(o: DevicePropsOpts, field: string, value: number, rule: NumRule, apply: (v: number) => boolean): TemplateResult {
   const shown = String(Math.round(value));
   return html`<input class="val" type="text" inputmode="numeric" data-field=${field} .value=${live(shown)}
     @change=${(e: Event) => {
       const el = e.target as HTMLInputElement;
       const v = parseNum(el.value, rule);
-      if (v === null || apply(v) === false) {
-        el.value = shown;
-        o.onNotice?.(t(BAD[rule], o.lang));
-      } else o.onNotice?.(null);
+      if (v === null) { el.value = shown; o.onNotice?.(t(BAD[rule], o.lang)); return; }
+      if (!apply(v)) { el.value = shown; o.onNotice?.(t('props.noFit', o.lang)); return; }
+      o.onNotice?.(null);
     }} />`;
 }
 
 /** Kind-specific fields; `pre` prefixes data-field names ("next-" for the next-device defaults). */
-function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch: Partial<DeviceProps>) => void): TemplateResult {
+function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch: Partial<DeviceProps>) => boolean): TemplateResult {
   const lang = o.lang;
   const mm = (name: string, label: string, v: number) =>
     row(`${t(label, lang)}, ${t('unit.mm', lang)}`, numField(o, pre + name, v, 'mm', x => set({ [name]: x } as Partial<DeviceProps>)));
@@ -94,11 +102,11 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
           data-field=${`${pre}poolRadius`} placeholder=${t('props.poolHint', lang)} title=${t('props.poolHint', lang)}
           .value=${live(pool)} @change=${(e: Event) => {
             const el = e.target as HTMLInputElement;
-            if (el.value.trim() === '') { o.onNotice?.(null); set({ poolRadius: null }); return; }
+            if (el.value.trim() === '') { if (set({ poolRadius: null })) o.onNotice?.(null); return; }
             const v = parseNum(el.value, 'mm');
             if (v === null) { el.value = pool; o.onNotice?.(t('props.badNumber', lang)); return; }
+            if (!set({ poolRadius: v })) { el.value = pool; o.onNotice?.(t('props.noFit', lang)); return; }
             o.onNotice?.(null);
-            set({ poolRadius: v });
           }} />`)}`;
     }
     case 'wall_light':
@@ -156,7 +164,7 @@ export function renderDeviceProps(o: DevicePropsOpts): TemplateResult {
   if (o.nextKind && o.nextProps) {
     return html`
       <h4>${t('props.nextDevice', o.lang)}: ${t(`device.${o.nextKind}`, o.lang)}</h4>
-      ${kindFields(o, o.nextProps, 'next-', patch => o.onNext(patch))}`;
+      ${kindFields(o, o.nextProps, 'next-', patch => { o.onNext(patch); return true; })}`;
   }
   return html`<p class="muted">${t('props.none', o.lang)}</p>`;
 }
@@ -180,16 +188,18 @@ export function renderEquipmentProps(o: EquipmentPropsOpts): TemplateResult {
   const { level, selection: s } = o;
   const device = s?.kind === 'device' ? level.devices.find(d => d.id === s.id) ?? null : null;
   const nextKind = isDeviceKind(o.toolId) ? o.toolId : null;
-  const edit = (next: Level) => {
-    if (next === level) { o.setNotice(t('props.noFit', o.lang)); return; }
+  /** Commits `next`; a rejected edit (same level back) keeps the level and shows "does not fit". */
+  const edit = (next: Level): boolean => {
+    if (next === level) { o.setNotice(t('props.noFit', o.lang)); return false; }
     o.setNotice(null);
     o.commit(next);
+    return true;
   };
   return html`<div class="props">
     ${renderDeviceProps({
       device, nextKind, nextProps: nextKind ? o.nextProps[nextKind] : null, lang: o.lang,
-      onDevice: (patch, name) => { if (device) edit(setDeviceProps(level, device.id, patch, name)); },
-      onPlacement: p => { if (device) edit(moveDevice(level, device.id, p)); },
+      onDevice: (patch, name) => !!device && edit(setDeviceProps(level, device.id, patch, name)),
+      onPlacement: p => !!device && edit(moveDevice(level, device.id, p)),
       onNext: patch => {
         if (!nextKind) return;
         o.setNextProps({ ...o.nextProps, [nextKind]: { ...o.nextProps[nextKind], ...patch, kind: nextKind } as DeviceProps });

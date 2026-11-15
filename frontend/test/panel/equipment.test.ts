@@ -147,3 +147,81 @@ describe('Equipment tab', () => {
     expect(el.selection).toBeNull();
   });
 });
+
+describe('Equipment tab: rejected edits', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+  });
+
+  async function wallSwitch(el: PlanStudioPanel): Promise<void> {
+    await tool(el, 'wall');
+    click(el, 0, 0);
+    click(el, 3000, 0);
+    key(el, 'keydown', 'Escape');
+    await el.updateComplete;
+    expect(el.history!.current.walls).toHaveLength(1);
+    await tab(el, 'equipment');
+    await tool(el, 'switch');
+    click(el, 1000, 0);
+    await el.updateComplete;
+    expect(el.history!.current.devices).toHaveLength(1);
+    expect(el.selection?.kind).toBe('device');
+  }
+
+  it('an offset outside the wall is rejected: notice shown, offset and field unchanged', async () => {
+    const el = await mount();
+    await wallSwitch(el);
+    const before = el.history!.current.devices[0].placement;
+    expect($<HTMLSelectElement>(el, '.props select[data-field="side"]').value).toBe(before.mode === 'wall' ? before.side : '');
+    const f = $<HTMLInputElement>(el, '.props input[data-field="offset"]');
+    const shown = f.value;
+    f.value = '5000';
+    f.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect(el.history!.current.devices[0].placement).toEqual(before);
+    expect($<HTMLInputElement>(el, '.props input[data-field="offset"]').value).toBe(shown);
+    expect($(el, '.props .warn').textContent).toContain('Does not fit');
+  });
+
+  it('a malformed offset shows the offset message', async () => {
+    const el = await mount();
+    await wallSwitch(el);
+    const f = $<HTMLInputElement>(el, '.props input[data-field="offset"]');
+    f.value = 'abc';
+    f.dispatchEvent(new Event('change'));
+    await el.updateComplete;
+    expect($(el, '.props .warn').textContent).toContain('0 or more');
+  });
+
+  it('rotation 0 is accepted and 360 is rejected', async () => {
+    const el = await mount();
+    await tab(el, 'equipment');
+    await tool(el, 'ceiling_light');
+    click(el, 1000, 1000);
+    await el.updateComplete;
+    const rot = () => $<HTMLInputElement>(el, '.props input[data-field="rotation"]');
+    const rotation = () => { const p = el.history!.current.devices[0].placement; return p.mode === 'free' ? p.rotation : NaN; };
+    rot().value = '30'; rot().dispatchEvent(new Event('change')); await el.updateComplete;
+    rot().value = '0'; rot().dispatchEvent(new Event('change')); await el.updateComplete;
+    expect(rotation()).toBe(0);
+    rot().value = '360'; rot().dispatchEvent(new Event('change')); await el.updateComplete;
+    expect(rotation()).toBe(0);
+    expect(rot().value).toBe('0');
+    expect(el.shadowRoot!.querySelector('.props .warn')).not.toBeNull();
+  });
+
+  it('undo with a device selected clears the selection', async () => {
+    const el = await mount();
+    await tab(el, 'equipment');
+    await tool(el, 'ceiling_light');
+    click(el, 1000, 1000);
+    await el.updateComplete;
+    expect(el.selection?.kind).toBe('device');
+    key(el, 'keydown', 'z', { ctrlKey: true, code: 'KeyZ' });
+    await el.updateComplete;
+    expect(el.selection).toBeNull();
+    expect(el.history!.current.devices).toHaveLength(0);
+    expect($(el, '.props').textContent).toContain('Next device');
+  });
+});
