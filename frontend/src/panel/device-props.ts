@@ -1,5 +1,5 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import { live } from 'lit/directives/live.js';
+import { fieldValue } from './field-value';
 import type { Device, DeviceKind, DevicePlacement, DeviceProps, Level, Side } from '../model/types';
 import { DEVICE_PLACEMENTS, deviceDefaults } from '../model/types';
 import { deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
@@ -59,7 +59,7 @@ function row(label: string, field: TemplateResult): TemplateResult {
 function select<T extends string>(field: string, value: T, options: T[], prefix: string, lang: string,
   on: (v: T) => boolean | void): TemplateResult {
   // A rejected change (on() returns false) puts the DOM back on the model value.
-  return html`<select class="val" data-field=${field} .value=${live(value)} @change=${(e: Event) => {
+  return html`<select class="val" data-field=${field} .value=${fieldValue(value)} @change=${(e: Event) => {
     const el = e.target as HTMLSelectElement;
     if (on(el.value as T) === false) el.value = value;
   }}>
@@ -73,7 +73,7 @@ function select<T extends string>(field: string, value: T, options: T[], prefix:
  */
 function numField(o: DevicePropsOpts, field: string, value: number, rule: NumRule, apply: (v: number) => boolean): TemplateResult {
   const shown = String(Math.round(value));
-  return html`<input class="val" type="text" inputmode="numeric" data-field=${field} .value=${live(shown)}
+  return html`<input class="val" type="text" inputmode="numeric" data-field=${field} .value=${fieldValue(shown)}
     @change=${(e: Event) => {
       const el = e.target as HTMLInputElement;
       const v = parseNum(el.value, rule);
@@ -100,7 +100,7 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
           : mm('diameter', 'props.diameter', p.diameter)}
         ${row(`${t('props.poolRadius', lang)}, ${t('unit.mm', lang)}`, html`<input class="val" type="text" inputmode="numeric"
           data-field=${`${pre}poolRadius`} placeholder=${t('props.poolHint', lang)} title=${t('props.poolHint', lang)}
-          .value=${live(pool)} @change=${(e: Event) => {
+          .value=${fieldValue(pool)} @change=${(e: Event) => {
             const el = e.target as HTMLInputElement;
             if (el.value.trim() === '') { if (set({ poolRadius: null })) o.onNotice?.(null); return; }
             const v = parseNum(el.value, 'mm');
@@ -121,7 +121,7 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
           : mm('diameter', 'props.diameter', p.diameter)}
         ${row(t('props.symbol', lang), select(`${pre}symbol`, p.symbol, ['boiler', 'pc', 'automation', 'other'], 'symbol', lang,
           v => set({ symbol: v })))}
-        ${row(t('props.label', lang), html`<input class="val wide" type="text" data-field=${`${pre}label`} .value=${live(p.label)}
+        ${row(t('props.label', lang), html`<input class="val wide" type="text" data-field=${`${pre}label`} .value=${fieldValue(p.label)}
           @change=${(e: Event) => set({ label: (e.target as HTMLInputElement).value.trim() })} />`)}`;
     default:
       return html`<p class="muted">${t('props.noSettings', lang)}</p>`;
@@ -145,7 +145,7 @@ function deviceProps(o: DevicePropsOpts, d: Device): TemplateResult {
   const lang = o.lang;
   return html`
     <h4>${t(`device.${d.props.kind}`, lang)}</h4>
-    ${row(t('props.name', lang), html`<input class="val wide" type="text" data-field="name" .value=${live(d.name)}
+    ${row(t('props.name', lang), html`<input class="val wide" type="text" data-field="name" .value=${fieldValue(d.name)}
       @change=${(e: Event) => {
         const el = e.target as HTMLInputElement;
         const name = el.value.trim();

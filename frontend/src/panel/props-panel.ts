@@ -1,5 +1,5 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import { live } from 'lit/directives/live.js';
+import { fieldValue } from './field-value';
 import type { Baseline, Level, Opening, OpeningKind, Side, Wall, WallType } from '../model/types';
 import { WALL_PRESETS } from '../model/types';
 import { deleteWall, setWallProps } from '../model/ops';
@@ -71,7 +71,7 @@ function select<T extends string>(value: T, options: { v: T; label: string }[], 
 
 /** Text field committing on change; `apply` returns false to reject (the field then reverts). */
 function mmField(value: number, apply: (v: number) => boolean, o: PropsOpts, badMsg: string): TemplateResult {
-  return html`<input class="val" type="text" inputmode="numeric" .value=${String(Math.round(value))}
+  return html`<input class="val" type="text" inputmode="numeric" .value=${fieldValue(String(Math.round(value)))}
     @change=${(e: Event) => {
       const el = e.target as HTMLInputElement;
       const v = parseMm(el.value);
@@ -114,7 +114,7 @@ function openingProps(op: Opening, o: PropsOpts): TemplateResult {
       o.commit(next);
       return true;
     }, o, 'props.badWidth'))}
-    ${row(t('props.offset', lang), html`<input class="val" type="text" inputmode="numeric" .value=${String(Math.round(op.offset))}
+    ${row(t('props.offset', lang), html`<input class="val" type="text" inputmode="numeric" .value=${fieldValue(String(Math.round(op.offset)))}
       @change=${(e: Event) => {
         const el = e.target as HTMLInputElement;
         const s = el.value.replace(/[\s ]/g, '');
@@ -137,7 +137,7 @@ function zoneProps(z: Level['zones'][number], o: PropsOpts): TemplateResult {
   const lang = o.lang;
   return html`
     <h4>${t('props.zone', lang)}</h4>
-    ${row(t('props.name', lang), html`<input class="val wide" type="text" .value=${z.name}
+    ${row(t('props.name', lang), html`<input class="val wide" type="text" .value=${fieldValue(z.name)}
       @change=${(e: Event) => {
         const el = e.target as HTMLInputElement;
         const name = el.value.trim();
@@ -161,7 +161,7 @@ function newWallProps(o: PropsOpts): TemplateResult {
       ${types.map(v => html`<option value=${v} ?selected=${v === o.wallType}>${t(`walltype.${v}`, lang)}</option>`)}
     </select>`)}
     ${row(`${t('props.thickness', lang)}, ${t('unit.mm', lang)}`, html`<input class="val" type="text" inputmode="numeric"
-      data-field="new-wall-thickness" .value=${live(String(o.thickness))}
+      data-field="new-wall-thickness" .value=${fieldValue(String(o.thickness))}
       @change=${(e: Event) => {
         const el = e.target as HTMLInputElement;
         const v = parseMm(el.value);

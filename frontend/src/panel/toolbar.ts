@@ -1,5 +1,5 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import { live } from 'lit/directives/live.js';
+import { fieldValue } from './field-value';
 import type { WallType } from '../model/types';
 import { WALL_PRESETS } from '../model/types';
 import type { SaveState } from '../editor/save';
@@ -66,7 +66,7 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
       ${o.lead ?? nothing}
       ${o.plans.length > 1 ? html`
         <select class="plan-pick" aria-label=${t('plan.pick', lang)} title=${t('plan.pick', lang)}
-          ?disabled=${o.saveState === 'saving'} .value=${live(o.planId)}
+          ?disabled=${o.saveState === 'saving'} .value=${fieldValue(o.planId)}
           @change=${(e: Event) => {
             const el = e.target as HTMLSelectElement;
             const id = el.value;
@@ -79,7 +79,7 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
         ?disabled=${o.busy || o.saveState === 'saving'} @click=${o.onNewPlan}>+</button>
       <button class="btn" data-action="delete-plan" title=${t('plan.delete', lang)} aria-label=${t('plan.delete', lang)}
         ?disabled=${o.busy || o.saveState === 'saving'} @click=${o.onDeletePlan}>&#128465;</button>
-      <input class="plan-name" .value=${o.planName} aria-label=${t('plan.name', lang)} title=${t('plan.name', lang)}
+      <input class="plan-name" .value=${fieldValue(o.planName)} aria-label=${t('plan.name', lang)} title=${t('plan.name', lang)}
         @change=${(e: Event) => o.onRename((e.target as HTMLInputElement).value)} />
       <span class="seg mode-tabs">
         ${(['plan', 'equipment'] as EditorMode[]).map(m => html`
@@ -92,7 +92,7 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
         ${EDITOR_WALL_TYPES.map(wt => html`
           <button class="tab ${o.wallType === wt ? 'on' : ''}" data-walltype=${wt} @click=${() => o.onWallType(wt)}>
             ${t(`walltype.${wt}`, lang)} ${WALL_PRESETS[wt]}</button>`)}
-        <input class="num" type="text" inputmode="numeric" .value=${String(o.thickness)}
+        <input class="num" type="text" inputmode="numeric" .value=${fieldValue(String(o.thickness))}
           aria-label=${t('props.thickness', lang)} title=${t('props.thickness', lang)}
           @change=${(e: Event) => {
             const el = e.target as HTMLInputElement;

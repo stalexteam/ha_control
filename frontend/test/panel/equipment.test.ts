@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { STORAGE_KEY } from '../../dev/mock-hass';
+import { STORAGE_KEY, createMockHass } from '../../dev/mock-hass';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 import { $, click, drawBox, key, mount, pressSave, stored } from './helpers';
 
@@ -223,5 +223,44 @@ describe('Equipment tab: rejected edits', () => {
     expect(el.selection).toBeNull();
     expect(el.history!.current.devices).toHaveLength(0);
     expect($(el, '.props').textContent).toContain('Next device');
+  });
+});
+
+describe('Equipment tab: typing survives re-renders', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+  });
+
+  it('a focused field keeps the typed text when HA pushes a new hass object', async () => {
+    const el = await mount();
+    await tab(el, 'equipment');
+    await tool(el, 'wall_light');
+    const f = $<HTMLInputElement>(el, '.props input[data-field="next-coneRange"]');
+    f.focus();
+    expect(el.shadowRoot!.activeElement).toBe(f);
+    f.value = '15';
+    el.hass = createMockHass({ language: 'en' });
+    await el.updateComplete;
+    el.requestUpdate();
+    await el.updateComplete;
+    expect($<HTMLInputElement>(el, '.props input[data-field="next-coneRange"]').value).toBe('15');
+    f.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    await el.updateComplete;
+    expect(el.nextProps.wall_light).toMatchObject({ coneRange: 15 });
+    expect($<HTMLInputElement>(el, '.props input[data-field="next-coneRange"]').value).toBe('15');
+  });
+
+  it('a focused plan field (new wall thickness) keeps the typed text across a re-render', async () => {
+    const el = await mount();
+    await tool(el, 'wall');
+    const f = $<HTMLInputElement>(el, '.props input[data-field="new-wall-thickness"]');
+    f.focus();
+    f.value = '12';
+    el.hass = createMockHass({ language: 'en' });
+    await el.updateComplete;
+    el.requestUpdate();
+    await el.updateComplete;
+    expect(f.value).toBe('12');
   });
 });
