@@ -3,7 +3,7 @@ import {
   addPolygonZone, addRoomZone, deleteAutomationZone, moveZoneVertex, refreshAutomationZones, renameAutomationZone,
   setZoneParticipation,
 } from '../../src/model/automation-zones';
-import { deleteWall, mergeNodes, moveNode, setWallProps } from '../../src/model/ops';
+import { addWallSegment, deleteWall, detachWallEnd, mergeNodes, moveNode, setWallProps } from '../../src/model/ops';
 import { addZone, deleteZone } from '../../src/model/zones';
 import { addDevice, moveDevice } from '../../src/model/devices';
 import { deviceZones, vertexPoint, zoneInvalidReason } from '../../src/geometry/zones';
@@ -68,6 +68,12 @@ describe('addPolygonZone', () => {
     const bow = addPolygonZone(l, [free(0, 0), free(1000, 1000), free(1000, 0), free(0, 1000)], 'Zone');
     expect(bow.zoneId).toBeNull();
     expect(bow.level).toBe(l);
+  });
+
+  it('a free vertex passed with lost is stored without it', () => {
+    const r = addPolygonZone(room(), [{ kind: 'free', x: 500, y: 500, lost: true }, free(1500, 500), free(1500, 1500)], 'Zone');
+    expect(verts(r.level, r.zoneId!)[0]).toEqual({ kind: 'free', x: 500, y: 500 });
+    expect(zoneOf(r.level, r.zoneId!).invalid).toBe(false);
   });
 
   it('a valid polygon is added with resolved vertex caches; the walls, nodes and openings stay by reference', () => {
@@ -158,6 +164,28 @@ describe('zones follow wall edits', () => {
     const r = mergeNodes(level, 'n1', 'n2');
     expect(r.nodes.some(n => n.id === 'n1')).toBe(false);
     expect(verts(r, id)[1]).toEqual({ kind: 'node', nodeId: 'n2', x: 3000, y: 4000 });
+  });
+
+  it('Alt-detaching a lone wall end keeps its node vertices anchored on the new node', () => {
+    // A free-standing wall s from p0 (5000,0) to p1 (5000,2000): p1 is used by s alone.
+    const seg = addWallSegment(room(), { kind: 'free', pt: { x: 5000, y: 0 } }, { kind: 'free', pt: { x: 5000, y: 2000 } },
+      { type: 'partition', thickness: 100, baseline: 'center' });
+    const p1 = seg.endNodeId!;
+    const z = addPolygonZone(seg.level, [{ kind: 'node', nodeId: p1, x: 0, y: 0 }, free(6000, 2000), free(6000, 3000)], 'Zone');
+    const r = detachWallEnd(z.level, seg.wallId!, 'b');
+    expect(r.level.nodes.some(n => n.id === p1)).toBe(false);
+    expect(verts(r.level, z.zoneId!)[0]).toEqual({ kind: 'node', nodeId: r.nodeId, x: 5000, y: 2000 });
+    expect(zoneOf(r.level, z.zoneId!).invalid).toBe(false);
+    // The detached end follows when dragged.
+    expect(verts(moveNode(r.level, r.nodeId, { x: 5000, y: 2500 }), z.zoneId!)[0]).toMatchObject({ x: 5000, y: 2500 });
+  });
+
+  it('detaching a shared wall end leaves vertices on the shared node unchanged', () => {
+    const { level, id } = withQuad();
+    // n1 is shared by w0 (as B) and w1 (as A).
+    const r = detachWallEnd(level, 'w0', 'b');
+    expect(r.nodeId).not.toBe('n1');
+    expect(verts(r.level, id)[1]).toEqual({ kind: 'node', nodeId: 'n1', x: 3000, y: 0 });
   });
 
   it("shortening a wall below a wall vertex offset marks the zone invalid ('wall'); lengthening it heals it", () => {

@@ -4,9 +4,8 @@ import {
   DEVICE_PLACEMENTS, deviceDefaults, type Device, type DeviceKind, type DevicePlacement, type DeviceProps, type Level, type Pt,
   type Wall,
 } from '../../src/model/types';
-import { addZone } from '../../src/model/zones';
 import {
-  CONE_MEDIUM, coneMedium, deviceRoomId, angleFromHandle, clippedCone, coneShape, deviceAt, devicePose, directionHandle,
+  CONE_MEDIUM, coneMedium, angleFromHandle, clippedCone, coneShape, deviceAt, devicePose, directionHandle,
   sightOrigin, wrap180, wrap360,
 } from '../../src/geometry/devices';
 import { lineOfSightObstacles, type Medium, type Segment } from '../../src/geometry/visibility';
@@ -372,16 +371,8 @@ describe('direction handle', () => {
   });
 });
 
-describe('deviceRoomId and no-cone kinds', () => {
+describe('no-cone kinds', () => {
   const box = rectRoomLevel(3000, 4000, 400);
-  it('sensor inside a zone gives its id, outside null', () => {
-    const z = addZone(box, { x: 1500, y: 2000 }, 'R');
-    const inside = dev('c', deviceDefaults('climate_sensor', 'free'), { mode: 'free', x: 1000, y: 1000, rotation: 0 });
-    const outside = dev('c2', deviceDefaults('climate_sensor', 'free'), { mode: 'free', x: 9000, y: 9000, rotation: 0 });
-    const lv = withDevs(z.level, inside, outside);
-    expect(deviceRoomId(lv, inside)).toBe(z.zoneId);
-    expect(deviceRoomId(lv, outside)).toBeNull();
-  });
   it('coneShape null for climate sensor and fan', () => {
     const c = dev('c', deviceDefaults('climate_sensor', 'free'), { mode: 'free', x: 1000, y: 1000, rotation: 0 });
     const f = dev('f', deviceDefaults('exhaust_fan', 'wall'), { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 });

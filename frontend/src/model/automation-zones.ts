@@ -15,6 +15,7 @@ const withZones = (level: Level, automationZones: AutomationZone[]): Level => ({
 /** A free vertex at p that was anchored and lost its anchor. */
 export const lostVertex = (p: Pt): ZoneVertex => ({ kind: 'free', x: p.x, y: p.y, lost: true });
 
+// sameVertex and sameZone compare field by field: update them whenever ZoneVertex or AutomationZone gains a field.
 function sameVertex(a: ZoneVertex, b: ZoneVertex): boolean {
   if (a.x !== b.x || a.y !== b.y) return false;
   switch (a.kind) {
@@ -97,10 +98,16 @@ export function addRoomZone(level: Level, roomId: Id, name: string): { level: Le
   return addZoneObject(level, { id: newId(), name, shape: { kind: 'room', roomId }, invalid: false });
 }
 
-/** A custom zone through `vertices` (caches resolved). Fewer than 3 vertices or a self-intersecting outline: same level, null. */
+/** A vertex placed by the user: a free vertex never keeps `lost`. */
+const placed = (v: ZoneVertex): ZoneVertex => (v.kind === 'free' && v.lost ? { kind: 'free', x: v.x, y: v.y } : v);
+
+/**
+ * A custom zone through `vertices` (caches resolved; a free vertex never keeps `lost`). Fewer than 3 vertices or a
+ * self-intersecting outline: same level, null.
+ */
 export function addPolygonZone(level: Level, vertices: ZoneVertex[], name: string): { level: Level; zoneId: Id | null } {
   if (vertices.length < MIN_VERTICES) return { level, zoneId: null };
-  const zone = refreshZone(level, { id: newId(), name, shape: { kind: 'polygon', vertices: [...vertices] }, invalid: false });
+  const zone = refreshZone(level, { id: newId(), name, shape: { kind: 'polygon', vertices: vertices.map(placed) }, invalid: false });
   if (selfIntersects(zoneOutline(level, zone))) return { level, zoneId: null };
   return addZoneObject(level, zone);
 }
@@ -144,8 +151,7 @@ export function moveZoneVertex(level: Level, id: Id, index: number, v: ZoneVerte
   if (!z || z.shape.kind !== 'polygon' || !Number.isInteger(index) || index < 0 || index >= z.shape.vertices.length) {
     return level;
   }
-  const placed: ZoneVertex = v.kind === 'free' ? { kind: 'free', x: v.x, y: v.y } : v;
-  const vertices = z.shape.vertices.map((x, i) => (i === index ? placed : x));
+  const vertices = z.shape.vertices.map((x, i) => (i === index ? placed(v) : x));
   const next = refreshZone(level, { ...z, shape: { kind: 'polygon', vertices } });
   return sameZone(next, z) ? level : withZones(level, zones.map(x => (x === z ? next : x)));
 }

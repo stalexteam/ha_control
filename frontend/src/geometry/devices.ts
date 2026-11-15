@@ -3,7 +3,7 @@ import {
   AIM_KINDS, AIM_MAX, type Device, type DeviceKind, type DevicePlacement, type DeviceProps, type Id, type Level, type Pt,
   type Side,
 } from '../model/types';
-import { add, cross, dist, dot, perpLeft, pointInPolygon, polygonArea, scale, sub } from './vec';
+import { add, cross, dist, dot, perpLeft, scale, sub } from './vec';
 import { fromRing, toPoly, wallFrame } from './walls';
 import {
   FAN_STEP_DEG, lineOfSightObstacles, obstaclesWithin, visibilityPolygon, type Medium, type Segment,
@@ -125,21 +125,6 @@ export function coneShape(level: Level, d: Device): Pt[] | null {
 /** Probe point of a device: the face normal step for wall devices, the centre for free ones. */
 function probeOf(pose: DevicePose): Pt {
   return pose.normal ? add(pose.pt, pose.normal) : pose.pt;
-}
-
-/** Zone (smallest outline) containing the device's probe point, or null. */
-export function deviceRoomId(level: Level, d: Device): Id | null {
-  const pose = devicePose(level, d);
-  if (!pose) return null;
-  const probe = probeOf(pose);
-  let best: Id | null = null;
-  let bestArea = Infinity;
-  for (const z of level.zones) {
-    if (!pointInPolygon(probe, z.outline)) continue;
-    const a = Math.abs(polygonArea(z.outline));
-    if (a < bestArea) { best = z.id; bestArea = a; }
-  }
-  return best;
 }
 
 /** Even-odd: p lies inside the closed rings the segments form (inside the walls, for line-of-sight obstacles). */

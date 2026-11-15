@@ -211,13 +211,27 @@ export function dropOrphans(level: Level): void {
   level.nodes = level.nodes.filter(n => level.walls.some(w => w.a === n.id || w.b === n.id));
 }
 
+/** Mutating: zone node vertices on `fromId` point at `intoId`. */
+function repointZoneNodes(level: Level, fromId: Id, intoId: Id): void {
+  for (const z of levelZones(level)) {
+    if (z.shape.kind !== 'polygon') continue;
+    for (const v of z.shape.vertices) if (v.kind === 'node' && v.nodeId === fromId) v.nodeId = intoId;
+  }
+}
+
+/**
+ * Gives the wall end a new node at the same place. When no other wall uses the old node, it is dropped and the zone
+ * node vertices on it move to the new node.
+ */
 export function detachWallEnd(level: Level, wallId: Id, end: 'a' | 'b'): { level: Level; nodeId: Id } {
   const out = clone(level);
   const w = findWall(out, wallId);
-  const p = nodePos(out, w[end]);
+  const old = w[end];
+  const p = nodePos(out, old);
   const node: PlanNode = { id: newId(), x: p.x, y: p.y };
   out.nodes.push(node);
   w[end] = node.id;
+  if (!out.walls.some(x => x.a === old || x.b === old)) repointZoneNodes(out, old, node.id);
   dropOrphans(out);
   return { level: finalize(out, level), nodeId: node.id };
 }
@@ -238,10 +252,7 @@ export function mergeNodes(level: Level, fromId: Id, intoId: Id): Level {
   out.openings = out.openings.filter(o => !dead.has(o.wallId));
   out.devices = out.devices.filter(d => d.placement.mode !== 'wall' || !dead.has(d.placement.wallId));
   for (const n of out.nodes) if (n.host && dead.has(n.host.wallId)) delete n.host;
-  for (const z of levelZones(out)) {
-    if (z.shape.kind !== 'polygon') continue;
-    for (const v of z.shape.vertices) if (v.kind === 'node' && v.nodeId === fromId) v.nodeId = intoId;
-  }
+  repointZoneNodes(out, fromId, intoId);
   out.nodes = out.nodes.filter(n => n.id !== fromId);
   dropOrphans(out);
   return finalize(out, level);
