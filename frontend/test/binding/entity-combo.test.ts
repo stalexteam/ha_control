@@ -36,6 +36,15 @@ describe('ps-entity-combo', () => {
     expect(el.shadowRoot!.querySelector('.srch')).toBeNull();
   });
 
+  it('shows the entity id as secondary text in the closed box and in every row, with a title', async () => {
+    const el = await mount('sensor.t_wc');
+    expect(q(el, '.cbox .eid').textContent).toBe('sensor.t_wc');
+    expect(q<HTMLElement>(el, '.cbox').title).toContain('sensor.t_wc');
+    await open(el);
+    expect(rows(el).map(r => r.querySelector('.eid')!.textContent)).toEqual(['sensor.t_wc', 'sensor.t_kit', 'light.main']);
+    expect((rows(el)[0] as HTMLElement).title).toContain('sensor.t_wc');
+  });
+
   it('opening shows a focused search field and rows', async () => {
     const el = await mount(null);
     await open(el);

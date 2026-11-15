@@ -10,7 +10,7 @@ import type { PlanStudioPanel } from './plan-studio-panel';
  *   state change; the metadata, and with it the memoised candidate lists, keep their identity unless the entity
  *   set or a structural attribute changed. Live values (state text, "unavailable") are read from `hass.states`.
  * - The registries load on the first entry to the Binding step. A failure keeps the states-only metadata (nothing
- *   is flagged Missing) and leaves a notice until Retry succeeds.
+ *   is flagged Missing) and leaves a notice until Retry succeeds. Reload runs the same load again.
  */
 export class MetaSource {
   /** User-facing registry load failure, or null. */
@@ -45,10 +45,13 @@ export class MetaSource {
     if (!this.tried) this.retry();
   }
 
-  /** Loads the registries unless they are loaded or loading; the panel re-renders when the load starts and settles. */
+  /**
+   * Loads the registries (again, when loaded already: Retry after a failure, "Reload from Home Assistant"); a no-op
+   * while a load runs. The panel re-renders when the load starts and settles. A failed reload keeps the older registries.
+   */
   retry(): void {
     const hass = this.h.hass;
-    if (this.regs || this.pending || !hass) return;
+    if (this.pending || !hass) return;
     this.tried = true;
     this.pending = true;
     this.h.requestUpdate();

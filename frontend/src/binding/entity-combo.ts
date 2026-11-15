@@ -2,7 +2,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { property } from 'lit/decorators.js';
 import { t } from '../i18n';
 import { entityLabel } from './candidates';
-import { stateOf, type EntityMeta, type HaMeta, type States } from './ha-meta';
+import { domainOf, stateOf, type EntityMeta, type HaMeta, type States } from './ha-meta';
 import { ComboBase, mdiIcon, type ComboRow } from './combo-base';
 
 /** Bundled MDI paths (24x24) by entity class or domain. */
@@ -28,7 +28,7 @@ const BY_DOMAIN: Record<string, IconName> = { light: 'light', switch: 'switch', 
 
 function iconFor(e: EntityMeta | undefined, eid: string): IconName {
   if (e?.deviceClass && BY_CLASS[e.deviceClass]) return BY_CLASS[e.deviceClass];
-  return BY_DOMAIN[e?.domain ?? eid.split('.')[0]] ?? 'generic';
+  return BY_DOMAIN[e?.domain ?? domainOf(eid)] ?? 'generic';
 }
 
 const icon = (name: IconName): TemplateResult => mdiIcon(ICONS[name]);
@@ -70,16 +70,24 @@ export class EntityCombo extends ComboBase<EntityRow> {
     const eid = this.value;
     const lab = eid ? entityLabel(this.meta, eid) : null;
     return html`${icon(eid ? iconFor(this.meta.entities.get(eid), eid) : 'generic')}
-      ${lab ? html`<span><b>${lab.name}</b>${lab.context !== lab.name ? html`<small>${lab.context}</small>` : nothing}</span>`
+      ${lab ? html`<span><b>${lab.name}</b>${lab.context !== lab.name ? html`<small>${lab.context}</small>` : nothing}<small class="eid">${eid}</small></span>`
         : html`<span class="ph">${t('combo.none')}</span>`}`;
   }
 
   protected renderRow({ e, name, context }: EntityRow): TemplateResult {
     const state = stateOf(this.states, e.entityId) ?? 'unavailable';
     return html`${icon(iconFor(e, e.entityId))}
-      <span><b>${name}</b><small>${context}</small></span>
+      <span><b>${name}</b><small>${context}</small><small class="eid">${e.entityId}</small></span>
       <span class="side">${domainLabel(e.domain)}<br>${state}${e.unit ? ` ${e.unit}` : ''}</span>`;
   }
+
+  protected boxTitle(): string | undefined {
+    const eid = this.value;
+    if (!eid) return undefined;
+    const name = entityLabel(this.meta, eid).name;
+    return name === eid ? eid : `${name} (${eid})`;
+  }
+  protected rowTitle(r: EntityRow): string { return r.name === r.id ? r.id : `${r.name} (${r.id})`; }
 
   protected searchLabel(): string { return t('combo.search'); }
   protected emptyText(): string { return t('combo.empty'); }

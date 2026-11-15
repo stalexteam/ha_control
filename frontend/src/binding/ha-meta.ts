@@ -4,7 +4,7 @@ import type { Presence } from '../model/bindings';
 /** Structural entity metadata. Live state values are not part of it: read them from hass.states (`stateOf`). */
 export interface EntityMeta {
   entityId: string; domain: string; name: string; deviceClass: string | null; unit: string | null;
-  deviceId: string | null; areaId: string | null; hidden: boolean; disabled: boolean; category: string | null; icon: string | null;
+  deviceId: string | null; areaId: string | null; hidden: boolean; disabled: boolean; category: string | null;
 }
 export interface DeviceMeta { id: string; name: string; model: string | null; areaId: string | null }
 export interface HaMeta { entities: Map<string, EntityMeta>; devices: Map<string, DeviceMeta>; areas: Map<string, string>; registryLoaded: boolean }
@@ -13,26 +13,30 @@ export type Registries = Pick<HaMeta, 'entities' | 'devices' | 'areas'>;
 export type States = Record<string, unknown> | undefined;
 
 interface StateObj { state?: unknown; attributes?: Record<string, unknown> }
+/**
+ * The fields of `config/entity_registry/list` used here (checked against a live Home Assistant: the entries carry no
+ * device_class, unit_of_measurement, original_device_class or original_icon; class and unit come from the live state).
+ */
 interface RegEntity {
   entity_id: string; device_id?: string | null; area_id?: string | null; name?: string | null; original_name?: string | null;
-  hidden_by?: string | null; disabled_by?: string | null; entity_category?: string | null; icon?: string | null; original_icon?: string | null;
-  device_class?: string | null; original_device_class?: string | null; unit_of_measurement?: string | null;
+  hidden_by?: string | null; disabled_by?: string | null; entity_category?: string | null;
 }
 interface RegDevice { id: string; name?: string | null; name_by_user?: string | null; model?: string | null; area_id?: string | null }
 interface RegArea { area_id: string; name: string }
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
-const domainOf = (eid: string): string => eid.split('.')[0];
+/** The domain of an entity id (`sensor` for `sensor.temp`). */
+export const domainOf = (eid: string): string => eid.split('.')[0];
 
 /** The state attributes the metadata is built from; any other attribute (and the state value) is live data. */
-const STRUCT_ATTRS = ['friendly_name', 'device_class', 'unit_of_measurement', 'icon'] as const;
+const STRUCT_ATTRS = ['friendly_name', 'device_class', 'unit_of_measurement'] as const;
 
 function fromState(eid: string, s: StateObj): EntityMeta {
   const a = s.attributes ?? {};
   return {
     entityId: eid, domain: domainOf(eid), name: str(a.friendly_name) ?? eid,
     deviceClass: str(a.device_class), unit: str(a.unit_of_measurement),
-    deviceId: null, areaId: null, hidden: false, disabled: false, category: null, icon: str(a.icon),
+    deviceId: null, areaId: null, hidden: false, disabled: false, category: null,
   };
 }
 
@@ -82,11 +86,8 @@ export async function loadRegistries(hass: HassLike): Promise<Registries> {
     entities.set(r.entity_id, {
       ...base,
       name: str(r.name) ?? str(r.original_name) ?? base.name,
-      deviceClass: str(r.device_class) ?? str(r.original_device_class),
-      unit: str(r.unit_of_measurement),
       deviceId: str(r.device_id), areaId: str(r.area_id),
       hidden: !!r.hidden_by, disabled: !!r.disabled_by, category: str(r.entity_category),
-      icon: str(r.icon) ?? str(r.original_icon),
     });
   }
   return {
@@ -96,12 +97,12 @@ export async function loadRegistries(hass: HassLike): Promise<Registries> {
   };
 }
 
-/** Per field: deviceClass, unit from the live state when present; name = live friendly_name, else registry name, else original_name, else entity id; hidden, disabled, category, deviceId, areaId from the registry; icon = registry icon, falling back to the live icon. */
+/** Per field: deviceClass, unit from the live state when present; name = live friendly_name, else registry name, else original_name, else entity id; hidden, disabled, category, deviceId, areaId from the registry. */
 export function mergeMeta(states: HaMeta, regs: Registries): HaMeta {
   const entities = new Map(regs.entities);
   for (const [eid, live] of states.entities) {
     const reg = regs.entities.get(eid);
-    entities.set(eid, reg ? { ...reg, name: live.name !== eid ? live.name : reg.name, deviceClass: live.deviceClass ?? reg.deviceClass, unit: live.unit ?? reg.unit, icon: reg.icon ?? live.icon } : live);
+    entities.set(eid, reg ? { ...reg, name: live.name !== eid ? live.name : reg.name, deviceClass: live.deviceClass ?? reg.deviceClass, unit: live.unit ?? reg.unit } : live);
   }
   return { entities, devices: regs.devices, areas: regs.areas, registryLoaded: true };
 }

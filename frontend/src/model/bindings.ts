@@ -22,6 +22,9 @@ export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
   equipment: [{ role: 'control', domains: ['switch'], primary: true }, POWER],
 };
 
+/** How many of the statuses are not `bound` (partly bound and missing count as not bound). */
+export const countNotBound = (statuses: Iterable<BindStatus>): number => { let n = 0; for (const s of statuses) if (s !== 'bound') n++; return n; };
+
 /** Kinds where one set primary is enough; all other kinds need every primary. */
 export const PRIMARY_MODE: Partial<Record<DeviceKind, 'any'>> = { climate_sensor: 'any' };
 

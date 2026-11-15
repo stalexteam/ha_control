@@ -57,14 +57,17 @@ describe('sameStructure', () => {
     expect(sameStructure(a, { ...a, 'light.k': { state: 'off', attributes: { friendly_name: 'Kitchen', brightness: 99 } } })).toBe(true);
     expect(sameStructure(undefined, {})).toBe(true);
   });
-  it('a new or removed entity, or a changed name, class, unit or icon, does', () => {
+  it('a changed icon attribute does not rebuild the metadata', () => {
+    const attrs = a['sensor.t'].attributes;
+    expect(sameStructure(a, { ...a, 'sensor.t': { state: '21', attributes: { ...attrs, icon: 'mdi:x' } } })).toBe(true);
+  });
+  it('a new or removed entity, or a changed name, class or unit, does', () => {
     const attrs = a['sensor.t'].attributes;
     expect(sameStructure(a, { ...a, 'sensor.new': { state: '1', attributes: {} } })).toBe(false);
     expect(sameStructure(a, { 'sensor.t': a['sensor.t'] })).toBe(false);
     expect(sameStructure(a, { ...a, 'sensor.t': { state: '21', attributes: { ...attrs, device_class: 'humidity' } } })).toBe(false);
     expect(sameStructure(a, { ...a, 'sensor.t': { state: '21', attributes: { ...attrs, unit_of_measurement: '°F' } } })).toBe(false);
     expect(sameStructure(a, { ...a, 'sensor.t': { state: '21', attributes: { ...attrs, friendly_name: 'T2' } } })).toBe(false);
-    expect(sameStructure(a, { ...a, 'sensor.t': { state: '21', attributes: { ...attrs, icon: 'mdi:x' } } })).toBe(false);
     expect(sameStructure(a, undefined)).toBe(false);
   });
 });
@@ -72,9 +75,9 @@ describe('sameStructure', () => {
 describe('loadRegistries / mergeMeta', () => {
   const answers: Record<string, unknown> = {
     'config/entity_registry/list': [
-      { entity_id: 'sensor.t', device_id: 'd1', area_id: null, name: null, original_name: 'T reg', hidden_by: null, disabled_by: null, entity_category: 'diagnostic', icon: null, original_icon: 'mdi:thermometer' },
-      { entity_id: 'sensor.orig', device_id: null, area_id: null, name: null, original_name: 'X', hidden_by: null, disabled_by: null, entity_category: null, icon: null, original_icon: null },
-      { entity_id: 'light.off', device_id: null, area_id: 'a1', name: 'Off light', hidden_by: 'user', disabled_by: 'integration', entity_category: null, icon: 'mdi:x', original_icon: 'mdi:y' },
+      { entity_id: 'sensor.t', device_id: 'd1', area_id: null, name: null, original_name: 'T reg', hidden_by: null, disabled_by: null, entity_category: 'diagnostic', icon: null },
+      { entity_id: 'sensor.orig', device_id: null, area_id: null, name: null, original_name: 'X', hidden_by: null, disabled_by: null, entity_category: null, icon: null },
+      { entity_id: 'light.off', device_id: null, area_id: 'a1', name: 'Off light', hidden_by: 'user', disabled_by: 'integration', entity_category: null, icon: 'mdi:x' },
     ],
     'config/device_registry/list': [{ id: 'd1', name: 'Dev', name_by_user: 'My dev', model: 'M1', area_id: 'a2' }],
     'config/area_registry/list': [{ area_id: 'a1', name: 'Hall' }, { area_id: 'a2', name: 'Kitchen' }],
@@ -89,10 +92,19 @@ describe('loadRegistries / mergeMeta', () => {
     const { hass, calls } = fakeHass();
     const r = await loadRegistries(hass);
     expect([...calls].sort()).toEqual(['config/area_registry/list', 'config/device_registry/list', 'config/entity_registry/list']);
-    expect(r.entities.get('sensor.t')).toMatchObject({ name: 'T reg', deviceId: 'd1', category: 'diagnostic', icon: 'mdi:thermometer', hidden: false, disabled: false });
-    expect(r.entities.get('light.off')).toMatchObject({ hidden: true, disabled: true, icon: 'mdi:x', areaId: 'a1', name: 'Off light' });
+    expect(r.entities.get('sensor.t')).toMatchObject({ name: 'T reg', deviceId: 'd1', category: 'diagnostic', hidden: false, disabled: false });
+    expect(r.entities.get('light.off')).toMatchObject({ hidden: true, disabled: true, areaId: 'a1', name: 'Off light' });
     expect(r.devices.get('d1')).toEqual({ id: 'd1', name: 'My dev', model: 'M1', areaId: 'a2' });
     expect(r.areas.get('a1')).toBe('Hall');
+  });
+
+  it('entity metadata has no icon and takes class and unit from live states only', async () => {
+    const { hass } = fakeHass();
+    const r = await loadRegistries(hass);
+    const e = r.entities.get('light.off')!;
+    expect(e).not.toHaveProperty('icon');
+    expect(e.deviceClass).toBeNull();
+    expect(e.unit).toBeNull();
   });
 
   it('rejects when one command fails', async () => {

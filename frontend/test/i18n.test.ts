@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { I18N_KEYS } from '../src/i18n';
 import { DEVICE_PLACEMENTS, WALL_PRESETS, OPENING_DEFAULT_WIDTH } from '../src/model/types';
 import { LIGHT_SHAPES, EQUIPMENT_SHAPES } from '../src/panel/device-props';
-import { STEPS } from '../src/panel/steps';
 import { LIST_FILTERS } from '../src/panel/binding-list';
 import { ROLE_SPECS } from '../src/model/bindings';
 
@@ -75,7 +74,7 @@ describe('i18n', () => {
       side: ['left', 'right'],
       hinge: ['start', 'end'],
       baseline: ['center', 'left', 'right'],
-      mode: STEPS,
+      mode: ['plan', 'equipment', 'binding', 'automation'],
       'binding.filter': LIST_FILTERS,
       bindstatus: ['bound', 'partial', 'unbound', 'missing'],
       role: [...new Set(Object.values(ROLE_SPECS).flat().map(s => s.role))],

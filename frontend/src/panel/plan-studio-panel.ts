@@ -1,6 +1,6 @@
 import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from 'lit';
 import { property, state } from 'lit/decorators.js';
-import type { Device, Id, Level, Plan, Pt, WallType } from '../model/types';
+import type { BindingRole, Device, Id, Level, Plan, Pt, WallType } from '../model/types';
 import { WALL_PRESETS } from '../model/types';
 import { deleteWall } from '../model/ops';
 import { deleteOpening } from '../model/openings';
@@ -57,7 +57,7 @@ export class PlanStudioPanel extends LitElement {
   @state() bindQuery = '';
   /** Binding step: the device list rail is folded to a strip; "Show all" per role (both per session). */
   @state() railCollapsed = false;
-  @state() showAll: Record<string, boolean> = {};
+  @state() showAll: Partial<Record<BindingRole, boolean>> = {};
   @state() private cones = true;
   /** "Next device" props per kind; they drive ctx.deviceDefaults. */
   @state() nextProps = initialNextProps();
@@ -67,7 +67,10 @@ export class PlanStudioPanel extends LitElement {
   @state() private size = { w: 0, h: 0 };
   /** The open modal dialog; Escape closes it (the restore prompt then leaves a non-modal banner). */
   @state() dialog: Dialog | null = null;
+  /** Error or warning text (field input, plan switch / open failures); shown in every step. */
   @state() notice: string | null = null;
+  /** Binding step: report of the last HA device auto-fill. */
+  @state() fillNotice: string | null = null;
   /**
    * Local draft found on load, waiting for Restore / Discard. While it is undecided and belongs to the open
    * plan, no new draft is written under its key (that would overwrite it).
@@ -192,7 +195,7 @@ export class PlanStudioPanel extends LitElement {
     if (op()) this.save.markDirty();
     const s = this.selection, level = this.history?.current;
     this.selection = this.mode === 'binding' && s && level && selectionExists(level, s) ? s : null;
-    if (this.mode === 'binding') this.notice = null;
+    if (this.mode === 'binding') this.fillNotice = null;
     this.requestUpdate();
   }
 
@@ -205,6 +208,7 @@ export class PlanStudioPanel extends LitElement {
     this.activeTool.cancel();
     this.selection = null;
     this.notice = null;
+    this.fillNotice = null;
     if (id === 'box') this.wallType = 'bearing';
     this.toolId = id;
     this.activeTool = createTool(id, this.ctx);
@@ -224,7 +228,7 @@ export class PlanStudioPanel extends LitElement {
     const d = level?.devices.find(x => x.id === id);
     if (!level || !d) return;
     this.selection = { kind: 'device', id };
-    this.notice = null;
+    this.fillNotice = null;
     const pose = devicePose(level, d);
     if (pose) this.view = revealPt(this.view, pose.pt, this.size.w, this.size.h);
   }

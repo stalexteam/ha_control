@@ -166,6 +166,7 @@ export const panelStyles = css`
   .showall { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ch-muted); cursor: pointer; }
   .note { margin: 4px 0 0; color: var(--ch-muted); font-size: 12px; }
   .bprops .warn { margin: 4px 0 0; }
+  .bprops .reload { margin-top: 12px; }
   .reg-error { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 8px;
     border: 1px solid var(--ch-error); border-radius: 8px; }
   .reg-error .warn { flex: 1; margin: 0; }

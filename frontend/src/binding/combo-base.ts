@@ -115,6 +115,10 @@ export abstract class ComboBase<R extends ComboRow = ComboRow> extends LitElemen
     return value;
   }
 
+  /** Tooltip of the closed box and of a row; none by default. */
+  protected boxTitle(): string | undefined { return undefined; }
+  protected rowTitle(_r: R): string | undefined { return undefined; }
+
   private optId(i: number): string { return `${this.uid}-opt-${i}`; }
 
   /** The active row index kept inside the rows (the rows can shrink while the list is open). */
@@ -146,7 +150,7 @@ export abstract class ComboBase<R extends ComboRow = ComboRow> extends LitElemen
 
   private renderClosed(): TemplateResult {
     return html`<div class="field"><div class="cbox" tabindex="0" role="combobox" aria-haspopup="listbox" aria-expanded=${this.isOpen ? 'true' : 'false'}
-        aria-controls=${`${this.uid}-lb`} aria-label=${ifDefined(this.label || undefined)} @click=${() => (this.isOpen ? this.close() : this.openList())} @keydown=${this.onBoxKey}>
+        aria-controls=${`${this.uid}-lb`} aria-label=${ifDefined(this.label || undefined)} title=${ifDefined(this.boxTitle())} @click=${() => (this.isOpen ? this.close() : this.openList())} @keydown=${this.onBoxKey}>
       ${this.renderBox()}
       <span class="car" aria-hidden="true">▾</span>
     </div>${this.value ? html`<button class="x" type="button" title=${t('combo.clear')} aria-label=${t('combo.clear')}
@@ -163,7 +167,7 @@ export abstract class ComboBase<R extends ComboRow = ComboRow> extends LitElemen
         @keydown=${this.onSearchKey}></div>
       <div class="opts" id=${`${this.uid}-lb`} role="listbox" aria-label=${this.label || this.searchLabel()}>
         ${rows.map((r, i) => html`<div class="opt ${i === active ? 'on' : ''}" id=${this.optId(i)} role="option"
-            aria-selected=${r.id === this.value ? 'true' : 'false'} data-id=${r.id}
+            aria-selected=${r.id === this.value ? 'true' : 'false'} data-id=${r.id} title=${ifDefined(this.rowTitle(r))}
             @click=${() => this.pick(r.id)} @pointerenter=${() => { this.active = i; }}>${this.renderRow(r)}</div>`)}
       </div>
       ${rows.length === 0 ? html`<div class="empty">${this.emptyText()}</div>` : nothing}

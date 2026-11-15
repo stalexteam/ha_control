@@ -1,6 +1,6 @@
 import { html, type TemplateResult } from 'lit';
 import type { Device, Id, Level } from '../model/types';
-import { roleCount, type BindStatus } from '../model/bindings';
+import { countNotBound, roleCount, type BindStatus } from '../model/bindings';
 import type { Selection } from '../editor/tools/types';
 import { cached } from '../render/shared';
 import { t } from '../i18n';
@@ -66,7 +66,7 @@ export function renderBindingList(o: BindingListOpts): TemplateResult {
   if (o.collapsed) return html`<div class="blist collapsed">${railToggle(o)}</div>`;
   const items = listOrder(o.level).map(d => ({ d, st: o.status(d) }));
   const counts: Record<ListFilter, number> = {
-    unbound: items.filter(x => x.st !== 'bound').length, bound: items.filter(x => x.st === 'bound').length, all: items.length,
+    unbound: countNotBound(items.map(x => x.st)), bound: items.filter(x => x.st === 'bound').length, all: items.length,
   };
   const q = o.query.trim().toLowerCase();
   const rows = items.filter(({ d, st }) => shown(o.filter, st)

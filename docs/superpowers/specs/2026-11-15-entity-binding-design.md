@@ -116,6 +116,10 @@ Chrome uses HA's own elements when the browser has them registered, with a self-
 - `ha-dialog`, `ha-button`, `ha-icon-button`, `ha-textfield`, `ha-select`, `ha-entity-picker`;
 - `ha-svg-icon` with MDI paths bundled.
 
+Decision (implementation): chrome uses HA theme variables only; HA's internal elements (ha-dialog, ha-button, ha-textfield, ha-select) are not used, for the same availability/API-stability reason as ha-entity-picker. ha-icon and ha-icon-picker are the exceptions (used when registered, with fallbacks).
+
+Registry-only entities (in the entity registry but absent from `hass.states`) show as "unavailable".
+
 Further rules:
 - The top bar follows HA page headers. On narrow screens it shows HA's sidebar menu button.
 - The drawing sheet (canvas) keeps the blueprint palettes A/C, chosen by `hass.themes.darkMode`. The drawing is content, not chrome.

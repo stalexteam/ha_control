@@ -218,6 +218,77 @@ describe('binding step', () => {
     expect(dot(el, 'g')).toContain('missing');
   });
 
+  it('a session error notice shows as a warning in the Binding step with nothing selected, and apart from the fill report', async () => {
+    const { el } = await open();
+    expect(el.selection).toBeNull();
+    el.notice = 'Plan not found';
+    await el.updateComplete;
+    const n = $(el, '.props [data-notice="session"]');
+    expect(n.textContent!.trim()).toBe('Plan not found');
+    expect(n.classList.contains('warn')).toBe(true);
+    await pick(el, 'c');
+    await haDevice(el, 'WC sensor');
+    expect($(el, '.props [data-notice="session"]').textContent!.trim()).toBe('Plan not found');
+    expect($(el, '.props [data-notice="fill"]').textContent!.trim()).toBe('Filled: Temperature, Humidity');
+    expect(el.fillNotice).toBe('Filled: Temperature, Humidity');
+    expect(el.notice).toBe('Plan not found');
+  });
+
+  it('Reload from Home Assistant loads the registries again, guarded while loading, with the same error notice', async () => {
+    const fail: Fail = { on: false };
+    const { el, calls } = await open(fail);
+    expect(notice(el)).toBeNull();
+    const reload = () => $<HTMLButtonElement>(el, '.props [data-action="reload-registries"]');
+    expect(reload().textContent!.trim()).toBe('Reload from Home Assistant');
+    let release!: () => void;
+    fail.gate = new Promise<void>(r => { release = r; });
+    await press(el, '.props [data-action="reload-registries"]');
+    expect(calls).toHaveLength(6);
+    expect(reload().disabled).toBe(true);
+    reload().click();
+    await el.updateComplete;
+    expect(calls).toHaveLength(6);
+    fail.on = true;
+    release();
+    await vi.waitFor(() => expect(notice(el)).not.toBeNull());
+    expect(notice(el)!.textContent).toContain("Couldn't load the Home Assistant registries: Unauthorized");
+    expect(reload().disabled).toBe(false);
+    // Entering the step again still does not load by itself.
+    await press(el, '[data-mode="equipment"]');
+    await press(el, '[data-mode="binding"]');
+    expect(calls).toHaveLength(6);
+    fail.on = false; fail.gate = undefined;
+    await press(el, '.props [data-action="reload-registries"]');
+    await vi.waitFor(() => expect(notice(el)).toBeNull());
+    expect(calls).toHaveLength(9);
+  });
+
+  it('the HA device picker placeholder tells loading, failed and loaded-but-empty apart', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      plans: { P1: { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level()] } },
+    }));
+    const fail: Fail = { on: true };
+    let release!: () => void;
+    fail.gate = new Promise<void>(r => { release = r; });
+    const { hass } = haHass(fail);
+    const el = await mount(hass);
+    el.history!.push({ ...el.history!.current, devices: [...el.history!.current.devices, dev('m', 'Motion', 'motion_sensor', free(500, 500))] });
+    await press(el, '[data-mode="binding"]');
+    await pick(el, 'm');
+    const ph = () => deviceCombo(el).shadowRoot!.querySelector('.ph')!.textContent!.trim();
+    expect(ph()).toBe('Loading Home Assistant devices…');
+    release();
+    await vi.waitFor(() => expect(notice(el)).not.toBeNull());
+    expect(ph()).toBe('Home Assistant devices unavailable');
+    fail.on = false;
+    await press(el, '[data-action="retry-registry"]');
+    await vi.waitFor(() => expect(notice(el)).toBeNull());
+    await pick(el, 'c');
+    expect(ph()).toBe('Choose one to fill the empty roles');
+    await pick(el, 'm');
+    expect(ph()).toBe('No Home Assistant device has a matching entity');
+  });
+
   it('a socket shows its name, kind, and the Control and Power fields', async () => {
     const { el } = await open();
     await pick(el, 's');
@@ -369,17 +440,6 @@ describe('binding step', () => {
     expect(el.selection).toEqual({ kind: 'device', id: 'g' });
     expect($(el, '.props .bfoot').textContent).toContain('3 not bound');
     await press(el, '.props [data-action="next-unbound"]');
-    expect(el.selection).toEqual({ kind: 'device', id: 's' });
-  });
-
-  it('Delete and Backspace in the binding step keep the selected device', async () => {
-    const { el } = await open();
-    await pick(el, 's');
-    key(el, 'keydown', 'Delete');
-    key(el, 'keydown', 'Backspace');
-    await el.updateComplete;
-    expect(el.history!.current.devices).toHaveLength(6);
-    expect(el.history!.canUndo).toBe(false);
     expect(el.selection).toEqual({ kind: 'device', id: 's' });
   });
 

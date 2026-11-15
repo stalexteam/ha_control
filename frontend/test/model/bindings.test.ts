@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { rectRoomLevel } from '../fixtures';
 import { addDevice } from '../../src/model/devices';
-import { alsoBoundTo, bindingStatus, roleCount, sanitizeBindings, setBinding, type Presence } from '../../src/model/bindings';
+import { alsoBoundTo, bindingStatus, countNotBound, roleCount, sanitizeBindings, setBinding, type Presence } from '../../src/model/bindings';
 import { deviceDefaults, normalizeLevel, type DeviceKind, type Level } from '../../src/model/types';
 
 const free = { mode: 'wall', wallId: 'w0', side: 'right', offset: 500 } as const;
@@ -103,5 +103,12 @@ describe("sanitizeBindings empty", () => {
     const { level } = withDevice("socket");
     const d = { ...level.devices[0], bindings: {} };
     expect("bindings" in sanitizeBindings(d)).toBe(false);
+  });
+});
+
+describe('countNotBound', () => {
+  it('counts every status except bound', () => {
+    expect(countNotBound(['bound', 'partial', 'unbound', 'missing', 'bound'])).toBe(3);
+    expect(countNotBound([])).toBe(0);
   });
 });

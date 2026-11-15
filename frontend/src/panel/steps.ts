@@ -1,12 +1,11 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import type { Device, Level } from '../model/types';
-import type { BindStatus } from '../model/bindings';
+import { countNotBound, type BindStatus } from '../model/bindings';
 import { t } from '../i18n';
 import { fieldValue } from './field-value';
 import type { EditorMode } from './tool-factory';
 
-/** Wizard steps in order; the last one is shown but not available yet. */
-export const STEPS = ['plan', 'equipment', 'binding', 'automation'] as const;
+/** Wizard steps in order; a fourth one (Automation) is shown after them but not available yet. */
 const MODES: readonly EditorMode[] = ['plan', 'equipment', 'binding'];
 
 export interface StepsOpts {
@@ -32,7 +31,7 @@ export function stepState(mode: EditorMode, level: Level, status: (d: Device) =>
     case 'equipment':
       return { text: count(devices.length, 'steps.device', 'steps.devices'), done: devices.length > 0 };
     case 'binding': {
-      const bound = devices.filter(d => status(d) === 'bound').length;
+      const bound = devices.length - countNotBound(devices.map(status));
       return { text: t('steps.bound').replace('{b}', String(bound)).replace('{n}', String(devices.length)),
         done: devices.length > 0 && bound === devices.length };
     }
@@ -66,7 +65,7 @@ export function renderSteps(o: StepsOpts): TemplateResult {
         </button>`;
       })}
       <button class="step later" data-step="automation" disabled>
-        <span class="n">${STEPS.length}</span><span class="name">${t('mode.automation')}</span>
+        <span class="n">${MODES.length + 1}</span><span class="name">${t('mode.automation')}</span>
         <span class="state">${t('steps.later')}</span>
       </button>
       <div class="nav">
