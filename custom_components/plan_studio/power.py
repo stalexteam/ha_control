@@ -30,6 +30,11 @@ _TRANSFER = {
 _COMMON = {"2in1out": "OUT", "1in2out": "IN"}
 # block entity keys read as numbers and reported on the block
 _READINGS = {"grid": ("power", "voltage"), "meter": ("power", "voltage"), "battery": ("power", "soc"), "pv": ("power",)}
+# reading key -> unit -> factor to the base unit (W, V); any other unit reads as unknown, a soc is not converted
+_UNITS = {
+    "power": {"W": 1.0, "kW": 1e3, "MW": 1e6, "mW": 1e-3},
+    "voltage": {"V": 1.0, "kV": 1e3, "mV": 1e-3},
+}
 _ROLES = ("power", "control")
 # reading seeds, highest precedence first (the first value wins)
 _SEED_ORDER = ("grid", "meter", "device", "battery", "pv")
@@ -104,7 +109,8 @@ def entity_ids(schema: dict, devices: dict) -> set[str]:
     return out
 
 
-def _read(lookup: Lookup, eid: str | None) -> float | None:
+def _read(lookup: Lookup, eid: str | None, key: str) -> float | None:
+    """A numeric reading of `key` (power, voltage, soc); power in W and voltage in V, None for an unknown unit."""
     st = lookup(eid) if eid else None
     if st is None:
         return None
@@ -115,7 +121,12 @@ def _read(lookup: Lookup, eid: str | None) -> float | None:
     if not math.isfinite(v):
         return None
     attrs = st[1] if isinstance(st[1], dict) else {}
-    return v * 1000 if attrs.get("unit_of_measurement") == "kW" else v
+    unit = attrs.get("unit_of_measurement")
+    units = _UNITS.get(key)
+    if units is None or unit is None or unit == "":  # not converted, or no unit: the base unit
+        return v
+    factor = units.get(unit) if isinstance(unit, str) else None
+    return None if factor is None else v * factor
 
 
 def _switch(lookup: Lookup, eid: str) -> str:
@@ -188,7 +199,7 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
     # per-block state
     kinds = {bid: _kind(b) for bid, b in blocks.items()}
     readings = {
-        bid: {k: _read(lookup, _str(b.get(k))) for k in _READINGS.get(kinds[bid], ()) if _str(b.get(k))}
+        bid: {k: _read(lookup, _str(b.get(k)), k) for k in _READINGS.get(kinds[bid], ()) if _str(b.get(k))}
         for bid, b in blocks.items()
     }
     switches: dict[str, str] = {}  # meter switch or device control state, when its entity is set
@@ -251,7 +262,7 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
 
     def power(bid: str) -> float | None:
         b = bindings.get(bid)
-        return _read(lookup, _str(b.get("power"))) if b else None
+        return _read(lookup, _str(b.get("power")), "power") if b else None
 
     for wid in valid:
         if wid not in live:

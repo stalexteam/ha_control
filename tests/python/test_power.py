@@ -192,6 +192,49 @@ def test_kw_converted():
     assert f["blocks"]["g"] == {"power": 1200.0}
 
 
+@pytest.mark.parametrize(
+    "unit, value, expected",
+    [("W", "500", 500.0), ("kW", "0.5", 500.0), ("MW", "0.0005", 500.0), ("mW", "500000", 500.0), (None, "500", 500.0)],
+)
+def test_power_units_convert_to_w(unit, value, expected):
+    f = owner_chain(grid=(value, {"unit_of_measurement": unit} if unit else {})).run()
+    assert f["wires"]["g_main"] == live(expected)
+    assert f["blocks"]["g"] == {"power": expected}
+
+
+@pytest.mark.parametrize("unit", ["VA", "var", "kWh", "A", "V", "w", "KW"])
+def test_unknown_power_unit_is_none(unit):
+    f = owner_chain(grid=("500", {"unit_of_measurement": unit})).run()
+    assert f["wires"]["g_main"] == live(None)
+    assert f["blocks"]["g"] == {"power": None}
+
+
+def test_device_power_unit_converts_or_is_none():
+    c = owner_chain()
+    c.states["sensor.pc"] = ("0.25", {"unit_of_measurement": "kW"})
+    assert c.run()["blocks"]["pc"] == {"power": 250.0}
+    c.states["sensor.pc"] = ("250", {"unit_of_measurement": "VA"})
+    assert c.run()["blocks"]["pc"] == {"power": None}
+
+
+@pytest.mark.parametrize(
+    "unit, value, expected",
+    [("V", "231", 231.0), ("kV", "0.231", 231.0), ("mV", "231000", 231.0), (None, "231", 231.0),
+     ("A", "231", None), ("kW", "231", None), ("v", "231", None)],
+)
+def test_voltage_units_convert_to_v_or_are_none(unit, value, expected):
+    c = owner_chain()
+    c.block("g")["voltage"] = "sensor.grid_v"
+    c.states["sensor.grid_v"] = (value, {"unit_of_measurement": unit} if unit else {})
+    assert c.run()["blocks"]["g"] == {"power": 1000.0, "voltage": expected}
+
+
+def test_soc_keeps_its_value():
+    c = owner_chain()
+    c.states["sensor.b1_soc"] = ("62", {"unit_of_measurement": "%"})
+    assert c.run()["blocks"]["b1"] == {"power": 100.0, "soc": 62.0}
+
+
 @pytest.mark.parametrize("state", ["unavailable", "unknown", "abc", "nan", "inf", None])
 def test_unavailable_reading_is_none(state):
     f = owner_chain(grid=state).run()
