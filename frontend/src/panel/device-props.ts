@@ -5,6 +5,8 @@ import { AIM_KINDS, AIM_MAX, DEVICE_PLACEMENTS, FAN_DIAMETERS, deviceDefaults, i
 import { changeDeviceKind, deleteDevice, moveDevice, setDeviceProps } from '../model/devices';
 import type { Selection } from '../editor/tools/types';
 import { withAim } from '../geometry/devices';
+import { deviceZones } from '../geometry/zones';
+import { setZoneParticipation } from '../model/automation-zones';
 import { t } from '../i18n';
 import { numField, row, select } from './fields';
 import type { WholeRule } from '../geometry/parse';
@@ -34,6 +36,8 @@ export interface DevicePropsOpts {
   onNext(patch: Partial<DeviceProps>): void;
   /** Turns the selected input container into the other kind (returns false when refused). */
   onKind?(kind: ContainerKind): boolean;
+  /** Sets whether the device takes part in an automation zone (returns false when refused). */
+  onZone?(zoneId: string, participates: boolean): boolean;
   onDelete(): void;
   /** Validation message for a rejected field (null clears it). */
   onNotice?(msg: string | null): void;
@@ -166,6 +170,19 @@ function typeRow(o: DevicePropsOpts, d: Device): TemplateResult | typeof nothing
     v => o.onKind?.(v), 'kind'));
 }
 
+/** The automation zones containing the device, each with a participation checkbox. */
+function zoneList(o: DevicePropsOpts, d: Device): TemplateResult {
+  const zones = o.level ? deviceZones(o.level, d) : [];
+  return html`<fieldset data-field="zone-membership"><legend>${t('props.zoneList')}</legend>
+    ${zones.length === 0 ? html`<p class="muted">${t('props.noZones')}</p>` : zones.map(({ zone, participates }) =>
+      html`<label class="row"><span>${zone.name}</span><input type="checkbox" data-zone=${zone.id} .checked=${participates}
+        @change=${(e: Event) => {
+          const el = e.target as HTMLInputElement;
+          if (!o.onZone?.(zone.id, el.checked)) el.checked = participates;
+        }} /></label>`)}
+  </fieldset>`;
+}
+
 function deviceProps(o: DevicePropsOpts, d: Device): TemplateResult {
   return html`
     <h4>${t(`device.${d.props.kind}`)}</h4>
@@ -173,6 +190,7 @@ function deviceProps(o: DevicePropsOpts, d: Device): TemplateResult {
     ${typeRow(o, d)}
     ${kindFields(o, d.props, '', patch => o.onDevice(patch))}
     ${placementFields(o, d)}
+    ${zoneList(o, d)}
     ${d.invalid ? html`<p class="warn">${t('props.invalidDevice')}</p>` : nothing}
     <button class="btn danger" data-action="delete-device" @click=${() => o.onDelete()}>${t('action.delete')}</button>`;
 }
@@ -218,6 +236,7 @@ export function renderEquipmentProps(o: EquipmentPropsOpts): TemplateResult {
       onDevice: (patch, name) => !!device && edit(setDeviceProps(level, device.id, patch, name)),
       onKind: kind => !!device && edit(changeDeviceKind(level, device.id, kind)),
       onPlacement: p => !!device && edit(moveDevice(level, device.id, p)),
+      onZone: (zoneId, on) => !!device && edit(setZoneParticipation(level, device.id, zoneId, on)),
       onNext: patch => {
         if (!nextKind) return;
         o.setNextProps({ ...o.nextProps, [nextKind]: { ...o.nextProps[nextKind], ...patch, kind: nextKind } as DeviceProps });

@@ -2,7 +2,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { STORAGE_KEY, createMockHass } from '../../dev/mock-hass';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
-import { $, click, drawBox, key, mount, pressSave, stored } from './helpers';
+import { $, click, drawBox, key, mount, pressSave, stored, undo } from './helpers';
+import { addPolygonZone } from '../../src/model/automation-zones';
+import { deviceDefaults } from '../../src/model/types';
+import type { Device, DeviceKind } from '../../src/model/types';
 
 async function tab(el: PlanStudioPanel, mode: 'plan' | 'equipment'): Promise<void> {
   $<HTMLButtonElement>(el, `.top button[data-mode="${mode}"]`).click();
@@ -430,6 +433,61 @@ describe('Equipment tab: typing survives re-renders', () => {
       expect(el.nextProps.equipment).toMatchObject({ icon: 'mdi:cube-outline' });
       expect(el.shadowRoot!.textContent).toContain('mdi:');
       expect(iconField(el).value).toBe('mdi:cube-outline');
+    });
+  });
+
+  describe('device zone membership list', () => {
+    const sq = (x0: number, x1: number) => [{ kind: 'free' as const, x: x0, y: 0 }, { kind: 'free' as const, x: x1, y: 0 },
+      { kind: 'free' as const, x: x1, y: 1000 }, { kind: 'free' as const, x: x0, y: 1000 }];
+    async function setup(kind: DeviceKind, x = 500): Promise<{ el: PlanStudioPanel; zoneIds: string[] }> {
+      const el = await mount();
+      const a = addPolygonZone(el.history!.current, sq(0, 1000), 'Hall');
+      const b = addPolygonZone(a.level, sq(0, 2000), 'House');
+      const dev: Device = { id: 'D1', name: 'Dev', placement: { mode: 'free', x, y: 500, rotation: 0 },
+        props: deviceDefaults(kind, 'free'), invalid: false };
+      el.commit({ ...b.level, devices: [dev] });
+      await tab(el, 'equipment');
+      el.selection = { kind: 'device', id: 'D1' };
+      await el.updateComplete;
+      return { el, zoneIds: [a.zoneId!, b.zoneId!] };
+    }
+    const boxes = (el: PlanStudioPanel) => [...el.shadowRoot!.querySelectorAll<HTMLInputElement>(
+      '.props fieldset[data-field="zone-membership"] input[data-zone]')];
+
+    it('the device lists the zones that contain it', async () => {
+      const { el, zoneIds } = await setup('socket');
+      const fs = $<HTMLElement>(el, '.props fieldset[data-field="zone-membership"]');
+      expect(fs.querySelector('legend')!.textContent).toBe('Zones');
+      expect(boxes(el).map(b => b.dataset.zone)).toEqual(zoneIds);
+      expect(boxes(el).every(b => b.checked)).toBe(true);
+      expect(fs.textContent).toContain('Hall');
+    });
+
+    it('unchecking a zone blacklists it; undo restores', async () => {
+      const { el, zoneIds } = await setup('socket');
+      const b = boxes(el)[0];
+      b.checked = false;
+      b.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      await el.updateComplete;
+      expect(el.history!.current.devices[0].zoneBlacklist).toEqual([zoneIds[0]]);
+      expect(boxes(el)[0].checked).toBe(false);
+      await undo(el);
+      expect(el.history!.current.devices[0].zoneBlacklist).toBeUndefined();
+      el.selection = { kind: 'device', id: 'D1' };
+      await el.updateComplete;
+      expect(boxes(el)[0].checked).toBe(true);
+    });
+
+    it('a device in no zone shows "Not in any zone."', async () => {
+      const { el } = await setup('socket', 5000);
+      expect(boxes(el)).toHaveLength(0);
+      expect($<HTMLElement>(el, '.props fieldset[data-field="zone-membership"]').textContent).toContain('Not in any zone.');
+    });
+
+    it('a climate sensor shows the same list', async () => {
+      const { el, zoneIds } = await setup('climate_sensor');
+      expect(boxes(el).map(b => b.dataset.zone)).toEqual(zoneIds);
+      expect(el.shadowRoot!.querySelector('.props fieldset[data-field="room"]')).toBeNull();
     });
   });
 });
