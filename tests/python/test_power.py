@@ -317,6 +317,20 @@ def test_inverter_binding_fills_in_then_out():
     assert f["blocks"]["inv"] == {"power": 700.0, "loss": 300.0}
 
 
+def test_seed_precedence_follows_kind_not_block_order():
+    blocks = [dev("d"), blk("m", "meter", power="sensor.m"), blk("g", "grid", power="sensor.grid")]
+    for order in (blocks, blocks[::-1]):
+        s = Scheme(
+            order,
+            [wire("g_m", "g.OUT", "m.IN"), wire("m_d", "m.OUT", "d.IN")],
+            {"d": {"power": "sensor.d"}},
+            {"sensor.grid": 1000, "sensor.m": 990, "sensor.d": 970},
+        )
+        f = s.run()
+        assert f["wires"]["g_m"] == live(1000.0)
+        assert f["wires"]["m_d"] == live(990.0)
+
+
 def test_missing_device():
     s = Scheme(
         [blk("g", "grid", power="sensor.grid"), blk("ghost", "device", deviceId="gone"), blk("rem", "remainder")],

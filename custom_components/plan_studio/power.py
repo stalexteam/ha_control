@@ -27,6 +27,8 @@ _COMMON = {"2in1out": "OUT", "1in2out": "IN"}
 # block entity keys read as numbers and reported on the block
 _READINGS = {"grid": ("power", "voltage"), "meter": ("power", "voltage"), "battery": ("power", "soc"), "pv": ("power",)}
 _ROLES = ("power", "control")
+# reading seeds, highest precedence first (the first value wins)
+_SEED_ORDER = ("grid", "meter", "device", "battery", "pv")
 # inverter loss terms: in + PV - OUT - BAT
 _LOSS = (("IN", 1), ("PV", 1), ("OUT", -1), ("BAT", -1))
 
@@ -255,7 +257,9 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
         zero = ("A", "B", common) if pos[bid] == "0" else ("B" if pos[bid] == "A" else "A",)
         for port in zero:
             seed(wire(bid, port), 0.0)
-    for bid, kind in kinds.items():
+    # precedence by kind, never by the order of the block list
+    seeding = sorted((kv for kv in kinds.items() if kv[1] in _SEED_ORDER), key=lambda kv: _SEED_ORDER.index(kv[1]))
+    for bid, kind in seeding:
         r = readings[bid].get("power")
         if kind == "grid":
             seed(wire(bid, "OUT"), r)
