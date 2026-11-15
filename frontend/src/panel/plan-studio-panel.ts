@@ -179,7 +179,11 @@ export class PlanStudioPanel extends LitElement {
     if (!this.history) return;
     this.history.push(next);
     this.save.markDirty();
-    if (this.selection && !selectionExists(next, this.selection)) { this.activeTool.cancel(); this.selection = null; }
+    if (this.selection && !selectionExists(next, this.selection)) {
+      this.activeTool.cancel();
+      this.selection = null;
+      this.fieldNotice = null;
+    }
     this.requestUpdate();
   }
 
@@ -196,12 +200,16 @@ export class PlanStudioPanel extends LitElement {
   undo(): void { this.step(() => this.history?.undo() ?? null); }
   redo(): void { this.step(() => this.history?.redo() ?? null); }
 
-  /** Undo / redo drop the selection, except in the Binding step, which keeps the selected device while it exists. */
+  /**
+   * Undo / redo drop the selection, except in the Binding step, which keeps the selected device while it exists;
+   * the field notice goes with a dropped selection.
+   */
   private step(op: () => Level | null): void {
     this.activeTool.cancel();
     if (op()) this.save.markDirty();
     const s = this.selection, level = this.history?.current;
     this.selection = this.mode === 'binding' && s && level && selectionExists(level, s) ? s : null;
+    if (!this.selection) this.fieldNotice = null;
     this.requestUpdate();
   }
 

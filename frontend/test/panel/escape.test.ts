@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest';
+import { deviceDefaults, type Device } from '../../src/model/types';
 import { click, key, mount, press } from './helpers';
 
 describe('Esc returns to Select', () => {
@@ -51,5 +52,66 @@ describe('Esc returns to Select', () => {
     await el.updateComplete;
     key(el, 'keydown', 'Escape');
     expect(el.toolId).toBe('binding-select');
+  });
+});
+
+describe('the Binding field notice goes with the selection', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+  });
+
+  const lamp: Device = {
+    id: 'lamp', name: 'Lamp', invalid: false, placement: { mode: 'free', x: 500, y: 500, rotation: 0 },
+    props: deviceDefaults('ceiling_light', 'free'),
+  };
+  const NOTICE = 'Slot is a whole number from 0 to 9.';
+
+  it('Esc in Binding clears the selection and the field notice', async () => {
+    const el = await mount();
+    el.commit({ ...el.history!.current, devices: [lamp] });
+    el.setMode('binding');
+    await el.updateComplete;
+    el.selection = { kind: 'device', id: 'lamp' };
+    el.fieldNotice = NOTICE;
+    key(el, 'keydown', 'Escape');
+    expect(el.selection).toBeNull();
+    expect(el.fieldNotice).toBeNull();
+  });
+
+  it('undo that removes the selected device clears the field notice', async () => {
+    const el = await mount();
+    el.commit({ ...el.history!.current, devices: [lamp] });
+    el.setMode('binding');
+    await el.updateComplete;
+    el.selection = { kind: 'device', id: 'lamp' };
+    el.fieldNotice = NOTICE;
+    el.undo();
+    expect(el.selection).toBeNull();
+    expect(el.fieldNotice).toBeNull();
+  });
+
+  it('a commit that removes the selected device clears the field notice', async () => {
+    const el = await mount();
+    el.commit({ ...el.history!.current, devices: [lamp] });
+    el.setMode('binding');
+    await el.updateComplete;
+    el.selection = { kind: 'device', id: 'lamp' };
+    el.fieldNotice = NOTICE;
+    el.commit({ ...el.history!.current, devices: [] });
+    expect(el.selection).toBeNull();
+    expect(el.fieldNotice).toBeNull();
+  });
+
+  it('a commit that keeps the selected device keeps the field notice', async () => {
+    const el = await mount();
+    el.commit({ ...el.history!.current, devices: [lamp] });
+    el.setMode('binding');
+    await el.updateComplete;
+    el.selection = { kind: 'device', id: 'lamp' };
+    el.fieldNotice = NOTICE;
+    el.commit({ ...el.history!.current, devices: [{ ...lamp, name: 'Lamp 2' }] });
+    expect(el.selection).toEqual({ kind: 'device', id: 'lamp' });
+    expect(el.fieldNotice).toBe(NOTICE);
   });
 });
