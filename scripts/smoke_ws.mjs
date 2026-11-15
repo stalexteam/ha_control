@@ -185,8 +185,38 @@ async function run() {
   eq(atB?.wires?.ts_r?.state, "dead", "transfer output at B (side B unwired)");
   expectOk(await setPosition("A"), "set position back to A");
   eq((await nextEvent(transferSub.id, "transfer frame after A"))?.blocks?.ts?.position, "A", "transfer position back at A");
+  // Devices: an inverter's output feeds a through device to a remainder; both read the smoke sensor. The through
+  // device's reading wins on the shared wire; power_out is reported only for a device the server takes as an inverter.
+  const deviceSchema = {
+    blocks: [
+      block("g", "grid"), block("inv", "device", { deviceId: "inv" }), block("d", "device", { deviceId: "d" }),
+      block("r", "remainder"),
+    ],
+    wires: [
+      wire("g_inv", { block: "g", port: "OUT" }, { block: "inv", port: "IN" }),
+      wire("inv_d", { block: "inv", port: "OUT" }, { block: "d", port: "IN" }),
+      wire("d_r", { block: "d", port: "OUT" }, { block: "r", port: "IN" }),
+    ],
+  };
+  const devices = {
+    inv: { power_out: POWER, inverter: true, controllable: false },
+    d: { power: POWER, inverter: false, controllable: false },
+  };
+  const deviceSub = await call({
+    type: "plan_studio/power/subscribe", plan_id: POWER_PLAN, power: deviceSchema, devices,
+  });
+  expectOk(deviceSub, "power subscribe (devices)");
+  same(await nextEvent(deviceSub.id, "first device frame"), {
+    wires: {
+      g_inv: { power: null, state: "live" },
+      inv_d: { power: 123, state: "live" },
+      d_r: { power: 123, state: "live" },
+    },
+    blocks: { g: {}, inv: { power_out: 123, loss: null }, d: { power: 123 }, r: { power: 123 } },
+  }, "first device frame");
   expectOk(await call({ type: "unsubscribe_events", subscription: gridSub.id }), "power unsubscribe");
   expectOk(await call({ type: "unsubscribe_events", subscription: transferSub.id }), "power unsubscribe (transfer)");
+  expectOk(await call({ type: "unsubscribe_events", subscription: deviceSub.id }), "power unsubscribe (devices)");
   await setEntity(POWER, null);
   console.log("SMOKE OK");
   process.exitCode = 0; ws.close();

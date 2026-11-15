@@ -19,11 +19,13 @@ def bus(bid):
     return blk(bid, "bus", w=200, h=8)
 
 
-def dev(bid, inverter=False):
-    b = blk(bid, "device", deviceId=bid)
-    if inverter:
-        b["inverter"] = True
-    return b
+def dev(bid):
+    return blk(bid, "device", deviceId=bid)
+
+
+def inverter(**roles):
+    """The payload entry of an inverter device with these bound roles."""
+    return {"inverter": True, "controllable": False, **roles}
 
 
 def end(spec):
@@ -69,11 +71,11 @@ def owner_chain(**states):
     blocks = [
         blk("g", "grid", power="sensor.grid"),
         bus("main"),
-        dev("inv", inverter=True),
+        dev("inv"),
         bus("batbus"),
         blk("b1", "battery", power="sensor.b1", soc="sensor.b1_soc"),
         blk("p1", "pv", power="sensor.pv"),
-        blk("rcbo", "meter", power="sensor.rcbo"),
+        dev("rcbo"),  # the former meter: a through device
         blk("ts", "transfer", form="2in1out"),
         bus("apt"),
         dev("pc"),
@@ -94,7 +96,8 @@ def owner_chain(**states):
     ]
     merged = {**OWNER_STATES, **states}
     world = {f"sensor.{k}": v for k, v in merged.items() if v is not None}
-    return Scheme(blocks, wires, {"inv": {}, "pc": {"power": "sensor.pc"}}, world)
+    devices = {"inv": inverter(), "rcbo": {"power": "sensor.rcbo"}, "pc": {"power": "sensor.pc"}}
+    return Scheme(blocks, wires, devices, world)
 
 
 def test_block_ports_per_kind():
@@ -103,9 +106,14 @@ def test_block_ports_per_kind():
     assert block_ports({"kind": "transfer", "form": "2in1out"}) == {"A": "in", "B": "in", "OUT": "out"}
     assert block_ports({"kind": "transfer", "form": "3in1out"}) == {}
     assert block_ports({"kind": "device"}) == {"IN": "in", "OUT": "out"}
-    assert block_ports({"kind": "device", "inverter": True}) == {"IN": "in", "OUT": "out", "PV": "in", "BAT": "out"}
+    # the inverter flag comes from the device, never from the block
+    inv = {"kind": "device", "deviceId": "i"}
+    assert block_ports(inv, {"i": inverter()}) == {"IN": "in", "OUT": "out", "PV": "in", "BAT": "out"}
+    assert block_ports({**inv, "inverter": True}) == {"IN": "in", "OUT": "out"}
+    assert block_ports({**inv, "inverter": True}, {"i": {"inverter": "yes"}}) == {"IN": "in", "OUT": "out"}
+    assert block_ports(inv, {"other": inverter()}) == {"IN": "in", "OUT": "out"}
     assert block_ports({"kind": "grid"}) == {"OUT": "out"}
-    assert block_ports({"kind": "meter"}) == {"IN": "in", "OUT": "out"}
+    assert block_ports({"kind": "meter"}) == {}  # retired: the panel migrates meters into devices
     assert block_ports({"kind": "battery"}) == {"BAT": "in"}
     assert block_ports({"kind": "pv"}) == {"OUT": "out"}
     assert block_ports({"kind": "remainder"}) == {"IN": "in"}
@@ -165,9 +173,9 @@ def test_position_0_kills_output():
     assert f["blocks"]["ts"] == {"position": "0"}
 
 
-def test_meter_switch_off_kills_downstream():
+def test_through_switch_off_kills_downstream():
     c = owner_chain()
-    c.block("rcbo")["switch"] = {"entity": "switch.rcbo", "controllable": False}
+    c.devices["rcbo"]["control"] = "switch.rcbo"
     c.states["switch.rcbo"] = ("off", {})
     f = c.run(ts="A")
     assert f["wires"]["inv_rcbo"] == live(900.0)
@@ -178,7 +186,7 @@ def test_meter_switch_off_kills_downstream():
 
 def test_switch_unknown_conducts():
     c = owner_chain()
-    c.block("rcbo")["switch"] = {"entity": "switch.rcbo", "controllable": False}
+    c.devices["rcbo"]["control"] = "switch.rcbo"
     c.states["switch.rcbo"] = ("unavailable", {})
     f = c.run()
     assert all(w["state"] == "live" for w in f["wires"].values())
@@ -273,7 +281,7 @@ def test_negative_grid_export():
     [("battery", None, live(None)), ("pv", None, live(None)), (None, None, dead()), ("battery", "off", dead())],
 )
 def test_inverter_with_storage_is_a_source(storage, control, expected):
-    blocks = [blk("g", "grid", power="sensor.grid"), dev("inv", inverter=True), dev("load")]
+    blocks = [blk("g", "grid", power="sensor.grid"), dev("inv"), dev("load")]
     wires = [wire("inv_load", "inv.OUT", "load.IN")]
     if storage == "battery":
         blocks.append(blk("b1", "battery", power="sensor.b1", soc="sensor.b1_soc"))
@@ -281,10 +289,10 @@ def test_inverter_with_storage_is_a_source(storage, control, expected):
     elif storage == "pv":
         blocks.append(blk("p1", "pv", power="sensor.pv"))
         wires.append(wire("p1_inv", "p1.OUT", "inv.PV"))
-    devices = {"inv": {}, "load": {}}
+    devices = {"inv": inverter(), "load": {}}
     states = {"sensor.grid": 0}
     if control:
-        devices["inv"] = {"control": "switch.inv"}
+        devices["inv"] = inverter(control="switch.inv")
         states["switch.inv"] = (control, {})
     f = Scheme(blocks, wires, devices, states).run()
     assert f["wires"]["inv_load"] == expected
@@ -295,7 +303,7 @@ def test_two_inverters_on_one_supply():
     wires = [wire("g_main", "g.OUT", "main")]
     devices = {}
     for n in ("1", "2"):
-        blocks += [blk(f"m{n}", "meter", power=f"sensor.m{n}"), dev(f"inv{n}", inverter=True), bus(f"x{n}")]
+        blocks += [dev(f"m{n}"), dev(f"inv{n}"), bus(f"x{n}")]
         blocks += [dev(f"load{n}"), blk(f"rem{n}", "remainder")]
         wires += [
             wire(f"main_m{n}", "main", f"m{n}.IN"),
@@ -304,7 +312,8 @@ def test_two_inverters_on_one_supply():
             wire(f"x{n}_load{n}", f"x{n}", f"load{n}.IN"),
             wire(f"x{n}_rem{n}", f"x{n}", f"rem{n}.IN"),
         ]
-        devices[f"inv{n}"] = {"power": f"sensor.inv{n}"}
+        devices[f"m{n}"] = {"power": f"sensor.m{n}"}
+        devices[f"inv{n}"] = inverter(power_out=f"sensor.inv{n}")
         devices[f"load{n}"] = {"power": f"sensor.load{n}"}
     states = {
         "sensor.grid": 1000,
@@ -316,8 +325,8 @@ def test_two_inverters_on_one_supply():
     assert f["wires"]["inv2_x2"] == live(390.0)
     assert f["blocks"]["rem1"] == {"power": 280.0}
     assert f["blocks"]["rem2"] == {"power": 290.0}
-    assert f["blocks"]["inv1"] == {"power": 580.0, "loss": 20.0}
-    assert f["blocks"]["inv2"] == {"power": 390.0, "loss": 10.0}
+    assert f["blocks"]["inv1"] == {"power_out": 580.0, "loss": 20.0}
+    assert f["blocks"]["inv2"] == {"power_out": 390.0, "loss": 10.0}
 
 
 def test_through_device_binding():
@@ -335,43 +344,157 @@ def test_through_device_binding():
     assert f["blocks"]["g"] == {}
 
 
-def test_inverter_binding_fills_in_then_out():
-    devices = {"inv": {"power": "sensor.inv"}, "load": {}}
+def test_inverter_reads_power_in_and_out_not_power():
     s = Scheme(
-        [blk("g", "grid"), dev("inv", inverter=True), dev("load")],
+        [blk("g", "grid"), dev("inv"), dev("load")],
         [wire("g_inv", "g.OUT", "inv.IN"), wire("inv_load", "inv.OUT", "load.IN")],
-        devices,
-        {"sensor.inv": 700},
+        {"inv": inverter(power="sensor.inv"), "load": {}},
+        {"sensor.inv": 700, "sensor.inv_in": ("0.7", {"unit_of_measurement": "kW"})},
     )
+    f = s.run()  # an inverter's `power` is shown but fills no wire (the v0.7 fallback is gone)
+    assert f["wires"]["g_inv"] == live(None)
+    assert f["wires"]["inv_load"] == live(None)
+    assert f["blocks"]["inv"] == {"power": 700.0, "loss": None}
+    s.devices["inv"] = inverter(power_in="sensor.inv_in")
     f = s.run()
     assert f["wires"]["g_inv"] == live(700.0)
     assert f["wires"]["inv_load"] == live(None)
-    assert f["blocks"]["inv"] == {"power": 700.0, "loss": None}
-
-    s = Scheme(
-        [blk("g", "grid", power="sensor.grid"), bus("main"), dev("inv", inverter=True), dev("load")],
-        [wire("g_main", "g.OUT", "main"), wire("main_inv", "main", "inv.IN"), wire("inv_load", "inv.OUT", "load.IN")],
-        devices,
-        {"sensor.grid": 1000, "sensor.inv": 700},
-    )
-    f = s.run()
-    assert f["wires"]["main_inv"] == live(1000.0)
-    assert f["wires"]["inv_load"] == live(700.0)
-    assert f["blocks"]["inv"] == {"power": 700.0, "loss": 300.0}
+    assert f["blocks"]["inv"] == {"power_in": 700.0, "loss": None}
+    assert f["blocks"]["load"] == {}
 
 
 def test_seed_precedence_follows_kind_not_block_order():
-    blocks = [dev("d"), blk("m", "meter", power="sensor.m"), blk("g", "grid", power="sensor.grid")]
+    blocks = [dev("d"), dev("m"), blk("g", "grid", power="sensor.grid")]
     for order in (blocks, blocks[::-1]):
         s = Scheme(
             order,
             [wire("g_m", "g.OUT", "m.IN"), wire("m_d", "m.OUT", "d.IN")],
-            {"d": {"power": "sensor.d"}},
+            {"d": {"power": "sensor.d"}, "m": {"power": "sensor.m"}},
             {"sensor.grid": 1000, "sensor.m": 990, "sensor.d": 970},
         )
         f = s.run()
         assert f["wires"]["g_m"] == live(1000.0)
         assert f["wires"]["m_d"] == live(990.0)
+
+
+def test_migrated_meter_chain():
+    s = Scheme(
+        [blk("g", "grid"), dev("a"), dev("b")],
+        [wire("g_a", "g.OUT", "a.IN"), wire("a_b", "a.OUT", "b.IN")],
+        {"a": {"power": "sensor.a", "control": "switch.a", "inverter": False, "controllable": True},
+         "b": {"inverter": False, "controllable": False}},
+        {"sensor.a": 900, "switch.a": ("on", {})},
+    )
+    f = s.run()
+    assert f["wires"]["g_a"] == live(900.0)
+    assert f["wires"]["a_b"] == f["wires"]["g_a"]
+    assert f["blocks"]["a"] == {"power": 900.0, "switch": "on"}
+    assert f["blocks"]["b"] == {}
+
+
+def test_dummy_passes_through():
+    """Inverter -> dummy D -> bus -> metered switch R -> load; the bus also feeds a remainder."""
+    s = Scheme(
+        [blk("g", "grid"), dev("inv"), dev("d"), bus("x"), dev("r"), dev("load"), blk("rem", "remainder")],
+        [
+            wire("g_inv", "g.OUT", "inv.IN"),
+            wire("inv_d", "inv.OUT", "d.IN"),
+            wire("d_x", "d.OUT", "x"),
+            wire("x_r", "x", "r.IN"),
+            wire("r_load", "r.OUT", "load.IN"),
+            wire("x_rem", "x", "rem.IN"),
+        ],
+        {"inv": inverter(power_out="sensor.inv_out"), "d": {}, "r": {"power": "sensor.r", "control": "switch.r"},
+         "load": {}},
+        {"sensor.inv_out": 500, "sensor.r": 480, "switch.r": ("on", {})},
+    )
+    f = s.run()
+    w = f["wires"]
+    assert w["inv_d"] == live(500.0) and w["d_x"] == live(500.0)  # D: in = out
+    assert w["x_r"] == live(480.0) and w["r_load"] == live(480.0)  # R: in = out = its power
+    assert f["blocks"]["rem"] == {"power": 20.0}
+    assert f["blocks"]["d"] == {}
+
+
+def test_inverter_in_out_and_loss():
+    s = Scheme(
+        [blk("g", "grid"), dev("inv"), blk("p1", "pv", power="sensor.pv"),
+         blk("b1", "battery", power="sensor.b1"), dev("load")],
+        [
+            wire("g_inv", "g.OUT", "inv.IN"),
+            wire("p1_inv", "p1.OUT", "inv.PV"),
+            wire("inv_b1", "inv.BAT", "b1.BAT"),
+            wire("inv_load", "inv.OUT", "load.IN"),
+        ],
+        {"inv": inverter(power_in="sensor.in", power_out="sensor.out"), "load": {}},
+        {"sensor.in": 1000, "sensor.pv": 200, "sensor.out": 1100, "sensor.b1": 50},
+    )
+    f = s.run()
+    assert f["wires"] == {
+        "g_inv": live(1000.0), "p1_inv": live(200.0), "inv_b1": live(50.0), "inv_load": live(1100.0),
+    }
+    assert f["blocks"]["inv"] == {"power_in": 1000.0, "power_out": 1100.0, "loss": 50.0}  # 1000 + 200 - 1100 - 50
+
+
+def test_off_switch_de_energizes():
+    s = Scheme(
+        [blk("g", "grid"), dev("a"), bus("x"), dev("load"), blk("rem", "remainder")],
+        [
+            wire("g_a", "g.OUT", "a.IN"),
+            wire("a_x", "a.OUT", "x"),
+            wire("x_load", "x", "load.IN"),
+            wire("x_rem", "x", "rem.IN"),
+        ],
+        {"a": {"control": "switch.a"}, "load": {"power": "sensor.load"}},
+        {"switch.a": ("off", {}), "sensor.load": 100},
+    )
+    f = s.run()
+    w = f["wires"]
+    assert w["a_x"] == dead() and w["x_load"] == dead() and w["x_rem"] == dead()
+    assert w["g_a"] == live(0.0)  # in = out across the open switch
+    assert f["blocks"]["a"] == {"switch": "off"}
+    assert f["blocks"]["load"] == {"power": 100.0}  # its own reading
+    assert f["blocks"]["rem"] == {"power": 0.0}
+
+
+def test_seed_order_devices():
+    """Grid, then through devices, then inverters, then loads; never by block order."""
+    chain = [blk("g", "grid", power="sensor.g"), dev("inv"), dev("r"), dev("l")]
+    for blocks in (chain, chain[::-1]):
+        s = Scheme(
+            blocks,
+            [wire("g_inv", "g.OUT", "inv.IN"), wire("inv_r", "inv.OUT", "r.IN"), wire("r_l", "r.OUT", "l.IN")],
+            {"inv": inverter(power_in="sensor.in", power_out="sensor.out"), "r": {"power": "sensor.r"},
+             "l": {"power": "sensor.l"}},
+            {"sensor.g": 1000, "sensor.in": 990, "sensor.out": 950, "sensor.r": 900, "sensor.l": 850},
+        )
+        w = s.run()["wires"]
+        assert w["g_inv"] == live(1000.0)  # grid over inverter in
+        assert w["inv_r"] == live(900.0)  # through device over inverter out
+        assert w["r_l"] == live(900.0)  # through device over load
+    short = [blk("g", "grid"), dev("inv"), dev("l")]
+    for blocks in (short, short[::-1]):
+        s = Scheme(
+            blocks,
+            [wire("g_inv", "g.OUT", "inv.IN"), wire("inv_l", "inv.OUT", "l.IN")],
+            {"inv": inverter(power_out="sensor.out"), "l": {"power": "sensor.l"}},
+            {"sensor.out": 950, "sensor.l": 850},
+        )
+        assert s.run()["wires"]["inv_l"] == live(950.0)  # inverter out over load
+
+
+def test_device_voltage_shown():
+    s = Scheme(
+        [blk("g", "grid"), dev("d"), dev("inv")],
+        [wire("g_d", "g.OUT", "d.IN")],
+        {"d": {"voltage": "sensor.v", "power_in": "sensor.x"}, "inv": inverter(voltage="sensor.v2")},
+        {"sensor.v": ("0.231", {"unit_of_measurement": "kV"}), "sensor.v2": ("230", {"unit_of_measurement": "V"}),
+         "sensor.x": 5},
+    )
+    f = s.run()
+    assert f["blocks"]["d"] == {"voltage": 231.0}  # power_in is read for an inverter only
+    assert f["blocks"]["inv"] == {"voltage": 230.0, "loss": None}
+    assert f["wires"]["g_d"] == live(None)  # voltage is not in the balance
 
 
 def test_missing_device():
@@ -393,7 +516,10 @@ def test_malformed_schema_is_ignored():
         bus("main"),
         blk("x", "toaster"),
         blk("k", ["grid"]),
-        blk("m", "meter", power="sensor.m"),
+        dev("m"),
+        blk("old", "meter", power="sensor.m"),  # retired kind: not evaluated
+        blk("j", "through", power="sensor.m"),  # a seed role is not a block kind
+        blk("i", "inverter"),
         blk("r", "remainder"),
         blk("t", "transfer", form="3in1out"),
         "junk",
@@ -409,6 +535,9 @@ def test_malformed_schema_is_ignored():
         wire("to_k", "main", "k.IN"),
         wire("self", "main", "main"),
         wire("no_port", "main", "m.SIDE"),
+        wire("to_pv", "main", "m.PV"),  # not an inverter: "yes" is not True
+        wire("to_old", "main", "old.IN"),
+        wire("to_j", "main", "j.IN"),
         wire("to_transfer", "main", "t.A"),
         {"id": "no_ends"},
         {"id": "bad_ends", "from": "g.OUT", "to": None},
@@ -416,15 +545,19 @@ def test_malformed_schema_is_ignored():
         "junk",
     ]
     states = {"sensor.grid": ("1000", W), "sensor.m": ("5", "not a dict")}
-    f = evaluate({"blocks": blocks, "wires": wires}, {"x": {}}, states.get, {"t": ["A"]})
+    devices = {"x": {}, "m": {"power": "sensor.m", "inverter": "yes", "control": 5}}
+    f = evaluate({"blocks": blocks, "wires": wires}, devices, states.get, {"t": ["A"]})
     w = f["wires"]
     assert w["ok"] == live(1000.0)
-    bad = ["to_missing", "at_big", "at_bool", "in_in", "to_toaster", "to_k", "self", "no_port", "to_transfer"]
+    bad = ["to_missing", "at_big", "at_bool", "in_in", "to_toaster", "to_k", "self", "no_port", "to_pv", "to_old",
+           "to_j", "to_transfer"]
     for wid in bad + ["no_ends", "bad_ends"]:
         assert w[wid] == {"power": None, "state": "dead"}, wid
     assert set(w) == {"ok", *bad, "no_ends", "bad_ends"}
     assert f["blocks"]["t"] == {"position": "A"}
     assert f["blocks"]["m"] == {"power": 5.0}
+    assert not {"old", "j", "i"} & set(f["blocks"])
+    assert evaluate({"blocks": blocks, "wires": wires}, {"m": "junk"}, states.get, {})["blocks"]["m"] == {"missing": True}
 
     f = evaluate({"blocks": None, "wires": [wire("ok", "g.OUT", "main")]}, {}, {}.get, {})
     assert f == {"wires": {"ok": {"power": None, "state": "dead"}}, "blocks": {}}
@@ -433,10 +566,14 @@ def test_malformed_schema_is_ignored():
 
 def test_entity_ids_and_device_bindings():
     c = owner_chain()
-    c.block("rcbo")["switch"] = {"entity": "switch.rcbo", "controllable": True}
+    c.block("g")["voltage"] = "sensor.grid_v"
+    c.devices["rcbo"].update(control="switch.rcbo", voltage="sensor.rcbo_v", controllable=True)
+    c.devices["inv"] = inverter(power_in="sensor.inv_in", power_out="sensor.inv_out", name="not a role")
+    c.schema["blocks"].append(blk("old", "meter", power="sensor.old", switch={"entity": "switch.old"}))
     devices = {**c.devices, "zz": {"power": "sensor.zz"}}  # not in the schematic
     assert entity_ids(c.schema, devices) == {
-        "sensor.grid", "sensor.b1", "sensor.b1_soc", "sensor.pv", "sensor.rcbo", "sensor.pc", "switch.rcbo",
+        "sensor.grid", "sensor.grid_v", "sensor.b1", "sensor.b1_soc", "sensor.pv", "sensor.rcbo", "sensor.rcbo_v",
+        "sensor.pc", "switch.rcbo", "sensor.inv_in", "sensor.inv_out",
     }
     assert entity_ids({"blocks": None}, {}) == set()
 
@@ -446,14 +583,18 @@ def test_entity_ids_and_device_bindings():
                 {"id": "a", "bindings": {"power": "sensor.a", "control": "switch.a", "state": "light.a"}},
                 {"id": "b"},
             ]},
-            {"devices": [{"id": "c", "bindings": {"control": "switch.c", "power": ""}}, "junk", {"id": 5}]},
+            {"devices": [
+                {"id": "c", "bindings": {"control": "switch.c", "power": "", "power_out": "sensor.c_out"}},
+                "junk",
+                {"id": 5},
+            ]},
             "junk",
         ]
     }
     assert device_bindings(plan) == {
         "a": {"power": "sensor.a", "control": "switch.a"},
         "b": {},
-        "c": {"control": "switch.c"},
+        "c": {"control": "switch.c", "power_out": "sensor.c_out"},
     }
     assert device_bindings({"levels": None}) == {}
 
@@ -493,6 +634,25 @@ def test_hub_state_change_resends_only_on_change():
     hub.handle_state("sensor.grid")  # same value: no new frame
     assert len(frames) == 2
     assert frames[1]["wires"]["g_ts"] == live(1200.0)
+
+
+def test_hub_resends_on_a_device_role_change():
+    s = Scheme(
+        [blk("g", "grid"), dev("inv"), dev("load")],
+        [wire("g_inv", "g.OUT", "inv.IN"), wire("inv_load", "inv.OUT", "load.IN")],
+        {"inv": inverter(power_out="sensor.out", voltage="sensor.v"), "load": {}},
+        {"sensor.out": 500, "sensor.v": ("230", {"unit_of_measurement": "V"})},
+    )
+    hub = PowerHub(s.states.get)
+    frames = []
+    hub.subscribe("p1", s.schema, s.devices, frames.append)
+    assert hub.entity_ids() == {"sensor.out", "sensor.v"}
+    s.states["sensor.out"] = reading(600)
+    hub.handle_state("sensor.out")
+    s.states["sensor.v"] = ("231", {"unit_of_measurement": "V"})
+    hub.handle_state("sensor.v")
+    assert [f["wires"]["inv_load"] for f in frames] == [live(500.0), live(600.0), live(600.0)]
+    assert frames[-1]["blocks"]["inv"] == {"power_out": 600.0, "voltage": 231.0, "loss": None}
 
 
 def test_hub_set_position_reevaluates_and_persists():
