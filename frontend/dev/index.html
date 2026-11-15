@@ -24,6 +24,10 @@
     import { createMockHass, simulateForeignSave, clearPlans, STORAGE_KEY } from './mock-hass.ts';
     import { memoryStorage } from './memory-storage.ts';
     import { SCENES } from './scenes.ts';
+    import { html, render } from 'lit';
+    import { renderPower } from '../src/render/power-svg.ts';
+    import { paletteFor } from '../src/render/theme.ts';
+    import { schemaBounds } from '../src/geometry/power.ts';
 
     const params = new URLSearchParams(location.search);
     const dark = params.get('dark') !== '0';
@@ -34,22 +38,42 @@
     // scene=<name>: seed an in-memory store from SCENES (localStorage stays untouched).
     const scene = SCENES[params.get('scene') ?? ''];
     const plans = scene ? Object.fromEntries(scene.plans.map(p => [p.id, p])) : null;
-    panel.hass = createMockHass({
-      darkMode: dark, demo: true,
-      ...(scene ? { storage: memoryStorage({ [STORAGE_KEY]: JSON.stringify({ plans }) }), powerFrame: scene.powerFrame } : {}),
-    });
+    const step = params.get('step'), select = params.get('select');
+    const selection = select ? { kind: select.slice(0, select.indexOf(':')), id: select.slice(select.indexOf(':') + 1) } : null;
+
+    if (params.get('render') === 'power') {
+      // render=power: the scene's schematic and frame drawn by renderPower full-screen (no panel), at 100 % or
+      // zoom=<screen px per unit>; a schematic larger than the window is fitted.
+      panel.remove();
+      const plan = scene?.plans[0];
+      const schema = plan?.power ?? { blocks: [], wires: [] };
+      const devices = plan ? plan.levels.flatMap(l => l.devices ?? []) : [];
+      const geo = { device: id => devices.find(d => d.id === id) };
+      const b = schemaBounds(schema, geo) ?? { x: 0, y: 0, w: 0, h: 0 };
+      const W = innerWidth, H = innerHeight;
+      const scale = Number(params.get('zoom')) || Math.min(1, (W - 80) / Math.max(b.w, 1), (H - 80) / Math.max(b.h, 1));
+      const vw = W / scale, vh = H / scale;
+      const box = `${b.x + b.w / 2 - vw / 2} ${b.y + b.h / 2 - vh / 2} ${vw} ${vh}`;
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      render(html`<svg id="power" xmlns="http://www.w3.org/2000/svg" width=${W} height=${H} viewBox=${box}
+        style="display:block">${renderPower(schema, {
+          palette: paletteFor(dark), selection, preview: {}, scale, frame: scene?.powerFrame ?? null, geo,
+        })}</svg>`, host);
+    } else {
+      panel.hass = createMockHass({
+        darkMode: dark, demo: true,
+        ...(scene ? { storage: memoryStorage({ [STORAGE_KEY]: JSON.stringify({ plans }) }), powerFrame: scene.powerFrame } : {}),
+      });
+    }
 
     // step=<EditorMode> and select=<kind>:<id>: applied once the panel has loaded its plan.
-    const step = params.get('step'), select = params.get('select');
-    if (step || select) {
+    if (params.get('render') !== 'power' && (step || select)) {
       const timer = setInterval(() => {
         if (!panel.plan) return;
         clearInterval(timer);
         if (step) panel.setMode(step);
-        if (select) {
-          const i = select.indexOf(':');
-          panel.selection = { kind: select.slice(0, i), id: select.slice(i + 1) };
-        }
+        if (selection) panel.selection = selection;
       }, 50);
     }
 

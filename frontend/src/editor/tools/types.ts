@@ -69,6 +69,10 @@ export interface Preview {
   /** The custom automation zone being drawn: fixed points, the cursor (null while off the plan) and whether closing now is invalid. */
   zoneDraft?: { points: Pt[]; cursor: Pt | null; invalid: boolean };
   device?: { placement: DevicePlacement; props: DeviceProps; invalid: boolean };
+  /** Working copy of the power schematic during a drag; the renderer draws it instead of the committed one. */
+  power?: PowerSchema;
+  /** The wire being dragged from a port (schematic units) and whether releasing here would connect. */
+  wireDraft?: { from: Pt; to: Pt; ok: boolean };
 }
 
 export interface Tool {

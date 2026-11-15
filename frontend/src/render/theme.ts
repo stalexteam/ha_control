@@ -24,6 +24,25 @@ export interface PlanPalette {
   breakLine: string;
   /** Opacity of the layer that is not being edited (walls in equipment mode, devices in plan mode). */
   dimOpacity: number;
+  // Power schematic
+  /** A live wire carrying power (the one accent of the schematic). */
+  powerLive: string;
+  /** A live wire carrying no power. */
+  powerIdle: string;
+  /** A de-energized wire. */
+  powerDead: string;
+  /** A wire whose power is unknown (dashed). */
+  powerNoData: string;
+  /** The dashed outline of a remainder block. */
+  powerRemainder: string;
+  blockFill: string;
+  blockStroke: string;
+  /** Block names: at least 7:1 against blockFill. */
+  blockName: string;
+  /** Block value lines: at least 4.5:1 against blockFill. */
+  blockValue: string;
+  portFill: string;
+  portIcon: string;
   // Chrome
   panel: string;
   border: string;
@@ -57,6 +76,17 @@ const DARK: PlanPalette = {
   motionCone: '#a78bfa',
   breakLine: '#94a3b8',
   dimOpacity: 0.35,
+  powerLive: '#38bdf8',
+  powerIdle: '#2f6f93',
+  powerDead: '#475569',
+  powerNoData: '#64748b',
+  powerRemainder: '#fbbf24',
+  blockFill: '#121b2f',
+  blockStroke: '#3b4a66',
+  blockName: '#e2e8f0',
+  blockValue: '#b4c0d3',
+  portFill: '#0b1220',
+  portIcon: '#cbd5e1',
   panel: '#0f172a',
   border: '#1e293b',
   text: '#e2e8f0',
@@ -89,6 +119,17 @@ const LIGHT: PlanPalette = {
   motionCone: '#7c3aed',
   breakLine: '#7c7368',
   dimOpacity: 0.4,
+  powerLive: '#0284c7',
+  powerIdle: '#7fb3d1',
+  powerDead: '#b3a999',
+  powerNoData: '#998f84',
+  powerRemainder: '#b45309',
+  blockFill: '#ffffff',
+  blockStroke: '#c9bfb1',
+  blockName: '#2b2622',
+  blockValue: '#5c534b',
+  portFill: '#ffffff',
+  portIcon: '#4a423b',
   panel: '#faf7f2',
   border: '#e0d8cc',
   text: '#2b2622',

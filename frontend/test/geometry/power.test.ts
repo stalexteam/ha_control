@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { deviceDefaults, type Device, type Pt } from '../../src/model/types';
 import type { PortSide, PowerBlock, PowerSchema, PowerWire } from '../../src/model/power';
 import {
-  GRID, HEAD_H, LINE_H, MIN_W, PORT_R, STUB, blockLines, blockName, blockRect, busAttach, hitPower, pinAt, portPlaces,
+  FOOT_H, GRID, HEAD_H, LINE_H, MIN_W, PORT_R, STUB, blockLines, blockName, blockRect, busAttach, hitPower, pinAt, portPlaces,
   routeWire, schemaBounds, transferChips, wireEnds, type GeoCtx, type Rect,
 } from '../../src/geometry/power';
 
@@ -72,7 +72,7 @@ function rectAround(pt: Pt, side: PortSide, w: number, h: number, u = 0.5): Rect
 
 describe('constants', () => {
   it('match the spec', () => {
-    expect([PORT_R, LINE_H, HEAD_H, MIN_W, STUB, GRID]).toEqual([11, 18, 24, 120, 14, 10]);
+    expect([PORT_R, LINE_H, HEAD_H, FOOT_H, MIN_W, STUB, GRID]).toEqual([11, 18, 30, 12, 120, 14, 10]);
   });
 });
 
@@ -230,7 +230,7 @@ describe('blockLines and blockRect', () => {
   it('grows with a longer name', () => {
     const short = blockRect({ id: 'm', kind: 'meter', name: 'M', x: 10, y: 20 }, G);
     const long = blockRect({ id: 'm', kind: 'meter', name: 'Main distribution board meter', x: 10, y: 20 }, G);
-    expect(short).toEqual({ x: 10, y: 20, w: MIN_W, h: HEAD_H + LINE_H + 8 });
+    expect(short).toEqual({ x: 10, y: 20, w: MIN_W, h: HEAD_H + LINE_H + FOOT_H });
     expect(long.w).toBe(7 * 'Main distribution board meter'.length + 32);
     expect(long.w).toBeGreaterThan(short.w);
   });
@@ -327,7 +327,7 @@ describe('blocks grow to fit their ports', () => {
 
   it('spaces two wired ports on the left of a short block at least 2 * PORT_R + 6 apart, on the grown edge', () => {
     const base = blockRect(short, g);
-    expect(base.h).toBe(HEAD_H + 8);
+    expect(base.h).toBe(HEAD_H + FOOT_H);
     const r = blockRect(short, g, s);
     expect(r).toEqual({ x: 0, y: 0, w: base.w, h: 3 * (2 * PORT_R + 6) });
     const [into, out] = portPlaces(s, short, g);
@@ -341,15 +341,17 @@ describe('blocks grow to fit their ports', () => {
   });
 
   it('blockRect without a schema stays the base rect', () => {
-    expect(blockRect(short, g)).toEqual({ x: 0, y: 0, w: MIN_W, h: HEAD_H + 8 });
+    expect(blockRect(short, g)).toEqual({ x: 0, y: 0, w: MIN_W, h: HEAD_H + FOOT_H });
   });
 
   it('wire ends, hits and bounds use the grown rect', () => {
     const r = blockRect(short, g, s);
     expect(wireEnds(s, s.wires[0], g)!.b.rect).toEqual(r);
     expect(hitPower(s, { x: 60, y: r.h - 6 }, 4, g)).toEqual({ kind: 'block', id: 'd' });
-    expect(schemaBounds(schema([short], s.wires), g)!.h).toBe(HEAD_H + 8);
-    expect(schemaBounds(s, g)).toEqual({ x: -600, y: -100, w: 720, h: 256 }); // the meter's single right port grows it to 56
+    expect(schemaBounds(schema([short], s.wires), g)!.h).toBe(HEAD_H + FOOT_H);
+    expect(schemaBounds(s, g)).toEqual({ x: -600, y: -100, w: 720, h: 260 }); // the meter (100 + 60) is the lowest
+    // with only the grid wired, the bare block's single left port grows it from 42 to 56: the bounds end at 56
+    expect(schemaBounds(schema([short, src], [s.wires[0]]), g)!.h).toBe(156);
   });
 
   it('grows the width for many ports on one side, pins included', () => {

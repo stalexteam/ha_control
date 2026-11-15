@@ -1,6 +1,7 @@
 import type { HassLike } from '../src/api';
 import type { ContainerState } from '../src/live/container-feed';
 import type { Plan } from '../src/model/types';
+import type { PowerFrame } from '../src/model/power';
 import { DEMO_REGISTRY, DEMO_STATES } from './demo-ha';
 
 /** localStorage key holding { plans: { [id]: Plan } } — same shape as the HA Store data. */
@@ -42,12 +43,14 @@ function notConfiguredStates(plan: Plan | undefined): Record<string, ContainerSt
  * an existing plan needs expected_revision == current unless force; a missing plan with a non-null
  * expected_revision is a conflict even with force.
  * `plan_studio/containers/subscribe` answers once with a full snapshot: every container of the stored plan as error,
- * not configured. Other subscriptions are unknown.
- * `powerFrame` is reserved for the power subscription (not answered yet).
+ * not configured. `plan_studio/power/subscribe` answers once with `powerFrame` (an empty frame by default), and
+ * `plan_studio/power/set_position` resolves `{}`. Other subscriptions are unknown.
  * With `demo` it also has live states and answers the entity, device and area registry commands with a small
  * sample (dev harness); without it those commands are unknown, so tests bring their own HA data.
  */
-export function createMockHass(opts: { darkMode?: boolean; storage?: Storage; demo?: boolean; powerFrame?: unknown } = {}): HassLike {
+export function createMockHass(
+  opts: { darkMode?: boolean; storage?: Storage; demo?: boolean; powerFrame?: PowerFrame } = {},
+): HassLike {
   const storage = opts.storage ?? localStorage;
   return {
     themes: { darkMode: opts.darkMode ?? true },
@@ -86,6 +89,8 @@ export function createMockHass(opts: { darkMode?: boolean; storage?: Storage; de
             write(storage, data);
             return Promise.resolve({ revision } as T);
           }
+          case 'plan_studio/power/set_position':
+            return Promise.resolve({} as T);
           case 'plan_studio/plans/delete': {
             const id = msg.plan_id as string;
             const existed = id in data.plans;
@@ -98,12 +103,18 @@ export function createMockHass(opts: { darkMode?: boolean; storage?: Storage; de
         }
       },
       subscribeMessage<T>(callback: (msg: T) => void, msg: Record<string, unknown>): Promise<() => Promise<void>> {
-        if (msg.type !== 'plan_studio/containers/subscribe') return fail('unknown_command', `Unknown command ${String(msg.type)}`);
-        const containers = notConfiguredStates(read(storage).plans[msg.plan_id as string]);
+        let first: unknown;
+        if (msg.type === 'plan_studio/containers/subscribe') {
+          first = { full: true, containers: notConfiguredStates(read(storage).plans[msg.plan_id as string]) };
+        } else if (msg.type === 'plan_studio/power/subscribe') {
+          first = structuredClone(opts.powerFrame ?? { wires: {}, blocks: {} });
+        } else {
+          return fail('unknown_command', `Unknown command ${String(msg.type)}`);
+        }
         let open = true;
         const subscribed = Promise.resolve(() => { open = false; return Promise.resolve(); });
         // Like HA: the result first, then the first event.
-        void subscribed.then(() => { if (open) callback({ full: true, containers } as T); });
+        void subscribed.then(() => { if (open) callback(first as T); });
         return subscribed;
       },
     },

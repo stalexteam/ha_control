@@ -8,7 +8,9 @@ import { dist, distToSegment } from './vec';
 /** Schematic units: 1 unit = 1 screen px at 100 % zoom. */
 export const PORT_R = 11;
 export const LINE_H = 18;
-export const HEAD_H = 24;
+/** The name row and the bottom margin: each clears a port circle on that edge (PORT_R) by a few units. */
+export const HEAD_H = 30;
+export const FOOT_H = 12;
 export const MIN_W = 120;
 export const STUB = 14;
 export const GRID = 10;
@@ -86,7 +88,7 @@ function baseRect(b: PowerBlock, g: GeoCtx): Rect {
   return {
     x: b.x, y: b.y,
     w: Math.max(MIN_W, 7 * blockName(b, g).length + 32),
-    h: HEAD_H + LINE_H * blockLines(b, g) + 8,
+    h: HEAD_H + LINE_H * blockLines(b, g) + FOOT_H,
   };
 }
 
