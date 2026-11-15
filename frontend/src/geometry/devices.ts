@@ -134,33 +134,41 @@ function insideSegments(p: Pt, segs: Segment[]): boolean {
   return inside;
 }
 
-/** Signed distances along the line through p in unit direction u at which it meets the segments. */
-function lineCrossings(p: Pt, u: Pt, segs: Segment[]): number[] {
-  const ts: number[] = [];
+/** The segment p-q meets one of the segments (crossing or touching). */
+function crossesAny(p: Pt, q: Pt, segs: Segment[]): boolean {
+  const d = sub(q, p);
   for (const [a, b] of segs) {
     const e = sub(b, a), w = sub(a, p);
-    const den = cross(u, e);
+    const den = cross(d, e);
     if (Math.abs(den) < 1e-12) continue; // parallel
-    const s = cross(w, u) / den;
-    if (s >= -1e-9 && s <= 1 + 1e-9) ts.push(cross(w, e) / den);
+    const t = cross(w, e) / den, s = cross(w, d) / den;
+    if (t >= 0 && t <= 1 && s >= 0 && s <= 1) return true;
   }
-  return ts;
+  return false;
 }
 
 /** A sight origin closer than this to a wall edge counts as on the wall (mm); the probe itself is 1 mm off its face. */
 const ORIGIN_CLEARANCE = 0.5;
 /** Joined wall corners lie within this many times the thickest wall of their node (MITER_LIMIT in walls.ts). */
 const ORIGIN_SLIDE_THICKNESSES = 3;
+/** A wall edge within this distance of the host face line lies on it (mm). */
+const ON_FACE = 1e-4;
 
 /**
  * Where a device's sight starts: its probe point (pose + face normal for wall devices, pose for free ones), or null
- * without a pose. A wall device whose probe lies inside the walls or within ORIGIN_CLEARANCE of a wall edge (snapped
- * to a room corner or a T-junction) moves along its host face, 1 mm in front of it, to the nearest clear point: the
- * candidates lie 1 mm either side of each wall edge the face line meets. In each direction the first clear candidate
- * decides; it counts only with the host face 1 mm behind it (not past a corner, outside the building), so the origin
- * never passes through a second wall into another room. The nearer direction wins, ties toward the host's middle.
- * At right angles and T-junctions the move is at most the wall thickness + 1 mm; it never exceeds 3 times the
- * thickest wall + 2 mm (an acute corner). Null when no direction gives a clear point.
+ * without a pose.
+ *
+ * A wall device's probe that lies inside the walls or within ORIGIN_CLEARANCE of a wall edge (the device sits at a
+ * room corner, a T-junction or the end of an opening) moves along the line 1 mm in front of its host face. The
+ * candidates lie 1 mm (perpendicular) either side of each wall edge that line meets, so each is clear of that edge
+ * at any angle. The nearest candidate wins (ties toward the host's middle) that is clear of the walls and has an
+ * unobstructed line of sight to a point 1 mm in front of the host-face edge nearest the device's offset (the middle
+ * of a wall edge on the face line with free space in front of it).
+ *
+ * Guaranteed for an origin that moved: it is at least ORIGIN_CLEARANCE from every wall edge, outside the walls, on
+ * that line (1 mm in front of the host face, so on the device's side of it), at most 3 times the thickest wall + 2 mm
+ * from the probe, and has a clear line of sight to that face edge, so no wall separates it from the device's own face
+ * (another room, outside the building). Null when no candidate qualifies: the cone is then empty.
  */
 export function sightOrigin(level: Level, d: Device, obstacles: Segment[]): Pt | null {
   const pose = devicePose(level, d);
@@ -171,25 +179,36 @@ export function sightOrigin(level: Level, d: Device, obstacles: Segment[]): Pt |
   const blocked = (p: Pt) => insideSegments(p, obstacles) || obstaclesWithin(p, obstacles, ORIGIN_CLEARANCE).length > 0;
   if (!blocked(probe)) return probe;
   const f = wallFrame(level, level.walls.find(w => w.id === pl.wallId)!);
-  // The host face 1 mm behind q (an edge parallel to it): q is in front of the face, not past a corner. An oblique
-  // edge does not count: past an acute corner the other wall's outer face is that close too.
-  const back = scale(pose.normal!, -1);
-  const faces = obstacles.filter(([a, b]) => Math.abs(cross(f.dir, sub(b, a))) <= 1e-9 * dist(a, b));
-  const faceBehind = (q: Pt) => lineCrossings(q, back, faces).some(t => t > 0 && t <= 1 + ORIGIN_CLEARANCE);
+  const n = pose.normal!;
+  const onFace = (p: Pt) => Math.abs(dot(sub(p, pose.pt), n)) <= ON_FACE;
+  const mid = ([a, b]: Segment): Pt => scale(add(a, b), 0.5);
+  const faces = obstacles.filter(e =>
+    onFace(e[0]) && onFace(e[1]) && dist(e[0], e[1]) > 1e-9 && !insideSegments(add(mid(e), scale(n, ORIGIN_CLEARANCE)), obstacles));
+  const along = (p: Pt) => dot(sub(p, f.a), f.dir);
+  const gap = ([a, b]: Segment) =>
+    Math.max(0, Math.min(along(a), along(b)) - pl.offset, pl.offset - Math.max(along(a), along(b)));
+  const nearest = Math.min(...faces.map(gap));
+  const targets = faces.filter(e => gap(e) <= nearest + 1e-6).map(e => add(mid(e), n));
+  const sees = (q: Pt) => targets.some(t => !crossesAny(q, t, obstacles));
   const cap = ORIGIN_SLIDE_THICKNESSES * Math.max(...level.walls.map(w => w.thickness)) + 2;
-  const ts = lineCrossings(probe, f.dir, obstacles);
-  const toMiddle = pl.offset <= f.len / 2 ? 1 : -1;
-  let best: number | null = null; // signed distance along f.dir
-  for (const sign of [toMiddle, -toMiddle]) {
-    const ahead = ts.flatMap(t => [(t - 1) * sign, (t + 1) * sign]).filter(c => c > 0 && c <= cap).sort((a, b) => a - b);
-    for (const c of ahead) {
-      const q = add(probe, scale(f.dir, c * sign));
-      if (blocked(q)) continue;
-      if (faceBehind(q) && (best === null || c < Math.abs(best))) best = c * sign;
-      break;
-    }
+  const cands: number[] = []; // signed distances along f.dir
+  for (const [a, b] of obstacles) {
+    const e = sub(b, a), w = sub(a, probe);
+    const den = cross(f.dir, e);
+    if (Math.abs(den) < 1e-12) continue; // parallel
+    const s = cross(w, f.dir) / den;
+    if (s < -1e-9 || s > 1 + 1e-9) continue;
+    const t = cross(w, e) / den, step = dist(a, b) / Math.abs(den); // 1 / sin(angle to the edge)
+    cands.push(t - step, t + step);
   }
-  return best === null ? null : add(probe, scale(f.dir, best));
+  const toMiddle = pl.offset <= f.len / 2 ? 1 : -1;
+  const order = cands.filter(c => Math.abs(c) <= cap)
+    .sort((x, y) => Math.abs(x) - Math.abs(y) || Math.sign(y) * toMiddle - Math.sign(x) * toMiddle);
+  for (const c of order) {
+    const q = add(probe, scale(f.dir, c));
+    if (!blocked(q) && sees(q)) return q;
+  }
+  return null;
 }
 
 /** The fan's chords lie inside its radius by up to cos(step / 2): this factor makes the visibility polygon cover the cone. */

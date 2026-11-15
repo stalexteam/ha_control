@@ -551,6 +551,10 @@ describe('clippedCone: robust clipping and corner devices', () => {
     expect(bad).toEqual([]);
   });
 
+  /** Area of a polygon-clipping MultiPolygon (outer rings minus holes). */
+  const mpArea = (mp: ReturnType<typeof polygonClipping.difference>): number =>
+    mp.reduce((s, poly) => s + poly.reduce((t, r, i) => t + (i ? -1 : 1) * Math.abs(polygonArea(fromRing(r))), 0), 0);
+
   it("at an acute corner the other wall's outer face is not taken for the host face", () => {
     // Triangle room with 45 degrees at (0, 0), 200 mm walls: past the corner, outside the building, the other wall's
     // oblique outer face lies 1 mm behind the face line too.
@@ -563,8 +567,6 @@ describe('clippedCone: robust clipping and corner devices', () => {
       })),
     };
     const roomRing = wallsUnion(lv, false)[0][1];
-    const mpArea = (mp: ReturnType<typeof polygonClipping.difference>): number =>
-      mp.reduce((s, poly) => s + poly.reduce((t, r, i) => t + (i ? -1 : 1) * Math.abs(polygonArea(fromRing(r))), 0), 0);
     const bad: string[] = [];
     for (const d of devicesAt('w0', 'right', [0, 50, 100, 200])) {
       const label = `${d.props.kind} ${(d.placement as { offset: number }).offset}`;
@@ -573,6 +575,112 @@ describe('clippedCone: robust clipping and corner devices', () => {
       if (outside > 10) bad.push(`${label}: ${(outside / 1e6).toFixed(3)} m2 outside the room`);
       if (d.props.kind === 'motion_sensor' && area(rings) < 0.5e6) bad.push(`${label}: ${(area(rings) / 1e6).toFixed(3)} m2`);
     }
+    expect(bad).toEqual([]);
+  });
+
+  /** One closed loop of partition walls (centre baseline) through pts, clockwise on screen: right faces inward. */
+  const loopLevel = (pts: number[][], t = 200): Level => ({
+    ...rectRoomLevel(1, 1, t),
+    nodes: pts.map(([x, y], i) => ({ id: `n${i}`, x, y })),
+    walls: pts.map((_, i) => ({
+      id: `w${i}`, a: `n${i}`, b: `n${(i + 1) % pts.length}`, thickness: t, type: 'partition' as const, baseline: 'center' as const,
+    })),
+  });
+  const rad = (deg: number): number => (deg * Math.PI) / 180;
+  /** Offsets from..to in steps. */
+  const steps = (from: number, to: number, step: number): number[] => {
+    const out: number[] = [];
+    for (let o = from; o <= to + 1e-9; o += step) out.push(Math.round(o * 1000) / 1000);
+    return out;
+  };
+  /** The cone as a polygon-clipping MultiPolygon (even-odd rings), or [] when empty. */
+  const coneMp = (rings: Pt[][]) =>
+    rings.length ? polygonClipping.xor([[toPoly(rings[0])[0]]], ...rings.slice(1).map(r => [[toPoly(r)[0]]])) : [];
+
+  /**
+   * Failures of wall devices against their room (a ring): an empty cone (when nonEmpty), area outside the room (when
+   * not allowOutside), or a cone that does not cover the cone shape's part of the room (a convex room) within 2 %.
+   */
+  function againstRoom(
+    level: Level, room: Pt[], devices: Device[], o: { nonEmpty?: boolean; allowOutside?: boolean } = {},
+  ): string[] {
+    const bad: string[] = [];
+    const obstaclesOf = cached();
+    for (const d of devices) {
+      const pl = d.placement as Extract<DevicePlacement, { mode: 'wall' }>;
+      const label = `${d.props.kind} ${pl.wallId}/${pl.offset}${pl.aim ? ` aim ${pl.aim}` : ''}`;
+      const cone = coneMp(clippedCone(level, d, obstaclesOf));
+      const a = mpArea(cone);
+      const outside = cone.length ? mpArea(polygonClipping.difference(cone, toPoly(room))) : 0;
+      const exact = mpArea(polygonClipping.intersection(toPoly(coneShape(level, d)!), toPoly(room)));
+      if ((o.nonEmpty ?? true) && a < 1) { bad.push(`${label}: empty (expected ${(exact / 1e6).toFixed(3)} m2)`); continue; }
+      if (!o.allowOutside && outside > 10) bad.push(`${label}: ${(outside / 1e6).toFixed(3)} m2 outside its room`);
+      if (a >= 1 && exact > 0 && Math.abs(a - outside - exact) / exact > 0.02) {
+        bad.push(`${label}: ${((a - outside) / 1e6).toFixed(3)} m2 in its room, expected ${(exact / 1e6).toFixed(3)}`);
+      }
+    }
+    return bad;
+  }
+
+  it('at a 150 degree bend a device on the corner still sees its room', () => {
+    const lv = loopLevel([[0, 0], [2000, 0], [4000, 2000 * Math.tan(rad(30))], [4000, 3000], [0, 3000]]);
+    const room = wallsUnion(lv, false)[0][1];
+    expect([
+      ...againstRoom(lv, room, devicesAt('w0', 'right', steps(1974, 2000, 0.5))),
+      ...againstRoom(lv, room, devicesAt('w1', 'right', steps(0, 26, 0.5))),
+    ]).toEqual([]);
+  });
+
+  it('at a corner of a 12-sided room (150 degrees) a device still sees its room', () => {
+    const lv = loopLevel(Array.from({ length: 12 }, (_, i) => [2500 + 2500 * Math.cos(rad(30 * i)), 2500 + 2500 * Math.sin(rad(30 * i))]));
+    const room = wallsUnion(lv, false)[0][1];
+    const len = 5000 * Math.sin(rad(15));
+    expect(againstRoom(lv, room, devicesAt('w0', 'right', [...steps(0, 30, 0.5), ...steps(len - 30, len, 0.5), len]))).toEqual([]);
+  });
+
+  it('beside a slanted stem, on its obtuse side, the zone stays in its own room', () => {
+    // 12000 x 3000 box split by a stem hosted on w0 at x = 2000, 40 degrees off w0, to the far wall.
+    const lv0 = rectRoomLevel(12000, 3000, 200);
+    const x2 = 2000 + 3000 / Math.tan(rad(40));
+    const lv: Level = {
+      ...lv0,
+      nodes: [
+        ...lv0.nodes,
+        { id: 's0', x: 2000, y: 0, host: { wallId: 'w0', offset: 2000 } }, { id: 's1', x: x2, y: 3000, host: { wallId: 'w2', offset: 12000 - x2 } },
+      ],
+      walls: [...lv0.walls, { id: 'S', a: 's0', b: 's1', thickness: 200, type: 'partition', baseline: 'center' }],
+    };
+    const room = wallsUnion(lv, false)[0].slice(1).find(r => pointInPolygon({ x: 500, y: 2500 }, r))!;
+    // The probe line (1 mm in front of w0) meets the stem's face at x = c; the probe is 0.1 to 3 mm before it.
+    const c = 2000 + 101 / Math.tan(rad(40)) - 100 / Math.sin(rad(40));
+    const devices = steps(0.1, 3, 0.1).flatMap(dx => [0, 60].flatMap(aim =>
+      (['motion_sensor', 'wall_light'] as const).map(kind => dev('d', deviceDefaults(kind, 'wall'),
+        { mode: 'wall', wallId: 'w0', side: 'right', offset: c - dx, ...(aim ? { aim } : {}) }))));
+    expect(againstRoom(lv, room, devices)).toEqual([]);
+  });
+
+  it('with an opening flush with the inner corner a corner device still sees its room', () => {
+    const lv: Level = {
+      ...rectRoomLevel(4000, 3000, 200),
+      openings: [{ id: 'o', wallId: 'w0', kind: 'opening', offset: 100, width: 800, invalid: false }],
+    };
+    // The cone may leave through the opening; it must still cover its room and never lie inside a wall.
+    const room = innerRect(4000, 3000, 200);
+    const devices = devicesAt('w0', 'right', steps(0, 100.5, 0.5));
+    const walls = wallsUnion(lv, true).map(poly => poly.map(r => toPoly(r)[0]));
+    const inWalls = devices.flatMap(d => {
+      const cone = coneMp(clippedCone(lv, d));
+      const a = cone.length ? mpArea(polygonClipping.intersection(cone, ...walls)) : 0;
+      return a > 10 ? [`${d.props.kind} ${(d.placement as { offset: number }).offset}: ${(a / 1e6).toFixed(3)} m2 in the walls`] : [];
+    });
+    expect([...againstRoom(lv, room, devices, { allowOutside: true }), ...inWalls]).toEqual([]);
+  });
+
+  it('at a 25 degree corner no zone leaves the room', () => {
+    const lv = loopLevel([[0, 0], [5000, 0], [4000 * Math.cos(rad(25)), 4000 * Math.sin(rad(25))]]);
+    const room = wallsUnion(lv, false)[0][1];
+    const bad = againstRoom(lv, room, devicesAt('w0', 'right', steps(0, 470, 1)), { nonEmpty: false })
+      .filter(m => m.includes('outside'));
     expect(bad).toEqual([]);
   });
 });
