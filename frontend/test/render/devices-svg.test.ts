@@ -138,3 +138,17 @@ describe('wall break symbol', () => {
     expect(drawLevel(lv, { mode: 'equipment' }).querySelectorAll('.wall-break').length).toBe(1);
   });
 });
+
+describe('direction handle rendering', () => {
+  const sel = (id: string) => ({ kind: 'device' as const, id });
+  it('selected motion sensor draws an aim handle and knob', () => {
+    const svg = drawDevs(levelWithAll(), { selection: sel('ms') });
+    expect(svg.querySelectorAll('.aim-handle')).toHaveLength(1);
+    expect(svg.querySelectorAll('.aim-knob')).toHaveLength(1);
+  });
+  it('selected switch and unselected devices draw none', () => {
+    expect(drawDevs(levelWithAll(), { selection: sel('sw') }).querySelector('.aim-handle')).toBeNull();
+    expect(drawDevs(levelWithAll()).querySelector('.aim-handle')).toBeNull();
+    expect(drawDevs(levelWithAll()).querySelector('.aim-knob')).toBeNull();
+  });
+});

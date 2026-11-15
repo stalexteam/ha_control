@@ -177,4 +177,71 @@ describe('device select tool', () => {
     t.down(ev(1500, 50)); t.move(ev(1600, -10)); t.up(ev(1700, -10));
     expect(ctx.level().devices.find(d => d.id === id)!.placement).toMatchObject({ mode: 'wall', side: 'right', offset: 1700 });
   });
+
+  describe('direction handle', () => {
+    // tolMm 20 => 0.5 px/mm => handle 120 mm. Top wall right-side device at (1500, 50) faces (0,1); knob at (1500, 170).
+    const dirAtDeg = (a: number) => ({ x: Math.cos((a * Math.PI) / 180), y: -Math.sin((a * Math.PI) / 180) });
+    const at = (a: number, r = 300, shift = false) => { const v = dirAtDeg(a); return ev(1500 + v.x * r, 50 + v.y * r, shift); };
+    const aimOf = (ctx: ReturnType<typeof fakeContext>) => { const p = ctx.level().devices[0].placement; return p.mode === 'wall' ? p.aim : NaN; };
+    function selected() {
+      const { lv } = withDevice('motion_sensor', onTop(1500));
+      const ctx = fakeContext(lv);
+      const t = createDeviceSelectTool(ctx);
+      t.down(ev(1500, 50)); t.up(ev(1500, 50));
+      return { ctx, t };
+    }
+
+    it('drag knob 45 deg CCW from the normal: aim 45, one commit', () => {
+      const { ctx, t } = selected();
+      t.down(ev(1500, 170)); t.move(at(-45)); t.up(at(-45));
+      expect(ctx.commits).toHaveLength(1);
+      expect(aimOf(ctx)).toBe(45);
+    });
+
+    it('live preview during drag', () => {
+      const { ctx, t } = selected();
+      t.down(ev(1500, 170)); t.move(at(-45));
+      const pl = t.preview().level!.devices[0].placement;
+      expect(pl.mode === 'wall' && pl.aim).toBe(45);
+      expect(ctx.commits).toHaveLength(0);
+      t.up(at(-45));
+    });
+
+    it('Shift snaps to 15 degree steps', () => {
+      const { ctx, t } = selected();
+      t.down(ev(1500, 170)); t.move(at(-90 + 52, 300, true)); t.up(at(-90 + 52, 300, true));
+      expect(aimOf(ctx)).toBe(45);
+    });
+
+    it('clamps to 90', () => {
+      const { ctx, t } = selected();
+      t.down(ev(1500, 170)); t.move(ev(3000, -500)); t.up(ev(3000, -500));
+      expect(aimOf(ctx)).toBe(90);
+    });
+
+    it('drag back to the start: no commit', () => {
+      const { ctx, t } = selected();
+      t.down(ev(1500, 170)); t.move(at(-45)); t.move(ev(1500, 170)); t.up(ev(1500, 170));
+      expect(ctx.commits).toHaveLength(0);
+    });
+
+    it('Escape mid-drag: no commit, aim unchanged', () => {
+      const { ctx, t } = selected();
+      t.down(ev(1500, 170)); t.move(at(-45));
+      expect(t.key('Escape', k)).toBe(true);
+      t.up(at(-45));
+      expect(ctx.commits).toHaveLength(0);
+      expect(aimOf(ctx)).toBeUndefined();
+    });
+
+    it('free wall light: knob drag sets rotation', () => {
+      const { lv } = withDevice('wall_light', free(1000, 1000));
+      const ctx = fakeContext(lv);
+      const t = createDeviceSelectTool(ctx);
+      t.down(ev(1000, 1000)); t.up(ev(1000, 1000));
+      t.down(ev(1120, 1000)); t.move(ev(1000, 1300)); t.up(ev(1000, 1300));
+      expect(ctx.commits).toHaveLength(1);
+      expect(ctx.level().devices[0].placement).toMatchObject({ mode: 'free', rotation: 270 });
+    });
+  });
 });

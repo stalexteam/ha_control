@@ -127,7 +127,7 @@ describe('Equipment tab', () => {
     expect(f.value).toBe('90');
   });
 
-  it('aim field on a wall motion sensor accepts -30 and rejects 81', async () => {
+  it('aim field on a wall motion sensor accepts -30, 90 and -90 and rejects 91', async () => {
     const el = await mount();
     await drawBox(el);
     await tab(el, 'equipment');
@@ -138,7 +138,12 @@ describe('Equipment tab', () => {
     const aim = () => { const p = el.history!.current.devices[0].placement; return p.mode === 'wall' ? p.aim : NaN; };
     f().value = '-30'; f().dispatchEvent(new Event('change')); await el.updateComplete;
     expect(aim()).toBe(-30);
-    f().value = '81'; f().dispatchEvent(new Event('change')); await el.updateComplete;
+    f().value = '90'; f().dispatchEvent(new Event('change')); await el.updateComplete;
+    expect(aim()).toBe(90);
+    f().value = '-90'; f().dispatchEvent(new Event('change')); await el.updateComplete;
+    expect(aim()).toBe(-90);
+    f().value = '-30'; f().dispatchEvent(new Event('change')); await el.updateComplete;
+    f().value = '91'; f().dispatchEvent(new Event('change')); await el.updateComplete;
     expect(aim()).toBe(-30);
     expect(f().value).toBe('-30');
     expect(el.shadowRoot!.querySelector('.props .warn')).not.toBeNull();

@@ -84,7 +84,7 @@ Defaults are the document author's call; the owner may change any of them:
 - equipment: rect 600 × 600, symbol "other".
 
 Rules:
-- A wall device may be aimed: `aim` is an optional integer from -80 to 80 degrees (default 0, so stored plans without it stay valid) that turns its direction from the face normal, counter-clockwise on screen like `rotation`. The position stays on the face, and the clip room is still chosen from the face normal, not the aim. Moving along or between walls keeps the aim; leaving the wall sets `rotation` to the current world direction; free to wall sets aim 0.
+- A wall device may be aimed: `aim` is an optional integer from -90 to 90 degrees (default 0, so stored plans without it stay valid) that turns its direction from the face normal, counter-clockwise on screen like `rotation`. The position stays on the face, and the clip room is still chosen from the face normal, not the aim. Moving along or between walls keeps the aim; leaving the wall sets `rotation` to the current world direction; free to wall sets aim 0.
 - A wall-hosted device behaves like an opening. It keeps its position in space when the wall's node A moves. It is marked `invalid` (shown red), never clipped or deleted, when the wall becomes too short. It is deleted together with its wall.
 - `side` selects the wall face. A device on the outer face of an outer wall faces outside, which is how the entrance floodlight is placed.
 - A device has no room link. Its room is derived from geometry when needed: the zone whose outline contains the point.
@@ -118,6 +118,7 @@ Storage compatibility: `devices` is an optional per-level list that defaults to 
   - A free device moves anywhere.
   - Delete removes the selected device.
   - Shift locks movement to the axes, as in stage 1.
+- A selected wall light, motion sensor or illuminance sensor shows a direction handle: a 60 px segment from the device along its direction, ending in a round knob that has hit priority over devices and walls. Dragging the knob sets `aim` (wall device: angle from the face normal to the pointer, clamped to -90..90) or `rotation` (free device: angle of the pointer, 0..359), whole degrees, Shift snaps to 15 degrees. The preview is live, one commit on release (none when unchanged), Esc cancels.
 - Right panel: properties of the selected device, or the defaults for the tool about to place one. The fields are name, the kind-specific props, rotation for free devices, and side and offset for wall devices.
 - Status bar: a "Cones & zones" toggle next to the grid toggle.
 - Walls, openings and rooms are drawn dimmed and cannot be selected in this tab. In the Plan tab devices are drawn dimmed and cannot be selected.

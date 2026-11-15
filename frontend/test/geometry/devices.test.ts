@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { deviceDefaults, type Device, type DevicePlacement, type DeviceProps, type Level } from '../../src/model/types';
-import { clippedCone, coneShape, deviceAt, devicePose } from '../../src/geometry/devices';
+import { angleFromHandle, clippedCone, coneShape, deviceAt, devicePose, directionHandle } from '../../src/geometry/devices';
 import { polygonArea } from '../../src/geometry/vec';
 import { rectRoomLevel } from '../fixtures';
 
@@ -184,5 +184,34 @@ describe('deviceAt', () => {
     const up = withDevs(rectRoomLevel(3000, 4000, 400), lin(90)); // 90 deg: along screen -Y
     expect(deviceAt(up, { x: 1000, y: 500 }, 50)).toBe('l');
     expect(deviceAt(up, { x: 1500, y: 1000 }, 50)).toBeNull();
+  });
+});
+
+describe('direction handle', () => {
+  const box = rectRoomLevel(3000, 4000, 400);
+  it('wall device aim 0 on the top wall points (0,1), length 60/scale', () => {
+    const d = dev('m', deviceDefaults('motion_sensor', 'wall'), { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 });
+    const h = directionHandle(box, d, 0.5)!;
+    expect(h.from.x).toBeCloseTo(1500);
+    expect(h.from.y).toBeCloseTo(200);
+    expect(h.to.x - h.from.x).toBeCloseTo(0);
+    expect(h.to.y - h.from.y).toBeCloseTo(120);
+  });
+  it('free rotation 90 points (0,-1)', () => {
+    const d = dev('w', deviceDefaults('wall_light', 'free'), { mode: 'free', x: 1000, y: 1000, rotation: 90 });
+    const h = directionHandle(box, d, 1)!;
+    expect(h.to.x - h.from.x).toBeCloseTo(0);
+    expect(h.to.y - h.from.y).toBeCloseTo(-60);
+  });
+  it('null for a switch', () => {
+    const d = dev('s', { kind: 'switch' }, { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 });
+    expect(directionHandle(box, d, 1)).toBeNull();
+  });
+  it('angleFromHandle clamps wall aim and normalises free rotation', () => {
+    const d = dev('m', deviceDefaults('motion_sensor', 'wall'), { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 });
+    const pl = angleFromHandle(box, d, { x: 1500 + 1000, y: 200 - 100 }, false);
+    expect(pl).toMatchObject({ mode: 'wall', aim: 90 });
+    const f = dev('w', deviceDefaults('wall_light', 'free'), { mode: 'free', x: 0, y: 0, rotation: 0 });
+    expect(angleFromHandle(box, f, { x: 0, y: 100 }, false)).toMatchObject({ mode: 'free', rotation: 270 });
   });
 });

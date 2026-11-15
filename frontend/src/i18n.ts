@@ -118,7 +118,7 @@ const en: Dict = {
   'props.label': 'Label',
   'props.rotation': 'Rotation',
   'props.aim': 'Aim',
-  'props.badAim': 'Aim must be a whole number from -80 to 80',
+  'props.badAim': 'Aim must be a whole number from -90 to 90',
   'props.side': 'Side',
   'props.badNumber': 'Must be a whole number above 0',
   'props.badAngle': 'Angle must be a whole number from 1 to 360',

@@ -1,7 +1,7 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
 import type { Device, Level, Pt } from '../model/types';
 import type { Preview, Selection } from '../editor/tools/types';
-import { clippedCone, devicePose, type DevicePose } from '../geometry/devices';
+import { clippedCone, devicePose, directionHandle, type DevicePose } from '../geometry/devices';
 import { roomHoles } from '../geometry/rooms';
 import type { PlanPalette } from './theme';
 
@@ -130,6 +130,21 @@ function renderCone(level: Level, d: Device, o: DeviceRenderOpts, preview: boole
     stroke-opacity="0.5" stroke-width="1" opacity=${opacity} vector-effect=${NS}></path>`;
 }
 
+/** Direction handle of the selected wall light / sensor: a segment and a round grab knob. */
+function renderHandle(level: Level, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
+  if (o.selection?.kind !== 'device') return nothing;
+  const id = o.selection.id;
+  const d = (level.devices ?? []).find(x => x.id === id);
+  const h = d ? directionHandle(level, d, o.scale) : null;
+  if (!h) return nothing;
+  const c = o.palette.selection;
+  return svg`<g class="aim-handle" opacity=${o.dim ? String(o.palette.dimOpacity) : nothing}>
+    <line x1=${h.from.x} y1=${h.from.y} x2=${h.to.x} y2=${h.to.y} stroke=${c} stroke-width="2" vector-effect=${NS}></line>
+    <circle class="aim-knob" cx=${h.to.x} cy=${h.to.y} r=${6 / o.scale} fill=${o.palette.deviceFill} stroke=${c}
+      stroke-width="2" vector-effect=${NS} style="cursor:grab"></circle>
+  </g>`;
+}
+
 /** Devices (and their cones, drawn first so the icons sit on top) in millimetre user units. */
 export function renderDevices(level: Level, o: DeviceRenderOpts): SVGTemplateResult {
   const items: { d: Device; pose: DevicePose; preview: boolean }[] = [];
@@ -144,5 +159,6 @@ export function renderDevices(level: Level, o: DeviceRenderOpts): SVGTemplateRes
   }
   return svg`
     <g class="cones">${o.showCones ? items.map(i => renderCone(level, i.d, o, i.preview)) : nothing}</g>
-    <g class="devices">${items.map(i => renderDevice(i.d, i.pose, o, i.preview))}</g>`;
+    <g class="devices">${items.map(i => renderDevice(i.d, i.pose, o, i.preview))}</g>
+    ${renderHandle(level, o)}`;
 }

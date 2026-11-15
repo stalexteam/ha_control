@@ -49,7 +49,7 @@ export interface Zone {
 
 export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | 'switch' | 'socket' | 'equipment';
 export type DevicePlacement =
-  | { mode: 'wall'; wallId: Id; side: Side; offset: number; aim?: number } // offset: along axis from node A to device centre; aim: degrees off the face normal, counter-clockwise on screen, integer -80..80 (default 0)
+  | { mode: 'wall'; wallId: Id; side: Side; offset: number; aim?: number } // offset: along axis from node A to device centre; aim: degrees off the face normal, counter-clockwise on screen, integer -90..90 (default 0)
   | { mode: 'free'; x: number; y: number; rotation: number }; // rotation in degrees
 export type DeviceProps =
   | { kind: 'ceiling_light'; shape: 'round' | 'linear' | 'spot'; diameter: number; length: number; width: number; poolRadius: number | null }

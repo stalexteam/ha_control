@@ -1,5 +1,5 @@
 import polygonClipping, { type Polygon } from 'polygon-clipping';
-import type { Device, Id, Level, Pt } from '../model/types';
+import type { Device, DevicePlacement, Id, Level, Pt } from '../model/types';
 import { add, dist, dot, perpLeft, scale, sub } from './vec';
 import { wallFrame } from './walls';
 import { outlineFromHoles, roomHoles } from './rooms';
@@ -126,4 +126,35 @@ export function deviceAt(level: Level, p: Pt, tolMm: number): Id | null {
     }
   }
   return null;
+}
+
+/** Handle length in screen pixels. */
+export const HANDLE_PX = 60;
+
+const HAS_DIRECTION = new Set(['wall_light', 'motion_sensor', 'illuminance_sensor']);
+
+/** Direction handle of a wall light or sensor: from the pose point along its direction, 60 screen px long; null for other kinds. */
+export function directionHandle(level: Level, d: Device, scaleFactor: number): { from: Pt; to: Pt } | null {
+  if (!HAS_DIRECTION.has(d.props.kind)) return null;
+  const pose = devicePose(level, d);
+  if (!pose) return null;
+  return { from: pose.pt, to: add(pose.pt, scale(pose.dir, HANDLE_PX / scaleFactor)) };
+}
+
+/**
+ * Placement with its direction set from a pointer at p: wall device aim = signed angle from the face normal
+ * (clamped to -90..90, 0 stored as no aim); free device rotation 0..359. Whole degrees; snap15 rounds to 15-degree steps.
+ * Unchanged when the pointer is on the device or the pose is missing.
+ */
+export function angleFromHandle(level: Level, d: Device, p: Pt, snap15: boolean): DevicePlacement {
+  const pl = d.placement;
+  const pose = devicePose(level, d);
+  if (!pose || (p.x === pose.pt.x && p.y === pose.pt.y)) return pl;
+  const a = angleOf(sub(p, pose.pt));
+  const round = (v: number) => (snap15 ? Math.round(v / 15) * 15 : Math.round(v));
+  if (pl.mode === 'free') return { ...pl, rotation: ((round(a) % 360) + 360) % 360 };
+  const rel = ((((a - angleOf(pose.normal!)) % 360) + 540) % 360) - 180; // -180..180
+  const aim = Math.max(-90, Math.min(90, round(rel)));
+  const { aim: _old, ...rest } = pl;
+  return aim === 0 ? rest : { ...rest, aim };
 }

@@ -4,7 +4,7 @@ import { dist, norm, projectT, add, scale, sub } from '../geometry/vec';
 
 const EPS = 1e-6; // mm
 /** Largest aim of a wall device, degrees either way. */
-export const AIM_MAX = 80;
+export const AIM_MAX = 90;
 
 /** Axis length of a wall, or null when the wall (or a node) is missing. */
 function wallLen(level: Level, wallId: Id): number | null {

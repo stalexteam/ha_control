@@ -40,7 +40,7 @@ const BAD: Record<NumRule, string> = {
   mm: 'props.badNumber', angle: 'props.badAngle', rotation: 'props.badRotation', offset: 'props.badOffset', aim: 'props.badAim',
 };
 
-/** Integer by rule: mm > 0, angle 1..360, rotation 0..359, offset >= 0, aim -80..80; else null. */
+/** Integer by rule: mm > 0, angle 1..360, rotation 0..359, offset >= 0, aim -90..90; else null. */
 export function parseNum(value: string, rule: NumRule): number | null {
   if (rule === 'mm' || rule === 'angle') {
     const v = parseMm(value);
