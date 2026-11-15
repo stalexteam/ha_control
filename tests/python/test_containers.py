@@ -42,19 +42,19 @@ def test_other_kinds_build_none():
 def test_wall_switch_follows_state():
     w = World(light__a="on")
     c = build(ws({"state": "light.a"}), w, None)
-    assert c.public() == {"output": "on", "fault": None}
+    assert c.public() == {"output": "on", "fault": None, "kind": "wall_switch"}
     assert w.set(c, "light.a", "off", now=10.0) is True
     assert c.public()["output"] == "off"
 
 
 def test_wall_switch_not_configured():
     c = build(ws(defaultOutput="error"), World(), None)
-    assert c.public() == {"output": "error", "fault": "not_configured"}
+    assert c.public() == {"output": "error", "fault": "not_configured", "kind": "wall_switch"}
 
 
 def test_wall_switch_unavailable():
     c = build(ws({"state": "light.a"}), World(light__a="unavailable"), None)
-    assert c.public() == {"output": "off", "fault": "unavailable", "entities": ["light.a"]}
+    assert c.public() == {"output": "off", "fault": "unavailable", "entities": ["light.a"], "kind": "wall_switch"}
 
 
 def test_wall_switch_missing_entity_is_unavailable():
@@ -86,9 +86,9 @@ def test_wall_switch_appearing_is_not_a_toggle():
     c = build(ws({"state": "light.a"}, autoByDoubleToggle=True), w, None)
     assert c.public()["fault"] == "unavailable"
     w.set(c, "light.a", "on", now=0)
-    assert c.public() == {"output": "on", "fault": None}
+    assert c.public() == {"output": "on", "fault": None, "kind": "wall_switch"}
     w.set(c, "light.a", "off", now=1)
-    assert c.public() == {"output": "off", "fault": None}
+    assert c.public() == {"output": "off", "fault": None, "kind": "wall_switch"}
 
 
 def test_wall_switch_restores_auto():
@@ -197,7 +197,7 @@ def test_entity_appearing_is_not_a_press():
     assert c.public()["fault"] == "unavailable"
     w.states["sensor.b"] = ("1_single", {})
     c.handle("sensor.b", None, ("1_single", {}), 1)
-    assert c.public() == {"output": "off", "fault": None}
+    assert c.public() == {"output": "off", "fault": None, "kind": "smart_button"}
 
 
 def test_final_unavailable_faults_and_presses_are_ignored():
@@ -209,11 +209,11 @@ def test_final_unavailable_faults_and_presses_are_ignored():
     w.set(c, "sensor.b", "single")
     assert c.public()["output"] == "on"
     w.set(c, "light.f", "unavailable")
-    assert c.public() == {"output": "off", "fault": "unavailable", "entities": ["light.f"]}
+    assert c.public() == {"output": "off", "fault": "unavailable", "entities": ["light.f"], "kind": "smart_button"}
     w.set(c, "sensor.b", "")
     w.set(c, "sensor.b", "single")  # ignored during fault
     w.set(c, "light.f", "off")
-    assert c.public() == {"output": "on", "fault": None}
+    assert c.public() == {"output": "on", "fault": None, "kind": "smart_button"}
 
 
 def test_smart_button_not_configured_parts():
@@ -259,3 +259,42 @@ def test_wrong_typed_props_use_defaults():
     c = build(sb({"on": "sensor.b"}, on={"slot": "x", "event": ""}, separateOff="yes"), w, None)
     w.set(c, "sensor.b", "single")
     assert c.public()["output"] == "on"
+
+
+def test_unconfigured_container_persists_nothing():
+    w = World(sensor__b="", light__a="on")
+    assert build(sb(defaultOutput="on"), w, None).persisted() is None
+    assert build(sb(defaultOutput="on"), w, "off").persisted() is None
+    assert build(ws(autoByDoubleToggle=True), w, "auto").persisted() is None
+    assert build(sb({"on": "sensor.b"}, defaultOutput="on"), w, None).persisted() == "on"
+
+
+def test_wall_switch_auto_survives_unavailable_cycle():
+    w = World(light__a="on")
+    c = build(ws({"state": "light.a"}, autoByDoubleToggle=True, windowSec=3), w, None)
+    w.set(c, "light.a", "off", now=0.0)
+    w.set(c, "light.a", "on", now=1.0)
+    assert c.public()["output"] == "auto"
+    w.set(c, "light.a", "unavailable", now=20.0)
+    assert c.public()["fault"] == "unavailable"
+    assert c.persisted() == "auto"
+    w.set(c, "light.a", "off", now=40.0)
+    assert c.public()["output"] == "auto"
+    assert c.public()["fault"] is None
+
+
+def test_unknown_state_is_not_a_fault():
+    w = World(light__a="unknown", sensor__b="unknown")
+    c = build(ws({"state": "light.a"}), w, None)
+    assert c.public()["fault"] is None
+    assert c.public()["output"] == "off"
+    c = build(sb({"on": "sensor.b"}), w, None)
+    assert c.public()["fault"] is None
+    w.set(c, "sensor.b", "single")
+    assert c.public()["output"] == "on"
+
+
+def test_public_names_the_kind():
+    w = World(light__a="on", sensor__b="")
+    assert build(ws({"state": "light.a"}), w, None).public()["kind"] == "wall_switch"
+    assert build(sb(), w, None).public()["kind"] == "smart_button"

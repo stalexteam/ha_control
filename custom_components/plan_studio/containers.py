@@ -80,7 +80,7 @@ class Container:
 
     def public(self) -> dict:
         fault, ents = self._fault()
-        out = {"output": self._default if fault else self._output_now(), "fault": fault}
+        out = {"output": self._default if fault else self._output_now(), "fault": fault, "kind": self.kind}
         if fault == "unavailable":
             out["entities"] = ents
         return out
@@ -99,6 +99,10 @@ class Container:
         return after != before
 
     def persisted(self) -> "str | None":
+        """The output to keep across restarts and saves; None while not configured (it only shows the default)."""
+        return None if self._fault()[0] == "not_configured" else self._kept()
+
+    def _kept(self) -> "str | None":
         raise NotImplementedError
 
 
@@ -132,7 +136,7 @@ class WallSwitch(Container):
             self._auto = prev is not None and now - prev <= self._window
             self._last_toggle = now
 
-    def persisted(self):
+    def _kept(self):
         return "auto" if self._auto and self._flag else None
 
 
@@ -197,7 +201,7 @@ class SmartButton(Container):
         else:
             self._last = "on"
 
-    def persisted(self):
+    def _kept(self):
         return self._last
 
 

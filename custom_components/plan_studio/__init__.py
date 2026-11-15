@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from pathlib import Path
 
 from homeassistant.components import frontend, panel_custom
@@ -15,6 +16,8 @@ from . import websocket_api as ps_ws
 from .const import DOMAIN, PANEL_JS, PANEL_URL_PATH, STATIC_URL
 from .live import LiveRuntime
 from .store import PlanStore
+
+_LOGGER = logging.getLogger(__name__)
 
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 
@@ -37,8 +40,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ps_ws.async_register(hass)
     if "live" not in data:
         live = LiveRuntime(hass, data["store"])
-        await live.async_start()
-        data["live"] = live
+        try:
+            await live.async_start()
+        except Exception:  # noqa: BLE001 - the editor panel must load even when the container runtime cannot start
+            # Without data["live"], subscribe answers `not_loaded` and save/delete skip the reload.
+            _LOGGER.exception("container runtime failed to start; the panel loads without live outputs")
+        else:
+            data["live"] = live
     if not data.get("static_registered"):
         await hass.http.async_register_static_paths(
             [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]

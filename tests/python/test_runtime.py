@@ -37,7 +37,7 @@ def press(rt, eid="sensor.b", value="single"):
 def test_snapshot_lists_containers_of_a_plan():
     rt, _ = make()
     rt.load_plans([plan(btn(), light())])
-    assert rt.snapshot("p1") == {"b": {"output": "off", "fault": "not_configured"}}
+    assert rt.snapshot("p1") == {"b": {"output": "off", "fault": "not_configured", "kind": "smart_button"}}
     assert rt.snapshot("nope") == {}
 
 
@@ -55,7 +55,7 @@ def test_handle_state_notifies_changed_container_only():
     rt.handle_state("sensor.other", ("a", {}), ("b", {}))
     assert calls == []
     press(rt)
-    assert calls == [(False, {"b": {"output": "on", "fault": None}})]
+    assert calls == [(False, {"b": {"output": "on", "fault": None, "kind": "smart_button"}})]
 
 
 def test_reload_notifies_full_snapshot():
@@ -105,7 +105,7 @@ def test_reload_keeps_output_unless_kind_changed():
     assert rt.snapshot("p1")["b"]["output"] == "on"
     ws = {"id": "b", "props": {"kind": "wall_switch"}, "bindings": {"state": "light.f"}}
     rt.load_plans([plan(ws)])
-    assert rt.snapshot("p1")["b"] == {"output": "off", "fault": None}
+    assert rt.snapshot("p1")["b"] == {"output": "off", "fault": None, "kind": "wall_switch"}
 
     full = {"on": "sensor.b", "auto": "sensor.a", "final": "light.f"}
     w = World(sensor__b="", sensor__a="", light__f="off")
@@ -148,3 +148,12 @@ def test_entity_ids_cover_all_containers():
         plan({"id": "w", "props": {"kind": "wall_switch"}, "bindings": {"state": "light.f"}}, pid="p2"),
     ])
     assert rt.entity_ids() == {"sensor.b", "light.f"}
+
+
+def test_unconfigured_button_does_not_restore_its_old_default():
+    rt, _ = make()
+    rt.load_plans([plan(btn(defaultOutput="on"))])
+    assert rt.snapshot("p1")["b"]["output"] == "on"
+    assert rt.persisted() == {}
+    rt.load_plans([plan(btn({"on": "sensor.b"}, defaultOutput="off"))])
+    assert rt.snapshot("p1")["b"]["output"] == "off"
