@@ -173,3 +173,18 @@ A free wall end is a node used by exactly one wall, with no T-junction host. It 
   - the cone toggle;
   - save, then reload, and the devices are still there.
 - Live check: deploy and smoke test on the test HA. The owner then places their real equipment: lights in each room, the motion sensors, the boiler and PC blocks beside the plan, and the entrance floodlight on the outer wall face.
+
+## 9. Addendum (2026-11-15): climate sensor and exhaust fan
+
+Owner request, approved as a short design:
+
+- `climate_sensor`: one device for temperature and humidity. Which Home Assistant entities it binds (temperature, humidity or both) is chosen in stage 2b.
+  - Placement: wall or free.
+  - Icon: a thermometer with a drop.
+  - Prop `zoneIds: Id[]`, the rooms the reading applies to. Empty means "the room containing the device", derived by geometry. The props panel lists every room of the level as checkboxes. If none is checked, the label shows the derived room ("auto").
+  - Ids of deleted rooms are dropped, and an empty list falls back to auto. This was option (b); the owner did not object to the recommendation.
+- `exhaust_fan`: wall only.
+  - Icon: a circle with blades.
+  - Prop `diameter`: 100 / 125 / 150 mm, default 100.
+  - No cone and no aim.
+- Both behave like the other devices for drag, delete with their wall, undo, drafts and saving. Version 0.2.6.
