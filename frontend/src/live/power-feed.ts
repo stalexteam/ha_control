@@ -1,12 +1,20 @@
 import type { HassLike } from '../api';
 import type { Id, Level } from '../model/types';
 import type { Position, PowerFrame, PowerSchema } from '../model/power';
+import { isControllable, isInverter } from '../model/devices';
 import { messageOf } from '../errors';
 import { t } from '../i18n';
 import { RETRY_MAX, RETRY_MS } from './container-feed';
 
-/** What `plan_studio/power/subscribe` evaluates: the draft schematic and the bindings of its plan devices. */
-export interface PowerPayload { power: PowerSchema; devices: Record<Id, { power?: string; control?: string }> }
+/** The entity roles of a device the evaluator reads. */
+const POWER_ROLES = ['power', 'voltage', 'power_in', 'power_out', 'control'] as const;
+type PowerRole = typeof POWER_ROLES[number];
+
+/** A device as the evaluator sees it: its bound entities (bound roles only), whether it is an inverter, controllable. */
+export type PowerDevice = Partial<Record<PowerRole, string>> & { inverter: boolean; controllable: boolean };
+
+/** What `plan_studio/power/subscribe` evaluates: the draft schematic and the devices of its device blocks. */
+export interface PowerPayload { power: PowerSchema; devices: Record<Id, PowerDevice> }
 
 /** A changed draft is sent again once the edits pause for this long. */
 export const DEBOUNCE_MS = 300;
@@ -23,8 +31,9 @@ function release(unsub: Unsubscribe): void {
 }
 
 /**
- * The payload for a draft: the schematic, and the `power` / `control` bindings of every plan device a device block
- * refers to. A device block whose plan device is gone gets no entry, so the server reports the block missing.
+ * The payload for a draft: the schematic, and for every device a device block refers to its bound `power`, `voltage`,
+ * `power_in`, `power_out` and `control` entities, `inverter` and `controllable` (equipment by its flag, any other kind
+ * always). A device block whose device is gone gets no entry, so the server reports the block missing.
  */
 export function powerPayload(power: PowerSchema, level: Level): PowerPayload {
   const byId = new Map(level.devices.map(d => [d.id, d]));
@@ -32,8 +41,12 @@ export function powerPayload(power: PowerSchema, level: Level): PowerPayload {
   for (const b of power.blocks) {
     const d = b.kind === 'device' ? byId.get(b.deviceId) : undefined;
     if (!d) continue;
-    const { power: p, control } = d.bindings ?? {};
-    devices[d.id] = { ...(p ? { power: p } : {}), ...(control ? { control } : {}) };
+    const entry: PowerDevice = { inverter: isInverter(d), controllable: isControllable(d) };
+    for (const role of POWER_ROLES) {
+      const eid = d.bindings?.[role];
+      if (eid) entry[role] = eid;
+    }
+    devices[d.id] = entry;
   }
   return { power, devices };
 }

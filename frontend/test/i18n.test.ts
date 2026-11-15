@@ -86,7 +86,7 @@ describe('i18n', () => {
       tool: [...PLAN_TOOL_IDS, ...EQUIPMENT_TOOL_IDS, ...ZONES_TOOL_IDS, ...POWER_TOOL_IDS],
       'power.err': ['missing', 'same-block', 'direction', 'port-taken', 'dc-mismatch', 'second-remainder', 'loop'],
       'power.help': ['select', 'place', 'device'],
-      'power.title': ['grid', 'device', 'meter', 'bus', 'battery', 'pv', 'transfer', 'remainder'],
+      'power.title': ['grid', 'device', 'bus', 'battery', 'pv', 'transfer', 'remainder'],
       'power.form': ['2in1out', '1in2out'],
       'zones.kind': ['room', 'polygon'],
       'zones.invalid': ['room', 'lost', 'wall', 'self'],

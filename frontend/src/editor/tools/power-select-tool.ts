@@ -88,7 +88,7 @@ export function createPowerSelectTool(ctx: ToolContext): Tool {
     moved = true;
     if (g.kind === 'wire') {
       const target = targetAt(s, e.pt);
-      gesture = { ...g, to: e.pt, ok: !!target && !('error' in connect(s, g.from, target)) };
+      gesture = { ...g, to: e.pt, ok: !!target && !('error' in connect(s, g.from, target, ctx.geo())) };
       return;
     }
     if (g.kind === 'bus-end') { working = resizeBus(s, g.id, g.end, e.pt); return; }
@@ -106,7 +106,7 @@ export function createPowerSelectTool(ctx: ToolContext): Tool {
   function finishWire(s: PowerSchema, from: PortRef, p: Pt): void {
     const target = targetAt(s, p);
     if (!target) return;
-    const r = connect(s, from, target);
+    const r = connect(s, from, target, ctx.geo());
     if ('error' in r) { ctx.notify(t(`power.err.${r.error}`)); return; }
     ctx.commitPower(r.schema);
     ctx.notify(null);

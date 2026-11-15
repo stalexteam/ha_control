@@ -26,8 +26,8 @@ export const BINDING_TOOL_IDS: ToolId[] = ['binding-select'];
 /** The Zones step tools; its rail adds the zone list under them. */
 export const ZONES_TOOL_IDS: ToolId[] = ['zones-select', 'zone-room', 'zone-draw'];
 /** The Power step: select, then the Plan device tool and the service blocks (no grid tool: the grid always exists). */
-export const POWER_TOOL_IDS: ToolId[] = ['power-select', 'power-device', 'power-meter', 'power-bus', 'power-battery',
-  'power-pv', 'power-transfer', 'power-remainder'];
+export const POWER_TOOL_IDS: ToolId[] = ['power-select', 'power-device', 'power-bus', 'power-battery', 'power-pv',
+  'power-transfer', 'power-remainder'];
 
 const TOOL_IDS: Record<EditorMode, ToolId[]> = {
   plan: PLAN_TOOL_IDS, equipment: EQUIPMENT_TOOL_IDS, binding: BINDING_TOOL_IDS, zones: ZONES_TOOL_IDS,
@@ -51,7 +51,7 @@ export function createTool(id: ToolId, ctx: ToolContext): Tool {
     case 'zone-room': return createZoneRoomTool(ctx);
     case 'zone-draw': return createZoneDrawTool(ctx);
     case 'power-select': return createPowerSelectTool(ctx);
-    case 'power-device': case 'power-meter': case 'power-bus': case 'power-battery': case 'power-pv':
+    case 'power-device': case 'power-bus': case 'power-battery': case 'power-pv':
     case 'power-transfer': case 'power-remainder':
       return createPowerPlaceTool(ctx, id);
     default: return createDeviceTool(ctx, id);

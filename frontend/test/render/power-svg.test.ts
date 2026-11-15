@@ -8,12 +8,16 @@ import {
 import { formatWatts, renderPower, type PowerRenderOpts } from '../../src/render/power-svg';
 import { paletteFor } from '../../src/render/theme';
 import { PORT_R, portPlaces, transferChips, type GeoCtx } from '../../src/geometry/power';
-import { deviceDefaults, type Device } from '../../src/model/types';
+import { deviceDefaults, type Device, type DeviceKind, type DeviceProps } from '../../src/model/types';
 import type { PowerBlock, PowerFrame, PowerSchema, PowerWire } from '../../src/model/power';
 
-const dev = (id: string, name: string, bindings?: Device['bindings']): Device =>
-  ({ id, name, invalid: false, placement: { mode: 'free', x: 0, y: 0, rotation: 0 }, props: deviceDefaults('equipment', 'free'), bindings });
-const geo = (...devices: Device[]): GeoCtx => ({ device: (id) => devices.find((d) => d.id === id) });
+const dev = (id: string, name: string, bindings?: Device['bindings'], kind: DeviceKind = 'equipment',
+  flags: { inverter?: true; controllable?: true } = {}): Device =>
+  ({ id, name, invalid: false, placement: { mode: 'free', x: 0, y: 0, rotation: 0 },
+    props: { ...deviceDefaults(kind, 'free'), ...flags } as DeviceProps, bindings });
+/** The RCBO, a metering device every geo() knows (the block `m` below). */
+const RCBO = dev('rcbo', 'RCBO', { power: 'sensor.rcbo_power' });
+const geo = (...devices: Device[]): GeoCtx => ({ device: (id) => [RCBO, ...devices].find((d) => d.id === id) });
 const P = paletteFor(true);
 
 function mount(content: unknown): SVGSVGElement {
@@ -25,9 +29,9 @@ function mount(content: unknown): SVGSVGElement {
 const draw = (s: PowerSchema, o: Partial<PowerRenderOpts> = {}) =>
   mount(renderPower(s, { palette: P, selection: null, preview: {}, scale: 1, frame: null, geo: geo(), ...o }));
 
-/** Grid at the top, a meter straight below it: one vertical wire grid OUT -> meter IN. */
+/** Grid at the top, a metering device straight below it: one vertical wire grid OUT -> meter IN. */
 const grid: PowerBlock = { id: 'g', kind: 'grid', x: 0, y: 0, name: 'AC-IN' };
-const meter: PowerBlock = { id: 'm', kind: 'meter', x: 0, y: 200, name: 'RCBO' };
+const meter: PowerBlock = { id: 'm', kind: 'device', x: 0, y: 200, deviceId: 'rcbo' };
 const w1: PowerWire = { id: 'w1', from: { block: 'g', port: 'OUT' }, to: { block: 'm', port: 'IN' } };
 const two: PowerSchema = { blocks: [grid, meter], wires: [w1] };
 const frameOf = (wires: PowerFrame['wires'], blocks: PowerFrame['blocks'] = {}): PowerFrame => ({ wires, blocks });
@@ -161,7 +165,7 @@ describe('renderPower blocks', () => {
   beforeEach(() => { document.body.innerHTML = ''; });
 
   it('draws preview.power instead of the schema', () => {
-    const moved: PowerSchema = { ...two, blocks: [grid, { ...meter, name: 'Moved' }] };
+    const moved: PowerSchema = { ...two, blocks: [{ ...grid, name: 'Moved' }, meter] };
     const root = draw(two, { preview: { power: moved } });
     expect([...root.querySelectorAll('text.name')].map((t) => t.textContent)).toContain('Moved');
   });
@@ -205,9 +209,9 @@ describe('renderPower blocks', () => {
   });
 
   it('ports: an MDI icon (or the letter) fully inside the circle, titled with the port name', () => {
-    const inv: PowerBlock = { id: 'i', kind: 'device', x: 0, y: 0, deviceId: 'inv', inverter: true };
+    const inv: PowerBlock = { id: 'i', kind: 'device', x: 0, y: 0, deviceId: 'inv' };
     const ts: PowerBlock = { id: 't', kind: 'transfer', x: 300, y: 0, name: 'TS', form: '2in1out' };
-    const root = draw({ blocks: [inv, ts], wires: [] }, { geo: geo(dev('inv', 'Inverter')) });
+    const root = draw({ blocks: [inv, ts], wires: [] }, { geo: geo(dev('inv', 'Inverter', undefined, 'equipment', { inverter: true })) });
     const ports = [...root.querySelectorAll('g.port')];
     const byName = new Map(ports.map((p) => [p.querySelector('title')!.textContent, p]));
     expect([...byName.keys()].sort()).toEqual(['A', 'B', 'BAT', 'IN', 'OUT', 'PV']);
@@ -226,11 +230,16 @@ describe('renderPower blocks', () => {
     }
   });
 
-  it('switch state: closed when on, open when off, dimmed when unknown; a lock when not controllable', () => {
-    const m = (id: string, controllable: boolean): PowerBlock =>
-      ({ id, kind: 'meter', x: 0, y: 0, name: id, switch: { entity: `switch.${id}`, controllable } });
-    const s: PowerSchema = { blocks: [m('on', true), { ...m('off', false), x: 200 }, { ...m('unk', true), x: 400 }], wires: [] };
-    const root = draw(s, { frame: frameOf({}, { on: { switch: 'on' }, off: { switch: 'off' }, unk: { switch: 'unknown' } }) });
+  it('switch state: closed when on, open when off, dimmed when unknown; a lock on equipment that is not controllable', () => {
+    // A socket is always controllable: no flag, no lock.
+    const switched = (id: string, kind: DeviceKind, flags: { controllable?: true } = {}): Device =>
+      dev(id, id, { control: `switch.${id}` }, kind, flags);
+    const devices = [switched('on', 'equipment', { controllable: true }), switched('off', 'equipment'), switched('unk', 'socket')];
+    const blocks = devices.map((d, i): PowerBlock => ({ id: d.id, kind: 'device', x: 200 * i, y: 0, deviceId: d.id }));
+    const s: PowerSchema = { blocks, wires: [] };
+    const root = draw(s, {
+      geo: geo(...devices), frame: frameOf({}, { on: { switch: 'on' }, off: { switch: 'off' }, unk: { switch: 'unknown' } }),
+    });
     const sw = (id: string) => root.querySelector(`g.block[data-id="${id}"] g.switch`)!;
     expect(sw('on').querySelector('path')!.getAttribute('d')).toBe(mdiElectricSwitchClosed);
     expect(sw('off').querySelector('path')!.getAttribute('d')).toBe(mdiElectricSwitch);

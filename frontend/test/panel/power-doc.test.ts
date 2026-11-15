@@ -1,11 +1,41 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest';
 import { drawBox, mount, pressSave, stored, undo } from './helpers';
+import { STORAGE_KEY } from '../../dev/mock-hass';
 import { selectionExists } from '../../src/panel/tool-factory';
 import { addBlock, newBlock, defaultPower, type PowerSchema } from '../../src/model/power';
-import type { Plan } from '../../src/model/types';
+import { setDeviceControllable } from '../../src/model/devices';
+import { deviceDefaults, emptyLevel, type Device, type Plan } from '../../src/model/types';
 
 const withPv = (s: PowerSchema): PowerSchema => addBlock(s, newBlock('pv', { x: 10, y: 20 }, s));
+
+/** A plan saved by v0.7: a meter with a read-only switch, a block-level inverter, and a Boiler whose switch was operable. */
+function v07Plan(): Plan {
+  const equipment = (id: string, bindings: Device['bindings']): Device => ({
+    id, name: id, invalid: false, placement: { mode: 'free', x: 1000, y: 1000, rotation: 0 },
+    props: deviceDefaults('equipment', 'free'), bindings,
+  });
+  const power = {
+    blocks: [
+      { id: 'grid', kind: 'grid', x: 0, y: 0, power: 'sensor.grid_power' },
+      { id: 'inv', kind: 'device', x: 0, y: 100, deviceId: 'inverter', inverter: true },
+      { id: 'rcbo', kind: 'meter', x: 0, y: 200, name: 'RCBO output', power: 'sensor.rcbo_power',
+        switch: { entity: 'switch.rcbo', controllable: false } },
+      { id: 'boiler', kind: 'device', x: 0, y: 300, deviceId: 'boiler' },
+    ],
+    wires: [
+      { id: 'w1', from: { block: 'grid', port: 'OUT' }, to: { block: 'inv', port: 'IN' } },
+      { id: 'w2', from: { block: 'inv', port: 'OUT' }, to: { block: 'rcbo', port: 'IN' } },
+      { id: 'w3', from: { block: 'rcbo', port: 'OUT' }, to: { block: 'boiler', port: 'IN' } },
+    ],
+  } as unknown as PowerSchema;
+  const level = { ...emptyLevel('L1'), devices: [
+    equipment('inverter', { power: 'sensor.inv_power' }), equipment('boiler', { control: 'switch.boiler' }),
+  ] };
+  return { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level], power };
+}
+
+const flags = (d: Device) => (d.props.kind === 'equipment' ? { inverter: !!d.props.inverter, controllable: !!d.props.controllable } : null);
 
 describe('power in the plan document', () => {
   beforeEach(() => {
@@ -58,6 +88,63 @@ describe('power in the plan document', () => {
     await undo(el);
     expect(el.history!.current.power).toBeUndefined();
     expect(el.power.blocks.map(b => b.kind)).toEqual(['grid']);
+  });
+
+  it('opening a v0.7 plan migrates its meter and inverter into devices; the wires stay and nothing is dirty', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: v07Plan() } }));
+    const el = await mount();
+    const { level, power } = el.history!.current;
+    const rcbo = power!.blocks.find(b => b.id === 'rcbo')!;
+    expect(rcbo.kind).toBe('device');
+    const meter = level.devices.find(d => rcbo.kind === 'device' && d.id === rcbo.deviceId)!;
+    expect(meter).toMatchObject({ name: 'RCBO output', placement: { mode: 'none' },
+      bindings: { power: 'sensor.rcbo_power', control: 'switch.rcbo' } });
+    expect(level.devices.map(d => [d.id === meter.id ? 'meter' : d.id, flags(d)])).toEqual([
+      ['inverter', { inverter: true, controllable: false }],
+      ['boiler', { inverter: false, controllable: true }],
+      ['meter', { inverter: false, controllable: false }],
+    ]);
+    expect(level.devices[0].bindings).toEqual({ power_out: 'sensor.inv_power' });
+    expect(power!.blocks.some(b => 'inverter' in b)).toBe(false);
+    expect(power!.wires.map(w => w.id)).toEqual(['w1', 'w2', 'w3']);
+    expect(el.save.dirty).toBe(false);
+  });
+
+  it('restoring a v0.7 draft migrates it too', async () => {
+    const el = await mount();
+    el.session.restoreDraft({ planId: 'P1', baseRevision: 1, plan: v07Plan(), savedAt: 0 });
+    const { level, power } = el.history!.current;
+    expect(power!.blocks.map(b => b.kind)).toEqual(['grid', 'device', 'device', 'device']);
+    expect(level.devices).toHaveLength(3);
+    expect(el.save.dirty).toBe(true);
+  });
+
+  it('a saved plan keeps a switch made read-only after the migration read-only when it opens again', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: v07Plan() } }));
+    const el = await mount();
+    el.commit(setDeviceControllable(el.level!, 'boiler', false));
+    await pressSave(el);
+    expect(stored()[0].levels[0].switchesMigrated).toBe(true);
+    document.body.innerHTML = '';
+    const again = await mount();
+    expect(flags(again.level!.devices.find(d => d.id === 'boiler')!)).toEqual({ inverter: false, controllable: false });
+    expect(again.save.dirty).toBe(false);
+  });
+
+  it('a switch added to a plan that had none is saved marked, so it stays read-only', async () => {
+    const el = await mount();
+    expect('switchesMigrated' in el.level!).toBe(false);
+    const pc: Device = {
+      id: 'pc', name: 'PC', invalid: false, placement: { mode: 'none' }, props: deviceDefaults('equipment', 'free'),
+      bindings: { control: 'switch.pc' },
+    };
+    el.commit({ ...el.level!, devices: [pc] });
+    await pressSave(el);
+    expect(stored()[0].levels[0].switchesMigrated).toBe(true);
+    expect('switchesMigrated' in el.level!).toBe(false); // the mark is added on the way out only
+    document.body.innerHTML = '';
+    const again = await mount();
+    expect(flags(again.level!.devices[0])).toEqual({ inverter: false, controllable: false });
   });
 
   it('selectionExists finds power blocks and wires', async () => {

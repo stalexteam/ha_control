@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deviceDefaults, type Device, type Pt } from '../../src/model/types';
+import { deviceDefaults, type Device, type DeviceProps, type Pt } from '../../src/model/types';
 import type { PortSide, PowerBlock, PowerSchema, PowerWire } from '../../src/model/power';
 import {
   FOOT_H, GRID, HEAD_H, LINE_H, MIN_W, PORT_R, STUB, blockLines, blockName, blockRect, busAttach, hitPower, pinAt, portPlaces,
@@ -12,7 +12,16 @@ const NORMAL: Record<PortSide, Pt> = { top: { x: 0, y: -1 }, right: { x: 1, y: 0
 
 const dev = (id: string, name: string, bindings?: Device['bindings']): Device =>
   ({ id, name, invalid: false, placement: { mode: 'free', x: 0, y: 0, rotation: 0 }, props: deviceDefaults('equipment', 'free'), bindings });
-const geo = (...devices: Device[]): GeoCtx => ({ device: (id) => devices.find((d) => d.id === id) });
+const inverter = (id: string, name: string, bindings?: Device['bindings']): Device =>
+  ({ ...dev(id, name, bindings), props: { ...deviceDefaults('equipment', 'free'), inverter: true } as DeviceProps });
+/**
+ * A through block (IN, OUT and one value line, as the retired meter had): a device block whose device, named `name`,
+ * has Power bound. Every GeoCtx made by geo() knows these devices.
+ */
+const thru = (id: string, name: string, x: number, y: number): PowerBlock => ({ id, kind: 'device', deviceId: `thru:${name}`, x, y });
+const geo = (...devices: Device[]): GeoCtx => ({
+  device: (id) => devices.find((d) => d.id === id) ?? (id.startsWith('thru:') ? dev(id, id.slice(5), { power: 'sensor.p' }) : undefined),
+});
 const G = geo();
 const schema = (blocks: PowerBlock[], wires: PowerWire[] = []): PowerSchema => ({ blocks, wires });
 const wire = (id: string, from: PowerWire['from'], to: PowerWire['to']): PowerWire => ({ id, from, to });
@@ -210,7 +219,7 @@ describe('blockLines and blockRect', () => {
 
   it('counts the configured value lines per kind, never live values', () => {
     const pc = dev('pc', 'PC', { power: 'sensor.pc_power', control: 'switch.pc' });
-    const inv = dev('inv', 'Inverter', { power: 'sensor.inv_power' });
+    const inv = inverter('inv', 'Inverter', { power_out: 'sensor.inv_power' });
     const bare = dev('bare', 'Bare');
     const g = geo(pc, inv, bare);
     const at = { x: 0, y: 0 };
@@ -218,9 +227,8 @@ describe('blockLines and blockRect', () => {
     expect(blockLines({ id: 'g', kind: 'grid', voltage: 'sensor.v', ...at }, g)).toBe(2);
     expect(blockLines({ id: 'd', kind: 'device', deviceId: 'pc', ...at }, g)).toBe(2);
     expect(blockLines({ id: 'd', kind: 'device', deviceId: 'bare', ...at }, g)).toBe(0);
-    expect(blockLines({ id: 'd', kind: 'device', deviceId: 'inv', inverter: true, ...at }, g)).toBe(2);
-    expect(blockLines({ id: 'm', kind: 'meter', ...at }, g)).toBe(1);
-    expect(blockLines({ id: 'm', kind: 'meter', voltage: 'sensor.v', switch: { entity: 'switch.m', controllable: false }, ...at }, g)).toBe(3);
+    // the loss line of its inverter device
+    expect(blockLines({ id: 'd', kind: 'device', deviceId: 'inv', ...at }, g)).toBe(1);
     expect(blockLines({ id: 'b', kind: 'battery', ...at }, g)).toBe(2);
     expect(blockLines({ id: 'p', kind: 'pv', ...at }, g)).toBe(1);
     expect(blockLines({ id: 't', kind: 'transfer', form: '2in1out', ...at }, g)).toBe(1);
@@ -228,8 +236,8 @@ describe('blockLines and blockRect', () => {
   });
 
   it('grows with a longer name', () => {
-    const short = blockRect({ id: 'm', kind: 'meter', name: 'M', x: 10, y: 20 }, G);
-    const long = blockRect({ id: 'm', kind: 'meter', name: 'Main distribution board meter', x: 10, y: 20 }, G);
+    const short = blockRect({ id: 'g', kind: 'grid', name: 'M', x: 10, y: 20 }, G);
+    const long = blockRect({ id: 'g', kind: 'grid', name: 'Main distribution board meter', x: 10, y: 20 }, G);
     expect(short).toEqual({ x: 10, y: 20, w: MIN_W, h: HEAD_H + LINE_H + FOOT_H });
     expect(long.w).toBe(7 * 'Main distribution board meter'.length + 32);
     expect(long.w).toBeGreaterThan(short.w);
@@ -246,7 +254,7 @@ describe('blockLines and blockRect', () => {
 
 describe('portPlaces', () => {
   const grid: PowerBlock = { id: 'g', kind: 'grid', name: 'Grid', x: 0, y: 0 };
-  const meterRight: PowerBlock = { id: 'm', kind: 'meter', name: 'Meter', x: 300, y: 0 };
+  const meterRight = thru('m', 'Meter', 300, 0);
 
   it('puts a wired OUT on the side facing a block to its right', () => {
     const s = schema([grid, meterRight], [wire('w', { block: 'g', port: 'OUT' }, { block: 'm', port: 'IN' })]);
@@ -258,8 +266,8 @@ describe('portPlaces', () => {
   });
 
   it('puts free ports on their default sides', () => {
-    const g = geo(dev('inv', 'Inverter'));
-    const inv: PowerBlock = { id: 'i', kind: 'device', deviceId: 'inv', inverter: true, x: 0, y: 0 };
+    const g = geo(inverter('inv', 'Inverter'));
+    const inv: PowerBlock = { id: 'i', kind: 'device', deviceId: 'inv', x: 0, y: 0 };
     const s = schema([inv]);
     const places = portPlaces(s, inv, g);
     const side = Object.fromEntries(places.map((p) => [p.name, p.side]));
@@ -272,8 +280,8 @@ describe('portPlaces', () => {
 
   it('orders two wired outputs on one side by their targets x', () => {
     const ts: PowerBlock = { id: 't', kind: 'transfer', form: '1in2out', name: 'TS', x: 0, y: 0 };
-    const right: PowerBlock = { id: 'r', kind: 'meter', name: 'R', x: 200, y: 300 };
-    const left: PowerBlock = { id: 'l', kind: 'meter', name: 'L', x: -200, y: 300 };
+    const right = thru('r', 'R', 200, 300);
+    const left = thru('l', 'L', -200, 300);
     const s = schema([ts, right, left], [
       wire('wa', { block: 't', port: 'A' }, { block: 'r', port: 'IN' }),
       wire('wb', { block: 't', port: 'B' }, { block: 'l', port: 'IN' }),
@@ -305,7 +313,7 @@ describe('portPlaces', () => {
 
   it('uses the tie rule |dx|/(w/2) against |dy|/(h/2)', () => {
     // grid 120 x 50 at the origin, centre (60, 25); target centre 100 right, 30 down: 100/60 > 30/25 -> right
-    const m: PowerBlock = { id: 'm', kind: 'meter', name: 'M', x: 100, y: 30 };
+    const m = thru('m', 'M', 100, 30);
     const s = schema([grid, m], [wire('w', { block: 'g', port: 'OUT' }, { block: 'm', port: 'IN' })]);
     expect(portPlaces(s, grid, G)[0].side).toBe('right');
     // 50 right, 60 down: 50/60 < 60/25 -> bottom
@@ -316,10 +324,10 @@ describe('portPlaces', () => {
 });
 
 describe('blocks grow to fit their ports', () => {
-  const g = geo(dev('bare', 'Bare'), dev('inv', 'Inverter'));
+  const g = geo(dev('bare', 'Bare'), inverter('inv', 'Inverter'));
   const short: PowerBlock = { id: 'd', kind: 'device', deviceId: 'bare', x: 0, y: 0 };
   const src: PowerBlock = { id: 'g', kind: 'grid', name: 'Grid', x: -600, y: -100 };
-  const sink: PowerBlock = { id: 'm', kind: 'meter', name: 'Meter', x: -600, y: 100 };
+  const sink = thru('m', 'Meter', -600, 100);
   const s = schema([short, src, sink], [
     wire('w1', { block: 'g', port: 'OUT' }, { block: 'd', port: 'IN' }),
     wire('w2', { block: 'd', port: 'OUT' }, { block: 'm', port: 'IN' }),
@@ -349,14 +357,14 @@ describe('blocks grow to fit their ports', () => {
     expect(wireEnds(s, s.wires[0], g)!.b.rect).toEqual(r);
     expect(hitPower(s, { x: 60, y: r.h - 6 }, 4, g)).toEqual({ kind: 'block', id: 'd' });
     expect(schemaBounds(schema([short], s.wires), g)!.h).toBe(HEAD_H + FOOT_H);
-    expect(schemaBounds(s, g)).toEqual({ x: -600, y: -100, w: 720, h: 260 }); // the meter (100 + 60) is the lowest
+    expect(schemaBounds(s, g)).toEqual({ x: -600, y: -100, w: 720, h: 260 }); // the sink (100 + 60) is the lowest
     // with only the grid wired, the bare block's single left port grows it from 42 to 56: the bounds end at 56
     expect(schemaBounds(schema([short, src], [s.wires[0]]), g)!.h).toBe(156);
   });
 
   it('grows the width for many ports on one side, pins included', () => {
     const inv: PowerBlock = {
-      id: 'i', kind: 'device', deviceId: 'inv', inverter: true, x: 0, y: 0,
+      id: 'i', kind: 'device', deviceId: 'inv', x: 0, y: 0,
       portPins: { IN: { side: 'top', at: 0.2 }, OUT: { side: 'top', at: 0.4 }, PV: { side: 'top', at: 0.6 }, BAT: { side: 'top', at: 0.8 } },
     };
     const si = schema([inv]);
@@ -441,7 +449,7 @@ describe('wireEnds', () => {
   });
 
   it('routes a wire clear of its own blocks', () => {
-    const m: PowerBlock = { id: 'm', kind: 'meter', name: 'Meter', x: 0, y: 200 };
+    const m = thru('m', 'Meter', 0, 200);
     const w = wire('w', { block: 'g', port: 'OUT' }, { block: 'm', port: 'IN' });
     const s = schema([grid, m], [w]);
     const e = wireEnds(s, w, G)!;
@@ -489,8 +497,8 @@ describe('hitPower', () => {
   });
 
   it('a later block lies on top', () => {
-    const m1: PowerBlock = { id: 'm1', kind: 'meter', name: 'M1', x: 0, y: 0 };
-    const m2: PowerBlock = { id: 'm2', kind: 'meter', name: 'M2', x: 30, y: 10 };
+    const m1 = thru('m1', 'M1', 0, 0);
+    const m2 = thru('m2', 'M2', 30, 10);
     expect(hitPower(schema([m1, m2]), { x: 45, y: 30 }, 4, G)).toEqual({ kind: 'block', id: 'm2' });
   });
 

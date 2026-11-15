@@ -3,6 +3,7 @@ import {
   blockPorts, type PortDir, type PortName, type PortPin, type PortSide, type Position, type PowerBlock,
   type PowerSchema, type PowerWire, type WireEnd,
 } from '../model/power';
+import { isInverter } from '../model/devices';
 import { dist, distToSegment } from './vec';
 
 /** Schematic units: 1 unit = 1 screen px at 100 % zoom. */
@@ -59,9 +60,9 @@ export function blockName(b: PowerBlock, g: GeoCtx): string {
 
 /**
  * Value lines under the name, from the configuration only (never live values, so blocks do not jump):
- * grid: power, voltage when set; device: power when bound, switch when the control is bound, loss for an inverter,
- * a single "missing" line when its device is gone; meter: power, voltage when set, switch when set;
- * battery: SOC and power; pv: power; transfer: the A/0/B chips; remainder: power; bus: none.
+ * grid: power, voltage when set; device: power when bound, switch when the control is bound, loss when its device is
+ * an inverter, a single "missing" line when its device is gone; battery: SOC and power; pv: power; transfer: the A/0/B
+ * chips; remainder: power; bus: none.
  */
 export function blockLines(b: PowerBlock, g: GeoCtx): number {
   const count = (...on: unknown[]) => on.filter(Boolean).length;
@@ -69,9 +70,8 @@ export function blockLines(b: PowerBlock, g: GeoCtx): number {
     case 'grid': return 1 + count(b.voltage);
     case 'device': {
       const d = g.device(b.deviceId);
-      return d ? count(d.bindings?.power, d.bindings?.control, b.inverter) : 1;
+      return d ? count(d.bindings?.power, d.bindings?.control, isInverter(d)) : 1;
     }
-    case 'meter': return 1 + count(b.voltage, b.switch?.entity);
     case 'battery': return 2;
     case 'bus': return 0;
     default: return 1;
@@ -160,8 +160,9 @@ export function busAttach(bus: Bus, at: number, toward: Pt): { pt: Pt; side: Por
   return { pt: sidePoint(r, side, at), side };
 }
 
+/** A free port's side: an inverter's BAT on the right and PV on top (only an inverter device block has them). */
 function defaultSide(b: PowerBlock, port: { name: PortName; dir: PortDir }): PortSide {
-  if (b.kind === 'device' && b.inverter) {
+  if (b.kind === 'device') {
     if (port.name === 'BAT') return 'right';
     if (port.name === 'PV') return 'top';
   }
@@ -198,7 +199,7 @@ function farPoint(s: PowerSchema, block: Id, port: PortName, g: GeoCtx): Pt | nu
 function layout(s: PowerSchema, b: PowerBlock, g: GeoCtx): { r: Rect; places: PortPlace[] } {
   const base = baseRect(b, g);
   const c = centre(base);
-  const ports = blockPorts(b).map((p) => {
+  const ports = blockPorts(b, g).map((p) => {
     const pin = b.portPins?.[p.name];
     if (pin) return { ...p, side: pin.side, pin, key: 0 };
     const far = farPoint(s, b.id, p.name, g);

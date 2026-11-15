@@ -4,6 +4,7 @@ import {
   mdiPowerSocketEu, mdiSolarPowerVariant,
 } from '@mdi/js';
 import type { Id, Pt } from '../model/types';
+import { isControllable, isInverter } from '../model/devices';
 import type { BlockLive, PortName, PowerBlock, PowerFrame, PowerSchema, PowerWire, WireLive } from '../model/power';
 import type { Preview, Selection } from '../editor/tools/types';
 import {
@@ -172,15 +173,9 @@ function blockContent(b: PowerBlock, g: GeoCtx, live: BlockLive | undefined, p: 
       if (!dev) return [{ kind: 'text', value: t('power.missing'), fill: p.blockInvalid }];
       const out: Line[] = [];
       if (dev.bindings?.power) out.push(watts());
-      // A plan device's control is an actuator Plan Studio operates: controllable.
-      if (dev.bindings?.control) out.push(sw(true));
-      if (b.inverter) out.push({ kind: 'text', label: t('power.loss'), value: formatWatts(live?.loss) });
-      return out;
-    }
-    case 'meter': {
-      const out: Line[] = [watts()];
-      if (b.voltage) out.push({ kind: 'text', value: unit(live?.voltage, 'V') });
-      if (b.switch?.entity) out.push(sw(b.switch.controllable));
+      // Equipment shows a lock unless it is controllable; other kinds are actuators Plan Studio operates.
+      if (dev.bindings?.control) out.push(sw(isControllable(dev)));
+      if (isInverter(dev)) out.push({ kind: 'text', label: t('power.loss'), value: formatWatts(live?.loss) });
       return out;
     }
     case 'battery':

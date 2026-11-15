@@ -126,6 +126,11 @@ export interface Level {
   devices: Device[];
   /** Missing = []: read it through levelZones. */
   automationZones?: AutomationZone[];
+  /**
+   * The level's equipment switches went through the v0.7 migration (see migrateDevices): from then on a switch without
+   * the controllable flag is read-only. Missing on levels saved before v0.7.2 and on levels without an equipment switch.
+   */
+  switchesMigrated?: true;
 }
 
 /** The level's automation zones (a missing field means none). */

@@ -2,6 +2,7 @@ import type { Id, Plan } from '../model/types';
 import { emptyPlan, normalizeLevel } from '../model/types';
 import { History } from '../editor/history';
 import { defaultPower, normalizePower, type PlanDoc } from '../model/power';
+import { markSwitchesMigrated, migrateDevices } from '../model/migrate-devices';
 import type { Draft } from '../editor/draft';
 import { deletePlan, getPlan, listPlans, type PlanSummary } from '../api';
 import { t } from '../i18n';
@@ -154,10 +155,16 @@ export class PlanSession {
     }
   }
 
+  /**
+   * Makes a plan (stored or a restored draft) the open one. Its first level and raw power data go through
+   * migrateDevices before normalizePower (a v0.7 meter must still be readable there); the result is saved with the
+   * next Save.
+   */
   adopt(input: Plan): void {
     this.h.plan = { ...input, levels: input.levels.map(normalizeLevel) };
-    const power = normalizePower(this.h.plan.power);
-    this.h.history = new History<PlanDoc>({ level: this.h.plan.levels[0], ...(power ? { power } : {}) });
+    const doc = migrateDevices({ level: this.h.plan.levels[0], power: this.h.plan.power });
+    const power = normalizePower(doc.power, { device: id => doc.level.devices.find(d => d.id === id) });
+    this.h.history = new History<PlanDoc>({ level: doc.level, ...(power ? { power } : {}) });
     this.h.lazyPower = defaultPower();
     this.h.activeTool.cancel();
     this.h.activeTool = createTool(this.h.toolId, this.h.ctx);
@@ -204,10 +211,11 @@ export class PlanSession {
     if (this.h.save.dirty && !this.draftBlocked()) this.h.drafts.schedule(() => this.makeDraft());
   }
 
+  /** The open plan as it is saved or drafted; an equipment switch on the edited level marks it (markSwitchesMigrated). */
   currentPlan(): Plan {
     const plan = this.h.plan!;
     const { level, power } = this.h.history!.current;
-    const levels = plan.levels.map((l, i) => (i === 0 ? level : l));
+    const levels = plan.levels.map((l, i) => (i === 0 ? markSwitchesMigrated(level) : l));
     const { power: _drop, ...rest } = plan;
     return { ...rest, levels, ...(power ? { power } : {}), revision: this.h.save.baseRevision ?? 0 };
   }

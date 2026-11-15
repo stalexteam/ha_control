@@ -4,7 +4,7 @@ import { render } from 'lit';
 import { STORAGE_KEY } from '../../dev/mock-hass';
 import { metaFromStates } from '../../src/binding/ha-meta';
 import type { EntityCombo } from '../../src/binding/entity-combo';
-import { blockPorts, type Position, type PowerBlock, type PowerFrame, type PowerSchema } from '../../src/model/power';
+import type { Position, PowerBlock, PowerFrame, PowerSchema } from '../../src/model/power';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Id, type Level } from '../../src/model/types';
 import { renderPowerProps, type PowerPropsOpts } from '../../src/panel/power-props';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
@@ -44,7 +44,7 @@ function level(): Level {
 }
 
 const grid: PowerBlock = { id: 'grid', kind: 'grid', x: 0, y: 0 };
-const meter: PowerBlock = { id: 'm1', kind: 'meter', x: 0, y: 200, name: 'RCBO output' };
+const roof: PowerBlock = { id: 'pv1', kind: 'pv', x: 0, y: 200, name: 'Roof PV' };
 const boiler: PowerBlock = { id: 'boiler', kind: 'device', x: 300, y: 200, deviceId: 'e' };
 const transfer: PowerBlock = { id: 'ts', kind: 'transfer', x: 0, y: 400, name: 'Apartment input', form: '2in1out' };
 const bus: PowerBlock = { id: 'bus', kind: 'bus', x: 300, y: 100, w: 240, h: 12, name: 'Main bus' };
@@ -88,11 +88,6 @@ async function choose(c: EntityCombo, eid: string): Promise<void> {
 
 function change(el: HTMLInputElement | HTMLSelectElement, value: string): void {
   el.value = value;
-  el.dispatchEvent(new Event('change', { bubbles: true }));
-}
-
-function toggle(el: HTMLInputElement): void {
-  el.checked = !el.checked;
   el.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
@@ -141,44 +136,31 @@ describe('Power properties', () => {
     expect(h.q('[data-notice="feed"]')!.className).toBe('note');
   });
 
-  it('choosing a power entity for a meter stores it; the power list is strict (power class or W / kW only)', async () => {
-    const h = harness(schema(meter), selected('m1'));
+  it('choosing a power entity for the grid stores it; the power list is strict (power class or W / kW only)', async () => {
+    const h = harness(schema(), selected('grid'));
     const power = h.q<EntityCombo>('ps-entity-combo[data-field="power"]')!;
     expect(ids(power)).toEqual(['sensor.grid_power', 'sensor.rcbo_power']);
     expect(ids(h.q<EntityCombo>('ps-entity-combo[data-field="voltage"]')!)).toEqual(['sensor.grid_voltage']);
-    expect(ids(h.q<EntityCombo>('ps-entity-combo[data-field="switch"]')!)).toEqual(['switch.rcbo']);
     await choose(power, 'sensor.rcbo_power');
-    expect(h.blk('m1')).toMatchObject({ power: 'sensor.rcbo_power' });
+    expect(h.blk('grid')).toMatchObject({ power: 'sensor.rcbo_power' });
     expect(h.calls.commits).toBe(1);
   });
 
   it('clearing an entity removes it from the block', async () => {
-    const h = harness(schema({ ...meter, power: 'sensor.rcbo_power' }), selected('m1'));
+    const h = harness(schema({ ...roof, power: 'sensor.rcbo_power' }), selected('pv1'));
     const power = h.q<EntityCombo>('ps-entity-combo[data-field="power"]')!;
     power.dispatchEvent(new CustomEvent('value-changed', { detail: { value: null }, bubbles: true, composed: true }));
-    expect('power' in h.blk('m1')).toBe(false);
+    expect('power' in h.blk('pv1')).toBe(false);
     expect(h.calls.commits).toBe(1);
   });
 
-  it('"Controllable" appears only with a switch; a new switch is read-only; the box toggles it', async () => {
-    const h = harness(schema(meter), selected('m1'));
-    expect(h.q('[data-field="controllable"]')).toBeNull();
-    await choose(h.q<EntityCombo>('ps-entity-combo[data-field="switch"]')!, 'switch.rcbo');
-    expect(h.blk('m1')).toMatchObject({ switch: { entity: 'switch.rcbo', controllable: false } });
-    const box = h.q<HTMLInputElement>('input[data-field="controllable"]')!;
-    expect(box.checked).toBe(false);
-    toggle(box);
-    expect(h.blk('m1')).toMatchObject({ switch: { entity: 'switch.rcbo', controllable: true } });
-    expect(h.calls.commits).toBe(2);
-  });
-
   it('a block name edit commits; a blank name reverts', () => {
-    const h = harness(schema(meter), selected('m1'));
+    const h = harness(schema(roof), selected('pv1'));
     const name = h.q<HTMLInputElement>('input[data-field="name"]')!;
     change(name, '  Breaker  ');
-    expect(h.blk('m1').name).toBe('Breaker');
+    expect(h.blk('pv1').name).toBe('Breaker');
     change(name, '   ');
-    expect(h.blk('m1').name).toBe('Breaker');
+    expect(h.blk('pv1').name).toBe('Breaker');
     expect(name.value).toBe('Breaker');
     expect(h.calls.commits).toBe(1);
   });
@@ -211,23 +193,12 @@ describe('Power properties', () => {
     expect(h.q('[data-note="device-missing"]')!.textContent).toBe('Device missing');
   });
 
-  it('toggling "Inverter" adds the PV and BAT ports, and unticking removes them', () => {
-    const h = harness(schema(boiler), selected('boiler'));
-    const box = h.q<HTMLInputElement>('input[data-field="inverter"]')!;
-    expect(box.checked).toBe(false);
-    toggle(box);
-    expect(blockPorts(h.blk('boiler')).map(p => p.name)).toEqual(['IN', 'OUT', 'PV', 'BAT']);
-    toggle(h.q<HTMLInputElement>('input[data-field="inverter"]')!);
-    expect(blockPorts(h.blk('boiler')).map(p => p.name)).toEqual(['IN', 'OUT']);
-    expect(h.calls.commits).toBe(2);
-  });
-
   it('changing the transfer form removes its wires', () => {
     const s: PowerSchema = {
-      blocks: [grid, meter, transfer],
+      blocks: [grid, boiler, transfer],
       wires: [
-        { id: 'w1', from: { block: 'grid', port: 'OUT' }, to: { block: 'm1', port: 'IN' } },
-        { id: 'w2', from: { block: 'm1', port: 'OUT' }, to: { block: 'ts', port: 'A' } },
+        { id: 'w1', from: { block: 'grid', port: 'OUT' }, to: { block: 'boiler', port: 'IN' } },
+        { id: 'w2', from: { block: 'boiler', port: 'OUT' }, to: { block: 'ts', port: 'A' } },
       ],
     };
     const h = harness(s, selected('ts'));
@@ -254,11 +225,11 @@ describe('Power properties', () => {
   });
 
   it('"Auto ports" shows only when the block has pins and clears them', () => {
-    expect(harness(schema(meter), selected('m1')).q('[data-action="auto-ports"]')).toBeNull();
+    expect(harness(schema(roof), selected('pv1')).q('[data-action="auto-ports"]')).toBeNull();
     document.body.innerHTML = '';
-    const h = harness(schema({ ...meter, portPins: { IN: { side: 'left', at: 0.5 } } }), selected('m1'));
+    const h = harness(schema({ ...roof, portPins: { OUT: { side: 'left', at: 0.5 } } }), selected('pv1'));
     h.q<HTMLButtonElement>('[data-action="auto-ports"]')!.click();
-    expect('portPins' in h.blk('m1')).toBe(false);
+    expect('portPins' in h.blk('pv1')).toBe(false);
     expect(h.q('[data-action="auto-ports"]')).toBeNull();
   });
 
@@ -326,7 +297,7 @@ describe('Power properties', () => {
   it('a block other than the grid has a Delete button', () => {
     expect(harness(schema(), selected('grid')).q('[data-action="delete-block"]')).toBeNull();
     document.body.innerHTML = '';
-    const h = harness(schema(meter), selected('m1'));
+    const h = harness(schema(roof), selected('pv1'));
     h.q<HTMLButtonElement>('[data-action="delete-block"]')!.click();
     expect(h.o.power.blocks.map(b => b.id)).toEqual(['grid']);
   });
@@ -441,17 +412,17 @@ describe('Power properties in the panel', () => {
   });
 
   it('the side panel edits the selected block through the shared history: Ctrl+Z undoes a rename', async () => {
-    const el = await mountPower({ blocks: [grid, meter], wires: [] });
-    el.selection = { kind: 'powerBlock', id: 'm1' };
+    const el = await mountPower({ blocks: [grid, roof], wires: [] });
+    el.selection = { kind: 'powerBlock', id: 'pv1' };
     await el.updateComplete;
     const name = $<HTMLInputElement>(el, '.props input[data-field="name"]');
     name.value = 'Breaker';
     name.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
     await el.updateComplete;
-    expect(el.power.blocks.find(b => b.id === 'm1')!.name).toBe('Breaker');
+    expect(el.power.blocks.find(b => b.id === 'pv1')!.name).toBe('Breaker');
     expect(el.save.dirty).toBe(true);
     await undo(el);
-    expect(el.power.blocks.find(b => b.id === 'm1')!.name).toBe('RCBO output');
+    expect(el.power.blocks.find(b => b.id === 'pv1')!.name).toBe('Roof PV');
   });
 
   it('switching a bus to Vertical is one undoable edit', async () => {

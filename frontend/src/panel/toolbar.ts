@@ -71,7 +71,7 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
 }
 
 /** Tools that start a group on the rail: the room tool, the first device tool, the Plan device and the service blocks. */
-const GROUP_STARTS: ToolId[] = ['zone', 'ceiling_light', 'power-device', 'power-meter'];
+const GROUP_STARTS: ToolId[] = ['zone', 'ceiling_light', 'power-device', 'power-bus'];
 
 /** The step's tool buttons (with a separator before each group). */
 export function toolButtons(mode: EditorMode, active: ToolId, onPick: (id: ToolId) => void): TemplateResult[] {

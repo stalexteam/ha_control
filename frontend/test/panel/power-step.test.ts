@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { STORAGE_KEY, createMockHass } from '../../dev/mock-hass';
-import { emptyLevel, type Pt } from '../../src/model/types';
+import { deviceDefaults, emptyLevel, type Device, type Level, type Pt } from '../../src/model/types';
 import { updateBlock, type PortName, type PowerBlock, type PowerSchema } from '../../src/model/power';
 import {
   blockRect, portPlaces, routeWire, transferChips, wireEnds, type GeoCtx,
@@ -10,15 +10,21 @@ import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 import type { HassLike } from '../../src/api';
 import { $, click, key, mount, pointer, press, undo } from './helpers';
 
-const geo: GeoCtx = { device: () => undefined };
+/** A metering device that is not on the plan; its block `m` has IN, OUT and one value line. */
+const METER: Device = {
+  id: 'dm', name: 'Meter 1', invalid: false, placement: { mode: 'none' }, props: deviceDefaults('equipment', 'free'),
+  bindings: { power: 'sensor.m_power' },
+};
+const level = (): Level => ({ ...emptyLevel('L1'), devices: [METER] });
+const geo: GeoCtx = { device: id => (id === METER.id ? METER : undefined) };
 
 const grid = (x = 0, y = 0): PowerBlock => ({ id: 'grid', kind: 'grid', x, y });
-const meter = (x = 0, y = 200): PowerBlock => ({ id: 'm', kind: 'meter', x, y, name: 'Meter 1' });
+const meter = (x = 0, y = 200): PowerBlock => ({ id: 'm', kind: 'device', x, y, deviceId: METER.id });
 const bus = (x = 300, y = 100): PowerBlock => ({ id: 'bus', kind: 'bus', x, y, w: 240, h: 12, name: 'Bus 1' });
 
 /** Mounts a stored plan (with `power` when given), enters the Power step and sets a 1:1 view at the origin. */
 async function mountPower(power?: PowerSchema, hass?: HassLike): Promise<PlanStudioPanel> {
-  const plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [emptyLevel('L1')], ...(power ? { power } : {}) };
+  const plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level()], ...(power ? { power } : {}) };
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
   const el = await mount(hass);
   el.setMode('power');
@@ -50,14 +56,14 @@ describe('Power step', () => {
     localStorage.clear();
   });
 
-  it('is the fifth step; its rail has the select tool and the seven place tools; Esc from a place tool returns to Select', async () => {
+  it('is the fifth step; its rail has the select tool and the six place tools; Esc from a place tool returns to Select', async () => {
     const el = await mountPower();
     expect(el.mode).toBe('power');
     expect(el.toolId).toBe('power-select');
     expect($(el, '.steps [data-mode="power"] .n').textContent).toBe('5');
     expect($(el, '.steps [data-mode="power"] .name').textContent).toBe('Power');
     expect([...el.shadowRoot!.querySelectorAll('.tools .tool')].map(b => b.textContent!.trim())).toEqual([
-      'Select', 'Plan device', 'Meter', 'Bus', 'Battery', 'PV field', 'Transfer switch', 'Remainder',
+      'Select', 'Plan device', 'Bus', 'Battery', 'PV field', 'Transfer switch', 'Remainder',
     ]);
     await press(el, 'button[data-tool="power-bus"]');
     expect(el.toolId).toBe('power-bus');
@@ -77,7 +83,7 @@ describe('Power step', () => {
     expect(stepText(el)).toBe('1 block');
     expect(stepDoneCls(el)).toBe(false);
     const gridId = el.power.blocks[0].id;
-    el.commitPower(updateBlock(el.power, gridId, { power: 'sensor.grid_power' }));
+    el.commitPower(updateBlock(el.power, gridId, { power: 'sensor.grid_power' }, geo));
     await el.updateComplete;
     expect(stepDoneCls(el)).toBe(false);
     el.commitPower({ ...el.power, blocks: [...el.power.blocks, meter()] });
@@ -88,14 +94,14 @@ describe('Power step', () => {
     expect(stepDoneCls(el)).toBe(true);
   });
 
-  it('placing a meter snaps it to the grid, selects it and returns to power-select', async () => {
+  it('placing a battery snaps it to the grid, selects it and returns to power-select', async () => {
     const el = await mountPower();
-    await press(el, 'button[data-tool="power-meter"]');
+    await press(el, 'button[data-tool="power-battery"]');
     click(el, 303, 207);
     await el.updateComplete;
     expect(el.power.blocks).toHaveLength(2);
     const m = el.power.blocks[1];
-    expect(m.kind).toBe('meter');
+    expect(m.kind).toBe('battery');
     expect(m.x % 10).toBe(0);
     expect(m.y % 10).toBe(0);
     // Centred on the click: the click lies inside the placed block.
@@ -323,7 +329,7 @@ describe('Power step', () => {
   });
 
   it('the first entry to the Power step after a plan is opened fits the schematic; later entries keep the view', async () => {
-    const plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [emptyLevel('L1')],
+    const plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level()],
       power: { blocks: [grid(0, 0), meter(0, 200)], wires: [] } };
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
     const el = await mount();

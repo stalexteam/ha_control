@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { DEBOUNCE_MS, PowerFeed, powerPayload, type PowerPayload } from '../../src/live/power-feed';
 import { RETRY_MAX, RETRY_MS } from '../../src/live/container-feed';
 import type { HassLike } from '../../src/api';
-import { deviceDefaults, emptyLevel, type Device, type Plan } from '../../src/model/types';
+import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type DeviceProps, type Plan } from '../../src/model/types';
 import { updateBlock, type PowerBlock, type PowerFrame, type PowerSchema } from '../../src/model/power';
 import { transferChips } from '../../src/geometry/power';
 import { STORAGE_KEY, createMockHass } from '../../dev/mock-hass';
@@ -56,45 +56,55 @@ function fakeConnection(reject?: unknown) {
 const NOT_READY = { code: 'unknown_command', message: 'Not ready' };
 const host = () => ({ requestUpdate: vi.fn() });
 const grid: PowerBlock = { id: 'grid', kind: 'grid', x: 0, y: 0, power: 'sensor.grid_power' };
-const meterAt = (y: number): PowerBlock => ({ id: 'm', kind: 'meter', x: 0, y, name: 'Meter 1' });
+const deviceAt = (y: number): PowerBlock => ({ id: 'm', kind: 'device', x: 0, y, deviceId: 'rcbo' });
 const draft = (...blocks: PowerBlock[]): PowerPayload => ({ power: { blocks: [grid, ...blocks], wires: [] }, devices: {} });
-/** Successive drafts of one schematic: the meter is added, then moved twice. */
+/** Successive drafts of one schematic: a device block is added, then moved twice. */
 const A = draft();
-const B = draft(meterAt(200));
-const C = draft(meterAt(210));
-const D = draft(meterAt(220));
+const B = draft(deviceAt(200));
+const C = draft(deviceAt(210));
+const D = draft(deviceAt(220));
 const frame = (watts: number): PowerFrame => ({ wires: {}, blocks: { grid: { power: watts } } });
 const SUB = (p: PowerPayload, planId = 'P1') =>
   ({ type: 'plan_studio/power/subscribe', plan_id: planId, power: p.power, devices: p.devices });
 
 describe('powerPayload', () => {
-  const dev = (id: string, bindings?: Device['bindings']): Device => ({
+  const dev = (id: string, bindings?: Device['bindings'], kind: DeviceKind = 'equipment',
+    flags: { inverter?: true; controllable?: true } = {}): Device => ({
     id, name: id, invalid: false, placement: { mode: 'free', x: 0, y: 0, rotation: 0 },
-    props: deviceDefaults('equipment', 'free'), ...(bindings ? { bindings } : {}),
+    props: { ...deviceDefaults(kind, 'free'), ...flags } as DeviceProps, ...(bindings ? { bindings } : {}),
   });
 
-  it('carries the draft and the power / control bindings of the devices its device blocks refer to', () => {
+  it('carries the draft, and per device its device blocks refer to: its bound entities, inverter and controllable', () => {
     const level = {
       ...emptyLevel('L1'),
       devices: [
-        dev('pc', { power: 'sensor.pc_power', control: 'switch.pc', temperature: 'sensor.pc_temp' }),
+        dev('pc', { power: 'sensor.pc_power', voltage: 'sensor.pc_v', control: 'switch.pc', temperature: 'sensor.pc_temp' },
+          'equipment', { controllable: true }),
+        dev('rcbo', { power: 'sensor.rcbo_power', control: 'switch.rcbo' }),
+        dev('inv', { power_in: 'sensor.inv_in', power_out: 'sensor.inv_out', voltage: 'sensor.inv_v' }, 'equipment', { inverter: true }),
         dev('lamp'),
+        dev('socket', { control: 'switch.socket' }, 'socket'),
         dev('boiler', { power: 'sensor.boiler_power' }), // not in the schematic
       ],
     };
     const power: PowerSchema = {
       blocks: [
         grid,
-        { id: 'b-pc', kind: 'device', x: 0, y: 200, deviceId: 'pc' },
-        { id: 'b-lamp', kind: 'device', x: 200, y: 200, deviceId: 'lamp' },
-        { id: 'b-gone', kind: 'device', x: 400, y: 200, deviceId: 'gone' }, // its plan device was deleted
+        ...['pc', 'rcbo', 'inv', 'lamp', 'socket'].map((id, i): PowerBlock => ({ id: `b-${id}`, kind: 'device', x: 200 * i, y: 200, deviceId: id })),
+        { id: 'b-gone', kind: 'device', x: 400, y: 400, deviceId: 'gone' }, // its plan device was deleted
       ],
       wires: [],
     };
     const p = powerPayload(power, level);
     expect(p.power).toBe(power);
-    // The deleted device has no entry: the server reports its block missing.
-    expect(p.devices).toStrictEqual({ pc: { power: 'sensor.pc_power', control: 'switch.pc' }, lamp: {} });
+    // The deleted device has no entry: the server reports its block missing. Only equipment can be read-only.
+    expect(p.devices).toStrictEqual({
+      pc: { power: 'sensor.pc_power', voltage: 'sensor.pc_v', control: 'switch.pc', inverter: false, controllable: true },
+      rcbo: { power: 'sensor.rcbo_power', control: 'switch.rcbo', inverter: false, controllable: false },
+      inv: { voltage: 'sensor.inv_v', power_in: 'sensor.inv_in', power_out: 'sensor.inv_out', inverter: true, controllable: false },
+      lamp: { inverter: false, controllable: false },
+      socket: { control: 'switch.socket', inverter: false, controllable: true },
+    });
   });
 });
 
@@ -406,9 +416,10 @@ describe('PowerFeed in the panel', () => {
     const el = await open(hass, schematic);
     expect(power).toHaveLength(0); // idle outside the Power step
     await enterPower(el);
+    // The stored PC switch predates v0.7.2: opening the plan made it controllable (migrateDevices).
     expect(power.map(s => s.msg)).toEqual([{
       type: 'plan_studio/power/subscribe', plan_id: 'P1', power: schematic,
-      devices: { 'd-pc': { power: 'sensor.pc_power', control: 'switch.pc' } },
+      devices: { 'd-pc': { power: 'sensor.pc_power', control: 'switch.pc', inverter: false, controllable: true } },
     }]);
     await vi.waitFor(() => expect(el.powerFeed.frame).toEqual(live));
     await el.updateComplete;
@@ -483,7 +494,7 @@ describe('PowerFeed in the panel', () => {
     const { hass, power } = recording(live);
     const el = await open(hass, schematic);
     await enterPower(el);
-    el.commitPower(updateBlock(el.power, 'grid', { name: 'AC-IN' }));
+    el.commitPower(updateBlock(el.power, 'grid', { name: 'AC-IN' }, el.ctx.geo()));
     await el.updateComplete;
     expect(power).toHaveLength(1);
     await vi.waitFor(() => expect(power).toHaveLength(2), { timeout: 10 * DEBOUNCE_MS });

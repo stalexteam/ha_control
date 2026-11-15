@@ -54,6 +54,15 @@ export function deviceRole(d: Device): DeviceRole | null {
   return measures ? 'meter' : 'dummy';
 }
 
+/** An inverter: equipment with the inverter flag (its schematic block has PV and BAT ports). False for a missing device. */
+export const isInverter = (d: Device | undefined): boolean => d?.props.kind === 'equipment' && !!d.props.inverter;
+
+/**
+ * Plan Studio may operate the device's control: equipment by its controllable flag; every other kind always (sockets,
+ * lights and fans are actuators Plan Studio operates).
+ */
+export const isControllable = (d: Device): boolean => d.props.kind !== 'equipment' || !!d.props.controllable;
+
 /** Equipment props with a flag set (`true`) or removed (a missing flag means false). */
 function withFlag(p: Extract<DeviceProps, { kind: 'equipment' }>, flag: 'inverter' | 'controllable', on: boolean): DeviceProps {
   const next = { ...p };

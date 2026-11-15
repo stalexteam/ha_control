@@ -1,13 +1,13 @@
 import { t } from '../i18n';
 import { newId } from './ids';
+import { isInverter } from './devices';
 import type { Device, Id, Level, Pt } from './types';
+import type { GeoCtx } from '../geometry/power';
 
 export type PortSide = 'top' | 'right' | 'bottom' | 'left';
 export type PortName = 'IN' | 'OUT' | 'PV' | 'BAT' | 'A' | 'B';
 export type PortDir = 'in' | 'out';
 export interface PortPin { side: PortSide; at: number }
-/** A switch entity id and whether Plan Studio may operate it. */
-export interface PowerSwitch { entity: string; controllable: boolean }
 
 interface BlockBase {
   id: Id;
@@ -17,11 +17,10 @@ interface BlockBase {
   portPins?: Partial<Record<PortName, PortPin>>;
 }
 
-/** Entity fields hold entity id strings. */
+/** Entity fields hold entity id strings. A device block reads its entities and flags from its device. */
 export type PowerBlock = BlockBase & (
   | { kind: 'grid'; power?: string; voltage?: string }
-  | { kind: 'device'; deviceId: Id; inverter?: boolean }
-  | { kind: 'meter'; power?: string; voltage?: string; switch?: PowerSwitch }
+  | { kind: 'device'; deviceId: Id }
   | { kind: 'bus'; w: number; h: number }
   | { kind: 'battery'; power?: string; soc?: string }
   | { kind: 'pv'; power?: string }
@@ -39,6 +38,8 @@ export type Position = 'A' | '0' | 'B';
 export interface WireLive { power: number | null; state: 'live' | 'dead' }
 export interface BlockLive {
   power?: number | null;
+  power_in?: number | null;
+  power_out?: number | null;
   voltage?: number | null;
   soc?: number | null;
   loss?: number | null;
@@ -52,18 +53,18 @@ export interface PowerFrame { wires: Record<Id, WireLive>; blocks: Record<Id, Bl
 export type WireError =
   | 'missing' | 'same-block' | 'direction' | 'port-taken' | 'dc-mismatch' | 'second-remainder' | 'loop';
 
-const KINDS: PowerKind[] = ['grid', 'device', 'meter', 'bus', 'battery', 'pv', 'transfer', 'remainder'];
+const KINDS: PowerKind[] = ['grid', 'device', 'bus', 'battery', 'pv', 'transfer', 'remainder'];
 const PORT_NAMES: PortName[] = ['IN', 'OUT', 'PV', 'BAT', 'A', 'B'];
 const LOOP_TRANSFER_CAP = 10;
 
-export function blockPorts(b: PowerBlock): { name: PortName; dir: PortDir }[] {
+/** A block's ports; a device block has PV and BAT while its device is an inverter (see isInverter). */
+export function blockPorts(b: PowerBlock, g: GeoCtx): { name: PortName; dir: PortDir }[] {
   const p = (name: PortName, dir: PortDir) => ({ name, dir });
   switch (b.kind) {
     case 'grid': return [p('OUT', 'out')];
-    case 'device': return b.inverter
+    case 'device': return isInverter(g.device(b.deviceId))
       ? [p('IN', 'in'), p('OUT', 'out'), p('PV', 'in'), p('BAT', 'out')]
       : [p('IN', 'in'), p('OUT', 'out')];
-    case 'meter': return [p('IN', 'in'), p('OUT', 'out')];
     case 'battery': return [p('BAT', 'in')];
     case 'pv': return [p('OUT', 'out')];
     case 'remainder': return [p('IN', 'in')];
@@ -106,8 +107,11 @@ export function moveBlock(s: PowerSchema, id: Id, x: number, y: number): PowerSc
 const endId = (e: WireEnd) => ('block' in e ? e.block : e.bus);
 const touches = (w: PowerWire, id: Id) => endId(w.from) === id || endId(w.to) === id;
 
-/** A transfer form change drops all its wires; any other patch drops wires on ports the block no longer has. */
-export function updateBlock(s: PowerSchema, id: Id, patch: Partial<PowerBlock>): PowerSchema {
+/**
+ * A transfer form change drops all its wires; any other patch drops wires on ports the block no longer has (with the
+ * devices of `g`, so a device block that is no longer an inverter loses its PV and BAT wires).
+ */
+export function updateBlock(s: PowerSchema, id: Id, patch: Partial<PowerBlock>, g: GeoCtx): PowerSchema {
   const old = s.blocks.find((b) => b.id === id);
   if (!old) return s;
   const next = mapBlock(s, id, (b) => ({ ...b, ...patch }) as PowerBlock);
@@ -115,7 +119,7 @@ export function updateBlock(s: PowerSchema, id: Id, patch: Partial<PowerBlock>):
     return { ...next, wires: next.wires.filter((w) => !touches(w, id)) };
   }
   const updated = next.blocks.find((b) => b.id === id)!;
-  const ports = new Set<PortName>(blockPorts(updated).map((p) => p.name));
+  const ports = new Set<PortName>(blockPorts(updated, g).map((p) => p.name));
   const stale = (e: WireEnd) => 'block' in e && e.block === id && !ports.has(e.port);
   if (!next.wires.some((w) => stale(w.from) || stale(w.to))) return next;
   return { ...next, wires: next.wires.filter((w) => !stale(w.from) && !stale(w.to)) };
@@ -150,10 +154,11 @@ export function clearPins(s: PowerSchema, id: Id): PowerSchema {
 
 type DcClass = 'ac' | 'bat' | 'pv';
 
+/** A device block has BAT and PV ports only as an inverter (see blockPorts). */
 function portClass(b: PowerBlock, port: PortName): DcClass {
   if (b.kind === 'battery') return 'bat';
   if (b.kind === 'pv') return 'pv';
-  if (b.kind === 'device' && b.inverter) {
+  if (b.kind === 'device') {
     if (port === 'BAT') return 'bat';
     if (port === 'PV') return 'pv';
   }
@@ -191,8 +196,9 @@ function hasLoop(blocks: PowerBlock[], wires: PowerWire[]): boolean {
   return false;
 }
 
+/** A wire from a to b, oriented out -> in; the ports come from blockPorts with the devices of `g`. */
 export function connect(
-  s: PowerSchema, a: WireEnd, b: WireEnd,
+  s: PowerSchema, a: WireEnd, b: WireEnd, g: GeoCtx,
 ): { schema: PowerSchema; wire: PowerWire } | { error: WireError } {
   const byId = new Map(s.blocks.map((x) => [x.id, x]));
   const resolve = (e: WireEnd): { bl: PowerBlock; dir: PortDir | null } | null => {
@@ -201,7 +207,7 @@ export function connect(
       return bl && bl.kind === 'bus' ? { bl, dir: null } : null;
     }
     const bl = byId.get(e.block);
-    const port = bl ? blockPorts(bl).find((p) => p.name === e.port) : undefined;
+    const port = bl ? blockPorts(bl, g).find((p) => p.name === e.port) : undefined;
     return bl && port ? { bl, dir: port.dir } : null;
   };
   const ra = resolve(a);
@@ -263,13 +269,13 @@ const FORMS: string[] = ['2in1out', '1in2out'];
  * with an unknown form becomes 2in1out, and pins with an unknown side, a non-finite place or a port the block lacks
  * are dropped (the others clamped to 0..1). The same object comes back when nothing changed.
  */
-function fixBlock(b: PowerBlock): PowerBlock {
+function fixBlock(b: PowerBlock, g: GeoCtx): PowerBlock {
   let out = b;
   if (out.kind === 'bus' && !(fin(out.w) && fin(out.h) && out.w >= 1 && out.h >= 1)) out = { ...out, w: 240, h: 12 };
   if (out.kind === 'transfer' && !FORMS.includes(out.form)) out = { ...out, form: '2in1out' };
   if (!('portPins' in out)) return out;
   const raw: unknown = out.portPins;
-  const ports = new Set<string>(blockPorts(out).map((p) => p.name));
+  const ports = new Set<string>(blockPorts(out, g).map((p) => p.name));
   const pins: Partial<Record<PortName, PortPin>> = {};
   let same = isObj(raw);
   for (const [port, pin] of isObj(raw) ? Object.entries(raw) : []) {
@@ -284,10 +290,11 @@ function fixBlock(b: PowerBlock): PowerBlock {
 }
 
 /**
- * Drops malformed blocks and wires and repairs block fields (see fixBlock); a transfer whose form was reset loses its
- * wires. The same object comes back when nothing changed.
+ * Drops malformed blocks and wires and repairs block fields (see fixBlock; a device block's ports come from its device
+ * in `g`); a transfer whose form was reset loses its wires. A v0.7 `meter` block is an unknown kind here: migrateDevices
+ * converts it first. The same object comes back when nothing changed.
  */
-export function normalizePower(raw: unknown): PowerSchema | undefined {
+export function normalizePower(raw: unknown, g: GeoCtx): PowerSchema | undefined {
   if (!isObj(raw)) return undefined;
   const rawBlocks = Array.isArray(raw.blocks) ? raw.blocks : [];
   const rawWires = Array.isArray(raw.wires) ? raw.wires : [];
@@ -298,7 +305,7 @@ export function normalizePower(raw: unknown): PowerSchema | undefined {
   const reset = new Set<Id>();
   for (const b of rawBlocks) {
     if (isObj(b) && typeof b.id === 'string' && b.id && KINDS.includes(b.kind as PowerKind) && fin(b.x) && fin(b.y)) {
-      const fixed = fixBlock(b as unknown as PowerBlock);
+      const fixed = fixBlock(b as unknown as PowerBlock, g);
       if (fixed !== (b as unknown)) changed = true;
       if (fixed.kind === 'transfer' && fixed.form !== b.form) reset.add(fixed.id);
       blocks.push(fixed);
@@ -330,8 +337,8 @@ export function normalizePower(raw: unknown): PowerSchema | undefined {
 }
 
 /**
- * Plan devices the Plan device tool can place, by name: sockets, equipment and devices with a power or control
- * binding that are not in the schematic yet.
+ * Devices the Plan device tool can place, by name: sockets, equipment (on the plan or not) and devices with a power or
+ * control binding that are not in the schematic yet.
  */
 export function placeableDevices(level: Level, power: PowerSchema): Device[] {
   const placed = new Set(power.blocks.flatMap(b => (b.kind === 'device' ? [b.deviceId] : [])));

@@ -2,7 +2,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import type { Device, Id, Level } from '../model/types';
 import {
   clearPins, deleteBlock, deleteWire, placeableDevices, updateBlock,
-  type Position, type PowerBlock, type PowerFrame, type PowerSchema, type PowerSwitch, type PowerWire, type WireEnd,
+  type Position, type PowerBlock, type PowerFrame, type PowerSchema, type PowerWire, type WireEnd,
 } from '../model/power';
 import { POWER, activeRoleSpecs } from '../model/bindings';
 import { candidates, entityLabel, type MatchSpec } from '../binding/candidates';
@@ -20,7 +20,6 @@ import { t } from '../i18n';
 /** Strict entity filters of the block fields (power uses the Binding step's POWER spec). */
 export const VOLTAGE: MatchSpec = { domains: ['sensor'], deviceClasses: ['voltage'], units: ['V'] };
 export const SOC: MatchSpec = { domains: ['sensor'], deviceClasses: ['battery'], units: ['%'] };
-export const SWITCH: MatchSpec = { domains: ['switch'] };
 /** The thinnest bus, in schematic units. */
 const BUS_THICK_MIN = 6;
 const POSITIONS: Position[] = ['A', '0', 'B'];
@@ -53,10 +52,13 @@ export interface PowerPropsOpts {
 }
 
 type Block<K extends PowerBlock['kind']> = Extract<PowerBlock, { kind: K }>;
-type Field = 'power' | 'voltage' | 'soc' | 'switch';
+type Field = 'power' | 'voltage' | 'soc';
+
+/** The device lookup of the schematic's device blocks: the level's devices. */
+const geoOf = (o: PowerPropsOpts): GeoCtx => ({ device: id => o.level.devices.find(d => d.id === id) });
 
 /** Sets an entity field of a block, or removes it (null). Entity fields never change the block's ports. */
-function setField(o: PowerPropsOpts, b: PowerBlock, key: Field, value: string | PowerSwitch | null): void {
+function setField(o: PowerPropsOpts, b: PowerBlock, key: Field, value: string | null): void {
   const { [key]: _drop, ...rest } = b as PowerBlock & Partial<Record<Field, unknown>>;
   const next = (value === null ? rest : { ...rest, [key]: value }) as PowerBlock;
   o.commitPower({ ...o.power, blocks: o.power.blocks.map(x => (x.id === b.id ? next : x)) });
@@ -76,11 +78,6 @@ function entityField(o: PowerPropsOpts, field: Field, label: string, spec: Match
   </div>`;
 }
 
-function check(field: string, label: string, value: boolean, on: (v: boolean) => void): TemplateResult {
-  return html`<div class="cflag">${row(label, html`<input type="checkbox" data-field=${field} .checked=${fieldValue(value)}
-    @change=${(e: Event) => on((e.target as HTMLInputElement).checked)} />`)}</div>`;
-}
-
 /** The block name; a blank name reverts. The placeholder is the name the canvas shows for an unnamed block. */
 function nameRow(o: PowerPropsOpts, b: PowerBlock): TemplateResult {
   const cur = b.name ?? '';
@@ -88,7 +85,7 @@ function nameRow(o: PowerPropsOpts, b: PowerBlock): TemplateResult {
     placeholder=${t(`power.kind.${b.kind}`)} .value=${fieldValue(cur)} @change=${(e: Event) => {
       const el = e.target as HTMLInputElement;
       const name = el.value.trim();
-      if (name && name !== cur) o.commitPower(updateBlock(o.power, b.id, { name }));
+      if (name && name !== cur) o.commitPower(updateBlock(o.power, b.id, { name }, geoOf(o)));
       else el.value = cur;
     }} />`);
 }
@@ -112,19 +109,7 @@ function deviceFields(o: PowerPropsOpts, b: Block<'device'>): TemplateResult {
   return html`
     ${row(t('props.name'), html`<span class="val ro" data-field="device-name">${d?.name ?? '—'}</span>`)}
     ${d ? html`${row(t('props.kind'), html`<span class="val ro">${t(`device.${d.props.kind}`)}</span>`)}${boundRows(o, d)}`
-      : html`<p class="warn" data-note="device-missing">${t('power.missing')}</p>`}
-    ${check('inverter', t('power.inverter'), !!b.inverter, on => o.commitPower(updateBlock(o.power, b.id, { inverter: on })))}`;
-}
-
-function meterFields(o: PowerPropsOpts, b: Block<'meter'>): TemplateResult {
-  const sw = b.switch;
-  return html`
-    ${entityField(o, 'power', t('power.field.power'), POWER, b.power, v => setField(o, b, 'power', v))}
-    ${entityField(o, 'voltage', t('power.field.voltage'), VOLTAGE, b.voltage, v => setField(o, b, 'voltage', v))}
-    ${entityField(o, 'switch', t('power.field.switch'), SWITCH, sw?.entity,
-      v => setField(o, b, 'switch', v ? { entity: v, controllable: sw?.controllable ?? false } : null))}
-    ${sw ? check('controllable', t('power.controllable'), sw.controllable,
-      on => setField(o, b, 'switch', { ...sw, controllable: on })) : nothing}`;
+      : html`<p class="warn" data-note="device-missing">${t('power.missing')}</p>`}`;
 }
 
 /** Form, and the live position buttons (the live position is marked; none without a frame). */
@@ -133,7 +118,7 @@ function transferFields(o: PowerPropsOpts, b: Block<'transfer'>): TemplateResult
   const forms = (['2in1out', '1in2out'] as const).map(v => ({ v, label: t(`power.form.${v}`) }));
   return html`
     ${row(t('power.form'), select(b.form, forms, v => {
-      if (v !== b.form) o.commitPower(updateBlock(o.power, b.id, { form: v }));
+      if (v !== b.form) o.commitPower(updateBlock(o.power, b.id, { form: v }, geoOf(o)));
     }, 'form'))}
     <div class="row"><span>${t('power.position')}</span><span class="seg pos">${POSITIONS.map(p => html`
       <button class=${p === live ? 'on' : ''} data-position=${p} @click=${() => o.setPosition(b.id, p)}>${p}</button>`)}
@@ -151,14 +136,14 @@ function busFields(o: PowerPropsOpts, b: Block<'bus'>): TemplateResult {
   const thick = horizontal ? b.h : b.w;
   const resize = (l: number, th: number): false | void => {
     if (l === len && th === thick) return false; // a clamped value equal to the current one shows the current one
-    o.commitPower(updateBlock(o.power, b.id, horizontal ? { w: l, h: th } : { w: th, h: l }));
+    o.commitPower(updateBlock(o.power, b.id, horizontal ? { w: l, h: th } : { w: th, h: l }, geoOf(o)));
   };
   const num = (field: string, value: number, apply: (v: number) => false | void) =>
     numField({ value, rule: { min: 1 }, bad: 'props.badNumber', field, skipSame: true, apply });
   const orientations = (['h', 'v'] as const).map(v => ({ v, label: t(`power.orientation.${v}`) }));
   return html`
     ${row(t('power.orientation'), select(horizontal ? 'h' : 'v', orientations, v => {
-      if (v !== (horizontal ? 'h' : 'v')) o.commitPower(updateBlock(o.power, b.id, { w: b.h, h: b.w }));
+      if (v !== (horizontal ? 'h' : 'v')) o.commitPower(updateBlock(o.power, b.id, { w: b.h, h: b.w }, geoOf(o)));
     }, 'bus-orientation'))}
     ${row(t('power.busLength'), num('bus-length', len, v => resize(Math.max(BUS_MIN, thick + 1, v), thick)))}
     ${row(t('power.busThickness'), num('bus-thickness', thick, v => resize(len, Math.min(Math.max(BUS_THICK_MIN, v), len - 1))))}`;
@@ -170,7 +155,6 @@ function kindFields(o: PowerPropsOpts, b: PowerBlock): TemplateResult | typeof n
       ${entityField(o, 'power', t('power.field.power'), POWER, b.power, v => setField(o, b, 'power', v))}
       ${entityField(o, 'voltage', t('power.field.voltage'), VOLTAGE, b.voltage, v => setField(o, b, 'voltage', v))}`;
     case 'device': return deviceFields(o, b);
-    case 'meter': return meterFields(o, b);
     case 'battery': return html`
       ${entityField(o, 'power', t('power.field.batteryPower'), POWER, b.power, v => setField(o, b, 'power', v))}
       ${entityField(o, 'soc', t('power.field.soc'), SOC, b.soc, v => setField(o, b, 'soc', v))}`;
@@ -197,7 +181,7 @@ function blockProps(o: PowerPropsOpts, b: PowerBlock): TemplateResult {
 
 /** A wire: its ends (block name and port, or the bus name), the live value or a dash, and Delete. */
 function wireProps(o: PowerPropsOpts, w: PowerWire): TemplateResult {
-  const g: GeoCtx = { device: id => o.level.devices.find(d => d.id === id) };
+  const g = geoOf(o);
   const end = (e: WireEnd): string => {
     const b = o.power.blocks.find(x => x.id === ('block' in e ? e.block : e.bus));
     const name = b ? blockName(b, g) || t(`power.kind.${b.kind}`) : '—';
@@ -238,9 +222,9 @@ function content(o: PowerPropsOpts): TemplateResult {
 
 /**
  * The Power step properties: the live feed error at the top, then the Plan device tool's device list, the selected
- * block (name, per-kind entity fields, Inverter, transfer form and live position, bus size, Auto ports, Delete) or
- * wire (ends, live value, Delete), or a hint. Every edit is one undoable commit; a transfer position is live state,
- * not an edit.
+ * block (name, per-kind entity fields, a device's bindings, transfer form and live position, bus size, Auto ports,
+ * Delete) or wire (ends, live value, Delete), or a hint. Every edit is one undoable commit; a transfer position is live
+ * state, not an edit.
  */
 export function renderPowerProps(o: PowerPropsOpts): TemplateResult {
   return html`<div class="props pprops">

@@ -46,7 +46,8 @@ function powerPlan(): Plan {
     },
     equipment('d-boiler', 'Boiler', 4500, 2500, { control: 'switch.boiler', power: 'sensor.boiler_power' }),
   ];
-  const power: PowerSchema = {
+  // Stored in the v0.7 shape (a meter block, a block-level inverter flag): the panel migrates it when the plan opens.
+  const power = {
     blocks: [
       { id: 'grid', kind: 'grid', x: 620, y: 30, name: 'AC-IN', power: 'sensor.grid_power', voltage: 'sensor.grid_voltage' },
       { id: 'main', kind: 'bus', x: 480, y: 150, w: 640, h: 20, name: 'Main bus' },
@@ -85,7 +86,7 @@ function powerPlan(): Plan {
       { id: 'w-boiler', from: { bus: 'apt', at: 0.5 }, to: { block: 'boiler', port: 'IN' } },
       { id: 'w-rem', from: { bus: 'apt', at: 0.8 }, to: { block: 'rem', port: 'IN' } },
     ],
-  };
+  } as unknown as PowerSchema;
   return { id: 'power', name: 'Power', schemaVersion: 1, revision: 1, levels: [level], power };
 }
 
