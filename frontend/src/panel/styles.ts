@@ -202,6 +202,7 @@ export const panelStyles = css`
   .bound small { font-size: 12px; }
   .pprops .val, .pprops .val.wide { max-width: min(190px, 100%); }
   .pprops .seg { margin-top: 0; }
+  .pprops [data-notice="feed"] { margin: 0 0 10px; }
   .pprops .seg button { min-width: 34px; border: 1px solid var(--ch-divider); font-variant-numeric: tabular-nums; }
   .pprops .seg button.on { border-color: var(--ch-primary); }
   .pactions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
