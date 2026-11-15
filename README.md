@@ -1,6 +1,6 @@
 # Plan Studio
 
-Home Assistant custom integration that adds a "Plan Studio" sidebar panel. Stage 1 is a 2D floor-plan editor: draw walls, openings and zones, and save plans to Home Assistant storage.
+Home Assistant custom integration that adds a "Plan Studio" sidebar panel: a 2D floor-plan editor in three steps. Plan: draw walls, openings and rooms. Equipment: place lights, sensors, switches and other devices. Binding: link each device to Home Assistant entities. Plans are saved to Home Assistant storage, and wall switches and smart buttons run as live input containers. Automation zones are not built yet.
 
 ## Install
 
@@ -12,14 +12,16 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 
 ## Usage
 
-- Tools: walls, doors, windows, zones, select/move; pick from the toolbar.
+- Tools: Select, Box, Wall, Door, Window, Opening and Zone (a room); pick from the toolbar.
+- Trim: Ctrl+click (Cmd+click on macOS) a wall with the Select tool to remove the piece around the click, between the nearest intersections on either side (T-junctions or crossing walls), or up to the wall's end on a side without one. A wall with no intersections is deleted. One Undo step brings it back.
 - Wall type (bearing / partition / railing) is only a visual style; thickness is a separate field and never changes when you pick a type. Both live in the left properties panel.
 - With a placement tool active and nothing selected, the left panel shows the parameters of the next object (door: width, hinge, swing; window: width, outside side; opening: width; room: name, default "Room N"). Values are remembered per tool for the session; a custom room name is used once, then the default returns to the smallest unused "Room N".
+- Opening properties: the "Passes light" checkbox lets the light of wall and ceiling lights through the opening. It is on by default for a plain opening and off for doors, windows, gates and wickets.
 - Layout: tool rail, properties panel, plan.
 - Hold Shift while drawing to snap to 90 degrees.
 - Type a length in millimetres and press Enter to set the exact segment length.
 - Tab switches to angle input.
-- Esc ends the current wall chain.
+- Esc works in two stages. The first Esc cancels the action in progress (a typed length, a wall chain, the first corner of a box, an aim drag). The next Esc switches to Select (Plan step) or the device Select (Equipment step). In Select, Esc cancels a drag, then clears the selection.
 - Ctrl+Z / Ctrl+Y: undo / redo.
 - Grid toggle in the status bar turns the grid display and grid snapping (100 mm) on or off together.
 - Save: the indicator shows the saved/unsaved state. If the plan changed elsewhere, a conflict dialog offers to overwrite or "Save as new".
@@ -37,9 +39,9 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 - Exhaust fan (wall only): diameter 100, 125 or 150 mm; no cone and no aim.
 - Select: click a device to select it, drag to move it (Shift locks the axis). A wall device slides along its wall, can be dragged onto another wall, or into open space if its kind allows. Delete removes it. A selected wall light or sensor shows a direction handle (a segment ending in a round knob): drag the knob to set the aim (wall device) or rotation (free device), Shift snaps to 15 degrees, Esc cancels.
 - Left panel (between the tool rail and the plan): properties of the selected device (name, kind settings, rotation for free devices, side, offset and aim, -90 to 90 degrees off the wall normal, for wall lights and sensors). With a placement tool active and nothing selected, it edits the defaults of the next device.
-- A newly placed device is selected, so the left panel shows its properties. Press Esc (or click empty space with the Select tool) to get back to the next-device defaults.
+- A newly placed device is selected, so the left panel shows its properties. Esc then switches to the device Select tool; pick the placement tool again to see the next-device defaults.
 - Deleting a wall also deletes the devices on it; Ctrl+Z brings both back.
-- "Cones & zones" in the status bar shows or hides light pools, wall-light cones and motion zones.
+- "Cones & zones" in the status bar shows or hides light pools, wall-light cones and motion zones. Each is clipped to what its device sees: every wall type blocks it, for outdoor devices too. Light passes openings with "Passes light"; motion zones pass only plain openings. Motion zones are violet; light cones and pools are amber.
 
 ### Binding
 
@@ -72,7 +74,7 @@ Wall switches and smart buttons are input containers: virtual objects with a liv
   - Identical triggers in one smart button show a warning; the first of On, Off, Auto wins.
 - Default output (both): the output while the container is not configured or a bound entity is unavailable.
 - Output line (both): the current output and, while it is the default, why (not configured, or the unavailable entities). "Not saved yet" means the saved plan has no such container, or has it as the other type.
-- On the plan, in every step, the symbol shows the output: `on` yellow, `auto` light blue, `error` red, `off` the plain device fill. A red dot marks a fault (the default output is shown). Without live data the symbol stays plain.
+- On the plan, in every step, the symbol shows the output: `on` yellow, `auto` light blue, `error` red, `off` the plain device fill. A red dot marks a fault (the default output is shown). Without live data the outline is dashed: the container is not saved yet, live outputs are not available, the subscription failed, or the connection to Home Assistant was lost. A live `off` stays solid. When the connection drops, the outputs go neutral and come back after the reconnect, retried every 5 s for up to 1 minute while the output line shows the error.
 
 ## Development
 
