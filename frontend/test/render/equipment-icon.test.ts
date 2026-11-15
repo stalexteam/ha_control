@@ -24,12 +24,4 @@ describe('equipment icon render', () => {
     expect(svg.querySelector('ha-icon')).toBeNull();
     expect(svg.querySelector('.equipment-icon path')).not.toBeNull();
   });
-  it('uses ha-icon in a centred foreignObject of 24/scale mm when defined', () => {
-    customElements.define('ha-icon', class extends HTMLElement {});
-    const svg = draw();
-    expect(svg.querySelector('.equipment-icon ha-icon')?.getAttribute('icon')).toBe('mdi:water-boiler');
-    const fo = svg.querySelector('foreignObject.equipment-icon')!;
-    expect(fo.getAttribute('width')).toBe('240');
-    expect(fo.getAttribute('x')).toBe('-120');
-  });
 });

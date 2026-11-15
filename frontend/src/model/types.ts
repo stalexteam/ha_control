@@ -156,21 +156,21 @@ export function deviceDefaults(kind: DeviceKind, mode: 'wall' | 'free'): DeviceP
   }
 }
 
-/** Stage-1 plans have no `devices`; a missing field means []. Invalid bindings are dropped. Same object back when nothing changes. */
 /** Legacy equipment `symbol` -> MDI icon (stage 2a plans). */
 const LEGACY_SYMBOL_ICON: Record<string, string> = {
   boiler: 'mdi:water-boiler', pc: 'mdi:desktop-tower', automation: 'mdi:server', other: DEFAULT_EQUIPMENT_ICON,
 };
 
-/** Replaces a legacy `symbol` by `icon`; returns the same device when there is nothing to migrate. */
+/** Replaces a legacy `symbol` by `icon` (a missing icon gets the default); returns the same device when there is nothing to migrate. */
 function migrateEquipment(d: Device): Device {
   const p = d.props as Record<string, unknown>;
-  if (p.kind !== 'equipment' || !('symbol' in p)) return d;
+  if (p.kind !== 'equipment' || (!('symbol' in p) && typeof p.icon === 'string')) return d;
   const { symbol, ...rest } = p;
   const icon = typeof p.icon === 'string' ? p.icon : LEGACY_SYMBOL_ICON[String(symbol)] ?? DEFAULT_EQUIPMENT_ICON;
   return { ...d, props: { ...rest, icon } as DeviceProps };
 }
 
+/** Stage-1 plans have no `devices`; a missing field means []. Invalid bindings are dropped. Same object back when nothing changes. */
 export function normalizeLevel(level: Level): Level {
   if (!level.devices) return { ...level, devices: [] };
   const devices = level.devices.map(d => sanitizeBindings(migrateEquipment(d)));

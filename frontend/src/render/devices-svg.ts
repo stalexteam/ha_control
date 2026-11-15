@@ -34,7 +34,8 @@ const EQUIPMENT_ICON_PX = 24;
 function equipmentIcon(icon: string, scale: number, color: string): SVGTemplateResult {
   const size = EQUIPMENT_ICON_PX / scale;
   if (customElements.get('ha-icon')) {
-    return svg`<foreignObject class="equipment-icon" x=${-size / 2} y=${-size / 2} width=${size} height=${size}>
+    return svg`<foreignObject class="equipment-icon" x=${-size / 2} y=${-size / 2} width=${size} height=${size}
+      style="pointer-events:none">
       <ha-icon icon=${icon} style=${`--mdc-icon-size:${size}px;color:${color};display:block`}></ha-icon></foreignObject>`;
   }
   return svg`<g class="equipment-icon" transform=${`translate(${-size / 2} ${-size / 2}) scale(${size / 24})`}>
