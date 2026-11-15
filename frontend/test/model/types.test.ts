@@ -100,3 +100,40 @@ describe("normalizeLevel: switch migration", () => {
     expect(normalizeLevel(l)).toBe(l);
   });
 });
+
+describe("normalizeLevel: partial container props", () => {
+  const room = (): Level => rectRoomLevel(3000, 4000, 400);
+  const placement = { mode: "free", x: 100, y: 100, rotation: 0 } as const;
+  const stored = (props: Record<string, unknown>, bindings?: Device["bindings"]): Device => ({
+    id: "b", name: "B", invalid: false, placement, props: props as unknown as DeviceProps,
+    ...(bindings ? { bindings } : {}),
+  });
+
+  it("fills a stored smart button without settings with the defaults", () => {
+    const d = normalizeLevel({ ...room(), devices: [stored({ kind: "smart_button" }, { on: "sensor.b" })] }).devices[0];
+    expect(d.props).toEqual(deviceDefaults("smart_button", "free"));
+    expect(d.bindings).toEqual({ on: "sensor.b" });
+  });
+
+  it("keeps valid values and replaces missing or invalid ones, also inside the triggers", () => {
+    const d = normalizeLevel({ ...room(), devices: [stored({
+      kind: "smart_button", separateOff: "yes", autoEnabled: true, defaultOutput: "auto",
+      on: { slot: 3 }, off: { slot: 12, event: "" }, auto: "double",
+    })] }).devices[0];
+    expect(d.props).toEqual({
+      ...deviceDefaults("smart_button", "free"), autoEnabled: true, defaultOutput: "auto",
+      on: { slot: 3, event: "single" }, off: { slot: 0, event: "hold" }, auto: { slot: 0, event: "double" },
+    });
+    const w = normalizeLevel({ ...room(), devices: [stored({ kind: "wall_switch", windowSec: 0, autoByDoubleToggle: 1 })] })
+      .devices[0];
+    expect(w.props).toEqual(deviceDefaults("wall_switch", "free"));
+    const w2 = normalizeLevel({ ...room(), devices: [stored({ kind: "wall_switch", windowSec: 2.5 })] }).devices[0];
+    expect(w2.props).toEqual(deviceDefaults("wall_switch", "free"));
+  });
+
+  it("keeps the same objects when the props are complete", () => {
+    const full = { ...deviceDefaults("smart_button", "free"), on: { slot: 1, event: "single_left" } };
+    const l: Level = { ...room(), devices: [stored(full)] };
+    expect(normalizeLevel(l)).toBe(l);
+  });
+});

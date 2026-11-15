@@ -222,6 +222,37 @@ function migrateSwitch(d: Device): Device {
   return { ...d, props: deviceDefaults('wall_switch', d.placement.mode) };
 }
 
+const isWhole = (v: unknown, min: number, max: number): v is number =>
+  typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
+
+/** A stored trigger with a missing or invalid slot (not 0..9) or event (not a non-empty string) takes the default there. */
+function completeTrigger(v: unknown, def: Trigger): unknown {
+  const t = (v !== null && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+  const slot = isWhole(t.slot, 0, 9) ? t.slot : def.slot;
+  const event = typeof t.event === 'string' && t.event ? t.event : def.event;
+  return slot === t.slot && event === t.event ? v : { slot, event };
+}
+
+/**
+ * Container props as the integration reads them: a missing or wrongly typed field takes the kind's default (a flag
+ * must be a boolean, `windowSec` a whole 1..10, a trigger a slot 0..9 and a non-empty event), so a partial stored
+ * container (for example `{ kind: 'smart_button' }`) is complete. Same device when nothing is missing.
+ */
+function completeContainer(d: Device): Device {
+  const kind = d.props.kind;
+  if (!isContainerKind(kind)) return d;
+  const cur = d.props as unknown as Record<string, unknown>;
+  let next: Record<string, unknown> | null = null;
+  for (const [k, def] of Object.entries(deviceDefaults(kind, d.placement.mode))) {
+    const v = cur[k];
+    const fixed = k === 'on' || k === 'off' || k === 'auto' ? completeTrigger(v, def as Trigger)
+      : k === 'windowSec' ? (isWhole(v, 1, 10) ? v : def)
+      : typeof v === typeof def ? v : def;
+    if (fixed !== v) (next ??= { ...cur })[k] = fixed;
+  }
+  return next ? { ...d, props: next as unknown as DeviceProps } : d;
+}
+
 /** A container whose stored default output is not allowed gets `off` (see normalizeDefaultOutput); same device otherwise. */
 function allowedDefault(d: Device): Device {
   const props = normalizeDefaultOutput(d.props);
@@ -229,11 +260,13 @@ function allowedDefault(d: Device): Device {
 }
 
 /**
- * Stage-1 plans have no `devices`; a missing field means []. Legacy kinds are migrated, a container default output
- * that is not allowed reads as `off`, then invalid bindings are dropped. Same object back when nothing changes.
+ * Stage-1 plans have no `devices`; a missing field means []. Legacy kinds are migrated, missing or invalid container
+ * props take their defaults, a container default output that is not allowed reads as `off`, then invalid bindings
+ * are dropped. Same object back when nothing changes.
  */
 export function normalizeLevel(level: Level): Level {
   if (!level.devices) return { ...level, devices: [] };
-  const devices = level.devices.map(d => sanitizeBindings(allowedDefault(migrateSwitch(migrateEquipment(d)))));
+  const devices = level.devices.map(d =>
+    sanitizeBindings(allowedDefault(completeContainer(migrateSwitch(migrateEquipment(d))))));
   return devices.some((d, i) => d !== level.devices[i]) ? { ...level, devices } : level;
 }

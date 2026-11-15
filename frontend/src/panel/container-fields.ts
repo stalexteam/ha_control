@@ -75,9 +75,9 @@ export function triggerFields(o: BindingPropsOpts, d: Device, role: TriggerRole)
  * The container checkboxes that follow a role section, so each sits under the section above it and before the
  * section it reveals (ticking one never moves it from under the pointer):
  * - wall switch, after State: "Auto by double toggle", then "Window, s" while it is checked;
- * - smart button, after On / Off (On): "Separate Off" (turning it on starts the Off entity as the On entity, in the
- *   same commit), then "Auto" unless the Off section comes between them;
+ * - smart button, after On / Off (On): "Separate Off", then "Auto" unless the Off section comes between them;
  * - smart button, after Off: "Auto".
+ * Turning "Separate Off" or "Auto" on while its entity is empty starts that entity as the On entity, in the same commit.
  * Nothing after any other role or for other kinds.
  */
 export function containerFlags(o: BindingPropsOpts, d: Device, role: BindingRole): TemplateResult {
@@ -92,11 +92,13 @@ export function containerFlags(o: BindingPropsOpts, d: Device, role: BindingRole
       }))}</div>` : nothing}`;
   }
   if (p.kind !== 'smart_button' || (role !== 'on' && role !== 'off')) return html`${nothing}`;
-  const separate = (on: boolean): boolean => {
-    const next = setDeviceProps(o.level, d.id, { separateOff: on });
-    return commit(o, on && !d.bindings?.off ? setBinding(next, d.id, 'off', d.bindings?.on ?? null) : next);
+  /** Turns a part on or off; turning it on with its entity empty starts it as the On entity, in the same commit. */
+  const part = (flag: 'separateOff' | 'autoEnabled', target: 'off' | 'auto') => (on: boolean): boolean => {
+    const next = setDeviceProps(o.level, d.id, { [flag]: on });
+    return commit(o, on && !d.bindings?.[target] ? setBinding(next, d.id, target, d.bindings?.on ?? null) : next);
   };
-  const auto = check('autoEnabled', t('binding.autoEnabled'), p.autoEnabled, v => setProps(o, d, { autoEnabled: v }));
+  const separate = part('separateOff', 'off');
+  const auto = check('autoEnabled', t('binding.autoEnabled'), p.autoEnabled, part('autoEnabled', 'auto'));
   if (role === 'off') return auto;
   return html`${check('separateOff', t('binding.separateOff'), p.separateOff, separate)}${p.separateOff ? nothing : auto}`;
 }

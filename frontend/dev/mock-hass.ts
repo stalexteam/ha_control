@@ -29,7 +29,9 @@ function defaultOutputs(plan: Plan | undefined): Record<string, ContainerState> 
   const out: Record<string, ContainerState> = {};
   for (const d of plan?.levels.flatMap(l => l.devices ?? []) ?? []) { // stage-1 plans have no devices
     const p = d.props;
-    if (p.kind === 'wall_switch' || p.kind === 'smart_button') out[d.id] = { output: p.defaultOutput ?? 'off', fault: 'not_configured' };
+    if (p.kind === 'wall_switch' || p.kind === 'smart_button') {
+      out[d.id] = { output: p.defaultOutput ?? 'off', fault: 'not_configured', kind: p.kind };
+    }
   }
   return out;
 }

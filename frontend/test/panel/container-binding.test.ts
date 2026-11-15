@@ -203,6 +203,29 @@ describe('binding step: container sections', () => {
     expect(roles(el)).toEqual(['on', 'off']);
   });
 
+  it('Auto starts the Auto entity as the On entity, in one step; with no On entity it stays empty', async () => {
+    const el = await open();
+    await pick(el, 'b');
+    await toggle(el, 'autoEnabled');
+    expect(props(el, 'b').autoEnabled).toBe(true);
+    expect(device(el, 'b').bindings).toEqual({ on: 'sensor.wc_action', auto: 'sensor.wc_action' });
+    expect(combo(el, 'auto').value).toBe('sensor.wc_action');
+    await undo(el);
+    expect(props(el, 'b').autoEnabled).toBe(false);
+    expect(device(el, 'b').bindings).toEqual({ on: 'sensor.wc_action' });
+    await redo(el);
+    expect(device(el, 'b').bindings).toEqual({ on: 'sensor.wc_action', auto: 'sensor.wc_action' });
+
+    // Unbound On: nothing to copy.
+    await toggle(el, 'autoEnabled');
+    combo(el, 'on').dispatchEvent(new CustomEvent('value-changed', { detail: { value: null } }));
+    await el.updateComplete;
+    expect(device(el, 'b').bindings).toBeUndefined();
+    await toggle(el, 'autoEnabled');
+    expect(props(el, 'b').autoEnabled).toBe(true);
+    expect(device(el, 'b').bindings).toBeUndefined();
+  });
+
   it('Auto adds the Auto section and Final state; default output offers Auto only while auto is enabled', async () => {
     const el = await open();
     await pick(el, 'b');
@@ -326,9 +349,9 @@ describe('binding step: output line', () => {
     expect(coloured(el)).toEqual([]);
 
     await push(el, live.subs[0], { full: true, containers: {
-      b: { output: 'on', fault: null },
-      w: { output: 'off', fault: 'not_configured' },
-      k1: { output: 'error', fault: 'unavailable', entities: ['sensor.x', 'light.y'] },
+      b: { output: 'on', fault: null, kind: 'smart_button' },
+      w: { output: 'off', fault: 'not_configured', kind: 'wall_switch' },
+      k1: { output: 'error', fault: 'unavailable', entities: ['sensor.x', 'light.y'], kind: 'smart_button' },
     } });
     expect(line(el)).toBe('Output: On');
     expect(coloured(el)).toEqual(['w', 'b', 'k1']);
@@ -343,14 +366,29 @@ describe('binding step: output line', () => {
     expect(line(el)).toBe('Not saved yet');
 
     // A change re-renders the line and the symbol at once.
-    await push(el, live.subs[0], { full: false, containers: { k2: { output: 'auto', fault: null } } });
+    await push(el, live.subs[0], { full: false, containers: { k2: { output: 'auto', fault: null, kind: 'smart_button' } } });
     expect(line(el)).toBe('Output: Auto');
     expect($(el, 'svg.plan g.device[data-id="k2"]').classList.contains('out-auto')).toBe(true);
     // A full snapshot (after a plan save) drops the containers it does not list.
-    await push(el, live.subs[0], { full: true, containers: { b: { output: 'off', fault: null } } });
+    await push(el, live.subs[0], { full: true, containers: { b: { output: 'off', fault: null, kind: 'smart_button' } } });
     expect(line(el)).toBe('Not saved yet');
     expect(coloured(el)).toEqual(['b']);
     expect(live.subs).toHaveLength(1);
+  });
+
+  it('a saved container of another kind (an unsaved Type change) reads as not saved and stays neutral', async () => {
+    const live = liveHass();
+    const el = await open(live.hass);
+    await push(el, live.subs[0], { full: true, containers: {
+      w: { output: 'on', fault: 'not_configured', kind: 'smart_button' },
+      b: { output: 'on', fault: null, kind: 'smart_button' },
+    } });
+    await pick(el, 'w');
+    expect(line(el)).toBe('Not saved yet');
+    expect(coloured(el)).toEqual(['b']);
+    expect(el.shadowRoot!.querySelectorAll('svg.plan .fault-mark')).toHaveLength(0);
+    await pick(el, 'b');
+    expect(line(el)).toBe('Output: On');
   });
 
   it('shows the feed error and keeps the plan neutral when the subscription fails', async () => {
@@ -374,7 +412,7 @@ describe('binding step: output line', () => {
   it('switching plans re-subscribes; removing the panel unsubscribes; re-attaching subscribes again', async () => {
     const live = liveHass();
     const el = await open(live.hass);
-    await push(el, live.subs[0], { full: true, containers: { b: { output: 'on', fault: null } } });
+    await push(el, live.subs[0], { full: true, containers: { b: { output: 'on', fault: null, kind: 'smart_button' } } });
     expect(coloured(el)).toEqual(['b']);
     const data = JSON.parse(localStorage.getItem(STORAGE_KEY)!) as { plans: Record<string, unknown> };
     data.plans.P2 = { id: 'P2', name: 'Cottage', schemaVersion: 1, revision: 1, levels: [level()] };
@@ -410,8 +448,9 @@ describe('binding step: output line', () => {
     const el = await mount(createMockHass());
     await vi.waitFor(() => expect(el.feed.ready).toBe(true));
     expect(el.feed.error).toBeNull();
-    const nc = (output: string) => ({ output, fault: 'not_configured' });
-    expect(['w', 'b', 'k1', 'k2', 'l'].map(id => el.feed.get(id))).toEqual([nc('off'), nc('off'), nc('on'), nc('off'), undefined]);
+    const nc = (output: string, kind = 'smart_button') => ({ output, fault: 'not_configured', kind });
+    expect(['w', 'b', 'k1', 'k2', 'l'].map(id => el.feed.get(id)))
+      .toEqual([nc('off', 'wall_switch'), nc('off'), nc('on'), nc('off'), undefined]);
 
     await expect(createMockHass().connection.subscribeMessage!(() => undefined, { type: 'other/subscribe' }))
       .rejects.toMatchObject({ code: 'unknown_command' });

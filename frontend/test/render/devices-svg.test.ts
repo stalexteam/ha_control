@@ -4,7 +4,7 @@ import { html, render } from 'lit';
 import { renderLevel } from '../../src/render/plan-svg';
 import { paletteFor } from '../../src/render/theme';
 import { renderDevices, ICON_PX } from '../../src/render/devices-svg';
-import { deviceDefaults, type Device, type DeviceKind, type Level } from '../../src/model/types';
+import { deviceDefaults, type ContainerKind, type Device, type DeviceKind, type Level } from '../../src/model/types';
 import type { ContainerState } from '../../src/live/container-feed';
 import { rectRoomLevel } from '../fixtures';
 
@@ -204,11 +204,13 @@ describe('container outputs on the plan', () => {
     ],
   });
   const fill = (root: SVGSVGElement, kind: string) => root.querySelector(`g.device-${kind} rect.icon`)!.getAttribute('fill');
+  /** The saved container kind a state carries: here always the device's own. */
+  const kindOf = (d: Device) => d.props.kind as ContainerKind;
   const outClasses = (root: SVGSVGElement) =>
     [...root.querySelectorAll('g.device')].flatMap(g => [...g.classList].filter(c => c.startsWith('out-')));
 
   it('a smart button with state on is filled yellow', () => {
-    const st: Record<string, ContainerState> = { sb: { output: 'on', fault: null } };
+    const st: Record<string, ContainerState> = { sb: { output: 'on', fault: null, kind: 'smart_button' } };
     const root = drawDevs(containers(), { containerState: (d: Device) => st[d.id] });
     expect(root.querySelectorAll('g.device-smart_button.out-on')).toHaveLength(1);
     expect(fill(root, 'smart_button')).toBe('#facc15');
@@ -220,7 +222,7 @@ describe('container outputs on the plan', () => {
 
   it('each output has its colour; off is the neutral fill', () => {
     const colour = (output: ContainerState['output']) => {
-      const root = drawDevs(containers(), { containerState: () => ({ output, fault: null }) });
+      const root = drawDevs(containers(), { containerState: (d: Device) => ({ output, fault: null, kind: kindOf(d) }) });
       expect(root.querySelectorAll(`g.device-wall_switch.out-${output}`)).toHaveLength(1);
       expect(fill(root, 'smart_button')).toBe(fill(root, 'wall_switch'));
       return fill(root, 'wall_switch');
@@ -233,8 +235,8 @@ describe('container outputs on the plan', () => {
 
   it('a fault adds a red mark', () => {
     const st: Record<string, ContainerState> = {
-      sb: { output: 'off', fault: 'not_configured' },
-      ws: { output: 'error', fault: 'unavailable', entities: ['switch.x'] },
+      sb: { output: 'off', fault: 'not_configured', kind: 'smart_button' },
+      ws: { output: 'error', fault: 'unavailable', entities: ['switch.x'], kind: 'wall_switch' },
     };
     const root = drawDevs(containers(), { containerState: (d: Device) => st[d.id] });
     for (const kind of ['smart_button', 'wall_switch']) {
@@ -256,15 +258,41 @@ describe('container outputs on the plan', () => {
     expect(fill(none, 'smart_button')).toBe(pal.deviceFill);
     expect(outClasses(none)).toEqual([]);
 
-    const all = drawDevs(containers(), { containerState: () => ({ output: 'on', fault: 'not_configured' }) });
+    const all = drawDevs(containers(), { containerState: (d: Device) => ({ output: 'on', fault: 'not_configured', kind: kindOf(d) }) });
     expect(outClasses(all)).toEqual(['out-on', 'out-on']); // the wall switch and the smart button only
     expect(all.querySelectorAll('.fault-mark')).toHaveLength(2);
     expect(all.querySelector('g.device-motion_sensor .fault-mark')).toBeNull();
   });
 
+  it('the smart button dot keeps a 3:1 contrast with a live fill in both themes', () => {
+    /** WCAG relative luminance of #rrggbb. */
+    const lum = (hex: string) => {
+      const [r, g, b] = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255)
+        .map(c => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const contrast = (a: string, b: string) => {
+      const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    const dot = (root: SVGSVGElement) => root.querySelector('g.device-smart_button circle.dot')!.getAttribute('fill')!;
+    for (const dark of [true, false]) {
+      const palette = paletteFor(dark);
+      for (const output of ['on', 'auto', 'error'] as const) {
+        const root = drawDevs(containers(), { palette, containerState: (d: Device) => ({ output, fault: null, kind: kindOf(d) }) });
+        expect(dot(root)).not.toBe(fill(root, 'smart_button'));
+        expect(contrast(dot(root), fill(root, 'smart_button')!), `${dark ? 'dark' : 'light'} ${output}`).toBeGreaterThanOrEqual(3);
+      }
+      // No live fill: the dot keeps the device colour.
+      for (const containerState of [undefined, (d: Device) => ({ output: 'off' as const, fault: null, kind: kindOf(d) })]) {
+        expect(dot(drawDevs(containers(), { palette, containerState }))).toBe(palette.device);
+      }
+    }
+  });
+
   it('renderLevel passes the state through in every mode', () => {
     for (const mode of ['plan', 'equipment', 'binding'] as const) {
-      const root = drawLevel(containers(), { mode, containerState: () => ({ output: 'auto', fault: null }) });
+      const root = drawLevel(containers(), { mode, containerState: (d: Device) => ({ output: 'auto', fault: null, kind: kindOf(d) }) });
       expect(root.querySelectorAll('g.device-smart_button.out-auto')).toHaveLength(1);
       expect(fill(root, 'smart_button')).toBe('#38bdf8');
     }

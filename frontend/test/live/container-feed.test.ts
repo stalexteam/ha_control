@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ContainerFeed, type ContainerState } from '../../src/live/container-feed';
 import type { HassLike } from '../../src/api';
+import { deviceDefaults, type ContainerKind, type Device } from '../../src/model/types';
 
 type Event = { full: boolean; containers: Record<string, ContainerState> };
 
@@ -29,9 +30,12 @@ function fakeConnection(reject?: unknown) {
 
 const flush = () => new Promise<void>(r => setTimeout(r, 0));
 const host = () => ({ requestUpdate: vi.fn() });
-const on: ContainerState = { output: 'on', fault: null };
-const off: ContainerState = { output: 'off', fault: 'not_configured' };
-const err: ContainerState = { output: 'error', fault: 'unavailable', entities: ['sensor.x'] };
+const on: ContainerState = { output: 'on', fault: null, kind: 'smart_button' };
+const off: ContainerState = { output: 'off', fault: 'not_configured', kind: 'wall_switch' };
+const err: ContainerState = { output: 'error', fault: 'unavailable', entities: ['sensor.x'], kind: 'smart_button' };
+/** A device of the given kind (only id and kind matter to the feed). */
+const dev = (id: string, kind: ContainerKind): Device =>
+  ({ id, name: id, invalid: false, placement: { mode: 'free', x: 0, y: 0, rotation: 0 }, props: deviceDefaults(kind, 'free') });
 
 describe('ContainerFeed', () => {
   it('full message replaces the map; partial merges', async () => {
@@ -63,6 +67,20 @@ describe('ContainerFeed', () => {
     expect(feed.get('b')).toBeUndefined();
     expect(feed.get('c')).toEqual(on);
     expect(feed.ready).toBe(true);
+  });
+
+  it('stateOf gives the state of a device only when the saved container is of the same kind', async () => {
+    const c = fakeConnection();
+    const feed = new ContainerFeed(host(), () => c.connection);
+    feed.watch('P1');
+    await c.settle();
+    c.subs[0].push({ full: true, containers: { a: on, b: off } });
+    expect(feed.stateOf(dev('a', 'smart_button'))).toEqual(on);
+    expect(feed.stateOf(dev('b', 'wall_switch'))).toEqual(off);
+    // An unsaved Type change: the saved container is of the other kind.
+    expect(feed.stateOf(dev('a', 'wall_switch'))).toBeUndefined();
+    expect(feed.stateOf(dev('b', 'smart_button'))).toBeUndefined();
+    expect(feed.stateOf(dev('x', 'smart_button'))).toBeUndefined();
   });
 
   it('a partial message before the first full one does not make the feed ready', async () => {

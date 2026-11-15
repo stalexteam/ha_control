@@ -1,4 +1,4 @@
-import type { BindingRole, Device, DeviceKind, Id, Level } from './types';
+import type { BindingRole, Device, DeviceKind, Id, Level, Trigger } from './types';
 
 export interface RoleSpec {
   role: BindingRole; domains: string[]; deviceClasses?: string[]; units?: string[]; primary: boolean;
@@ -99,13 +99,19 @@ export function roleCount(d: Device): { filled: number; total: number } {
   return { filled: specs.filter(s => !!d.bindings?.[s.role]).length, total: specs.length };
 }
 
-/** What a binding listens to: the entity id; for a smart button trigger, `${entity}|${slot}|${event}`. Null when unbound. */
+/** The action value a trigger waits for, as the integration compares it: slot 0 -> `event`, slot N -> `N_event`. */
+export const expectedValue = (t: Trigger): string => (t.slot === 0 ? t.event : `${t.slot}_${t.event}`);
+
+/**
+ * What a binding listens to: the entity id; for a smart button trigger, `${entity}|${expected value}` (so slot 0 with
+ * event `1_single` equals slot 1 with `single`). Null when unbound.
+ */
 export function bindingKey(d: Device, role: BindingRole): string | null {
   const eid = d.bindings?.[role];
   if (!eid) return null;
   const p = d.props;
   if (p.kind !== 'smart_button' || !isTriggerRole(role)) return eid;
-  return `${eid}|${p[role].slot}|${p[role].event}`;
+  return `${eid}|${expectedValue(p[role])}`;
 }
 
 /**

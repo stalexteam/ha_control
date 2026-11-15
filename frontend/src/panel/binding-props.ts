@@ -40,7 +40,7 @@ export interface BindingPropsOpts {
   registryLoading: boolean;
   onRetry(): void;
   /** Live container outputs of the open plan, for the output line. */
-  feed: Pick<ContainerFeed, 'ready' | 'error' | 'get'>;
+  feed: Pick<ContainerFeed, 'ready' | 'error' | 'stateOf'>;
 }
 
 /** The role's name; a smart button in toggle mode calls its `on` role "On / Off" (that trigger does both). */
@@ -67,12 +67,13 @@ function outputText(s: ContainerState): string {
 }
 
 /**
- * Output line of an input container: its live output; "Not saved yet" when the saved plan has no such container;
- * the feed error when there are no live outputs. Nothing until the runtime first answers, or for other kinds.
+ * Output line of an input container: its live output; "Not saved yet" when the saved plan has no such container (or
+ * has it as the other kind, after an unsaved Type change); the feed error when there are no live outputs. Nothing
+ * until the runtime first answers, or for other kinds.
  */
 function outputLine(o: BindingPropsOpts, d: Device): TemplateResult | typeof nothing {
   if (!isContainerKind(d.props.kind)) return nothing;
-  const s = o.feed.get(d.id);
+  const s = o.feed.stateOf(d);
   const text = s ? outputText(s) : o.feed.error ?? (o.feed.ready ? t('output.notSaved') : null);
   return text === null ? nothing : html`<p class="note" data-field="output">${text}</p>`;
 }

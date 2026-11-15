@@ -149,9 +149,9 @@ describe('setDeviceProps on a container', () => {
 });
 
 describe('bindingKey', () => {
-  it('a smart button trigger is the entity, slot and event; other roles are the entity', () => {
+  it('a smart button trigger is the entity and the expected action value; other roles are the entity', () => {
     const d = button({ autoEnabled: true, on: { slot: 2, event: 'hold' } }, { on: 'sensor.a', final: 'light.x' });
-    expect(bindingKey(d, 'on')).toBe('sensor.a|2|hold');
+    expect(bindingKey(d, 'on')).toBe('sensor.a|2_hold');
     expect(bindingKey(d, 'final')).toBe('light.x');
     expect(bindingKey(d, 'auto')).toBeNull();
     expect(bindingKey(withDevice('socket').level.devices[0], 'control')).toBeNull();
@@ -180,12 +180,27 @@ describe('alsoBoundTo', () => {
     const same = setDeviceProps(l, bid, { on: { slot: 0, event: 'single' } });
     expect(alsoBoundTo(same, da, 'on').map(d => d.id)).toEqual([bid]);
   });
+  it('compares the expected action value: slot 0 with event 1_single is slot 1 with single', () => {
+    const a = withDevice('smart_button', 'A');
+    const b = addDevice(a.level, deviceDefaults('smart_button', 'wall'), free, 'B');
+    const bid = b.deviceId!;
+    let l = setBinding(setBinding(b.level, a.id, 'on', 'sensor.sw'), bid, 'on', 'sensor.sw');
+    l = setDeviceProps(setDeviceProps(l, a.id, { on: { slot: 0, event: '1_single' } }), bid, { on: { slot: 1, event: 'single' } });
+    const da = l.devices.find(d => d.id === a.id)!;
+    expect(bindingKey(da, 'on')).toBe(bindingKey(l.devices.find(d => d.id === bid)!, 'on'));
+    expect(alsoBoundTo(l, da, 'on').map(d => d.id)).toEqual([bid]);
+  });
 });
 
 describe('duplicateTriggers', () => {
   it('on equal to off with separateOff -> [off]', () => {
     const on = { slot: 0, event: 'single' };
     expect(duplicateTriggers(button({ separateOff: true, off: on }, { on: 'sensor.a', off: 'sensor.a' }))).toEqual(['off']);
+  });
+  it('slot 0 with event 2_hold duplicates slot 2 with hold', () => {
+    const d = button({ separateOff: true, on: { slot: 0, event: '2_hold' }, off: { slot: 2, event: 'hold' } },
+      { on: 'sensor.a', off: 'sensor.a' });
+    expect(duplicateTriggers(d)).toEqual(['off']);
   });
   it('none for distinct triggers, inactive roles or other kinds', () => {
     expect(duplicateTriggers(button({ separateOff: true }, { on: 'sensor.a', off: 'sensor.a' }))).toEqual([]);

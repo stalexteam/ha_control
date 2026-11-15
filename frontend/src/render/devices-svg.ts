@@ -31,6 +31,11 @@ export interface DeviceRenderOpts {
 const NS = 'non-scaling-stroke';
 /** Symbol fill per container output, the same in both themes; `off` keeps the palette's neutral device fill. */
 const OUTPUT_FILL: Partial<Record<ContainerOutput, string>> = { on: '#facc15', auto: '#38bdf8', error: '#f43f5e' };
+/**
+ * Ink of the smart button dot on a live output fill, the same in both themes like the fills: the device colour
+ * would vanish on them (the dark theme's #fbbf24 on the `on` yellow). At least 3:1 against every output fill.
+ */
+const OUTPUT_DOT = '#0f172a';
 /** Fault mark colour: a dot on the container symbol. */
 const FAULT_MARK = '#f43f5e';
 /** MDI `cube-outline` (24x24), the bundled fallback when `ha-icon` is not registered. */
@@ -58,7 +63,8 @@ const BIND_STROKE: Record<Exclude<BindStatus, 'bound'>, string> = {
 const holesCache = new WeakMap<Level, Pt[][]>();
 const holesOf = (level: Level): Pt[][] => cached(holesCache, level, roomHoles);
 
-function iconShape(d: Device, R: number, color: string, fill: string): SVGTemplateResult {
+/** `dot`: the smart button's centre dot (the device colour unless a live output fill needs another ink). */
+function iconShape(d: Device, R: number, color: string, fill: string, dot = color): SVGTemplateResult {
   const pr = d.props;
   const common = { stroke: color, fill };
   switch (pr.kind) {
@@ -94,7 +100,7 @@ function iconShape(d: Device, R: number, color: string, fill: string): SVGTempla
     case 'smart_button':
       return svg`<rect class="icon" x=${-R * 0.6} y=${-R * 0.6} width=${R * 1.2} height=${R * 1.2} rx=${R * 0.35}
         fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></rect>
-        <circle class="dot" r=${R * 0.18} fill=${color}></circle>`;
+        <circle class="dot" r=${R * 0.18} fill=${dot}></circle>`;
     case 'socket':
       return svg`<circle class="icon" r=${R} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
         <circle class="dot" cx=${-R * 0.4} r=${R * 0.15} fill=${color}></circle>
@@ -153,7 +159,8 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
   const deg = (Math.atan2(pose.dir.y, pose.dir.x) * 180) / Math.PI;
   const selected = !preview && o.selection?.kind === 'device' && o.selection.id === d.id;
   const live = !preview && isContainerKind(d.props.kind) ? o.containerState?.(d) : undefined;
-  const fill = (live && OUTPUT_FILL[live.output]) ?? p.deviceFill;
+  const liveFill = live ? OUTPUT_FILL[live.output] : undefined;
+  const fill = liveFill ?? p.deviceFill;
   const cls = `device device-${d.props.kind}${selected ? ' selected' : ''}${d.invalid ? ' invalid' : ''}${preview ? ' device-preview' : ''}`
     + (live ? ` out-${live.output}` : '');
   const opacity = preview ? '0.5' : o.dim ? String(p.dimOpacity) : nothing;
@@ -166,7 +173,7 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
         stroke-width="2" stroke-dasharray="4 3" vector-effect=${NS}></circle>` : nothing}
       ${d.props.kind === 'equipment'
         ? equipmentBlock(d, o, color, deg)
-        : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, fill)}</g>`}
+        : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, fill, liveFill ? OUTPUT_DOT : color)}</g>`}
       ${live?.fault ? faultMark(R, p) : nothing}
       ${o.bindingStatus && !preview ? bindRing(o.bindingStatus(d), o.scale) : nothing}
     </g>`;

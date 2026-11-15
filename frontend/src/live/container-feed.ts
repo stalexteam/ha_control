@@ -1,5 +1,5 @@
 import type { HassLike } from '../api';
-import type { ContainerOutput } from '../model/types';
+import type { ContainerKind, ContainerOutput, Device } from '../model/types';
 import { messageOf } from '../errors';
 import { t } from '../i18n';
 
@@ -10,6 +10,8 @@ export interface ContainerState {
   fault: null | 'not_configured' | 'unavailable';
   /** The unavailable entities (with `unavailable` only). */
   entities?: string[];
+  /** The kind of the saved container; a device of another kind (an unsaved Type change) is not that container. */
+  kind: ContainerKind;
 }
 
 /** One `plan_studio/containers/subscribe` event: `full` replaces the map, otherwise the changed containers merge into it. */
@@ -51,6 +53,12 @@ export class ContainerFeed {
   get error(): string | null { return this.failure; }
 
   get(deviceId: string): ContainerState | undefined { return this.map.get(deviceId); }
+
+  /** The device's live state; undefined when the saved plan has no such container or has it as another kind. */
+  stateOf(d: Device): ContainerState | undefined {
+    const s = this.map.get(d.id);
+    return s?.kind === d.props.kind ? s : undefined;
+  }
 
   watch(planId: string | null): void {
     if (planId === this.planId) return;
