@@ -65,7 +65,7 @@ Binding links every device on the plan to Home Assistant entities, one field per
 Wall switches and smart buttons are input containers: virtual objects that report events. Each event is an intent (`toggle`, `set on`, `set off` or `auto`) plus a status (`ok` or `error`; the reason is "not configured" or "unavailable (ids)"). Nothing acts on intents yet; controllers will come later. No Home Assistant entities or events are created. They run inside Home Assistant for every saved plan, also while the panel is closed, and changes take effect when the plan is saved.
 
 - Smart button, in the Binding step:
-  - On / Off: the action sensor or event entity, Slot (0 to 9) and Event (`single`, `double`, `hold` or any other text). Slot 0 waits for the action value `event`, slot N for `N_event`. In toggle mode a press gives `toggle`.
+  - On / Off: the action sensor or event entity, Button ("— (single button)" or 1 to 9) and Event (`single`, `double`, `hold` or any other text). The single button waits for the action value `event`, button N for `N_event`. In toggle mode a press gives `toggle`.
   - "Separate Off" splits the section into On and Off, each with its own trigger: On gives `set on`, Off gives `set off`. A repeated `set on` is meaningful (for example, to extend a timer).
   - "Auto" adds the Auto section, whose trigger gives `auto`. Both new sections start with the On entity.
   - Identical triggers in one smart button show a warning; the first of On, Off, Auto wins.

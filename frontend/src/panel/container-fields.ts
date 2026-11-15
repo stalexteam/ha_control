@@ -13,8 +13,9 @@ import { numField, row, select } from './fields';
 import type { BindingPropsOpts } from './binding-props';
 import { t } from '../i18n';
 
-/** Trigger slot: 0 = a one-button device, 1..9 = the button of a multi-button one. */
-const SLOT: WholeRule = { min: 0, max: 9 };
+/** Trigger button options: 0 = a one-button device, 1..9 = the button of a multi-button one. */
+const slotOptions = (): { v: string; label: string }[] =>
+  [{ v: '0', label: t('binding.singleButton') }, ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => ({ v: String(n), label: String(n) }))];
 /** Double-toggle window of a wall switch, whole seconds. */
 const WINDOW: WholeRule = { min: 1, max: 10 };
 
@@ -90,8 +91,8 @@ function eventField(o: BindingPropsOpts, d: Device, role: TriggerRole, event: st
 }
 
 /**
- * A smart button trigger under its role's combobox: Slot (0..9) and Event (a select of `single`, `double`, `hold`
- * or "Other…" with a text input for any other non-empty event). A malformed slot or a blank event reverts with a notice.
+ * A smart button trigger under its role's combobox: Button (a select: single button, or 1..9) and Event (a select of `single`, `double`, `hold`
+ * or "Other…" with a text input for any other non-empty event). A blank event reverts with a notice.
  */
 export function triggerFields(o: BindingPropsOpts, d: Device, role: TriggerRole): TemplateResult {
   const p = d.props;
@@ -99,10 +100,8 @@ export function triggerFields(o: BindingPropsOpts, d: Device, role: TriggerRole)
   const cur = p[role];
   const set = (patch: Partial<Trigger>): boolean => setProps(o, d, { [role]: { ...cur, ...patch } } as Partial<DeviceProps>);
   return html`<div class="trigger" data-trigger=${role}>
-    ${row(t('binding.slot'), numField({
-      value: cur.slot, rule: SLOT, bad: 'props.badSlot', field: `${role}-slot`, skipSame: true,
-      setNotice: msg => o.setFieldNotice(msg), apply: v => set({ slot: v }),
-    }))}
+    ${row(t('binding.slot'), select<string>(String(cur.slot), slotOptions(),
+      v => v === String(cur.slot) ? false : set({ slot: Number(v) }), `${role}-slot`))}
     ${row(t('binding.event'), eventField(o, d, role, cur.event, ev => set({ event: ev })))}
   </div>`;
 }

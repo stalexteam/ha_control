@@ -78,6 +78,14 @@ async function type(el: PlanStudioPanel, field: string, v: string): Promise<void
   await el.updateComplete;
 }
 
+/** Picks an option of a role's Button (slot) select. */
+async function chooseSlot(el: PlanStudioPanel, role: string, v: string): Promise<void> {
+  const f = $<HTMLSelectElement>(el, `.props select[data-field="${role}-slot"]`);
+  f.value = v;
+  f.dispatchEvent(new Event('change', { bubbles: true }));
+  await el.updateComplete;
+}
+
 const OTHER = '__other';
 const evSelect = (el: PlanStudioPanel, role: string) => $<HTMLSelectElement>(el, `.props select[data-field="${role}-event"]`);
 /** The option marked selected in the markup (happy-dom reports a wrong `value` for a freshly rendered select). */
@@ -154,18 +162,24 @@ describe('binding step: container sections', () => {
     expect(input(el, 'separateOff').checked).toBe(false);
     expect(input(el, 'autoEnabled').checked).toBe(false);
 
-    const slot = () => input(el, 'on-slot');
+    const slot = () => $<HTMLSelectElement>(el, '.props select[data-field="on-slot"]');
+    expect(q(el, '.props input[data-field="on-slot"]')).toBeNull();
+    expect(slot().closest('label')!.textContent).toContain('Button');
+    expect([...slot().options].map(o => [o.value, o.textContent!.trim()])).toEqual([
+      ['0', '— (single button)'], ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => [String(n), String(n)]),
+    ]);
     expect(slot().value).toBe('0');
-    expect(slot().closest('label')!.textContent).toContain('Slot');
-    await type(el, 'on-slot', '9');
-    expect(props(el, 'b').on).toEqual({ slot: 9, event: 'single' });
-    await type(el, 'on-slot', '10');
-    expect(props(el, 'b').on).toEqual({ slot: 9, event: 'single' });
-    expect(slot().value).toBe('9');
-    expect(el.fieldNotice).toBe('Slot is a whole number from 0 to 9.');
-    await type(el, 'on-slot', '0');
+    await chooseSlot(el, 'on', '2');
+    expect(props(el, 'b').on).toEqual({ slot: 2, event: 'single' });
+    expect(slot().value).toBe('2');
+    await chooseSlot(el, 'on', '0');
     expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single' });
-    expect(el.fieldNotice).toBeNull();
+    expect(slot().value).toBe('0');
+    // One undo step per choice.
+    await chooseSlot(el, 'on', '2');
+    await undo(el);
+    expect(props(el, 'b').on).toEqual({ slot: 0, event: 'single' });
+    expect(slot().value).toBe('0');
 
     expect(evSelect(el, 'on').closest('label')!.textContent).toContain('Event');
     expect(evSelect(el, 'on').value).toBe('single');
@@ -260,14 +274,15 @@ describe('binding step: container sections', () => {
     expect(evSelect(el, 'on').value).toBe('single');
   });
 
-  it('a slot notice disappears when another device is picked; a session error stays', async () => {
+  it('a field notice disappears when another device is picked; a session error stays', async () => {
     const el = await open();
     await pick(el, 'b');
-    await type(el, 'on-slot', '10');
-    const slotMsg = 'Slot is a whole number from 0 to 9.';
-    expect(el.fieldNotice).toBe(slotMsg);
-    expect($(el, '.props [data-notice="field"]').textContent!.trim()).toBe(slotMsg);
-    expect($(el, '.props [role="alert"]').textContent!.trim()).toBe(slotMsg);
+    await chooseEvent(el, 'on', OTHER);
+    await type(el, 'on-event-custom', '   ');
+    const msg = 'Event cannot be empty.';
+    expect(el.fieldNotice).toBe(msg);
+    expect($(el, '.props [data-notice="field"]').textContent!.trim()).toBe(msg);
+    expect($(el, '.props [role="alert"]').textContent!.trim()).toBe(msg);
     // A session error (a failed plan switch) meanwhile.
     await el.session.switchPlan('missing');
     await el.updateComplete;
@@ -302,7 +317,7 @@ describe('binding step: container sections', () => {
     expect(label(el, 'on')).toBe('On');
     expect(label(el, 'off')).toBe('Off');
     expect(combo(el, 'off').value).toBe('sensor.wc_action');
-    expect(input(el, 'off-slot').value).toBe('0');
+    expect($<HTMLSelectElement>(el, '.props select[data-field="off-slot"]').value).toBe('0');
     expect(markedEvent(el, 'off')).toBe('hold');
     // Turning it on is one step.
     await undo(el);
@@ -353,7 +368,7 @@ describe('binding step: container sections', () => {
     expect(props(el, 'b').autoEnabled).toBe(true);
     expect(roles(el)).toEqual(['on', 'auto']);
     expect(['on', 'auto'].map(r => label(el, r))).toEqual(['On / Off', 'Auto']);
-    expect(input(el, 'auto-slot').value).toBe('0');
+    expect($<HTMLSelectElement>(el, '.props select[data-field="auto-slot"]').value).toBe('0');
     expect(markedEvent(el, 'auto')).toBe('double');
     expect(q(el, '.props [data-field="defaultOutput"]')).toBeNull();
 
@@ -418,7 +433,7 @@ describe('binding step: container sections', () => {
     const el = await open();
     await pick(el, 'k2');
     expect(q(el, '.props [data-note="also"]')).toBeNull();
-    await type(el, 'on-slot', '1');
+    await chooseSlot(el, 'on', '1');
     expect($(el, '.props [data-role="on"] [data-note="also"]').textContent!.trim()).toBe('Also bound to: WC light key');
     await chooseEvent(el, 'on', 'double');
     expect(q(el, '.props [data-note="also"]')).toBeNull();
@@ -432,7 +447,7 @@ describe('binding step: container sections', () => {
     await chooseEvent(el, 'off', 'single');
     expect($(el, '.props [data-note="duplicate"]').textContent!.trim())
       .toBe('Two triggers of this device are identical; the first one (On, Off, Auto) wins.');
-    await type(el, 'off-slot', '1');
+    await chooseSlot(el, 'off', '1');
     expect(q(el, '.props [data-note="duplicate"]')).toBeNull();
   });
 
