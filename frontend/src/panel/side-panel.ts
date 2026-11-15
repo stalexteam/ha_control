@@ -28,6 +28,7 @@ function bindingSide(h: PlanStudioPanel, level: Level): TemplateResult {
     notice: h.notice, setNotice: msg => { h.notice = msg; },
     fillNotice: h.fillNotice, setFillNotice: msg => { h.fillNotice = msg; },
     registryError: h.haMeta.error, registryLoading: h.haMeta.loading, onRetry: () => h.haMeta.retry(),
+    feed: h.feed,
   });
 }
 

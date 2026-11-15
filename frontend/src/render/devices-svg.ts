@@ -1,6 +1,7 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
-import type { Device, Level, Pt } from '../model/types';
+import { isContainerKind, type ContainerOutput, type Device, type Level, type Pt } from '../model/types';
 import type { BindStatus } from '../model/bindings';
+import type { ContainerState } from '../live/container-feed';
 import type { Preview, Selection } from '../editor/tools/types';
 import { clippedCone, devicePose, directionHandle, type DevicePose } from '../geometry/devices';
 import { roomHoles } from '../geometry/rooms';
@@ -23,9 +24,15 @@ export interface DeviceRenderOpts {
    * handle is not drawn (devices are not edited in that step).
    */
   bindingStatus?: (d: Device) => BindStatus;
+  /** Live output of an input container, or undefined (no data: neutral). It colours the symbol; a fault adds a mark. */
+  containerState?: (d: Device) => ContainerState | undefined;
 }
 
 const NS = 'non-scaling-stroke';
+/** Symbol fill per container output, the same in both themes; `off` keeps the palette's neutral device fill. */
+const OUTPUT_FILL: Partial<Record<ContainerOutput, string>> = { on: '#facc15', auto: '#38bdf8', error: '#f43f5e' };
+/** Fault mark colour: a dot on the container symbol. */
+const FAULT_MARK = '#f43f5e';
 /** MDI `cube-outline` (24x24), the bundled fallback when `ha-icon` is not registered. */
 const CUBE_OUTLINE = 'M21,16.5C21,16.88 20.79,17.21 20.47,17.38L12.57,21.82C12.41,21.94 12.21,22 12,22C11.79,22 11.59,21.94 11.43,21.82L3.53,17.38C3.21,17.21 3,16.88 3,16.5V7.5C3,7.12 3.21,6.79 3.53,6.62L11.43,2.18C11.59,2.06 11.79,2 12,2C12.21,2 12.41,2.06 12.57,2.18L20.47,6.62C20.79,6.79 21,7.12 21,7.5V16.5M12,4.15L6.04,7.5L12,10.85L17.96,7.5L12,4.15M5,15.91L11,19.29V12.58L5,9.21V15.91M19,15.91V9.21L13,12.58V19.29L19,15.91Z';
 /** Equipment icon size in screen pixels. */
@@ -133,13 +140,22 @@ function bindRing(st: BindStatus, scale: number): SVGTemplateResult | typeof not
     stroke-width="2" stroke-dasharray=${st === 'unbound' ? '4 3' : nothing} vector-effect=${NS}></circle>`;
 }
 
+/** A container in fault: a red dot on the top-right corner of its symbol (unrotated), haloed in the background colour. */
+function faultMark(R: number, p: PlanPalette): SVGTemplateResult {
+  return svg`<circle class="fault-mark" cx=${R * 0.6} cy=${-R * 0.6} r=${R * 0.3} fill=${FAULT_MARK} stroke=${p.background}
+    stroke-width="1.5" vector-effect=${NS}></circle>`;
+}
+
 function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview: boolean): SVGTemplateResult {
   const p = o.palette;
   const color = d.invalid ? p.invalid : p.device;
   const R = ICON_PX / o.scale;
   const deg = (Math.atan2(pose.dir.y, pose.dir.x) * 180) / Math.PI;
   const selected = !preview && o.selection?.kind === 'device' && o.selection.id === d.id;
-  const cls = `device device-${d.props.kind}${selected ? ' selected' : ''}${d.invalid ? ' invalid' : ''}${preview ? ' device-preview' : ''}`;
+  const live = !preview && isContainerKind(d.props.kind) ? o.containerState?.(d) : undefined;
+  const fill = (live && OUTPUT_FILL[live.output]) ?? p.deviceFill;
+  const cls = `device device-${d.props.kind}${selected ? ' selected' : ''}${d.invalid ? ' invalid' : ''}${preview ? ' device-preview' : ''}`
+    + (live ? ` out-${live.output}` : '');
   const opacity = preview ? '0.5' : o.dim ? String(p.dimOpacity) : nothing;
   const reach = d.props.kind === 'equipment'
     ? (d.props.shape === 'circle' ? d.props.diameter / 2 : Math.hypot(d.props.width, d.props.depth) / 2)
@@ -150,7 +166,8 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
         stroke-width="2" stroke-dasharray="4 3" vector-effect=${NS}></circle>` : nothing}
       ${d.props.kind === 'equipment'
         ? equipmentBlock(d, o, color, deg)
-        : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, p.deviceFill)}</g>`}
+        : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, fill)}</g>`}
+      ${live?.fault ? faultMark(R, p) : nothing}
       ${o.bindingStatus && !preview ? bindRing(o.bindingStatus(d), o.scale) : nothing}
     </g>`;
 }

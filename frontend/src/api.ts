@@ -1,7 +1,11 @@
 import type { Id, Plan } from './model/types';
 
 export interface HassLike {
-  connection: { sendMessagePromise<T>(msg: Record<string, unknown>): Promise<T> };
+  connection: {
+    sendMessagePromise<T>(msg: Record<string, unknown>): Promise<T>;
+    /** HA's subscription call: resolves to the unsubscribe function (it sends `unsubscribe_events`). */
+    subscribeMessage?<T>(callback: (msg: T) => void, msg: Record<string, unknown>): Promise<() => Promise<void>>;
+  };
   themes?: { darkMode?: boolean };
   states?: Record<string, unknown>;
 }

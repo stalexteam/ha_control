@@ -1,6 +1,7 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
 import type { Device, Id, Level, Opening, Pt, Wall, Zone } from '../model/types';
 import type { BindStatus } from '../model/bindings';
+import type { ContainerState } from '../live/container-feed';
 import type { WallProps } from '../model/ops';
 import type { Preview, Selection } from '../editor/tools/types';
 import { segmentFrame, wallFrame, wallOutlines, wallPieces, wallsUnion, type WallFrame } from '../geometry/walls';
@@ -21,6 +22,8 @@ export interface RenderOpts {
   mode?: 'plan' | 'equipment' | 'binding';
   /** Binding status per device; drawn as rings in the binding mode only. */
   bindingStatus?: (d: Device) => BindStatus;
+  /** Live output of an input container; drawn in every mode. */
+  containerState?: (d: Device) => ContainerState | undefined;
   /** Default true. */
   showCones?: boolean;
 }
@@ -335,7 +338,7 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
     <g class="wall-breaks" opacity=${dimOp}>${renderWallBreaks(lv, o)}</g>
     <g class="devices-layer">${renderDevices(lv, {
       palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: plan, preview: o.preview.device,
-      bindingStatus: o.mode === 'binding' ? o.bindingStatus : undefined,
+      bindingStatus: o.mode === 'binding' ? o.bindingStatus : undefined, containerState: o.containerState,
     })}</g>
     <g class="selection">${renderSelection(lv, o)}</g>
     <g class="preview">${renderPreview(lv, o)}</g>`;

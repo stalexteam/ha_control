@@ -1,5 +1,5 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import type { BindingRole, Device, Level } from '../model/types';
+import { isContainerKind, type BindingRole, type Device, type Level } from '../model/types';
 import {
   activeRoleSpecs, alsoBoundTo, countNotBound, isTriggerRole, setBinding, type BindStatus, type RoleSpec,
 } from '../model/bindings';
@@ -10,6 +10,7 @@ import '../binding/device-combo';
 import { setDeviceProps } from '../model/devices';
 import { deviceNameRow } from './device-props';
 import { containerFields, containerFlags, triggerFields } from './container-fields';
+import type { ContainerFeed, ContainerState } from '../live/container-feed';
 import { t } from '../i18n';
 
 export interface BindingPropsOpts {
@@ -38,6 +39,8 @@ export interface BindingPropsOpts {
   /** A registry load is running: Retry shows "Loading…" and is disabled. */
   registryLoading: boolean;
   onRetry(): void;
+  /** Live container outputs of the open plan, for the output line. */
+  feed: Pick<ContainerFeed, 'ready' | 'error' | 'get'>;
 }
 
 /** The role's name; a smart button in toggle mode calls its `on` role "On / Off" (that trigger does both). */
@@ -53,6 +56,25 @@ function fillReport(d: Device, filled: BindingRole[], several: { role: BindingRo
     : t('binding.nothingFilled');
   if (several.length === 0) return head;
   return `${head}; ${t('binding.several').replace('{roles}', several.map(s => `${roleLabel(d, s.role)} (${s.n})`).join(', '))}`;
+}
+
+/** "Output: On", and in fault why the output is the default: "— default: not configured" or "— default: unavailable (ids)". */
+function outputText(s: ContainerState): string {
+  const head = t('output.line').replace('{output}', t(`output.${s.output}`));
+  if (s.fault === 'not_configured') return `${head} — ${t('output.defaultNotConfigured')}`;
+  if (s.fault === 'unavailable') return `${head} — ${t('output.defaultUnavailable').replace('{entities}', (s.entities ?? []).join(', '))}`;
+  return head;
+}
+
+/**
+ * Output line of an input container: its live output; "Not saved yet" when the saved plan has no such container;
+ * the feed error when there are no live outputs. Nothing until the runtime first answers, or for other kinds.
+ */
+function outputLine(o: BindingPropsOpts, d: Device): TemplateResult | typeof nothing {
+  if (!isContainerKind(d.props.kind)) return nothing;
+  const s = o.feed.get(d.id);
+  const text = s ? outputText(s) : o.feed.error ?? (o.feed.ready ? t('output.notSaved') : null);
+  return text === null ? nothing : html`<p class="note" data-field="output">${text}</p>`;
 }
 
 /** Placeholder key of the HA device picker: devices to choose, registries loading, load failed, or none match. */
@@ -127,10 +149,10 @@ function roleField(o: BindingPropsOpts, d: Device, spec: RoleSpec): TemplateResu
 }
 
 /**
- * Binding step properties: the selected device's name and kind, the HA device picker, one field per active role
- * and, for an input container, its checkboxes after the sections above them and its settings after the roles;
- * with nothing selected, an invitation to pick a device. The footer counts the devices not bound and offers Next
- * unbound device.
+ * Binding step properties: the selected device's name and kind, an input container's output line, the HA device
+ * picker, one field per active role and, for an input container, its checkboxes after the sections above them and
+ * its settings after the roles; with nothing selected, an invitation to pick a device. The footer counts the devices
+ * not bound and offers Next unbound device.
  */
 export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
   const d = o.device;
@@ -143,6 +165,7 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
     ${d ? html`
       <h4>${t(`device.${d.props.kind}`)}</h4>
       ${deviceNameRow(d, name => o.commit(setDeviceProps(o.level, d.id, {}, name)))}
+      ${outputLine(o, d)}
       ${haDevicePicker(o, d)}
       ${o.fillNotice ? html`<p class="note" data-notice="fill">${o.fillNotice}</p>` : nothing}
       ${activeRoleSpecs(d).map(spec => html`${roleField(o, d, spec)}${containerFlags(o, d, spec.role)}`)}

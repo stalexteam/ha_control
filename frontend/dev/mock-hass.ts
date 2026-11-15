@@ -1,4 +1,5 @@
 import type { HassLike } from '../src/api';
+import type { ContainerState } from '../src/live/container-feed';
 import type { Plan } from '../src/model/types';
 import { DEMO_REGISTRY, DEMO_STATES } from './demo-ha';
 
@@ -23,11 +24,23 @@ function write(storage: Storage, data: Stored): void {
 
 const fail = (code: string, message: string) => Promise.reject({ code, message });
 
+/** Every input container of a stored plan at its default output, not configured (the mock has no runtime). */
+function defaultOutputs(plan: Plan | undefined): Record<string, ContainerState> {
+  const out: Record<string, ContainerState> = {};
+  for (const d of plan?.levels.flatMap(l => l.devices ?? []) ?? []) { // stage-1 plans have no devices
+    const p = d.props;
+    if (p.kind === 'wall_switch' || p.kind === 'smart_button') out[d.id] = { output: p.defaultOutput ?? 'off', fault: 'not_configured' };
+  }
+  return out;
+}
+
 /**
  * HassLike backed by localStorage. Implements plan_studio/plans/{list,get,save,delete} with the
  * revision rules of the Python PlanRepo: a new plan needs expected_revision null and gets revision 1;
  * an existing plan needs expected_revision == current unless force; a missing plan with a non-null
  * expected_revision is a conflict even with force.
+ * `plan_studio/containers/subscribe` answers once with a full snapshot: every container of the stored plan at its
+ * default output, not configured. Other subscriptions are unknown.
  * With `demo` it also has live states and answers the entity, device and area registry commands with a small
  * sample (dev harness); without it those commands are unknown, so tests bring their own HA data.
  */
@@ -80,6 +93,15 @@ export function createMockHass(opts: { darkMode?: boolean; storage?: Storage; de
           default:
             return fail('unknown_command', `Unknown command ${String(msg.type)}`);
         }
+      },
+      subscribeMessage<T>(callback: (msg: T) => void, msg: Record<string, unknown>): Promise<() => Promise<void>> {
+        if (msg.type !== 'plan_studio/containers/subscribe') return fail('unknown_command', `Unknown command ${String(msg.type)}`);
+        const containers = defaultOutputs(read(storage).plans[msg.plan_id as string]);
+        let open = true;
+        const subscribed = Promise.resolve(() => { open = false; return Promise.resolve(); });
+        // Like HA: the result first, then the first event.
+        void subscribed.then(() => { if (open) callback({ full: true, containers } as T); });
+        return subscribed;
       },
     },
   };

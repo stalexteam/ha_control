@@ -34,6 +34,7 @@ import { fitView, renderGrid, revealPt, screenToMm, type View } from './viewport
 import { EditorInput } from './input';
 import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
+import { ContainerFeed } from '../live/container-feed';
 
 export class PlanStudioPanel extends LitElement {
   static styles = panelStyles;
@@ -93,6 +94,8 @@ export class PlanStudioPanel extends LitElement {
   readonly session = new PlanSession(this);
   /** HA states merged with the registries (loaded on the first entry to the Binding step). */
   readonly haMeta = new MetaSource(this);
+  /** Live outputs of the open plan's input containers (subscribed while the panel is attached). */
+  readonly feed = new ContainerFeed(this, () => this.hass?.connection);
 
   /** Binding status of a device, from live states. Until the registries are loaded no entity is Missing (its presence is unknown). */
   readonly bindStatus = (d: Device): BindStatus => bindingStatus(d, eid => presence(this.haMeta.get(), eid, this.hass?.states));
@@ -134,6 +137,7 @@ export class PlanStudioPanel extends LitElement {
     this.addEventListener('blur', this.input.blur);
     window.addEventListener('beforeunload', this.onBeforeUnload);
     window.addEventListener('pagehide', this.onPageHide);
+    this.feed.watch(this.plan?.id ?? null); // re-attached: subscribe again (no-op before the first load)
   }
 
   disconnectedCallback(): void {
@@ -148,11 +152,14 @@ export class PlanStudioPanel extends LitElement {
     this.drafts.cancel();
     this.resizeObs?.disconnect();
     this.resizeObs = null;
+    this.feed.stop();
   }
 
   protected willUpdate(changed: PropertyValues): void {
     if (changed.has('hass') && this.hass && !this.plan && !this.loading && !this.loadError) void this.session.load();
     if (this.needFit && this.size.w > 0 && this.size.h > 0) { this.needFit = false; this.fit(); }
+    // A detached panel still updates when handed a new hass: it keeps no subscription until it is attached again.
+    this.feed.watch(this.isConnected ? this.plan?.id ?? null : null);
   }
 
   protected updated(): void {
@@ -322,7 +329,7 @@ export class PlanStudioPanel extends LitElement {
             ${this.grid ? renderGrid(this.view, w, h, pal) : nothing}
             ${renderLevel(level, {
               palette: pal, selection: this.selection, preview, scale, mode: this.mode, showCones: this.cones,
-              bindingStatus: this.bindStatus,
+              bindingStatus: this.bindStatus, containerState: d => this.feed.get(d.id),
             })}
             ${preview.tracker ? renderTracker(preview.tracker, {
               palette: pal, scale, mode: this.toolId === 'box' ? 'box' : 'wall',

@@ -5,6 +5,7 @@ import { renderLevel } from '../../src/render/plan-svg';
 import { paletteFor } from '../../src/render/theme';
 import { renderDevices, ICON_PX } from '../../src/render/devices-svg';
 import { deviceDefaults, type Device, type DeviceKind, type Level } from '../../src/model/types';
+import type { ContainerState } from '../../src/live/container-feed';
 import { rectRoomLevel } from '../fixtures';
 
 const free = (id: string, kind: DeviceKind, x: number, y: number, over: Partial<Device['props']> = {}, invalid = false): Device =>
@@ -187,5 +188,85 @@ describe('input container symbols', () => {
     const sb = root.querySelector('g.device-smart_button rect.icon')!;
     expect(Number(sb.getAttribute('rx'))).toBeCloseTo(ICON_PX * 0.35);
     expect(Number(root.querySelector('g.device-smart_button circle.dot')!.getAttribute('r'))).toBeCloseTo(ICON_PX * 0.18);
+  });
+});
+
+describe('container outputs on the plan', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+  const pal = paletteFor(true);
+  const containers = (): Level => ({
+    ...rectRoomLevel(6000, 5000, 200),
+    devices: [
+      { id: 'ws', name: 'ws', invalid: false, props: deviceDefaults('wall_switch', 'wall'),
+        placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 1000 } },
+      free('sb', 'smart_button', 2000, 2000),
+      free('ms', 'motion_sensor', 3000, 2500),
+    ],
+  });
+  const fill = (root: SVGSVGElement, kind: string) => root.querySelector(`g.device-${kind} rect.icon`)!.getAttribute('fill');
+  const outClasses = (root: SVGSVGElement) =>
+    [...root.querySelectorAll('g.device')].flatMap(g => [...g.classList].filter(c => c.startsWith('out-')));
+
+  it('a smart button with state on is filled yellow', () => {
+    const st: Record<string, ContainerState> = { sb: { output: 'on', fault: null } };
+    const root = drawDevs(containers(), { containerState: (d: Device) => st[d.id] });
+    expect(root.querySelectorAll('g.device-smart_button.out-on')).toHaveLength(1);
+    expect(fill(root, 'smart_button')).toBe('#facc15');
+    expect(root.querySelector('.fault-mark')).toBeNull();
+    // The wall switch has no state here: neutral.
+    expect(fill(root, 'wall_switch')).toBe(pal.deviceFill);
+    expect(outClasses(root)).toEqual(['out-on']);
+  });
+
+  it('each output has its colour; off is the neutral fill', () => {
+    const colour = (output: ContainerState['output']) => {
+      const root = drawDevs(containers(), { containerState: () => ({ output, fault: null }) });
+      expect(root.querySelectorAll(`g.device-wall_switch.out-${output}`)).toHaveLength(1);
+      expect(fill(root, 'smart_button')).toBe(fill(root, 'wall_switch'));
+      return fill(root, 'wall_switch');
+    };
+    expect(colour('on')).toBe('#facc15');
+    expect(colour('auto')).toBe('#38bdf8');
+    expect(colour('error')).toBe('#f43f5e');
+    expect(colour('off')).toBe(pal.deviceFill);
+  });
+
+  it('a fault adds a red mark', () => {
+    const st: Record<string, ContainerState> = {
+      sb: { output: 'off', fault: 'not_configured' },
+      ws: { output: 'error', fault: 'unavailable', entities: ['switch.x'] },
+    };
+    const root = drawDevs(containers(), { containerState: (d: Device) => st[d.id] });
+    for (const kind of ['smart_button', 'wall_switch']) {
+      const marks = root.querySelectorAll(`g.device-${kind} circle.fault-mark`);
+      expect(marks).toHaveLength(1);
+      expect(marks[0].getAttribute('fill')).toBe('#f43f5e');
+    }
+    expect(fill(root, 'smart_button')).toBe(pal.deviceFill);
+  });
+
+  it('no state: neutral fill, no out-* class, no mark; other kinds are never coloured', () => {
+    const plain = drawDevs(containers());
+    expect(fill(plain, 'smart_button')).toBe(pal.deviceFill);
+    expect(fill(plain, 'wall_switch')).toBe(pal.deviceFill);
+    expect(outClasses(plain)).toEqual([]);
+    expect(plain.querySelector('.fault-mark')).toBeNull();
+
+    const none = drawDevs(containers(), { containerState: () => undefined });
+    expect(fill(none, 'smart_button')).toBe(pal.deviceFill);
+    expect(outClasses(none)).toEqual([]);
+
+    const all = drawDevs(containers(), { containerState: () => ({ output: 'on', fault: 'not_configured' }) });
+    expect(outClasses(all)).toEqual(['out-on', 'out-on']); // the wall switch and the smart button only
+    expect(all.querySelectorAll('.fault-mark')).toHaveLength(2);
+    expect(all.querySelector('g.device-motion_sensor .fault-mark')).toBeNull();
+  });
+
+  it('renderLevel passes the state through in every mode', () => {
+    for (const mode of ['plan', 'equipment', 'binding'] as const) {
+      const root = drawLevel(containers(), { mode, containerState: () => ({ output: 'auto', fault: null }) });
+      expect(root.querySelectorAll('g.device-smart_button.out-auto')).toHaveLength(1);
+      expect(fill(root, 'smart_button')).toBe('#38bdf8');
+    }
   });
 });
