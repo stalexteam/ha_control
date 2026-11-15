@@ -192,6 +192,45 @@ describe('ps-entity-combo', () => {
     expect(input.getAttribute('aria-activedescendant')).toBe(rows(el)[0].id);
   });
 
+  it('Enter picks the highlighted row when the items shrink under the active index', async () => {
+    const el = await mount(null);
+    let got: unknown = 'none';
+    el.addEventListener('value-changed', e => { got = (e as CustomEvent).detail; });
+    await open(el);
+    const input = q<HTMLInputElement>(el, '.srch input');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    await el.updateComplete;
+    expect(rows(el)[2].classList.contains('on')).toBe(true);
+    el.items = [entities[1]];
+    await el.updateComplete;
+    expect(rows(el)[0].classList.contains('on')).toBe(true);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await el.updateComplete;
+    expect(got).toEqual({ value: 'sensor.t_kit' });
+  });
+
+  it('the listbox holds only options: the hint and the empty text sit outside it', async () => {
+    const many = Array.from({ length: 150 }, (_, i) => ent(`sensor.s${i}`, { name: `Sensor ${i}` }));
+    const el = await mount(null, many, makeMeta(many));
+    await open(el);
+    const lb = () => q(el, '[role=listbox]');
+    expect(el.shadowRoot!.querySelector('.hint')).not.toBeNull();
+    expect(lb().querySelector('.hint')).toBeNull();
+    expect([...lb().children].every(c => c.getAttribute('role') === 'option')).toBe(true);
+    await type(el, 'zzzz');
+    expect(el.shadowRoot!.querySelector('.empty')).not.toBeNull();
+    expect(lb().querySelector('.empty')).toBeNull();
+    expect(lb().children).toHaveLength(0);
+  });
+
+  it('the listbox label falls back to the search label when label is empty', async () => {
+    const el = await mount(null);
+    el.label = '';
+    await open(el);
+    expect(q(el, '[role=listbox]').getAttribute('aria-label')).toBe('Search entities');
+  });
+
   it('shows a hint only when more than 100 rows match; no aria-label when label is empty', async () => {
     const many = Array.from({ length: 150 }, (_, i) => ent(`sensor.s${i}`, { name: `Sensor ${i}` }));
     const el = await mount(null, many, makeMeta(many));

@@ -140,11 +140,14 @@ ${context}`.toLowerCase().includes(key[2])) continue;
 
   private optId(i: number): string { return `${this.uid}-opt-${i}`; }
 
+  /** The active row index kept inside the rows (the items can shrink while the list is open). */
+  private clamped(rows: readonly Row[]): number { return Math.min(this.active, Math.max(rows.length - 1, 0)); }
+
   private onSearchKey(e: KeyboardEvent): void {
     const { rows } = this.filtered();
     if (e.key === 'ArrowDown') { e.preventDefault(); this.active = Math.max(0, Math.min(this.active + 1, rows.length - 1)); this.scrollActive(); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); this.active = Math.max(this.active - 1, 0); this.scrollActive(); }
-    else if (e.key === 'Enter') { e.preventDefault(); const r = rows[this.active]; if (r) this.pick(r.e.entityId); }
+    else if (e.key === 'Enter') { e.preventDefault(); const r = rows[this.clamped(rows)]; if (r) this.pick(r.e.entityId); }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); this.close(); this.focusBox(); }
   }
 
@@ -180,22 +183,23 @@ ${context}`.toLowerCase().includes(key[2])) continue;
 
   private renderDrop(): TemplateResult {
     const { rows, more } = this.filtered();
-    const active = Math.min(this.active, Math.max(rows.length - 1, 0));
+    const active = this.clamped(rows);
     return html`<div class="drop" @pointerdown=${(e: Event) => { if ((e.target as HTMLElement).tagName !== 'INPUT') e.preventDefault(); }}>
       <div class="srch"><input type="text" role="searchbox" placeholder=${t('combo.search')} aria-label=${t('combo.search')}
         aria-controls=${`${this.uid}-lb`} aria-activedescendant=${ifDefined(rows.length ? this.optId(active) : undefined)}
         .value=${this.query} @input=${(e: Event) => { this.query = (e.target as HTMLInputElement).value; this.active = 0; }}
         @keydown=${this.onSearchKey}></div>
-      <div class="opts" id=${`${this.uid}-lb`} role="listbox" aria-label=${ifDefined(this.label || undefined)}>
-        ${rows.length === 0 ? html`<div class="empty">${t('combo.empty')}</div>` : rows.map(({ e, name, context }, i) =>
+      <div class="opts" id=${`${this.uid}-lb`} role="listbox" aria-label=${this.label || t('combo.search')}>
+        ${rows.map(({ e, name, context }, i) =>
           html`<div class="opt ${i === active ? 'on' : ''}" id=${this.optId(i)} role="option" aria-selected=${e.entityId === this.value ? 'true' : 'false'}
               data-id=${e.entityId} @click=${() => this.pick(e.entityId)} @pointerenter=${() => { this.active = i; }}>
             ${icon(iconFor(e, e.entityId))}
             <span><b>${name}</b><small>${context}</small></span>
             <span class="side">${domainLabel(e.domain)}<br>${e.state}${e.unit ? ` ${e.unit}` : ''}</span>
           </div>`)}
-        ${more ? html`<div class="hint">${t('combo.more')}</div>` : nothing}
       </div>
+      ${rows.length === 0 ? html`<div class="empty">${t('combo.empty')}</div>` : nothing}
+      ${more ? html`<div class="hint">${t('combo.more')}</div>` : nothing}
     </div>`;
   }
 
