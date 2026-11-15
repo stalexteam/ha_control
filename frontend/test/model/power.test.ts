@@ -268,6 +268,85 @@ describe('normalizePower', () => {
     expect(n.wires[0].to).toEqual({ bus: 'bus', at: 1 });
     expect(n.wires[1].from).toEqual({ bus: 'bus', at: 0 });
   });
+
+  it('keeps a valid bus, transfer and pins as they are (the same object)', () => {
+    const s: PowerSchema = {
+      blocks: [
+        blk({ id: 'g', kind: 'grid', portPins: { OUT: { side: 'bottom', at: 0.5 } } }),
+        blk({ id: 'bus', kind: 'bus', w: 12, h: 240 }),
+        blk({ id: 'ts', kind: 'transfer', form: '1in2out', portPins: { A: { side: 'left', at: 0 }, B: { side: 'right', at: 1 } } }),
+      ],
+      wires: [{ id: 'w', from: { block: 'g', port: 'OUT' }, to: { bus: 'bus', at: 0.5 } }],
+    };
+    expect(normalizePower(s)).toBe(s);
+  });
+
+  it('repairs a bus without a finite size of at least 1 to 240 x 12; its wires stay', () => {
+    const raw = {
+      blocks: [
+        { id: 'g', kind: 'grid', x: 0, y: 0 },
+        { id: 'b1', kind: 'bus', x: 5, y: 6, w: null, h: 12, name: 'Main' },
+        { id: 'b2', kind: 'bus', x: 0, y: 0, w: 100 },
+        { id: 'b3', kind: 'bus', x: 0, y: 0, w: 100, h: 0 },
+        { id: 'b4', kind: 'bus', x: 0, y: 0, w: Infinity, h: 12 },
+        { id: 'b5', kind: 'bus', x: 0, y: 0, w: '240', h: 12 },
+        { id: 'ok', kind: 'bus', x: 0, y: 0, w: 12, h: 300 },
+      ],
+      wires: [{ id: 'w', from: { block: 'g', port: 'OUT' }, to: { bus: 'b1', at: 0.5 } }],
+    };
+    const n = normalizePower(raw)!;
+    expect(n.blocks[1]).toEqual({ id: 'b1', kind: 'bus', x: 5, y: 6, w: 240, h: 12, name: 'Main' });
+    expect(n.blocks.slice(2).map((b) => (b.kind === 'bus' ? [b.w, b.h] : null)))
+      .toEqual([[240, 12], [240, 12], [240, 12], [240, 12], [12, 300]]);
+    expect(n.blocks[6]).toBe(raw.blocks[6]);
+    expect(n.wires).toEqual(raw.wires);
+  });
+
+  it('resets a transfer with an unknown form to 2in1out and drops its wires', () => {
+    const raw = {
+      blocks: [
+        { id: 'g', kind: 'grid', x: 0, y: 0 },
+        { id: 'ts', kind: 'transfer', x: 0, y: 0, form: '3in1out', name: 'TS' },
+        { id: 'nf', kind: 'transfer', x: 0, y: 0 },
+        { id: 'ok', kind: 'transfer', x: 0, y: 0, form: '1in2out' },
+        { id: 'd', kind: 'device', x: 0, y: 0, deviceId: 'x' },
+      ],
+      wires: [
+        { id: 'w1', from: { block: 'g', port: 'OUT' }, to: { block: 'ts', port: 'A' } },
+        { id: 'w2', from: { block: 'nf', port: 'OUT' }, to: { block: 'd', port: 'IN' } },
+        { id: 'w3', from: { block: 'ok', port: 'A' }, to: { block: 'd', port: 'IN' } },
+      ],
+    };
+    const n = normalizePower(raw)!;
+    expect(n.blocks[1]).toEqual({ id: 'ts', kind: 'transfer', x: 0, y: 0, form: '2in1out', name: 'TS' });
+    expect(n.blocks[2]).toEqual({ id: 'nf', kind: 'transfer', x: 0, y: 0, form: '2in1out' });
+    expect(n.blocks[3]).toBe(raw.blocks[3]);
+    expect(n.wires.map((w) => w.id)).toEqual(['w3']);
+  });
+
+  it('drops pins with an unknown side, a bad place or a port the block lacks; clamps a pin to 0..1', () => {
+    const raw = {
+      blocks: [
+        { id: 'g', kind: 'grid', x: 0, y: 0, portPins: { OUT: { side: 'up', at: 0.5 } } },
+        { id: 'm', kind: 'meter', x: 0, y: 0, portPins: {
+          IN: { side: 'left', at: 1.4 }, OUT: { side: 'right', at: 0.3 }, PV: { side: 'top', at: 0.5 }, BAT: 5,
+        } },
+        { id: 'd', kind: 'device', x: 0, y: 0, deviceId: 'x', portPins: { IN: { side: 'top', at: 'mid' } } },
+        { id: 'p', kind: 'pv', x: 0, y: 0, portPins: 'none' },
+        { id: 'b', kind: 'bus', x: 0, y: 0, w: 240, h: 12, portPins: { IN: { side: 'top', at: 0.5 } } },
+        { id: 'ts', kind: 'transfer', x: 0, y: 0, form: '2in1out', portPins: { A: { side: 'left', at: -1 } } },
+      ],
+      wires: [],
+    };
+    const n = normalizePower(raw)!;
+    expect('portPins' in n.blocks[0]).toBe(false);
+    expect(n.blocks[1].portPins).toEqual({ IN: { side: 'left', at: 1 }, OUT: { side: 'right', at: 0.3 } });
+    expect('portPins' in n.blocks[2]).toBe(false);
+    expect('portPins' in n.blocks[3]).toBe(false);
+    expect('portPins' in n.blocks[4]).toBe(false);
+    expect(n.blocks[5].portPins).toEqual({ A: { side: 'left', at: 0 } });
+    expect(n.blocks.map((b) => b.id)).toEqual(['g', 'm', 'd', 'p', 'b', 'ts']);
+  });
 });
 
 function owner0(): PowerSchema {

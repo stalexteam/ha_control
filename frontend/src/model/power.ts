@@ -255,8 +255,38 @@ export function connect(
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const fin = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const SIDES: PortSide[] = ['top', 'right', 'bottom', 'left'];
+const FORMS: string[] = ['2in1out', '1in2out'];
 
-/** Drops malformed blocks and wires; the same object comes back when nothing changed. */
+/**
+ * A block's kind-specific fields repaired: a bus without a finite size of at least 1 becomes 240 x 12, a transfer
+ * with an unknown form becomes 2in1out, and pins with an unknown side, a non-finite place or a port the block lacks
+ * are dropped (the others clamped to 0..1). The same object comes back when nothing changed.
+ */
+function fixBlock(b: PowerBlock): PowerBlock {
+  let out = b;
+  if (out.kind === 'bus' && !(fin(out.w) && fin(out.h) && out.w >= 1 && out.h >= 1)) out = { ...out, w: 240, h: 12 };
+  if (out.kind === 'transfer' && !FORMS.includes(out.form)) out = { ...out, form: '2in1out' };
+  if (!('portPins' in out)) return out;
+  const raw: unknown = out.portPins;
+  const ports = new Set<string>(blockPorts(out).map((p) => p.name));
+  const pins: Partial<Record<PortName, PortPin>> = {};
+  let same = isObj(raw);
+  for (const [port, pin] of isObj(raw) ? Object.entries(raw) : []) {
+    if (!ports.has(port) || !isObj(pin) || !SIDES.includes(pin.side as PortSide) || !fin(pin.at)) { same = false; continue; }
+    const at = Math.min(1, Math.max(0, pin.at));
+    if (at !== pin.at) same = false;
+    pins[port as PortName] = at === pin.at ? (pin as unknown as PortPin) : { side: pin.side as PortSide, at };
+  }
+  if (same) return out;
+  const { portPins: _drop, ...rest } = out;
+  return (Object.keys(pins).length ? { ...rest, portPins: pins } : rest) as PowerBlock;
+}
+
+/**
+ * Drops malformed blocks and wires and repairs block fields (see fixBlock); a transfer whose form was reset loses its
+ * wires. The same object comes back when nothing changed.
+ */
 export function normalizePower(raw: unknown): PowerSchema | undefined {
   if (!isObj(raw)) return undefined;
   const rawBlocks = Array.isArray(raw.blocks) ? raw.blocks : [];
@@ -264,9 +294,14 @@ export function normalizePower(raw: unknown): PowerSchema | undefined {
   let changed = !Array.isArray(raw.blocks) || !Array.isArray(raw.wires);
 
   const blocks: PowerBlock[] = [];
+  /** Transfers whose unknown form was reset: their wires are dropped. */
+  const reset = new Set<Id>();
   for (const b of rawBlocks) {
     if (isObj(b) && typeof b.id === 'string' && b.id && KINDS.includes(b.kind as PowerKind) && fin(b.x) && fin(b.y)) {
-      blocks.push(b as unknown as PowerBlock);
+      const fixed = fixBlock(b as unknown as PowerBlock);
+      if (fixed !== (b as unknown)) changed = true;
+      if (fixed.kind === 'transfer' && fixed.form !== b.form) reset.add(fixed.id);
+      blocks.push(fixed);
     } else changed = true;
   }
   const byId = new Map(blocks.map((b) => [b.id, b]));
@@ -278,7 +313,7 @@ export function normalizePower(raw: unknown): PowerSchema | undefined {
       const at = Math.min(1, Math.max(0, e.at));
       return at === e.at ? (e as unknown as WireEnd) : { bus: e.bus, at };
     }
-    if (typeof e.block === 'string' && PORT_NAMES.includes(e.port as PortName) && byId.has(e.block)) {
+    if (typeof e.block === 'string' && PORT_NAMES.includes(e.port as PortName) && byId.has(e.block) && !reset.has(e.block)) {
       return e as unknown as WireEnd;
     }
     return null;
