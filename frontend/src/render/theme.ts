@@ -16,6 +16,12 @@ export interface PlanPalette {
   invalid: string;
   snap: string;
   dim: string;
+  device: string;
+  deviceFill: string;
+  cone: string;
+  breakLine: string;
+  /** Opacity of the layer that is not being edited (walls in equipment mode, devices in plan mode). */
+  dimOpacity: number;
   // Chrome
   panel: string;
   border: string;
@@ -44,6 +50,11 @@ const DARK: PlanPalette = {
   invalid: '#f43f5e',
   snap: '#facc15',
   dim: '#94a3b8',
+  device: '#fbbf24',
+  deviceFill: '#1e293b',
+  cone: '#fbbf24',
+  breakLine: '#94a3b8',
+  dimOpacity: 0.35,
   panel: '#0f172a',
   border: '#1e293b',
   text: '#e2e8f0',
@@ -71,6 +82,11 @@ const LIGHT: PlanPalette = {
   invalid: '#e5484d',
   snap: '#d97706',
   dim: '#6b6258',
+  device: '#b45309',
+  deviceFill: '#fffbeb',
+  cone: '#d97706',
+  breakLine: '#7c7368',
+  dimOpacity: 0.4,
   panel: '#faf7f2',
   border: '#e0d8cc',
   text: '#2b2622',

@@ -7,6 +7,7 @@ import { roomAreaM2 } from '../geometry/rooms';
 import { add, cross, dist, norm, perpLeft, pointInPolygon, scale as mul, sub } from '../geometry/vec';
 import { t } from '../i18n';
 import type { PlanPalette } from './theme';
+import { renderDevices } from './devices-svg';
 
 export { paletteFor, type PlanPalette } from './theme';
 
@@ -17,6 +18,10 @@ export interface RenderOpts {
   /** Screen pixels per millimetre; used to keep strokes, text and handles a constant on-screen size. */
   scale: number;
   lang: string;
+  /** plan: devices dimmed; equipment: walls, openings and rooms dimmed. Default plan. */
+  mode?: 'plan' | 'equipment';
+  /** Default true. */
+  showCones?: boolean;
 }
 
 /** 3000 -> "3 000" (space as the thousands separator, whole millimetres). */
@@ -77,6 +82,36 @@ function centroid(ring: Pt[], fallback: Pt): Pt {
 }
 
 const NS = 'non-scaling-stroke';
+
+/** Wall end nodes used by exactly one wall and not hosted on another wall: a break symbol marks each. */
+function renderWallBreaks(level: Level, o: RenderOpts): SVGTemplateResult | typeof nothing {
+  const uses = new Map<Id, number>();
+  for (const w of level.walls) {
+    uses.set(w.a, (uses.get(w.a) ?? 0) + 1);
+    uses.set(w.b, (uses.get(w.b) ?? 0) + 1);
+  }
+  const ext = 6 / o.scale, zig = 5 / o.scale, gap = 2 / o.scale;
+  const marks: SVGTemplateResult[] = [];
+  for (const w of level.walls) {
+    const f = frameOf(level, w.id);
+    if (!f) continue;
+    const L = perpLeft(f.dir);
+    for (const [id, p, u] of [[w.a, f.a, f.dir], [w.b, f.b, mul(f.dir, -1)]] as [Id, Pt, Pt][]) {
+      const node = level.nodes.find(n => n.id === id);
+      if (!node || node.host || uses.get(id) !== 1) continue;
+      const s = add(p, mul(L, f.leftOff + ext));
+      const e = sub(p, mul(L, f.rightOff + ext));
+      const c = mul(L, 1);
+      const m = mul(add(s, e), 0.5);
+      const p1 = add(sub(m, mul(c, -gap)), mul(u, zig / 2));
+      const p2 = sub(sub(m, mul(c, gap)), mul(u, zig / 2));
+      const pts = [s, p1, p2, e];
+      marks.push(svg`<path class="wall-break" d=${`M${pts.map(q => `${q.x} ${q.y}`).join('L')}`} fill="none"
+        stroke=${o.palette.breakLine} stroke-width="1.5" stroke-linejoin="round" vector-effect=${NS}></path>`);
+    }
+  }
+  return marks.length ? svg`${marks}` : nothing;
+}
 
 function renderZone(z: Zone, o: RenderOpts, selected: boolean): SVGTemplateResult {
   const p = o.palette;
@@ -293,6 +328,8 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
   const pieces = lightWalls.length ? cached(piecesCache, lv, wallPieces) : null;
   const hs = 8 / o.scale;
   const sel = o.selection;
+  const equip = o.mode === 'equipment';
+  const dimOp = equip ? String(p.dimOpacity) : nothing;
   return svg`
     <defs>
       <pattern id="hatch" patternUnits="userSpaceOnUse" width=${hs} height=${hs} patternTransform="rotate(45)">
@@ -300,11 +337,15 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
         <line x1="0" y1="0" x2="0" y2=${hs} stroke=${p.hatch} stroke-width=${1.5 / o.scale}></line>
       </pattern>
     </defs>
-    <g class="zones">${lv.zones.map(z => renderZone(z, o, sel?.kind === 'zone' && sel.id === z.id))}</g>
-    <path class="walls" d=${union.map(poly => poly.map(ringD).join('')).join('')} fill=${p.wall} fill-rule="evenodd"></path>
-    ${pieces ? svg`<g class="railings">${lightWalls.flatMap(w => (pieces.get(w.id) ?? []).map(r =>
+    <g class="zones" opacity=${dimOp}>${lv.zones.map(z => renderZone(z, o, sel?.kind === 'zone' && sel.id === z.id))}</g>
+    <path class="walls" d=${union.map(poly => poly.map(ringD).join('')).join('')} fill=${p.wall} fill-rule="evenodd" opacity=${dimOp}></path>
+    ${pieces ? svg`<g class="railings" opacity=${dimOp}>${lightWalls.flatMap(w => (pieces.get(w.id) ?? []).map(r =>
       svg`<path d=${ringD(r)} fill=${p.railing}></path>`))}</g>` : nothing}
-    <g class="openings">${lv.openings.map(op => renderOpening(lv, op, o))}</g>
+    <g class="openings" opacity=${dimOp}>${lv.openings.map(op => renderOpening(lv, op, o))}</g>
+    <g class="wall-breaks">${renderWallBreaks(lv, o)}</g>
+    <g class="devices-layer">${renderDevices(lv, {
+      palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: !equip, lang: o.lang, preview: o.preview.device,
+    })}</g>
     <g class="selection">${renderSelection(lv, o)}</g>
     <g class="preview">${renderPreview(lv, o)}</g>`;
 }

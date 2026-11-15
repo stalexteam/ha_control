@@ -75,14 +75,15 @@ const toPoly = (ring: Pt[]): Polygon => [ring.map(p => [p.x, p.y] as [number, nu
 /**
  * Cone clipped to the room the device is in (smallest room hole containing the probe point:
  * pt + dir for wall devices, pt for free ones). Unclipped when outside every room.
+ * `holes` may be passed pre-computed (roomHoles(level)) to avoid recomputing per device.
  * Returns rings (outer rings and any holes, unclosed): render with fill-rule evenodd. [] when none.
  */
-export function clippedCone(level: Level, d: Device): Pt[][] {
+export function clippedCone(level: Level, d: Device, holes: Pt[][] = roomHoles(level)): Pt[][] {
   const shape = coneShape(level, d);
   if (!shape) return [];
   const pose = devicePose(level, d)!;
   const probe = d.placement.mode === 'wall' ? add(pose.pt, pose.dir) : pose.pt;
-  const room = outlineFromHoles(roomHoles(level), probe);
+  const room = outlineFromHoles(holes, probe);
   if (!room) return [shape];
   let mp: ReturnType<typeof polygonClipping.intersection>;
   try {
