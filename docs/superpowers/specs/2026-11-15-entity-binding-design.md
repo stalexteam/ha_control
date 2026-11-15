@@ -163,7 +163,7 @@ The owner called the old four-value `symbol` a meagre choice.
 - **Entity combobox** (owner request: "like HA's entity picker").
   - Closed, it shows the domain or device-class icon, the friendly name, "HA area ▸ HA device", a clear ✕ and a ▾.
   - Open, it shows a search field and rows with icon, name, "area ▸ device", the domain label ("Sensor", "Binary sensor"…) and the current value.
-  - It is HA's `ha-entity-picker` when available, configured with the role's domains, device classes and units through its filter props. Otherwise it is a self-contained Lit combobox with the same layout.
+  - It is a self-contained Lit combobox with that layout. HA's internal `ha-entity-picker` is not used: in custom panels its availability and API are not guaranteed, and keeping a single code path is simpler (simplicity review 2026-11-15).
   - The HA area appears only as a label for finding the entity. It never drives binding.
 - **Device list** (owner request).
   - A three-position switch, "Not bound / Bound / All", with counts. Partly bound devices count as Not bound and carry an amber dot.
@@ -181,7 +181,7 @@ The owner called the old four-value `symbol` a meagre choice.
 - Device deletion removes its bindings implicitly.
 
 ## 6a. Builder-check answers (document author's calls)
-- **Data source.** Use `hass.states`, `hass.entities` and `hass.devices`, and `hass.areas` for the area labels, typed as optional in an extended `HassLike`. If `hass.entities` or `hass.devices` is undefined, fetch `config/entity_registry/list_for_display` (decode its compact keys) and `config/device_registry/list` once when the Binding step opens. One adapter hides both sources. Memoise candidate lists on the registry objects' identity, not on state ticks.
+- **Data source.** States come from `hass.states`. When the Binding step first opens, the entity, device and area registries are loaded once over websocket (`config/entity_registry/list`, `config/device_registry/list` and `config/area_registry/list`; the panel is admin-only). There is one path, with no `hass.entities` branching (simplicity review 2026-11-15). Memoise candidate lists on the registry objects' identity, not on state ticks.
 - **Class versus unit.** A conflicting `device_class` excludes the entity. The unit fallback applies only when `device_class` is absent, so a battery `%` sensor is never a humidity candidate.
 - **HA device picker.** It uses the strict filters and the hidden, disabled and diagnostic exclusion. A role with several matches stays empty and the dialog shows the count. That is acceptable for dimmers that expose both a light and a switch.
 - **Scope.** The list and "also bound to" cover the active level, which is the only level today.
