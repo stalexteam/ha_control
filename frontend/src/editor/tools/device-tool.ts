@@ -1,6 +1,7 @@
 import type { DeviceKind, DevicePlacement, DeviceProps, Level, Pt } from '../../model/types';
 import { DEVICE_PLACEMENTS } from '../../model/types';
 import { addDevice, retargetZoneAngle } from '../../model/devices';
+import { nextFreeName } from '../../model/ids';
 import { snap } from '../../geometry/snap';
 import { wallFrame, wallLocal } from '../../geometry/walls';
 import { t } from '../../i18n';
@@ -87,11 +88,8 @@ export function createDeviceTool(ctx: ToolContext, kind: DeviceKind): Tool {
       const pr = probe();
       if (!pr || pr.invalid) return;
       const level = ctx.level();
-      const base = t(`device.${kind}`);
-      const used = new Set(level.devices.filter(d => d.props.kind === kind).map(d => d.name));
-      let n = 1;
-      while (used.has(`${base} ${n}`)) n++;
-      const res = addDevice(level, pr.props, pr.placement, `${base} ${n}`);
+      const name = nextFreeName(t(`device.${kind}`), level.devices.filter(d => d.props.kind === kind).map(d => d.name));
+      const res = addDevice(level, pr.props, pr.placement, name);
       if (res.deviceId === null) return;
       ctx.commit(res.level);
       placedId = res.deviceId;

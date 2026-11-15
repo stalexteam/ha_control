@@ -1,8 +1,8 @@
-import polygonClipping, { type Polygon } from 'polygon-clipping';
+import polygonClipping from 'polygon-clipping';
 import { AIM_KINDS, type Device, type DevicePlacement, type Id, type Level, type Pt } from '../model/types';
 import { AIM_MAX } from '../model/devices';
 import { add, dist, dot, perpLeft, pointInPolygon, polygonArea, scale, sub } from './vec';
-import { wallFrame } from './walls';
+import { fromRing, toPoly, wallFrame } from './walls';
 import { outlineFromHoles, roomHoles } from './rooms';
 
 /** pt: device centre; dir: unit facing direction (a wall device's face normal turned by its aim); normal: the wall face normal, wall devices only. */
@@ -101,8 +101,6 @@ export function deviceRoomId(level: Level, d: Device): Id | null {
   return best;
 }
 
-const toPoly = (ring: Pt[]): Polygon => [ring.map(p => [p.x, p.y] as [number, number])];
-
 /**
  * Cone clipped to the room the device is in (smallest room hole containing the probe point:
  * pt + face normal for wall devices, pt for free ones). Unclipped when outside every room.
@@ -123,12 +121,7 @@ export function clippedCone(level: Level, d: Device, holesOf: (level: Level) => 
     // Degenerate geometry: never crash rendering; fall back to the unclipped shape.
     return [shape];
   }
-  return mp.flatMap(poly => poly.map(r => {
-    const pts = r.map(([x, y]) => ({ x, y }));
-    const f = pts[0], l = pts[pts.length - 1];
-    if (pts.length > 1 && f.x === l.x && f.y === l.y) pts.pop();
-    return pts;
-  }));
+  return mp.flatMap(poly => poly.map(fromRing));
 }
 
 function hits(level: Level, d: Device, p: Pt, tol: number): boolean {

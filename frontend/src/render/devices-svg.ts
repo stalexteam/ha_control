@@ -4,6 +4,7 @@ import type { Preview, Selection } from '../editor/tools/types';
 import { clippedCone, devicePose, directionHandle, type DevicePose } from '../geometry/devices';
 import { roomHoles } from '../geometry/rooms';
 import type { PlanPalette } from './theme';
+import { cached, ringD } from './shared';
 
 /** Device icon radius in screen pixels. */
 export const ICON_PX = 12;
@@ -24,13 +25,7 @@ const PREVIEW_ID = '__preview__';
 
 // Room holes are cached per level object (levels are immutable snapshots): one computation per frame.
 const holesCache = new WeakMap<Level, Pt[][]>();
-function holesOf(level: Level): Pt[][] {
-  let h = holesCache.get(level);
-  if (h === undefined) { h = roomHoles(level); holesCache.set(level, h); }
-  return h;
-}
-
-const ringD = (r: Pt[]): string => (r.length === 0 ? '' : `M${r.map(p => `${p.x} ${p.y}`).join('L')}Z`);
+const holesOf = (level: Level): Pt[][] => cached(holesCache, level, roomHoles);
 
 function iconShape(d: Device, R: number, color: string, fill: string): SVGTemplateResult {
   const pr = d.props;

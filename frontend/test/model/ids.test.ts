@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { newId } from '../../src/model/ids';
+import { newId, nextFreeName } from '../../src/model/ids';
+
+describe('nextFreeName', () => {
+  it('smallest free N from 1, ignoring other names', () => {
+    expect(nextFreeName('Room', [])).toBe('Room 1');
+    expect(nextFreeName('Room', ['Room 1', 'Room 3', 'Kitchen'])).toBe('Room 2');
+    expect(nextFreeName('Room', ['Room 2', 'Room 1'])).toBe('Room 3');
+  });
+});
 
 describe('newId', () => {
   afterEach(() => vi.restoreAllMocks());

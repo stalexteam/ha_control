@@ -1,5 +1,5 @@
-import polygonClipping, { type Polygon } from 'polygon-clipping';
-import type { Id, Level, PlanNode, Pt, Wall } from '../model/types';
+import polygonClipping, { type Polygon, type Ring } from 'polygon-clipping';
+import type { Baseline, Id, Level, PlanNode, Pt, Wall } from '../model/types';
 import { add, cross, dist, dot, lineIntersect, norm, perpLeft, polygonArea, scale, sub } from './vec';
 
 export interface WallFrame { a: Pt; b: Pt; dir: Pt; len: number; leftOff: number; rightOff: number }
@@ -30,13 +30,16 @@ export function wallLen(level: Level, wallId: Id): number | null {
   return dist(a, b);
 }
 
-/** leftOff/rightOff: distance from the A->B axis to the left/right face. */
-export function wallFrame(level: Level, wall: Wall): WallFrame {
-  const a = nodePos(level, wall.a);
-  const b = nodePos(level, wall.b);
-  const t = wall.thickness;
-  const [leftOff, rightOff] = wall.baseline === 'left' ? [0, t] : wall.baseline === 'right' ? [t, 0] : [t / 2, t / 2];
+/** Frame of a wall body from a to b; leftOff/rightOff: distance from the A->B axis to the left/right face. */
+export function segmentFrame(a: Pt, b: Pt, thickness: number, baseline: Baseline): WallFrame {
+  const t = thickness;
+  const [leftOff, rightOff] = baseline === 'left' ? [0, t] : baseline === 'right' ? [t, 0] : [t / 2, t / 2];
   return { a, b, dir: norm(sub(b, a)), len: dist(a, b), leftOff, rightOff };
+}
+
+/** Frame of a wall of the level (see segmentFrame); throws when a node is missing. */
+export function wallFrame(level: Level, wall: Wall): WallFrame {
+  return segmentFrame(nodePos(level, wall.a), nodePos(level, wall.b), wall.thickness, wall.baseline);
 }
 
 /** p in the wall's frame: t along the axis from A, side across it (positive = left face, i.e. perpLeft(dir)). */
@@ -235,12 +238,23 @@ export function wallPieces(level: Level): Map<Id, Pt[][]> {
   return res;
 }
 
+/** A ring as a polygon-clipping polygon (outer ring only). */
+export const toPoly = (ring: Pt[]): Polygon => [ring.map(p => [p.x, p.y] as [number, number])];
+
+/** A polygon-clipping ring as points, without the closing duplicate. */
+export function fromRing(r: Ring): Pt[] {
+  const pts = r.map(([x, y]) => ({ x, y }));
+  const f = pts[0], l = pts[pts.length - 1];
+  if (pts.length > 1 && f.x === l.x && f.y === l.y) pts.pop();
+  return pts;
+}
+
 /** Union of all wall contours (or pieces). MultiPolygon: [polygon][ring][pt], rings not closed. */
 export function wallsUnion(level: Level, cutOpenings: boolean): Pt[][][] {
   const polys: Pt[][] = cutOpenings
     ? [...wallPieces(level).values()].flat()
     : [...wallOutlines(level).values()];
-  const geoms: Polygon[] = polys.map(r => [r.map(p => [p.x, p.y] as [number, number])]);
+  const geoms: Polygon[] = polys.map(toPoly);
   if (geoms.length === 0) return [];
   let mp: ReturnType<typeof polygonClipping.union>;
   try {
@@ -249,10 +263,5 @@ export function wallsUnion(level: Level, cutOpenings: boolean): Pt[][][] {
     // Degenerate geometry: never crash rendering; no holes means no rooms are detected.
     return polys.map(r => [r.map(p => ({ x: p.x, y: p.y }))]);
   }
-  return mp.map(poly => poly.map(r => {
-    const pts = r.map(([x, y]) => ({ x, y }));
-    const f = pts[0], l = pts[pts.length - 1];
-    if (pts.length > 1 && f.x === l.x && f.y === l.y) pts.pop();
-    return pts;
-  }));
+  return mp.map(poly => poly.map(fromRing));
 }

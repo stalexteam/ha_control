@@ -2,12 +2,13 @@ import { svg, nothing, type SVGTemplateResult } from 'lit';
 import type { Id, Level, Opening, Pt, Wall, Zone } from '../model/types';
 import type { WallProps } from '../model/ops';
 import type { Preview, Selection } from '../editor/tools/types';
-import { wallFrame, wallOutlines, wallPieces, wallsUnion, type WallFrame } from '../geometry/walls';
+import { segmentFrame, wallFrame, wallOutlines, wallPieces, wallsUnion, type WallFrame } from '../geometry/walls';
 import { roomAreaM2 } from '../geometry/rooms';
-import { add, cross, dist, norm, perpLeft, pointInPolygon, scale as mul, sub } from '../geometry/vec';
+import { add, cross, dist, perpLeft, pointInPolygon, scale as mul, sub } from '../geometry/vec';
 import { t } from '../i18n';
 import type { PlanPalette } from './theme';
 import { renderDevices } from './devices-svg';
+import { cached, ringD } from './shared';
 
 export interface RenderOpts {
   palette: PlanPalette;
@@ -37,15 +38,6 @@ export function formatArea(m2: number): string {
 const unionCache = new WeakMap<Level, Pt[][][]>();
 const piecesCache = new WeakMap<Level, Map<Id, Pt[][]>>();
 const outlineCache = new WeakMap<Level, Map<Id, Pt[]>>();
-
-function cached<V>(map: WeakMap<Level, V>, level: Level, make: (l: Level) => V): V {
-  let v = map.get(level);
-  if (v === undefined) { v = make(level); map.set(level, v); }
-  return v;
-}
-
-const ringD = (r: Pt[]): string =>
-  r.length === 0 ? '' : `M${r.map(p => `${p.x} ${p.y}`).join('L')}Z`;
 
 /** Points across the wall thickness between axis params t0..t1 (along the wall from node A). */
 function spanQuad(f: WallFrame, t0: number, t1: number): Pt[] {
@@ -226,9 +218,7 @@ function renderSelection(level: Level, o: RenderOpts): SVGTemplateResult | typeo
 /** Wall body quad for a preview segment, honouring thickness and baseline. */
 function previewQuad(a: Pt, b: Pt, props: WallProps): Pt[] | null {
   if (dist(a, b) < 1e-6) return null;
-  const tk = props.thickness;
-  const [leftOff, rightOff] = props.baseline === 'left' ? [0, tk] : props.baseline === 'right' ? [tk, 0] : [tk / 2, tk / 2];
-  return spanQuad({ a, b, dir: norm(sub(b, a)), len: dist(a, b), leftOff, rightOff }, 0, dist(a, b));
+  return spanQuad(segmentFrame(a, b, props.thickness, props.baseline), 0, dist(a, b));
 }
 
 function renderPreview(level: Level, o: RenderOpts): SVGTemplateResult {

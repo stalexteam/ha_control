@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import type { Level, Pt, Wall } from '../../src/model/types';
-import { findNode, nodePos, wallFrame, wallLen, wallLocal, wallOutlines, wallPieces, wallsUnion } from '../../src/geometry/walls';
+import {
+  findNode, fromRing, nodePos, segmentFrame, toPoly, wallFrame, wallLen, wallLocal, wallOutlines, wallPieces, wallsUnion,
+} from '../../src/geometry/walls';
 import { polygonArea } from '../../src/geometry/vec';
 import { rectRoomLevel } from '../fixtures';
 
@@ -24,6 +26,26 @@ describe('wallFrame', () => {
       [wall('w', 'a', 'b', 200), wall('v', 'a', 'b', 200, 'right')]);
     expect(wallFrame(l, l.walls[0])).toMatchObject({ leftOff: 100, rightOff: 100 });
     expect(wallFrame(l, l.walls[1])).toMatchObject({ leftOff: 200, rightOff: 0 });
+  });
+});
+
+describe('segmentFrame', () => {
+  it('face offsets from the baseline; wallFrame is segmentFrame of the wall nodes', () => {
+    const a = { x: 0, y: 0 }, b = { x: 0, y: 500 };
+    expect(segmentFrame(a, b, 200, 'left')).toEqual({ a, b, dir: { x: 0, y: 1 }, len: 500, leftOff: 0, rightOff: 200 });
+    expect(segmentFrame(a, b, 200, 'right')).toMatchObject({ leftOff: 200, rightOff: 0 });
+    expect(segmentFrame(a, b, 200, 'center')).toMatchObject({ leftOff: 100, rightOff: 100 });
+    const l = lvl([{ id: 'a', ...a }, { id: 'b', ...b }], [wall('w', 'a', 'b', 200, 'right')]);
+    expect(wallFrame(l, l.walls[0])).toEqual(segmentFrame(a, b, 200, 'right'));
+  });
+});
+
+describe('polygon-clipping ring conversion', () => {
+  it('toPoly wraps the ring as pairs; fromRing drops the closing duplicate only', () => {
+    expect(toPoly([{ x: 1, y: 2 }, { x: 3, y: 4 }])).toEqual([[[1, 2], [3, 4]]]);
+    expect(fromRing([[0, 0], [5, 0], [5, 5], [0, 0]])).toEqual([{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 5 }]);
+    expect(fromRing([[0, 0], [5, 0], [5, 5]])).toEqual([{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 5 }]);
+    expect(fromRing([[1, 1]])).toEqual([{ x: 1, y: 1 }]);
   });
 });
 

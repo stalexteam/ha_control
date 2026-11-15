@@ -2,6 +2,7 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
 import type { Level, OpeningKind, Side } from '../model/types';
 import { OPENING_DEFAULT_WIDTH } from '../model/types';
+import { nextFreeName } from '../model/ids';
 import type { OpeningDefaults } from '../editor/tools/types';
 import { t } from '../i18n';
 import { numField, row, select } from './fields';
@@ -34,11 +35,7 @@ export function openingDefaults(n: NextObjects, kind: OpeningKind): OpeningDefau
 
 /** "Room N" with the smallest N not used by a zone name on the level. */
 export function defaultZoneName(level: Level): string {
-  const base = t('zone.default');
-  const used = new Set(level.zones.map(z => z.name));
-  let n = 1;
-  while (used.has(`${base} ${n}`)) n++;
-  return `${base} ${n}`;
+  return nextFreeName(t('zone.default'), level.zones.map(z => z.name));
 }
 
 export interface NextObjectOpts {
