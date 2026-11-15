@@ -22,7 +22,7 @@ function levelWithAll(): Level {
       placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 500 } },
     { id: 'so', name: 'so', invalid: true, props: deviceDefaults('socket', 'wall'),
       placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 5000 } },
-    free('eq', 'equipment', 2000, 3500, { label: 'Boiler X', symbol: 'boiler' }),
+    free('eq', 'equipment', 2000, 3500, { label: 'Boiler X', icon: 'mdi:water-boiler' }),
   ];
   return { ...box, devices };
 }

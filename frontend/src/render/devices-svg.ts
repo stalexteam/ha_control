@@ -26,7 +26,20 @@ export interface DeviceRenderOpts {
 }
 
 const NS = 'non-scaling-stroke';
-const GLYPH: Record<string, string> = { boiler: 'B', pc: 'PC', automation: 'A', other: '•' };
+/** MDI `cube-outline` (24x24), the bundled fallback when `ha-icon` is not registered. */
+const CUBE_OUTLINE = 'M21,16.5C21,16.88 20.79,17.21 20.47,17.38L12.57,21.82C12.41,21.94 12.21,22 12,22C11.79,22 11.59,21.94 11.43,21.82L3.53,17.38C3.21,17.21 3,16.88 3,16.5V7.5C3,7.12 3.21,6.79 3.53,6.62L11.43,2.18C11.59,2.06 11.79,2 12,2C12.21,2 12.41,2.06 12.57,2.18L20.47,6.62C20.79,6.79 21,7.12 21,7.5V16.5M12,4.15L6.04,7.5L12,10.85L17.96,7.5L12,4.15M5,15.91L11,19.29V12.58L5,9.21V15.91M19,15.91V9.21L13,12.58V19.29L19,15.91Z';
+/** Equipment icon size in screen pixels. */
+const EQUIPMENT_ICON_PX = 24;
+
+function equipmentIcon(icon: string, scale: number, color: string): SVGTemplateResult {
+  const size = EQUIPMENT_ICON_PX / scale;
+  if (customElements.get('ha-icon')) {
+    return svg`<foreignObject class="equipment-icon" x=${-size / 2} y=${-size / 2} width=${size} height=${size}>
+      <ha-icon icon=${icon} style=${`--mdc-icon-size:${size}px;color:${color};display:block`}></ha-icon></foreignObject>`;
+  }
+  return svg`<g class="equipment-icon" transform=${`translate(${-size / 2} ${-size / 2}) scale(${size / 24})`}>
+    <path d=${CUBE_OUTLINE} fill=${color}></path></g>`;
+}
 const PREVIEW_ID = '__preview__';
 /** Ring stroke per binding status; a bound device has no ring. Unbound follows the HA theme's secondary text. */
 const BIND_STROKE: Record<Exclude<BindStatus, 'bound'>, string> = {
@@ -103,9 +116,8 @@ function equipmentBlock(d: Device, o: DeviceRenderOpts, color: string, deg: numb
         fill=${o.palette.deviceFill} stroke=${color} stroke-width="1.5" vector-effect=${NS}></rect>`;
   return svg`
     <g transform=${`rotate(${deg})`}>${body}</g>
-    <text class="equipment-glyph" text-anchor="middle" dominant-baseline="middle" font-size=${fs} fill=${color}
-      font-family="system-ui, sans-serif" font-weight="600">${GLYPH[pr.symbol] ?? GLYPH.other}</text>
-    <text class="equipment-label" y=${fs * 1.5} text-anchor="middle" dominant-baseline="middle" font-size=${fs * 0.85}
+    ${equipmentIcon(pr.icon, o.scale, color)}
+    <text class="equipment-label" y=${EQUIPMENT_ICON_PX / o.scale / 2 + fs} text-anchor="middle" dominant-baseline="middle" font-size=${fs * 0.85}
       fill=${color} font-family="system-ui, sans-serif">${pr.label}</text>
     <g class="equipment-data"></g>`;
 }

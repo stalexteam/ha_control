@@ -344,4 +344,31 @@ describe('Equipment tab: typing survives re-renders', () => {
     await el.updateComplete;
     expect(f.value).toBe('12');
   });
+
+  describe('equipment icon field (text input fallback)', () => {
+    const iconField = (el: PlanStudioPanel) => $<HTMLInputElement>(el, '.props input[data-field="next-icon"]');
+    const type = async (el: PlanStudioPanel, v: string) => {
+      const f = iconField(el);
+      f.value = v;
+      f.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      await el.updateComplete;
+    };
+    it('stores mdi:water-boiler', async () => {
+      const el = await mount();
+      await tab(el, 'equipment');
+      await tool(el, 'equipment');
+      expect(iconField(el).value).toBe('mdi:cube-outline');
+      await type(el, 'mdi:water-boiler');
+      expect(el.nextProps.equipment).toMatchObject({ icon: 'mdi:water-boiler' });
+    });
+    it('rejects a value without the mdi: prefix with a notice', async () => {
+      const el = await mount();
+      await tab(el, 'equipment');
+      await tool(el, 'equipment');
+      await type(el, 'water-boiler');
+      expect(el.nextProps.equipment).toMatchObject({ icon: 'mdi:cube-outline' });
+      expect(el.shadowRoot!.textContent).toContain('mdi:');
+      expect(iconField(el).value).toBe('mdi:cube-outline');
+    });
+  });
 });

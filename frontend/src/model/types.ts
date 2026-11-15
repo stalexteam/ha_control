@@ -62,7 +62,10 @@ export type DeviceProps =
   | { kind: 'exhaust_fan'; diameter: FanDiameter }
   | { kind: 'illuminance_sensor' } | { kind: 'switch' } | { kind: 'socket' }
   | { kind: 'equipment'; shape: 'rect' | 'circle'; width: number; depth: number; diameter: number;
-      symbol: 'boiler' | 'pc' | 'automation' | 'other'; label: string };
+      icon: string; label: string };
+
+/** Equipment icon default (an MDI name). */
+export const DEFAULT_EQUIPMENT_ICON = 'mdi:cube-outline';
 
 export type BindingRole = 'control' | 'motion' | 'illuminance' | 'temperature' | 'humidity' | 'action' | 'state' | 'power';
 
@@ -147,15 +150,29 @@ export function deviceDefaults(kind: DeviceKind, mode: 'wall' | 'free'): DeviceP
     case 'exhaust_fan':
       return { kind, diameter: 100 };
     case 'equipment':
-      return { kind, shape: 'rect', width: 600, depth: 600, diameter: 600, symbol: 'other', label: '' };
+      return { kind, shape: 'rect', width: 600, depth: 600, diameter: 600, icon: DEFAULT_EQUIPMENT_ICON, label: '' };
     default:
       return { kind };
   }
 }
 
 /** Stage-1 plans have no `devices`; a missing field means []. Invalid bindings are dropped. Same object back when nothing changes. */
+/** Legacy equipment `symbol` -> MDI icon (stage 2a plans). */
+const LEGACY_SYMBOL_ICON: Record<string, string> = {
+  boiler: 'mdi:water-boiler', pc: 'mdi:desktop-tower', automation: 'mdi:server', other: DEFAULT_EQUIPMENT_ICON,
+};
+
+/** Replaces a legacy `symbol` by `icon`; returns the same device when there is nothing to migrate. */
+function migrateEquipment(d: Device): Device {
+  const p = d.props as Record<string, unknown>;
+  if (p.kind !== 'equipment' || !('symbol' in p)) return d;
+  const { symbol, ...rest } = p;
+  const icon = typeof p.icon === 'string' ? p.icon : LEGACY_SYMBOL_ICON[String(symbol)] ?? DEFAULT_EQUIPMENT_ICON;
+  return { ...d, props: { ...rest, icon } as DeviceProps };
+}
+
 export function normalizeLevel(level: Level): Level {
   if (!level.devices) return { ...level, devices: [] };
-  const devices = level.devices.map(sanitizeBindings);
+  const devices = level.devices.map(d => sanitizeBindings(migrateEquipment(d)));
   return devices.some((d, i) => d !== level.devices[i]) ? { ...level, devices } : level;
 }

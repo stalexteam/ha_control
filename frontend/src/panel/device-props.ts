@@ -51,10 +51,9 @@ const NUM: Record<NumRule, { rule: WholeRule; bad: string }> = {
 const numProp = (o: DevicePropsOpts, field: string, value: number, rule: NumRule, apply: (v: number) => boolean) =>
   numField({ ...NUM[rule], value, field, setNotice: o.onNotice, apply, skipSame: true });
 
-/** Option sets rendered through `labelled` (each member needs a `shape.*` / `symbol.*` dictionary key). */
+/** Option sets rendered through `labelled` (each member needs a `shape.*` dictionary key). */
 export const LIGHT_SHAPES = ['round', 'linear', 'spot'] as const;
 export const EQUIPMENT_SHAPES = ['rect', 'circle'] as const;
-export const EQUIPMENT_SYMBOLS = ['boiler', 'pc', 'automation', 'other'] as const;
 
 const labelled = <T extends string>(values: T[], prefix: string) => values.map(v => ({ v, label: t(`${prefix}.${v}`) }));
 
@@ -97,8 +96,7 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
         ${p.shape === 'rect'
           ? html`${mm('width', 'props.width', p.width)}${mm('depth', 'props.depth', p.depth)}`
           : mm('diameter', 'props.diameter', p.diameter)}
-        ${row(t('props.symbol'), select(p.symbol, labelled([...EQUIPMENT_SYMBOLS], 'symbol'),
-          v => set({ symbol: v }), `${pre}symbol`))}
+        ${row(t('props.icon'), iconField(o, p.icon, `${pre}icon`, set))}
         ${row(t('props.label'), html`<input class="val wide" type="text" data-field=${`${pre}label`} .value=${fieldValue(p.label)}
           @change=${(e: Event) => {
             const label = (e.target as HTMLInputElement).value.trim();
@@ -107,6 +105,28 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
     default:
       return html`<p class="muted">${t('props.noSettings')}</p>`;
   }
+}
+
+const MDI_ICON = /^mdi:[a-z0-9-]+$/;
+
+/** HA's icon picker when registered, otherwise a text input accepting only `mdi:<name>`. */
+function iconField(o: DevicePropsOpts, value: string, field: string, set: (patch: Partial<DeviceProps>) => boolean): TemplateResult {
+  const commit = (v: string, revert: (s: string) => void): void => {
+    if (!MDI_ICON.test(v)) { revert(value); o.onNotice?.(t('props.badIcon')); return; }
+    o.onNotice?.(null);
+    if (v !== value && !set({ icon: v })) revert(value);
+  };
+  if (customElements.get('ha-icon-picker')) {
+    return html`<ha-icon-picker data-field=${field} .value=${fieldValue(value)} @value-changed=${(e: CustomEvent<{ value?: string }>) => {
+      const el = e.target as HTMLElement & { value: string };
+      commit(String(e.detail?.value ?? '').trim(), s => { el.value = s; });
+    }}></ha-icon-picker>`;
+  }
+  return html`<input class="val wide" type="text" data-field=${field} .value=${fieldValue(value)}
+    @change=${(e: Event) => {
+      const el = e.target as HTMLInputElement;
+      commit(el.value.trim(), s => { el.value = s; });
+    }} />`;
 }
 
 const nothing_ = (): TemplateResult => html`${nothing}`;

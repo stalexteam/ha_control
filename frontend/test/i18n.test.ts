@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { I18N_KEYS } from '../src/i18n';
 import { DEVICE_PLACEMENTS, WALL_PRESETS, OPENING_DEFAULT_WIDTH } from '../src/model/types';
-import { LIGHT_SHAPES, EQUIPMENT_SHAPES, EQUIPMENT_SYMBOLS } from '../src/panel/device-props';
+import { LIGHT_SHAPES, EQUIPMENT_SHAPES } from '../src/panel/device-props';
 import { STEPS } from '../src/panel/steps';
 import { LIST_FILTERS } from '../src/panel/binding-list';
 
@@ -71,7 +71,6 @@ describe('i18n', () => {
       walltype: Object.keys(WALL_PRESETS),
       kind: Object.keys(OPENING_DEFAULT_WIDTH),
       shape: [...LIGHT_SHAPES, ...EQUIPMENT_SHAPES],
-      symbol: EQUIPMENT_SYMBOLS,
       side: ['left', 'right'],
       hinge: ['start', 'end'],
       baseline: ['center', 'left', 'right'],

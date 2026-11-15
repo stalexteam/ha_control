@@ -165,7 +165,7 @@ describe('wrap360 / wrap180', () => {
 
 describe('deviceAt', () => {
   const eq = (rotation: number): Device =>
-    dev('e', { kind: 'equipment', shape: 'rect', width: 600, depth: 600, diameter: 600, symbol: 'pc', label: '' },
+    dev('e', { kind: 'equipment', shape: 'rect', width: 600, depth: 600, diameter: 600, icon: 'mdi:desktop-tower', label: '' },
       { mode: 'free', x: 1000, y: 1000, rotation });
 
   it('rotated equipment rect is hit inside, missed outside', () => {
@@ -175,7 +175,7 @@ describe('deviceAt', () => {
   });
 
   it('equipment circle is hit within diameter/2 + tol', () => {
-    const c = dev('c', { kind: 'equipment', shape: 'circle', width: 0, depth: 0, diameter: 600, symbol: 'pc', label: '' },
+    const c = dev('c', { kind: 'equipment', shape: 'circle', width: 0, depth: 0, diameter: 600, icon: 'mdi:desktop-tower', label: '' },
       { mode: 'free', x: 0, y: 0, rotation: 0 });
     const level = withDevs(rectRoomLevel(3000, 4000, 400), c);
     expect(deviceAt(level, { x: 340, y: 0 }, 50)).toBe('c');
@@ -192,7 +192,7 @@ describe('deviceAt', () => {
   });
 
   it('an icon device under an equipment block stays selectable (icons first, then bodies)', () => {
-    const body = dev('body', { kind: 'equipment', shape: 'rect', width: 1000, depth: 1000, diameter: 600, symbol: 'pc', label: '' },
+    const body = dev('body', { kind: 'equipment', shape: 'rect', width: 1000, depth: 1000, diameter: 600, icon: 'mdi:desktop-tower', label: '' },
       { mode: 'free', x: 1000, y: 1000, rotation: 0 });
     const sensor = dev('s', { kind: 'illuminance_sensor' }, { mode: 'free', x: 1000, y: 1000, rotation: 0 });
     const level = withDevs(rectRoomLevel(3000, 4000, 400), sensor, body); // body drawn last (topmost)
