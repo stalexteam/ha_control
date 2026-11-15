@@ -34,6 +34,10 @@ def validate_plan(plan: dict) -> None:
     levels = plan.get("levels")
     if not isinstance(levels, list) or not levels:
         raise vol.Invalid("levels must be a non-empty list")
+    if "power" in plan:
+        power = plan["power"]
+        if not isinstance(power, dict) or not all(isinstance(power.get(k), list) for k in ("blocks", "wires")):
+            raise vol.Invalid("power must have blocks and wires lists")
     try:
         size = len(json.dumps(plan).encode("utf-8"))
     except (TypeError, ValueError) as err:

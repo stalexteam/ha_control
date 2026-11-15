@@ -2,7 +2,7 @@
 
 import pytest
 
-from power import POSITIONS, block_ports, device_bindings, entity_ids, evaluate
+from power import POSITIONS, PowerHub, block_ports, device_bindings, entity_ids, evaluate
 
 W = {"unit_of_measurement": "W"}
 
@@ -413,3 +413,102 @@ def test_entity_ids_and_device_bindings():
         "c": {"control": "switch.c"},
     }
     assert device_bindings({"levels": None}) == {}
+
+
+def hub_scheme():
+    """A grid with a reading through a transfer at A to a remainder."""
+    return Scheme(
+        [blk("g", "grid", power="sensor.grid"), blk("ts", "transfer", form="2in1out"), blk("rem", "remainder")],
+        [wire("g_ts", "g.OUT", "ts.A"), wire("ts_rem", "ts.OUT", "rem.IN")],
+        {},
+        {"sensor.grid": 1000},
+    )
+
+
+def test_hub_subscribe_sends_frame_at_once():
+    s = hub_scheme()
+    hub = PowerHub(s.states.get)
+    frames = []
+    hub.subscribe("p1", s.schema, s.devices, frames.append)
+    assert frames == [s.run()]
+    assert frames[0]["wires"]["ts_rem"] == live(1000.0)
+    assert hub.entity_ids() == {"sensor.grid"}
+    # stored positions apply from the first frame
+    frames = []
+    PowerHub(s.states.get, {"p1": {"ts": "B"}}).subscribe("p1", s.schema, s.devices, frames.append)
+    assert frames[0]["blocks"]["ts"] == {"position": "B"}
+
+
+def test_hub_state_change_resends_only_on_change():
+    s = hub_scheme()
+    hub = PowerHub(s.states.get)
+    frames = []
+    hub.subscribe("p1", s.schema, s.devices, frames.append)
+    hub.handle_state("sensor.other")  # not read by the schematic
+    s.states["sensor.grid"] = reading(1200)
+    hub.handle_state("sensor.grid")
+    hub.handle_state("sensor.grid")  # same value: no new frame
+    assert len(frames) == 2
+    assert frames[1]["wires"]["g_ts"] == live(1200.0)
+
+
+def test_hub_set_position_reevaluates_and_persists():
+    s = hub_scheme()
+    saves = []
+    hub = PowerHub(s.states.get, on_positions=lambda: saves.append(1))
+    frames, other = [], []
+    hub.subscribe("p1", s.schema, s.devices, frames.append)
+    hub.subscribe("p2", s.schema, s.devices, other.append)
+    hub.set_position("p1", "ts", "B")
+    assert frames[-1]["blocks"]["ts"] == {"position": "B"}
+    assert frames[-1]["wires"]["ts_rem"] == dead()
+    assert len(other) == 1  # another plan keeps its position
+    assert len(saves) == 1
+    positions = hub.positions()
+    assert positions == {"p1": {"ts": "B"}}
+    positions["p1"]["ts"] = "A"  # a copy
+    assert hub.positions() == {"p1": {"ts": "B"}}
+
+
+def test_hub_rejects_bad_position():
+    s = hub_scheme()
+    saves = []
+    hub = PowerHub(s.states.get, on_positions=lambda: saves.append(1))
+    with pytest.raises(ValueError):
+        hub.set_position("p1", "ts", "C")
+    assert saves == [] and hub.positions() == {}
+
+
+def test_hub_unsubscribe_stops_frames():
+    s = hub_scheme()
+    hub = PowerHub(s.states.get)
+    frames = []
+    unsubscribe = hub.subscribe("p1", s.schema, s.devices, frames.append)
+    unsubscribe()
+    unsubscribe()  # twice is harmless
+    s.states["sensor.grid"] = reading(1200)
+    hub.handle_state("sensor.grid")
+    hub.set_position("p1", "ts", "B")
+    assert len(frames) == 1
+    assert hub.entity_ids() == set()
+
+
+def test_hub_drops_failing_subscriber(caplog):
+    s = hub_scheme()
+    hub = PowerHub(s.states.get)
+    good, bad_calls = [], []
+
+    def bad(frame):
+        bad_calls.append(frame)
+        if len(bad_calls) > 1:
+            raise RuntimeError("boom")
+
+    hub.subscribe("p1", s.schema, s.devices, bad)
+    hub.subscribe("p1", s.schema, s.devices, good.append)
+    s.states["sensor.grid"] = reading(1200)
+    hub.handle_state("sensor.grid")  # bad raises and is dropped; good still gets its frame
+    s.states["sensor.grid"] = reading(1300)
+    hub.handle_state("sensor.grid")
+    assert len(bad_calls) == 2
+    assert len(good) == 3
+    assert "dropping it" in caplog.text

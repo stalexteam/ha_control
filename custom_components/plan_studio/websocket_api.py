@@ -8,6 +8,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
+from .power import POSITIONS
 from .repo import RevisionConflict, validate_revision
 
 
@@ -33,6 +34,8 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_save)
     websocket_api.async_register_command(hass, ws_delete)
     websocket_api.async_register_command(hass, ws_containers_subscribe)
+    websocket_api.async_register_command(hass, ws_power_subscribe)
+    websocket_api.async_register_command(hass, ws_power_set_position)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "plan_studio/plans/list"})
@@ -115,3 +118,59 @@ def ws_containers_subscribe(hass, connection, msg):
     connection.subscriptions[msg["id"]] = runtime.subscribe(plan_id, forward)
     connection.send_result(msg["id"])
     forward(True, runtime.snapshot(plan_id))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "plan_studio/power/subscribe",
+        vol.Required("plan_id"): str,
+        vol.Required("power"): dict,
+        vol.Required("devices"): dict,
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_power_subscribe(hass, connection, msg):
+    """Stream live power frames of a schematic (the panel's draft); every event is a full frame.
+
+    Ends with HA's standard `unsubscribe_events` or when the connection closes.
+    """
+    live = _live(hass)
+    if live is None:
+        connection.send_error(msg["id"], "not_loaded", "Plan Studio is not loaded")
+        return
+
+    @callback
+    def forward(frame: dict) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], frame))
+
+    connection.send_result(msg["id"])
+    unsub = live.power.subscribe(msg["plan_id"], msg["power"], msg["devices"], forward)  # sends the first frame
+    live.retrack()
+
+    @callback
+    def unsubscribe() -> None:
+        unsub()
+        live.retrack()
+
+    connection.subscriptions[msg["id"]] = unsubscribe
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "plan_studio/power/set_position",
+        vol.Required("plan_id"): str,
+        vol.Required("block_id"): str,
+        vol.Required("position"): vol.In(POSITIONS),
+    }
+)
+@websocket_api.require_admin
+@callback
+def ws_power_set_position(hass, connection, msg):
+    """Set a transfer block's position: live state, stored by the integration, no plan revision."""
+    live = _live(hass)
+    if live is None:
+        connection.send_error(msg["id"], "not_loaded", "Plan Studio is not loaded")
+        return
+    live.power.set_position(msg["plan_id"], msg["block_id"], msg["position"])
+    connection.send_result(msg["id"], {})

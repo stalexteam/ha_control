@@ -2,32 +2,36 @@
 const base = (process.env.HA_URL || "").replace(/\/+$/, "");
 const token = process.env.HA_TOKEN;
 if (!base || !token) { console.error("HA_URL/HA_TOKEN required"); process.exit(1); }
-// A throwaway entity the smoke wall switch follows; set and removed through the REST API.
+// Throwaway entities, set and removed through the REST API: the smoke wall switch follows ENTITY,
+// the smoke schematic's grid reads POWER.
 const ENTITY = "binary_sensor.plan_studio_smoke";
+const POWER = "sensor.plan_studio_smoke_power";
+// The power part keeps a fixed plan id, so its stored transfer position does not pile up per run.
+const POWER_PLAN = "plan_studio_smoke";
 const ws = new WebSocket(base.replace(/^http/, "ws") + "/api/websocket");
 let nextId = 1;
 const pending = new Map();
-// What to undo when the run fails half-way: the smoke plan and the smoke entity.
-const created = { planId: null, entity: false };
+// What to undo when the run fails half-way: the smoke plan and the smoke entities.
+const created = { planId: null, entities: new Set() };
 let aborting = false;
 // Every check throws; run() rejects and abort() cleans up and exits 1.
 const fail = (m) => { throw new Error(m); };
 const withTimeout = (p, ms) => Promise.race([p, new Promise((res) => setTimeout(res, ms))]);
-// Sets (state) or removes (null) the smoke entity. The token goes only into the header, never into output.
-async function setEntity(state) {
-  const r = await fetch(`${base}/api/states/${ENTITY}`, {
+// Sets (state) or removes (null) a smoke entity. The token goes only into the header, never into output.
+async function setEntity(entity, state, attributes) {
+  const r = await fetch(`${base}/api/states/${entity}`, {
     method: state === null ? "DELETE" : "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Connection: "close" },
-    ...(state === null ? {} : { body: JSON.stringify({ state }) }),
+    ...(state === null ? {} : { body: JSON.stringify({ state, ...(attributes ? { attributes } : {}) }) }),
   });
-  if (!r.ok) fail(`${state === null ? "remove" : "set"} ${ENTITY}: HTTP ${r.status}`);
-  created.entity = state !== null;
+  if (!r.ok) fail(`${state === null ? "remove" : "set"} ${entity}: HTTP ${r.status}`);
+  if (state === null) created.entities.delete(entity); else created.entities.add(entity);
 }
 async function cleanup() {
   if (created.planId && ws.readyState === WebSocket.OPEN) {
     await withTimeout(call({ type: "plan_studio/plans/delete", plan_id: created.planId }), 3000);
   }
-  if (created.entity) await withTimeout(setEntity(null).catch(() => undefined), 3000);
+  for (const entity of [...created.entities]) await withTimeout(setEntity(entity, null).catch(() => undefined), 3000);
 }
 async function abort(m) {
   if (aborting) return;
@@ -114,7 +118,7 @@ async function run() {
     walls: [{ id: `${id}-w0`, a: `${id}-n1`, b: `${id}-n2`, thickness: 100, type: "partition", baseline: "center" }],
     devices: [button, wallSwitch],
   };
-  await setEntity("off");
+  await setEntity(ENTITY, "off");
   eq(expectOk(await call({ type: "plan_studio/plans/save", plan: { ...plan, levels: [room] }, expected_revision: 3 }),
     "save with containers").revision, 4, "containers revision");
   const sub = await call({ type: "plan_studio/containers/subscribe", plan_id: id });
@@ -126,7 +130,7 @@ async function run() {
       [`${id}-w`]: { kind: "wall_switch", status: "ok" },
     },
   }, "first containers event");
-  await setEntity("on");
+  await setEntity(ENTITY, "on");
   // The manual change is a "set on" intent; its time comes from the server, so only its type is checked.
   const turnedOn = await nextEvent(sub.id, "containers event after the entity turned on");
   const at = turnedOn?.containers?.[`${id}-w`]?.last?.at;
@@ -139,9 +143,51 @@ async function run() {
   same(await nextEvent(sub.id, "containers event after delete"), { full: true, containers: {} },
     "containers event after delete");
   expectOk(await call({ type: "unsubscribe_events", subscription: sub.id }), "unsubscribe");
-  await setEntity(null);
+  await setEntity(ENTITY, null);
   const g = await call({ type: "plan_studio/plans/get", plan_id: id });
   if (g.success || g.error.code !== "not_found") fail("expected not_found, got " + JSON.stringify(g));
+
+  // Power: a grid reading the smoke sensor wired to a remainder; every event is a full frame.
+  const block = (bid, kind, props = {}) => ({ id: bid, kind, x: 0, y: 0, ...props });
+  const wire = (wid, from, to) => ({ id: wid, from, to });
+  const setPosition = (position) =>
+    call({ type: "plan_studio/power/set_position", plan_id: POWER_PLAN, block_id: "ts", position });
+  await setEntity(POWER, "123", { unit_of_measurement: "W" });
+  expectOk(await setPosition("A"), "reset transfer position"); // a failed earlier run may have left B
+  const gridSchema = {
+    blocks: [block("g", "grid", { power: POWER }), block("r", "remainder")],
+    wires: [wire("g_r", { block: "g", port: "OUT" }, { block: "r", port: "IN" })],
+  };
+  const gridSub = await call({ type: "plan_studio/power/subscribe", plan_id: POWER_PLAN, power: gridSchema, devices: {} });
+  expectOk(gridSub, "power subscribe");
+  same(await nextEvent(gridSub.id, "first power frame"), {
+    wires: { g_r: { power: 123, state: "live" } },
+    blocks: { g: { power: 123 }, r: { power: 123 } },
+  }, "first power frame");
+  // A transfer in a second schematic: its position is live state and comes back in the next frame.
+  const transferSchema = {
+    blocks: [block("g", "grid"), block("ts", "transfer", { form: "2in1out" }), block("r", "remainder")],
+    wires: [
+      wire("g_ts", { block: "g", port: "OUT" }, { block: "ts", port: "A" }),
+      wire("ts_r", { block: "ts", port: "OUT" }, { block: "r", port: "IN" }),
+    ],
+  };
+  const transferSub = await call({
+    type: "plan_studio/power/subscribe", plan_id: POWER_PLAN, power: transferSchema, devices: {},
+  });
+  expectOk(transferSub, "power subscribe (transfer)");
+  const atA = await nextEvent(transferSub.id, "first transfer frame");
+  eq(atA?.blocks?.ts?.position, "A", "transfer position at start");
+  eq(atA?.wires?.ts_r?.state, "live", "transfer output at A");
+  expectOk(await setPosition("B"), "set position B");
+  const atB = await nextEvent(transferSub.id, "transfer frame after B");
+  eq(atB?.blocks?.ts?.position, "B", "transfer position after B");
+  eq(atB?.wires?.ts_r?.state, "dead", "transfer output at B (side B unwired)");
+  expectOk(await setPosition("A"), "set position back to A");
+  eq((await nextEvent(transferSub.id, "transfer frame after A"))?.blocks?.ts?.position, "A", "transfer position back at A");
+  expectOk(await call({ type: "unsubscribe_events", subscription: gridSub.id }), "power unsubscribe");
+  expectOk(await call({ type: "unsubscribe_events", subscription: transferSub.id }), "power unsubscribe (transfer)");
+  await setEntity(POWER, null);
   console.log("SMOKE OK");
   process.exitCode = 0; ws.close();
 }

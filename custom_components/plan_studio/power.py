@@ -1,13 +1,17 @@
-"""Power schematic evaluator: energized wires and signed wire powers from entity states. Must not import homeassistant."""
+"""Power schematic evaluator and live hub: energized wires and signed wire powers from entity states. Must not import homeassistant."""
 
 from __future__ import annotations
 
+import logging
 import math
+from typing import Callable
 
 try:
     from .containers import Lookup
 except ImportError:  # pytest: module dir on sys.path
     from containers import Lookup
+
+_LOGGER = logging.getLogger(__name__)
 
 POSITIONS = ("A", "0", "B")
 
@@ -360,3 +364,82 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
         for wid, e in ends.items()
     }
     return {"wires": frame_wires, "blocks": frame_blocks}
+
+
+class _Sub:
+    """One subscription: a plan's schematic (a draft), its device bindings and the last frame sent."""
+
+    def __init__(self, plan_id: str, schema: dict, devices: dict, cb: Callable[[dict], None]) -> None:
+        self.plan_id = plan_id
+        self.schema = schema
+        self.devices = devices
+        self.cb = cb
+        self.entities = entity_ids(schema, devices)
+        self.frame: dict | None = None
+
+
+class PowerHub:
+    """Live power frames per subscription, and the transfer positions (live state, not plan data)."""
+
+    def __init__(
+        self,
+        lookup: Lookup,
+        positions: dict | None = None,
+        on_positions: Callable[[], None] | None = None,
+    ) -> None:
+        self._lookup = lookup
+        self._positions: dict[str, dict[str, str]] = {
+            pid: dict(v) for pid, v in (positions or {}).items() if isinstance(pid, str) and isinstance(v, dict)
+        }
+        self._on_positions = on_positions  # persist positions()
+        self._subs: list[_Sub] = []
+
+    def subscribe(self, plan_id: str, schema: dict, devices: dict, cb: Callable[[dict], None]) -> Callable[[], None]:
+        sub = _Sub(plan_id, schema, devices, cb)
+        self._subs.append(sub)
+
+        def unsubscribe() -> None:
+            if sub in self._subs:
+                self._subs.remove(sub)
+
+        self._update(sub)
+        return unsubscribe
+
+    def handle_state(self, entity_id: str) -> None:
+        for sub in list(self._subs):
+            if entity_id in sub.entities:
+                self._update(sub)
+
+    def set_position(self, plan_id: str, block_id: str, position: str) -> None:
+        if position not in POSITIONS:
+            raise ValueError(f"position must be one of {POSITIONS}")
+        self._positions.setdefault(plan_id, {})[block_id] = position
+        for sub in list(self._subs):
+            if sub.plan_id == plan_id:
+                self._update(sub)
+        if self._on_positions is not None:
+            self._on_positions()
+
+    def positions(self) -> dict[str, dict[str, str]]:
+        return {pid: dict(v) for pid, v in self._positions.items()}
+
+    def entity_ids(self) -> set[str]:
+        out: set[str] = set()
+        for sub in self._subs:
+            out |= sub.entities
+        return out
+
+    def _update(self, sub: _Sub) -> None:
+        """Evaluate and send the frame when it changed; a subscriber that raises is dropped."""
+        if sub not in self._subs:
+            return
+        frame = evaluate(sub.schema, sub.devices, self._lookup, self._positions.get(sub.plan_id, {}))
+        if frame == sub.frame:
+            return
+        sub.frame = frame
+        try:
+            sub.cb(frame)
+        except Exception:  # noqa: BLE001 - one bad subscriber must not stop the others
+            _LOGGER.exception("power subscriber failed; dropping it")
+            if sub in self._subs:
+                self._subs.remove(sub)

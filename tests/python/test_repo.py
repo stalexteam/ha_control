@@ -1,6 +1,6 @@
 import pytest
 import voluptuous as vol
-from repo import PlanRepo, RevisionConflict
+from repo import PlanRepo, RevisionConflict, validate_plan
 
 
 LEVEL = {"id": "l1", "name": "Level 1", "kind": "floor", "order": 0,
@@ -57,3 +57,9 @@ def test_snapshot_restore_undoes_a_save():
 def test_repo_plans_returns_stored_plans():
     r = PlanRepo(None); r.save(plan("p1"), None); r.save(plan("p2"), None)
     assert {p["id"] for p in r.plans()} == {"p1", "p2"}
+def test_validate_plan_power():
+    validate_plan(plan("p"))  # no power
+    validate_plan({**plan("p"), "power": {"blocks": [], "wires": []}})
+    for bad in ({"blocks": {}}, {"blocks": [], "wires": {}}, {"wires": []}, [], None):
+        with pytest.raises(vol.Invalid, match="power must have blocks and wires lists"):
+            validate_plan({**plan("p"), "power": bad})
