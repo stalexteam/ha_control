@@ -97,4 +97,41 @@ describe('device select tool', () => {
     t.cancel();
     expect(sels[sels.length - 1]).toBeNull();
   });
+
+  it('out-and-back drag commits nothing', () => {
+    const { lv } = withDevice('equipment', free(1000, 1000));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    t.down(ev(1000, 1000)); t.move(ev(1500, 1000)); t.move(ev(1000, 1000)); t.up(ev(1000, 1000));
+    expect(ctx.commits).toHaveLength(0);
+    expect(ctx.level().devices[0].placement).toMatchObject({ x: 1000, y: 1000 });
+  });
+
+  it('a drag that grid-snaps back to the same placement commits nothing', () => {
+    const { lv } = withDevice('equipment', free(1000, 1000));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    t.down(ev(1000, 1000)); t.move(ev(1020, 1000)); t.up(ev(1020, 1000));
+    expect(ctx.commits).toHaveLength(0);
+  });
+
+  it('Escape mid-drag restores and commits nothing', () => {
+    const { lv } = withDevice('equipment', free(1000, 1000));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    t.down(ev(1000, 1000)); t.move(ev(1500, 1000));
+    expect(t.key('Escape', k)).toBe(true);
+    t.up(ev(1500, 1000));
+    expect(ctx.commits).toHaveLength(0);
+    expect(ctx.level().devices[0].placement).toMatchObject({ x: 1000, y: 1000 });
+  });
+
+  it('Backspace deletes the selected device', () => {
+    const { lv } = withDevice('equipment', free(1000, 1000));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    t.down(ev(1000, 1000)); t.up(ev(1000, 1000));
+    expect(t.key('Backspace', k)).toBe(true);
+    expect(ctx.level().devices).toHaveLength(0);
+  });
 });

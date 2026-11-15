@@ -58,6 +58,14 @@ describe('device place tool', () => {
     const ctx = fakeContext(box());
     const t = createDeviceTool(ctx, 'socket');
     t.move(ev(5, 5)); t.down(ev(5, 5));
-    expect(ctx.level().devices[0].placement).toMatchObject({ mode: 'wall' });
+    const lv = ctx.level();
+    expect(lv.devices[0].placement).toEqual({ mode: 'wall', wallId: lv.walls[0].id, side: 'right', offset: 0 });
+  });
+
+  it('cursor above the top wall gives side left', () => {
+    const ctx = fakeContext(box());
+    const t = createDeviceTool(ctx, 'switch');
+    t.move(ev(1500, -10));
+    expect(t.preview().device!.placement).toMatchObject({ mode: 'wall', side: 'left', offset: 1500 });
   });
 });

@@ -6,6 +6,9 @@ import { add, sub } from '../../geometry/vec';
 import { deviceCandidate } from './device-tool';
 import type { Preview, Selection, Tool, ToolContext, ToolEvent } from './types';
 
+const placementOf = (l: Level, id: Id) => JSON.stringify(l.devices.find(d => d.id === id)?.placement);
+const placementChanged = (a: Level, b: Level, id: Id | undefined) => id === undefined || placementOf(a, id) !== placementOf(b, id);
+
 /** Device select tool: pick, drag (slide / re-host / leave the wall; one commit on `up`), delete. */
 export function createDeviceSelectTool(ctx: ToolContext): Tool {
   let sel: Selection | null = null;
@@ -20,8 +23,8 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
 
   function update(e: ToolEvent): void {
     if (!drag || !original) return;
-    if (e.pt.x === downPt.x && e.pt.y === downPt.y) return; // a click without movement edits nothing
     moved = true;
+    if (e.pt.x === downPt.x && e.pt.y === downPt.y) { working = original; return; } // back at the grab point: nothing moved
     const d = original.devices.find(x => x.id === drag!.id);
     if (!d) return;
     const p = e.shift ? orthoConstrain(downPt, e.pt) : e.pt;
@@ -44,14 +47,15 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
       const d = level.devices.find(x => x.id === id)!;
       const pose = devicePose(level, d);
       original = working = level;
-      drag = { id, grab: pose ? sub(pose.pt, e.pt) : { x: 0, y: 0 } };
+      // Only a free device keeps the grab offset; a wall device follows the pointer.
+      drag = { id, grab: pose && d.placement.mode === 'free' ? sub(pose.pt, e.pt) : { x: 0, y: 0 } };
     },
     move(e: ToolEvent) { update(e); },
     up(e: ToolEvent) {
       if (drag) update(e);
-      const next = working, orig = original, wasMoved = moved;
+      const next = working, orig = original, wasMoved = moved, id = drag?.id;
       reset();
-      if (wasMoved && next && orig && next !== orig) ctx.commit(next);
+      if (wasMoved && next && orig && next !== orig && placementChanged(orig, next, id)) ctx.commit(next);
     },
     key(key) {
       if (key === 'Escape' && drag) { reset(); return true; }
