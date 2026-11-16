@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest';
 import { render } from 'lit';
-import { renderRuleTrace, gateValue, fieldOf, type FocusTarget, type RuleTraceOpts } from '../../src/render/rule-trace';
+import { renderRuleTrace, WIDTH, FLOW_MAX_SCALE, gateValue, fieldOf, type FocusTarget, type RuleTraceOpts } from '../../src/render/rule-trace';
 import type { Rule } from '../../src/model/types';
 import type { RuleTrace } from '../../src/live/rules-feed';
 
@@ -25,6 +25,11 @@ function draw(over: Partial<RuleTraceOpts> = {}): { host: HTMLElement; onFocus: 
 const text = (host: HTMLElement, sel: string) => host.querySelector(sel)!.textContent!.replace(/\s+/g, ' ').trim();
 
 describe('rule flowchart', () => {
+  it('caps the scale of the svg', () => {
+    const { host } = draw();
+    expect((host.querySelector('svg.fc') as SVGElement).style.maxWidth).toBe(`${WIDTH * FLOW_MAX_SCALE}px`);
+  });
+
   it('draws the blocks of an unsaved rule without live values and with the note', () => {
     const { host } = draw({ note: 'Live state appears after Save' });
     expect(host.querySelectorAll('.fc-blk[data-block^="input-"]')).toHaveLength(2);

@@ -32,7 +32,8 @@ export interface RuleTraceOpts {
 
 const IN_W = 210, IN_H = 50, GATE_W = 90, VERDICT_W = 150, ACT_W = 230, ACT_H = 44, HEAD_H = 26, GAP = 44, PAD = 10;
 const X_GATE = PAD + IN_W + GAP, X_VERDICT = X_GATE + GATE_W + GAP, X_ACT = X_VERDICT + VERDICT_W + GAP;
-const WIDTH = X_ACT + ACT_W + PAD;
+export const FLOW_MAX_SCALE = 1.25;
+export const WIDTH = X_ACT + ACT_W + PAD;
 
 const secs = (n: number): string => (Number.isFinite(n) ? String(n) : '?');
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -103,7 +104,7 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
 
   return html`
     <div class="flow">
-      <svg class="fc" viewBox=${`0 0 ${WIDTH} ${H}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-label=${t('rules.flow.title')}>
+      <svg class="fc" style=${`max-width:${WIDTH * FLOW_MAX_SCALE}px`} viewBox=${`0 0 ${WIDTH} ${H}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-label=${t('rules.flow.title')}>
         ${rule.inputs.map((_, k) => link(PAD + IN_W, inY0 + k * (IN_H + 12) + IN_H / 2, X_GATE, mid))}
         ${svg`<path class="fc-link" d=${`M${X_GATE + GATE_W} ${mid} H${X_VERDICT}`}></path>`}
         ${sides.map(s => link(X_VERDICT + VERDICT_W, mid, X_ACT, s.y0 + HEAD_H / 2))}
