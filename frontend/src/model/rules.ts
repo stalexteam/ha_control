@@ -1,7 +1,7 @@
 /** Pure ops on condition rules (`Plan.rules`). Rules are plan-level: they reference devices and rules of any level. */
 import { zoneMembers } from '../geometry/zones';
 import { newId } from './ids';
-import type { Device, Id, Level, Rule, RuleDo } from './types';
+import type { Device, Id, Level, Rule, RuleDo, RuleInput } from './types';
 
 export const RULE_DELAY_MAX = 3600;
 
@@ -20,7 +20,22 @@ export function rulesFor(rules: Rule[], zoneId: Id | null, zoneExists: (id: Id) 
   return rules.filter(r => r.zoneId === zoneId);
 }
 
-const ruleRefs = (r: Rule): Id[] => r.inputs.flatMap(i => ('rule' in i.source ? [i.source.rule] : []));
+const inputRefs = (i: RuleInput): Id[] => {
+  const s = i.source;
+  if ('rule' in s) return [s.rule];
+  if ('held' in s) return s.held.sources.flatMap(x => ('rule' in x ? [x.rule] : []));
+  return [];
+};
+
+/** Every rule id the rule references: inputs, the gate and held sources. */
+export const ruleRefs = (r: Rule): Id[] => [...r.inputs, ...(r.gate ? [r.gate] : [])].flatMap(inputRefs);
+
+const inputDevices = (i: RuleInput): Id[] => {
+  const s = i.source;
+  if ('device' in s) return [s.device];
+  if ('held' in s) return s.held.sources.flatMap(x => ('device' in x ? [x.device] : []));
+  return [];
+};
 
 /** The other rules that take the given rule as an input. */
 export const ruleUsers = (rules: Rule[], id: Id): Rule[] => rules.filter(r => r.id !== id && ruleRefs(r).includes(id));
@@ -49,26 +64,53 @@ export function ruleCycle(rules: Rule[], candidate: Rule): Id[] | null {
   return null;
 }
 
-export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action';
+export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'time' | 'held';
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+
+/** The parameter problem of one input ('light' | 'time' | 'held'), if any. */
+function paramProblem(i: RuleInput): RuleProblem | null {
+  const s = i.source;
+  if ('light' in s) return isNum(s.below) && s.below > 0 && isNum(s.hysteresis) && s.hysteresis >= 0 ? null : 'light';
+  if ('time' in s) {
+    const { from, to } = s.time;
+    return typeof from === 'string' && typeof to === 'string' && TIME_RE.test(from) && TIME_RE.test(to) && from !== to ? null : 'time';
+  }
+  if ('held' in s) {
+    const h = s.held;
+    const ok = Array.isArray(h.sources) && h.sources.length >= 1 && ['on', 'off', 'any'].includes(h.state)
+      && Number.isInteger(h.seconds) && h.seconds >= 1 && h.seconds <= 86400;
+    return ok ? null : 'held';
+  }
+  return null;
+}
 
 const delayOk = (n: unknown): boolean => Number.isInteger(n) && (n as number) >= 0 && (n as number) <= RULE_DELAY_MAX;
 
-/** `actionsOf` (optional) gives the actions a device takes; an action outside them is the 'action' problem. */
+/**
+ * `actionsOf` (optional) gives the actions a device takes; an action outside them is the 'action' problem.
+ * `lightSensorExists` (optional) tells whether an id is an illuminance_sensor device; default = any existing device.
+ */
 export function ruleProblems(
   rules: Rule[], r: Rule, deviceExists: (id: Id) => boolean, actionsOf?: (id: Id) => RuleDo[] | undefined,
+  lightSensorExists?: (id: Id) => boolean,
 ): RuleProblem[] {
   const out: RuleProblem[] = [];
   if (!r.name.trim()) out.push('name');
   if (r.inputs.length === 0) out.push('inputs');
-  const devices = [
-    ...r.inputs.flatMap(i => ('device' in i.source ? [i.source.device] : [])),
-    ...r.onTrue.map(a => a.device), ...r.onFalse.map(a => a.device),
-  ];
-  if (devices.some(id => !deviceExists(id))) out.push('device-missing');
+  const all = [...r.inputs, ...(r.gate ? [r.gate] : [])];
+  const devices = [...all.flatMap(inputDevices), ...r.onTrue.map(a => a.device), ...r.onFalse.map(a => a.device)];
+  const lights = all.flatMap(i => ('light' in i.source ? [i.source.light] : []));
+  if (devices.some(id => !deviceExists(id)) || lights.some(id => !(lightSensorExists ?? deviceExists)(id))) out.push('device-missing');
   const known = new Set(rules.map(x => x.id));
   if (ruleRefs(r).some(id => id !== r.id && !known.has(id))) out.push('rule-missing');
   if (ruleCycle(rules, r)) out.push('cycle');
   if (!delayOk(r.onDelay) || !delayOk(r.offDelay)) out.push('delay');
+  for (const i of all) {
+    const p = paramProblem(i);
+    if (p && !out.includes(p)) out.push(p);
+  }
   if (actionsOf && [...r.onTrue, ...r.onFalse].some(a => { const ok = actionsOf(a.device); return ok !== undefined && !ok.includes(a.do); })) out.push('action');
   return out;
 }
@@ -84,6 +126,34 @@ export function leakTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneN
   rule.inputs = members.filter(d => d.props.kind === 'leak_sensor').map(d => ({ source: { device: d.id } }));
   const valves = members.filter(d => d.props.kind === 'valve');
   if (valves.length === 1) rule.onTrue = [{ device: valves[0].id, do: 'close' }];
+  return rule;
+}
+
+const HELD_30_MIN = 1800;
+
+/** The "Timer" template: a device unchanged for 30 minutes (no actions; the owner adds them). */
+export function timerTemplate(_plan: { levels: Level[] }, zoneId: Id | null, deviceId: Id | null, name: string): Rule {
+  const rule = newRule(zoneId);
+  rule.name = name.trim() ? `${name.trim()} unchanged 30 min` : 'Unchanged 30 min';
+  rule.inputs = [{ source: { held: { sources: deviceId === null ? [] : [{ device: deviceId }], state: 'any', seconds: HELD_30_MIN } } }];
+  return rule;
+}
+
+/** The "Outside light" template: dark (light + sun + time window), gated by the light unchanged for 30 min. The owner picks the light. */
+export function outsideLightTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
+  const rule = newRule(zoneId);
+  rule.name = zoneId !== null && zoneName ? `Outside light ${zoneName}` : 'Outside light';
+  rule.combine = 'all';
+  const level = zoneId === null ? undefined : plan.levels.find(l => l.zones.some(z => z.id === zoneId));
+  const sensor = level
+    ? zoneMembers(level, zoneId as Id).find(m => m.participates && m.device.props.kind === 'illuminance_sensor')?.device.id
+    : undefined;
+  rule.inputs = [
+    { source: { light: sensor ?? '', below: 10, hysteresis: 5 } },
+    { source: { sun: true } },
+    { source: { time: { from: '17:00', to: '01:00' } } },
+  ];
+  rule.gate = { source: { held: { sources: [], state: 'any', seconds: HELD_30_MIN } } };
   return rule;
 }
 

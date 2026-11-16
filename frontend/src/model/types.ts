@@ -147,11 +147,19 @@ export interface Plan {
 }
 
 export type RuleDo = 'on' | 'off' | 'open' | 'close';
-export interface RuleInput { source: { device: Id } | { rule: Id }; not?: true }
+export type RuleSource =
+  | { device: Id } | { rule: Id }
+  | { light: Id; below: number; hysteresis: number }
+  | { sun: true }
+  | { time: { from: string; to: string } }
+  | { held: { sources: ({ device: Id } | { rule: Id })[]; state: 'on' | 'off' | 'any'; seconds: number } };
+export interface RuleInput { source: RuleSource; not?: true }
 export interface RuleAction { device: Id; do: RuleDo }
 /** zoneId only says where the rule is listed; enabled missing = enabled; delays are whole seconds 0..3600. */
 export interface Rule {
   id: Id; name: string; zoneId: Id | null; enabled?: false; combine: 'all' | 'any';
+  /** Optional gate: actions are sent only while it is true. */
+  gate?: RuleInput;
   inputs: RuleInput[]; onDelay: number; offDelay: number; onTrue: RuleAction[]; onFalse: RuleAction[];
 }
 

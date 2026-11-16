@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RULE_DELAY_MAX, addRule, deleteRule, isRuleInputDevice, leakTemplate, newRule, ruleActionsFor, ruleCycle, ruleProblems,
-  rulesFor, updateRule,
+  RULE_DELAY_MAX, addRule, deleteRule, isRuleInputDevice, leakTemplate, newRule, outsideLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
+  rulesFor, ruleUsers, updateRule,
 } from '../../src/model/rules';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Rule, type Zone } from '../../src/model/types';
 
@@ -120,5 +120,96 @@ describe('rules model', () => {
     expect(ruleActionsFor(dev('d', 'equipment'))).toEqual([]);
     expect(ruleActionsFor(dev('d', 'equipment', 0, 0, { controllable: true }))).toEqual(['on', 'off']);
     expect(ruleActionsFor(dev('d', 'leak_sensor'))).toEqual([]);
+  });
+
+  const inp = (source: object, extra: object = {}) => ({ source, ...extra }) as Rule['inputs'][number];
+  const probs = (i: Rule['inputs'][number], rules: Rule[] = []) => ruleProblems(rules, rule('a', { inputs: [i] }), exists);
+  const held = (over: object = {}) => ({ held: { sources: [{ device: 'd' }], state: 'any', seconds: 1800, ...over } });
+
+  it('light input bounds and sensor kind', () => {
+    expect(probs(inp({ light: 'd', below: 10, hysteresis: 5 }))).toEqual([]);
+    expect(probs(inp({ light: 'd', below: 10, hysteresis: 0 }))).toEqual([]);
+    expect(probs(inp({ light: 'd', below: 0, hysteresis: 5 }))).toEqual(['light']);
+    expect(probs(inp({ light: 'd', below: 10, hysteresis: -1 }))).toEqual(['light']);
+    expect(probs(inp({ light: 'd', below: NaN, hysteresis: 1 }))).toEqual(['light']);
+    expect(ruleProblems([], rule('a', { inputs: [inp({ light: 'x', below: 10, hysteresis: 1 })] }), () => false)).toContain('device-missing');
+    const r = rule('a', { inputs: [inp({ light: 'd', below: 10, hysteresis: 1 })] });
+    expect(ruleProblems([], r, exists, undefined, () => false)).toEqual(['device-missing']);
+    expect(ruleProblems([], r, exists, undefined, id => id === 'd')).toEqual([]);
+  });
+
+  it('sun and time inputs', () => {
+    expect(probs(inp({ sun: true }, { not: true }))).toEqual([]);
+    expect(probs(inp({ time: { from: '17:00', to: '01:00' } }))).toEqual([]);
+    expect(probs(inp({ time: { from: '00:00', to: '23:59' } }))).toEqual([]);
+    for (const t of [{ from: '17:00', to: '17:00' }, { from: '24:00', to: '01:00' }, { from: '7:00', to: '08:00' }, { from: '10:60', to: '11:00' }, { from: '10:00', to: 5 }])
+      expect(probs(inp({ time: t }))).toEqual(['time']);
+  });
+
+  it('held input bounds and sources', () => {
+    expect(probs(inp(held()))).toEqual([]);
+    expect(probs(inp(held({ seconds: 1 })))).toEqual([]);
+    expect(probs(inp(held({ seconds: 86400, state: 'off' })))).toEqual([]);
+    for (const over of [{ seconds: 0 }, { seconds: 86401 }, { seconds: 1.5 }, { state: 'x' }, { sources: [] }])
+      expect(probs(inp(held(over)))).toEqual(['held']);
+    expect(ruleProblems([], rule('a', { inputs: [inp(held())] }), () => false)).toContain('device-missing');
+    expect(probs(inp(held({ sources: [{ rule: 'nope' }] })))).toContain('rule-missing');
+    expect(probs(inp(held({ sources: [{ rule: 'b' }] })), [rule('b')])).toEqual([]);
+  });
+
+  it('gate is validated like an input', () => {
+    const g = (gate: Rule['gate']) => ruleProblems([], rule('a', { gate }), exists);
+    expect(g({ source: { device: 'd' }, not: true })).toEqual([]);
+    expect(g({ source: { sun: true } })).toEqual([]);
+    expect(g({ source: { time: { from: '1:00', to: '2:00' } } })).toEqual(['time']);
+    expect(g({ source: { light: 'd', below: 0, hysteresis: 0 } })).toEqual(['light']);
+    expect(g(inp(held({ seconds: 0 })))).toEqual(['held']);
+    expect(ruleProblems([], rule('a', { gate: { source: { device: 'x' } } }), () => false)).toContain('device-missing');
+    expect(ruleProblems([], rule('a', { gate: { source: { rule: 'nope' } } }), exists)).toContain('rule-missing');
+  });
+
+  it('ruleRefs and cycles through gate and held', () => {
+    const a = rule('a', { inputs: [...refs('i'), inp(held({ sources: [{ device: 'd' }, { rule: 'h' }] }))], gate: { source: { rule: 'g' } } });
+    expect(ruleRefs(a).sort()).toEqual(['g', 'h', 'i']);
+    expect(ruleRefs(rule('b'))).toEqual([]);
+    const viaGate = rule('b', { gate: { source: { rule: 'a' } } });
+    expect(ruleCycle([viaGate], rule('a', { inputs: refs('b') }))).not.toBeNull();
+    const viaHeld = rule('b', { inputs: [inp(held({ sources: [{ rule: 'a' }] }))] });
+    expect(new Set(ruleCycle([viaHeld], rule('a', { inputs: refs('b') })))).toEqual(new Set(['a', 'b']));
+    expect(ruleProblems([viaGate], rule('a', { inputs: refs('b') }), exists)).toContain('cycle');
+    expect(ruleUsers([viaGate, viaHeld], 'a').map(r => r.id)).toEqual(['b', 'b']);
+  });
+
+  it('timerTemplate', () => {
+    const plan = { levels: [] };
+    const t = timerTemplate(plan, 'z1', 'd1', 'Pump');
+    expect(t).toMatchObject({
+      name: 'Pump unchanged 30 min', zoneId: 'z1', combine: 'any', onTrue: [], onFalse: [],
+      inputs: [{ source: { held: { sources: [{ device: 'd1' }], state: 'any', seconds: 1800 } } }],
+    });
+    expect(t.gate).toBeUndefined();
+    expect(timerTemplate(plan, null, null, '').inputs[0].source).toEqual({ held: { sources: [], state: 'any', seconds: 1800 } });
+  });
+
+  it('outsideLightTemplate picks the first participating illuminance sensor of the zone', () => {
+    const zone: Zone = {
+      id: 'z1', name: 'Yard', invalid: false,
+      shape: { kind: 'polygon', vertices: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
+    };
+    const lvl = { ...emptyLevel('l1'), zones: [zone],
+      devices: [dev('far', 'illuminance_sensor', 5000, 5000), { ...dev('s1', 'illuminance_sensor'), zoneBlacklist: ['z1'] }, dev('s2', 'illuminance_sensor', 600, 600)] };
+    const r = outsideLightTemplate({ levels: [lvl] }, 'z1', 'Yard');
+    expect(r.name).toBe('Outside light Yard');
+    expect(r.combine).toBe('all');
+    expect(r.inputs).toEqual([
+      { source: { light: 's2', below: 10, hysteresis: 5 } },
+      { source: { sun: true } },
+      { source: { time: { from: '17:00', to: '01:00' } } },
+    ]);
+    expect(r.gate).toEqual({ source: { held: { sources: [], state: 'any', seconds: 1800 } } });
+    expect(r.onTrue).toEqual([]);
+    const e = outsideLightTemplate({ levels: [lvl] }, null, null);
+    expect(e.name).toBe('Outside light');
+    expect(e.inputs[0].source).toEqual({ light: '', below: 10, hysteresis: 5 });
   });
 });

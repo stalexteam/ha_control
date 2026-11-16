@@ -17,7 +17,7 @@ function draw(over: Partial<RuleTraceOpts> = {}): { host: HTMLElement; onFocus: 
   const onFocus = vi.fn();
   const host = document.createElement('div');
   render(renderRuleTrace({
-    rule, inputName: i => names['device' in i.source ? i.source.device : i.source.rule], actionName: id => names[id],
+    rule, inputName: i => names['device' in i.source ? i.source.device : 'rule' in i.source ? i.source.rule : ''], actionName: id => names[id],
     note: null, now: NOW, onFocus, ...over,
   }), host);
   return { host, onFocus };

@@ -106,3 +106,61 @@ def test_validate_plan_rules():
     for match, rules in bad:
         with pytest.raises(vol.Invalid, match=match):
             validate_plan({**plan("p"), "rules": rules})
+
+
+def held(**kw):
+    h = {"sources": [{"device": "d1"}], "state": "any", "seconds": 1800}
+    h.update(kw)
+    return {"source": {"held": h}}
+
+
+def test_validate_plan_rule_sources_and_gate():
+    good = [
+        {"source": {"light": "d1", "below": 10, "hysteresis": 5}},
+        {"source": {"light": "d1", "below": 0.5, "hysteresis": 0}},
+        {"source": {"sun": True}, "not": True},
+        {"source": {"time": {"from": "17:00", "to": "01:00"}}},
+        {"source": {"time": {"from": "00:00", "to": "23:59"}}},
+        held(), held(seconds=1), held(seconds=86400, state="off", sources=[{"device": "a"}, {"rule": "r2"}]),
+    ]
+    for g in good:
+        validate_plan({**plan("p"), "rules": [rule(inputs=[g]), rule("r2")]})
+        validate_plan({**plan("p"), "rules": [rule(gate=g), rule("r2")]})
+    bad = [
+        ("light", {"source": {"light": "d1", "below": 0, "hysteresis": 5}}),
+        ("light", {"source": {"light": "d1", "below": 10, "hysteresis": -1}}),
+        ("light", {"source": {"light": "", "below": 10, "hysteresis": 1}}),
+        ("light", {"source": {"light": "d1", "below": True, "hysteresis": 1}}),
+        ("light", {"source": {"light": "d1", "below": 10}}),
+        ("sun", {"source": {"sun": False}}),
+        ("time", {"source": {"time": {"from": "17:00", "to": "17:00"}}}),
+        ("time", {"source": {"time": {"from": "24:00", "to": "01:00"}}}),
+        ("time", {"source": {"time": {"from": "7:00", "to": "08:00"}}}),
+        ("time", {"source": {"time": {"from": "10:00"}}}),
+        ("held seconds", held(seconds=0)),
+        ("held seconds", held(seconds=86401)),
+        ("held seconds", held(seconds=1.5)),
+        ("held seconds", held(seconds=True)),
+        ("held state", held(state="x")),
+        ("at least one", held(sources=[])),
+        ("rule input", held(sources=[{"light": "d"}])),
+        ("rule input", held(sources=[{"device": ""}])),
+        ("rule input", {"source": {"device": "a", "rule": "b"}}),
+        ("sun input", {"source": {"sun": True, "device": "a"}}),
+        ("not may only", {"source": {"sun": True}, "not": False}),
+    ]
+    for match, g in bad:
+        for r in (rule(inputs=[g]), rule(gate=g)):
+            with pytest.raises(vol.Invalid, match=match):
+                validate_plan({**plan("p"), "rules": [r]})
+    with pytest.raises(vol.Invalid, match="rule input"):
+        validate_plan({**plan("p"), "rules": [rule(gate="x")]})
+
+
+def test_validate_plan_rule_cycle_through_gate_and_held():
+    with pytest.raises(vol.Invalid, match="cycle"):
+        validate_plan({**plan("p"), "rules": [rule("a", gate={"source": {"rule": "b"}}), rule("b", inputs=ref("a"))]})
+    with pytest.raises(vol.Invalid, match="cycle"):
+        validate_plan({**plan("p"), "rules": [rule("a", inputs=[held(sources=[{"rule": "b"}])]), rule("b", inputs=ref("a"))]})
+    with pytest.raises(vol.Invalid, match="cycle"):
+        validate_plan({**plan("p"), "rules": [rule("a", gate=held(sources=[{"rule": "a"}]))]})

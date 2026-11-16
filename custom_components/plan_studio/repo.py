@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import json
+import math
+import re
 
 import voluptuous as vol
 
@@ -21,6 +23,60 @@ class RevisionConflict(Exception):
 
 def _is_id(v: object) -> bool:
     return isinstance(v, str) and bool(v)
+
+
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def _is_num(v: object) -> bool:
+    return type(v) in (int, float) and math.isfinite(v)
+
+
+def _simple_source(src: object) -> str | None:
+    """Rule id of a {device} / {rule} source (None for a device); raises when not one of them."""
+    if not isinstance(src, dict) or len(src) != 1 or not _is_id(src.get("device", src.get("rule"))):
+        raise vol.Invalid("rule input needs a source with a device or rule id")
+    return src.get("rule")
+
+
+def _validate_input(i: object) -> list[str]:
+    """Validate one rule input (or the gate); returns the rule ids it references."""
+    src = i.get("source") if isinstance(i, dict) else None
+    if not isinstance(src, dict):
+        raise vol.Invalid("rule input needs a source with a device or rule id")
+    if "not" in i and i["not"] is not True:
+        raise vol.Invalid("rule input not may only be true")
+    if "light" in src:
+        if set(src) != {"light", "below", "hysteresis"} or not _is_id(src["light"]):
+            raise vol.Invalid("rule light input needs a sensor id, below and hysteresis")
+        if not _is_num(src["below"]) or src["below"] <= 0 or not _is_num(src["hysteresis"]) or src["hysteresis"] < 0:
+            raise vol.Invalid("rule light input needs below > 0 and hysteresis >= 0")
+        return []
+    if "sun" in src:
+        if src != {"sun": True}:
+            raise vol.Invalid("rule sun input must be {sun: true}")
+        return []
+    if "time" in src:
+        t = src["time"]
+        if len(src) != 1 or not isinstance(t, dict) or set(t) != {"from", "to"} or not all(
+                isinstance(t[k], str) and _TIME_RE.match(t[k]) for k in ("from", "to")):
+            raise vol.Invalid("rule time input needs from and to as HH:MM")
+        if t["from"] == t["to"]:
+            raise vol.Invalid("rule time input needs from different from to")
+        return []
+    if "held" in src:
+        h = src["held"]
+        if len(src) != 1 or not isinstance(h, dict) or set(h) != {"sources", "state", "seconds"}:
+            raise vol.Invalid("rule held input needs sources, state and seconds")
+        if h["state"] not in ("on", "off", "any"):
+            raise vol.Invalid("rule held state must be on, off or any")
+        if type(h["seconds"]) is not int or not 1 <= h["seconds"] <= 86400:
+            raise vol.Invalid("rule held seconds must be a whole number 1..86400")
+        if not isinstance(h["sources"], list) or not h["sources"]:
+            raise vol.Invalid("rule held input needs at least one source")
+        return [x for x in map(_simple_source, h["sources"]) if x is not None]
+    rule_id = _simple_source(src)
+    return [rule_id] if rule_id is not None else []
 
 
 def _validate_rules(rules: object) -> None:
@@ -50,13 +106,9 @@ def _validate_rules(rules: object) -> None:
             raise vol.Invalid("rule inputs must be a list")
         refs: list[str] = []
         for i in inputs:
-            src = i.get("source") if isinstance(i, dict) else None
-            if not isinstance(src, dict) or len(src) != 1 or not _is_id(src.get("device", src.get("rule"))):
-                raise vol.Invalid("rule input needs a source with a device or rule id")
-            if "not" in i and i["not"] is not True:
-                raise vol.Invalid("rule input not may only be true")
-            if "rule" in src:
-                refs.append(src["rule"])
+            refs.extend(_validate_input(i))
+        if "gate" in r:
+            refs.extend(_validate_input(r["gate"]))
         for key in ("onTrue", "onFalse"):
             actions = r.get(key)
             if not isinstance(actions, list):

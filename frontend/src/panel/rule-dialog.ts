@@ -44,6 +44,7 @@ function seconds(v: string): number {
 
 function inputName(o: RuleDialogOpts, i: RuleInput): string {
   if ('device' in i.source) return o.deviceById(i.source.device)?.name ?? t('rules.missingDevice');
+  if (!('rule' in i.source)) return '';
   return o.ruleName(i.source.rule) ?? t('rules.missingRule');
 }
 
@@ -97,7 +98,7 @@ function actionList(o: RuleDialogOpts, side: 'true' | 'false'): TemplateResult {
 
 function inputRow(o: RuleDialogOpts, i: RuleInput, k: number): TemplateResult {
   const r = o.draft.rule;
-  const missing = 'device' in i.source ? !o.deviceById(i.source.device) : o.ruleName(i.source.rule) === undefined;
+  const missing = 'device' in i.source ? !o.deviceById(i.source.device) : 'rule' in i.source && o.ruleName(i.source.rule) === undefined;
   return html`
     <div class="rline${missing ? ' bad' : ''}" data-field=${fieldOf({ input: k })} tabindex="-1">
       <span class="grow">${inputName(o, i)}</span>
