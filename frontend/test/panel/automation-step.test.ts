@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { $, click, key, mount, press, stored, undo } from './helpers';
+import { $, click, key, mount, press, pressSave, redo, stored, undo } from './helpers';
 import { createMockHass, STORAGE_KEY } from '../../dev/mock-hass';
 import { SCENES } from '../../dev/scenes';
 import type { Plan, Rule } from '../../src/model/types';
@@ -23,8 +23,8 @@ const TRACES: Record<string, RuleTrace> = {
   'r-none': { status: 'ok', verdict: false, inputs: [], unknownInputs: 0 },
 };
 
-async function open(): Promise<PlanStudioPanel> {
-  const plan: Plan = { ...structuredClone(SCENES.room.plans[0]), rules: structuredClone(RULES) };
+async function open(rules: Rule[] = RULES): Promise<PlanStudioPanel> {
+  const plan: Plan = { ...structuredClone(SCENES.room.plans[0]), rules: structuredClone(rules) };
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { [plan.id]: plan } }));
   const el = await mount(createMockHass({ rulesFrame: TRACES }));
   el.setMode('automation');
@@ -144,5 +144,51 @@ describe('Automation step', () => {
     click(el, 2500, 1500);
     await el.updateComplete;
     expect($(el, 'svg.plan path.zone.selected').getAttribute('data-id')).toBe('z-mid');
+  });
+
+  it('undo and redo keep the selected zone', async () => {
+    const el = await open();
+    click(el, 2500, 1500);
+    await el.updateComplete;
+    await press(el, '.rrow[data-id="r-mid"] button[data-action="rule-delete"]');
+    await press(el, 'button[data-action="delete-rule-confirm"]');
+    expect(rows(el)).toEqual([]);
+    await undo(el);
+    expect(el.selection).toEqual({ kind: 'zone', id: 'z-mid' });
+    expect(rows(el)).toEqual(['r-mid']);
+    await redo(el);
+    expect(el.selection).toEqual({ kind: 'zone', id: 'z-mid' });
+    expect(title(el)).toBe('Middle');
+  });
+
+  it('the delete confirm names the rules that use this rule as an input', async () => {
+    const users = [
+      ...RULES,
+      rule('r-a', 'Uses loose A', null, { inputs: [{ source: { rule: 'r-none' } }] }),
+      rule('r-b', 'Uses loose B', null, { inputs: [{ source: { device: 'd-leak' } }, { source: { rule: 'r-none' }, not: true }] }),
+    ];
+    const el = await open(users);
+    await press(el, '.rrow[data-id="r-none"] button[data-action="rule-delete"]');
+    expect($(el, '.dialog').textContent).toContain('Used by: Uses loose A, Uses loose B — they will lose this input.');
+    await press(el, 'button[data-action="delete-rule-cancel"]');
+    await press(el, '.rrow[data-id="r-a"] button[data-action="rule-delete"]');
+    expect($(el, '.dialog').textContent).not.toContain('Used by');
+  });
+
+  it('a row whose rule differs from its saved version says "Unsaved changes" until Save', async () => {
+    const el = await open();
+    const unsaved = () => el.shadowRoot!.querySelector('.rrow[data-id="r-none"] .runsaved');
+    expect(unsaved()).toBeNull();
+    el.openRuleDialog('condition', 'r-none');
+    await el.updateComplete;
+    const name = $<HTMLInputElement>(el, '.rule-backdrop [data-field="name"]');
+    name.value = 'Loose rule 2';
+    name.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+    await el.updateComplete;
+    await press(el, 'button[data-action="rule-ok"]');
+    expect(unsaved()!.textContent).toContain('Unsaved changes');
+    expect(el.shadowRoot!.querySelectorAll('.rrow .runsaved')).toHaveLength(1);
+    await pressSave(el);
+    expect(unsaved()).toBeNull();
   });
 });

@@ -59,8 +59,15 @@ class FakeServices:
             raise RuntimeError(self.fail or "boom")
 
 
+class CoreState:
+    not_running = "NOT_RUNNING"
+    starting = "STARTING"
+    running = "RUNNING"
+
+
 class FakeHass:
     def __init__(self):
+        self.state = CoreState.running
         self.states = FakeStates()
         self.services = FakeServices()
         self.tasks = []
@@ -98,7 +105,7 @@ class FakeStore:
 
 @pytest.fixture
 def env(monkeypatch):
-    tracked, later, cmds = [], [], {}
+    tracked, later, cmds, started = [], [], {}, []
 
     def track(hass, ids, cb):
         entry = {"ids": list(ids), "cb": cb, "on": True}
@@ -109,6 +116,12 @@ def env(monkeypatch):
         assert getattr(action, "_hass_callback", False), "timer action must be a @callback"
         entry = {"delay": delay, "action": action, "on": True}
         later.append(entry)
+        return lambda: entry.__setitem__("on", False)
+
+    def at_started(hass, cb):
+        assert getattr(cb, "_hass_callback", False), "the start action must be a @callback"
+        entry = {"cb": cb, "on": True}
+        started.append(entry)
         return lambda: entry.__setitem__("on", False)
 
     def command(schema):
@@ -131,12 +144,14 @@ def env(monkeypatch):
         "homeassistant.components": _module("homeassistant.components", websocket_api=ws),
         "homeassistant.components.websocket_api": ws,
         "homeassistant.core": _module(
-            "homeassistant.core", CALLBACK_TYPE=object, HomeAssistant=object, callback=_mark, Context=Context
+            "homeassistant.core",
+            CALLBACK_TYPE=object, HomeAssistant=object, callback=_mark, Context=Context, CoreState=CoreState,
         ),
         "homeassistant.helpers": _module("homeassistant.helpers"),
         "homeassistant.helpers.event": _module(
             "homeassistant.helpers.event", async_track_state_change_event=track, async_call_later=call_later
         ),
+        "homeassistant.helpers.start": _module("homeassistant.helpers.start", async_at_started=at_started),
         "homeassistant.helpers.storage": _module("homeassistant.helpers.storage", Store=FakeStore),
         "homeassistant.util": _module("homeassistant.util"),
         "homeassistant.util.dt": _module(
@@ -151,7 +166,9 @@ def env(monkeypatch):
     monkeypatch.setitem(sys.modules, NAME, pkg)
     live_mod = importlib.import_module(f"{NAME}.live")
     ws_mod = importlib.import_module(f"{NAME}.websocket_api")
-    yield types.SimpleNamespace(live=live_mod, ws=ws_mod, tracked=tracked, later=later, cmds=cmds)
+    yield types.SimpleNamespace(
+        live=live_mod, ws=ws_mod, tracked=tracked, later=later, cmds=cmds, started=started
+    )
     for name in [m for m in sys.modules if m.startswith(f"{NAME}.")]:
         sys.modules.pop(name, None)
 
@@ -314,5 +331,121 @@ def test_late_failure_of_an_older_firing_is_ignored(env):
         live.engine.handle_state("binary_sensor.leak")  # firing 2, succeeds
         await asyncio.gather(*hass.tasks, return_exceptions=True)
         assert live.engine.snapshot("p1")["r1"]["status"] == "ok"
+
+    asyncio.run(go())
+
+
+def _boot_plan():
+    p = _plan()
+    p["levels"][0]["devices"].append(
+        {"id": "sw2", "name": "sw2", "props": {"kind": "socket"}, "bindings": {"control": "switch.sock2"}}
+    )
+    p["rules"][0]["onTrue"].append({"device": "sw2", "do": "off"})
+    p["rules"][0]["onFalse"] = [{"device": "sw", "do": "on"}]
+    return p
+
+
+async def _boot(env, hass, plan):
+    """Start during bootstrap with a wet sensor: the rule fires at once, before HA has started."""
+    hass.state = CoreState.not_running
+    hass.states.d["switch.sock2"] = "on"
+    live = await _start(env, hass, plan)
+    hass.states.d["binary_sensor.leak"] = "on"
+    live.engine.handle_state("binary_sensor.leak")
+    return live
+
+
+def _fire_started(env, hass):
+    hass.state = CoreState.running
+    for entry in [e for e in env.started if e["on"]]:
+        entry["on"] = False
+        entry["cb"](hass)
+
+
+def test_calls_before_start_are_sent_once_after_start_in_order_with_own_contexts(env):
+    async def go():
+        hass = FakeHass()
+        hass.services.known.clear()  # the switch platform is not set up yet
+        live = await _boot(env, hass, _boot_plan())
+        ignored = []
+        orig = live.runtime.ignore_context
+        live.runtime.ignore_context = lambda cid: (ignored.append(cid), orig(cid))[1]
+        assert hass.tasks == [] and hass.services.calls == []
+        assert live.engine.snapshot("p1")["r1"]["status"] == "ok"
+        assert len([e for e in env.started if e["on"]]) == 1  # one start listener for all deferred calls
+        hass.services.known.add(("switch", "turn_off"))
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        assert [(c[0], c[1], c[2]) for c in hass.services.calls] == [
+            ("switch", "turn_off", {"entity_id": "switch.sock"}),
+            ("switch", "turn_off", {"entity_id": "switch.sock2"}),
+        ]
+        assert ignored == [c[4].id for c in hass.services.calls]
+        _fire_started(env, hass)  # nothing is sent twice
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 2
+        assert live.engine.snapshot("p1")["r1"]["status"] == "ok"
+
+    asyncio.run(go())
+
+
+def test_a_service_still_missing_after_start_is_reported(env):
+    async def go():
+        hass = FakeHass()
+        hass.services.known.clear()
+        live = await _boot(env, hass, _plan())
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks, return_exceptions=True)
+        assert hass.services.calls == []
+        trace = live.engine.snapshot("p1")["r1"]
+        assert trace["status"] == "error" and trace["reason"] == "service failed"
+        assert "switch.turn_off" in trace["last"]["error"]
+
+    asyncio.run(go())
+
+
+def test_a_stale_call_from_before_start_is_not_sent(env):
+    async def go():
+        hass = FakeHass()
+        hass.services.known.add(("switch", "turn_on"))
+        live = await _boot(env, hass, _boot_plan())
+        hass.states.d["binary_sensor.leak"] = "off"
+        live.engine.handle_state("binary_sensor.leak")  # a newer firing: switch.sock on
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        assert [(c[0], c[1], c[2]) for c in hass.services.calls] == [("switch", "turn_on", {"entity_id": "switch.sock"})]
+
+    asyncio.run(go())
+
+
+def test_a_rule_changed_or_removed_before_start_sends_nothing(env):
+    async def go():
+        hass = FakeHass()
+        plans = FakePlans([_plan()])
+        hass.state = CoreState.not_running
+        hass.states.d.update({"binary_sensor.leak": "on", "switch.sock": "on"})
+        live = env.live.LiveRuntime(hass, plans)
+        await live.async_start()  # the wet sensor fires at rule start
+        changed = _plan(on_delay=3)
+        plans._plans = [changed]
+        live.reload()  # the changed rule restarts; its start firing is deferred again
+        plans._plans = []
+        live.reload()
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        assert hass.services.calls == []
+
+    asyncio.run(go())
+
+
+def test_stop_before_start_drops_the_deferred_calls(env):
+    async def go():
+        hass = FakeHass()
+        live = await _boot(env, hass, _plan())
+        await live.async_stop()
+        assert not [e for e in env.started if e["on"]]
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        assert hass.services.calls == []
 
     asyncio.run(go())

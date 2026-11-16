@@ -42,7 +42,7 @@ import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { RulesFeed } from '../live/rules-feed';
-import { addRule, deleteRule, isRuleInputDevice, leakTemplate, newRule, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
+import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakTemplate, newRule, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import type { RuleTemplate } from './rule-templates';
 import { renderRuleDialog, type RuleDraft } from './rule-dialog';
 import { PowerFeed, powerPayload } from '../live/power-feed';
@@ -377,12 +377,12 @@ export class PlanStudioPanel extends LitElement {
     const levels = this.planLevels();
     const devices = levels.flatMap(l => l.devices);
     const rule = d.rule;
-    const stored = this.rules.find(r => r.id === rule.id);
-    const saved = stored ? this.rulesFeed.trace(rule.id) : undefined;
-    // Live values only for an unchanged saved rule: after an edit they would land on the wrong blocks.
-    const same = !!stored && ruleEqual(stored, rule);
-    const trace = same ? saved : undefined;
-    const note = saved === undefined ? t('rules.flow.new') : same ? null : t('rules.flow.edited');
+    // Live values only for a rule equal to its saved copy (not an OK-confirmed but unsaved edit): after an edit they
+    // would land on the wrong blocks.
+    const saved = this.session.savedRules.find(r => r.id === rule.id);
+    const same = !!saved && ruleEqual(saved, rule);
+    const trace = same ? this.rulesFeed.trace(rule.id) : undefined;
+    const note = !saved ? t('rules.flow.new') : same ? null : t('rules.flow.edited');
     const multi = levels.length > 1;
     return renderRuleDialog({
       draft: d,
@@ -456,14 +456,15 @@ export class PlanStudioPanel extends LitElement {
   redo(): void { if (!this.modal) this.step(() => this.history?.redo() ?? null); }
 
   /**
-   * Undo / redo drop the selection, except in the Binding step, which keeps the selected device while it exists;
-   * the field notice goes with a dropped selection.
+   * Undo / redo drop the selection, except in the Binding step (the selected device) and the Automation step (the
+   * selected zone), which keep it while it exists; the field notice goes with a dropped selection.
    */
   private step(op: () => PlanDoc | null): void {
     this.activeTool.cancel();
     if (op()) this.save.markDirty();
     const s = this.selection, level = this.level;
-    this.selection = this.mode === 'binding' && s && level && selectionExists(level, s, this.power) ? s : null;
+    const keep = this.mode === 'binding' || this.mode === 'automation';
+    this.selection = keep && s && level && selectionExists(level, s, this.power) ? s : null;
     if (!this.selection) this.fieldNotice = null;
     this.requestUpdate();
   }
@@ -575,6 +576,7 @@ export class PlanStudioPanel extends LitElement {
     return renderActiveDialog({
       dialog: this.dialog, draft: this.pendingDraft, planName: this.plan?.name ?? '',
       ruleName: this.dialog?.kind === 'delete-rule' ? this.rules.find(r => r.id === (this.dialog as { id: string }).id)?.name ?? '' : '',
+      ruleUsers: this.dialog?.kind === 'delete-rule' ? ruleUsers(this.rules, this.dialog.id).map(r => r.name) : [],
       saving: this.save.state === 'saving', message: this.save.errorMessage,
       restore: d => this.session.restoreDraft(d), discard: d => this.session.discardDraft(d), startNew: () => this.session.startNewPlan(),
       confirmDelete: () => { void this.session.confirmDelete(); }, confirmDeleteRule: () => this.confirmDeleteRule(), confirmSwitch: () => this.session.confirmSwitch(),

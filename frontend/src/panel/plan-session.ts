@@ -1,4 +1,4 @@
-import type { Id, Plan } from '../model/types';
+import type { Id, Plan, Rule } from '../model/types';
 import { emptyPlan, normalizeLevel } from '../model/types';
 import { History } from '../editor/history';
 import { defaultPower, normalizePower, type PlanDoc } from '../model/power';
@@ -13,6 +13,12 @@ import type { PlanStudioPanel } from './plan-studio-panel';
 
 /** Plan lifecycle: load / open / switch / new / delete, local drafts and saving. */
 export class PlanSession {
+  /**
+   * The rules as the server has them for the open plan (set on open and after each successful save): the rule dialog
+   * shows live values only for a rule equal to its saved copy, and the rules panel marks rules that differ from it.
+   */
+  savedRules: Rule[] = [];
+
   constructor(private readonly h: PlanStudioPanel) {}
 
   async load(): Promise<void> {
@@ -24,6 +30,7 @@ export class PlanSession {
       this.h.plans = list;
       if (list.length === 0) {
         this.h.save.reset(null);
+        this.savedRules = [];
         this.adopt(emptyPlan(t('plan.default')));
         this.offerDraft(this.h.drafts.latest());
       } else {
@@ -47,6 +54,7 @@ export class PlanSession {
     if (plan.schemaVersion !== 2) throw new Error(t('load.oldServer'));
     this.h.drafts.cancel();
     this.h.save.reset(plan.revision);
+    this.savedRules = plan.rules ?? [];
     this.adopt(plan);
     this.h.drafts.setLastPlanId(plan.id);
     this.offerDraft(this.h.drafts.read(plan.id));
@@ -128,6 +136,7 @@ export class PlanSession {
     this.h.toolId = toolIdsFor(this.h.mode)[0];
     this.h.notice = null;
     this.h.save.reset(null);
+    this.savedRules = [];
     this.adopt(emptyPlan(t('plan.default')));
     this.offerDraft(null);
   }
@@ -234,16 +243,25 @@ export class PlanSession {
     return { ...rest, levels, ...(power ? { power } : {}), ...(rules ? { rules } : {}), revision: this.h.save.baseRevision ?? 0 };
   }
 
+  /** After a save: the rules of the plan that was sent are the saved ones when it succeeded. */
+  private keepSaved(sent: Plan): void {
+    if (this.h.save.state === 'saved') this.savedRules = sent.rules ?? [];
+  }
+
   async doSave(): Promise<void> {
     if (!this.h.plan || this.h.save.state === 'saving') return;
-    await this.h.save.save(this.currentPlan());
+    const sent = this.currentPlan();
+    await this.h.save.save(sent);
+    this.keepSaved(sent);
     this.afterSaved(this.h.plan.id);
     if (this.h.save.state === 'conflict') this.h.dialog = { kind: 'conflict' };
   }
 
   async doOverwrite(): Promise<void> {
     if (!this.h.plan || this.h.save.state === 'saving') return;
-    await this.h.save.overwrite(this.currentPlan());
+    const sent = this.currentPlan();
+    await this.h.save.overwrite(sent);
+    this.keepSaved(sent);
     this.afterSaved(this.h.plan.id);
     // A second conflict (e.g. the plan was deleted elsewhere) leaves only "Save as new".
     this.h.dialog = this.h.save.state === 'conflict' ? { kind: 'conflict-again' } : null;
@@ -253,7 +271,9 @@ export class PlanSession {
     if (!this.h.plan || this.h.save.state === 'saving') return;
     const name = `${this.h.plan.name} ${t('plan.copySuffix')}`;
     const oldId = this.h.plan.id;
-    const res = await this.h.save.saveAsNew(this.currentPlan(), name);
+    const sent = this.currentPlan();
+    const res = await this.h.save.saveAsNew(sent, name);
+    if (res) this.keepSaved(sent);
     if (res) { this.h.plan = res; this.h.dialog = null; this.afterSaved(oldId, res.id); } else if (this.h.save.state === 'error') this.h.dialog = null;
   }
 }

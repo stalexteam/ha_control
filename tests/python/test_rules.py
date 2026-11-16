@@ -22,8 +22,9 @@ class World:
     def lookup(self, eid):
         return self.states.get(eid)
 
-    def call(self, domain, service, eid, on_error=None):
+    def call(self, domain, service, eid, on_error=None, current=None):
         self.on_error = on_error
+        self.current = current
         self.calls.append((domain, service, eid))
         if eid in self.fail:
             raise RuntimeError("boom")
@@ -511,3 +512,68 @@ def test_consumer_follows_a_reference_without_delay():
     w.set("binary_sensor.m", "on")
     assert trace(w, "a")["verdict"] is True and trace(w, "b")["verdict"] is False
     assert w.calls[-1] == ("light", "turn_off", "light.l")
+
+
+# --- target availability and call validity -----------------------------------
+
+@pytest.mark.parametrize("state", ["unavailable", "unknown", None])
+def test_an_unavailable_target_is_still_called_but_recorded_as_an_error(state):
+    w = leak_world()
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE)])])
+    if state is None:
+        w.states.pop("valve.v")
+    else:
+        w.states["valve.v"] = (state, {})
+    w.set("binary_sensor.s1", "on")
+    assert w.calls == [("valve", "close_valve", "valve.v")]
+    t = trace(w)
+    assert t["status"] == "error" and t["reason"] == "target unavailable"
+    assert t["last"]["error"] == "target unavailable" and t["last"]["target"] == "Valve"
+    # the next firing to an available target clears it
+    w.states["valve.v"] = ("open", {})
+    w.set("binary_sensor.s1", "off")
+    w.set("binary_sensor.s1", "on")
+    t = trace(w)
+    assert t["status"] == "ok" and "error" not in t["last"]
+
+
+def test_a_raising_call_wins_over_an_unavailable_target():
+    w = leak_world(valve__v="unavailable")
+    w.fail.add("valve.v")
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE)])])
+    w.set("binary_sensor.s1", "on")
+    t = trace(w)
+    assert t["reason"] == "service failed" and t["last"]["error"] == "boom"
+
+
+def test_current_is_true_only_for_the_latest_firing_of_the_same_rule():
+    w = leak_world()
+    p = plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE, on_false=(("v", "open"),))])
+    w.engine.load_plans([p])
+    w.set("binary_sensor.s1", "on")
+    first = w.current
+    assert first() is True
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE, on_false=(("v", "open"),), name="New")])])
+    assert first() is True  # a cosmetic change keeps the firing
+    w.set("binary_sensor.s1", "off")  # a newer firing
+    assert first() is False and w.current() is True
+    second = w.current
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1", "s2"], on_true=CLOSE, on_false=(("v", "open"),))])])
+    assert second() is False  # the rule changed (it restarts dry: nothing fired)
+    w.engine.load_plans([p])
+    w.set("binary_sensor.s1", "on")
+    third = w.current
+    assert third() is True
+    w.engine.load_plans([])
+    assert third() is False  # the rule is gone
+
+
+def test_a_late_failure_after_an_unchanged_reload_still_counts():
+    w = leak_world()
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE)])])
+    w.set("binary_sensor.s1", "on")
+    on_error = w.on_error
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE, name="Renamed")])])
+    on_error("late boom")
+    t = trace(w)
+    assert t["status"] == "error" and t["reason"] == "service failed" and t["last"]["error"] == "late boom"

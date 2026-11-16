@@ -2,12 +2,14 @@ import { html, nothing, type TemplateResult } from 'lit';
 import type { Id, Level, Rule } from '../model/types';
 import type { Selection } from '../editor/tools/types';
 import type { RuleLast, RuleTrace } from '../live/rules-feed';
-import { rulesFor } from '../model/rules';
+import { ruleEqual, rulesFor } from '../model/rules';
 import { t } from '../i18n';
 
 export interface RulesPanelOpts {
   level: Level;
   rules: Rule[];
+  /** The saved copy of a rule; undefined for a rule not saved yet. */
+  saved(ruleId: Id): Rule | undefined;
   selection: Selection | null;
   /** Live trace of a saved rule; undefined for a rule the server does not know. */
   trace(ruleId: Id): RuleTrace | undefined;
@@ -40,6 +42,8 @@ function row(r: Rule, orphan: boolean, o: RulesPanelOpts): TemplateResult {
   const tr = o.trace(r.id);
   const verdict = tr?.verdict === true ? 'true' : tr?.verdict === false ? 'false' : 'unknown';
   const unknown = tr?.unknownInputs ?? 0;
+  const saved = o.saved(r.id);
+  const changed = !!saved && !ruleEqual(saved, r);
   return html`
     <div class="rrow" data-id=${r.id}>
       <span class="vdot" data-verdict=${verdict} role="img" aria-label=${t(`rules.verdict.${verdict}`)}
@@ -47,6 +51,7 @@ function row(r: Rule, orphan: boolean, o: RulesPanelOpts): TemplateResult {
       <div class="rbody">
         <span class="rname">${r.name}${orphan ? html` <span class="orphan">(${t('rules.orphan')})</span>` : nothing}</span>
         <span class="rstatus ${tr?.status ?? ''}">${statusText(r, tr, o)}</span>
+        ${changed ? html`<span class="runsaved">${t('rules.unsavedChanges')}</span>` : nothing}
         ${unknown > 0 ? html`<span class="rwarn">${unknown === 1 ? t('rules.unknown1') : t('rules.unknownN').replace('{n}', String(unknown))}</span>` : nothing}
         ${tr?.last ? html`<span class="rlast">${lastText(tr.last)}</span>` : nothing}
       </div>

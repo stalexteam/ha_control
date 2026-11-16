@@ -16,6 +16,8 @@ Callback = Callable[[bool, "dict[str, dict]"], None]
 # (plan id, device id, event): the event is an intent with "at", or a status dict
 Listener = Callable[[str, str, dict], None]
 Key = tuple[str, str]
+# own command contexts remembered; HA reuses a context for a few seconds, so only the latest ones matter
+OWN_LIMIT = 200
 
 
 def _copy(event: dict) -> dict:
@@ -33,7 +35,7 @@ class Runtime:
         self._last: dict[Key, dict] = {}
         self._subs: dict[str, list[Callback]] = {}
         self._listeners: list[Listener] = []
-        self._own: set[str] = set()
+        self._own: dict[str, None] = {}  # insertion ordered: the oldest goes first past OWN_LIMIT
 
     def load_plans(self, plans: "list[dict]") -> None:
         old = self._containers
@@ -153,7 +155,10 @@ class Runtime:
 
     def ignore_context(self, context_id: str) -> None:
         """Register the HA context id of an own command: changes it causes are not presses for a wall switch."""
-        self._own.add(context_id)
+        self._own.pop(context_id, None)
+        self._own[context_id] = None
+        while len(self._own) > OWN_LIMIT:
+            del self._own[next(iter(self._own))]
 
     def entity_ids(self) -> "set[str]":
         out: set[str] = set()

@@ -10,8 +10,9 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, Context, CoreState, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -48,6 +49,9 @@ class LiveRuntime:
         self._untrack: CALLBACK_TYPE | None = None
         self._stopped = False
         self._power_store: Store = Store(hass, 1, POWER_STORAGE_KEY)
+        # rule actions fired before HA has started (a sensor known at boot), sent in order once it has
+        self._deferred: list[tuple[str, str, str, Callable[[str], None], Callable[[], bool]]] = []
+        self._unstarted: CALLBACK_TYPE | None = None
 
     async def async_start(self) -> None:
         # The v0.4 runtime store held persisted outputs; it is no longer used.
@@ -83,6 +87,10 @@ class LiveRuntime:
         # A power subscription that ends later (its connection closes) retracks; it must not track again.
         self._stopped = True
         self._untrack_all()
+        self._deferred.clear()
+        if self._unstarted is not None:
+            self._unstarted()
+            self._unstarted = None
         self.engine.load_plans([])  # cancels every rule timer
 
     @callback
@@ -109,10 +117,43 @@ class LiveRuntime:
         self.power.handle_state(data["entity_id"])
         self.engine.handle_state(data["entity_id"])
 
-    def _call(self, domain: str, service: str, entity_id: str, on_error: Callable[[str], None]) -> None:
-        """Send a rule action as a task; a missing service fails now, a failing call is reported later."""
+    def _call(
+        self,
+        domain: str,
+        service: str,
+        entity_id: str,
+        on_error: Callable[[str], None],
+        current: Callable[[], bool] = lambda: True,
+    ) -> None:
+        """Send a rule action as a task; a missing service fails now, a failing call is reported later.
+
+        Before HA has started (platforms may not have registered their services yet) the call waits for the start;
+        then it is sent only while its firing is still the rule's latest one (current()), and a missing service is
+        reported through on_error."""
+        if self._hass.state is not CoreState.running:
+            self._deferred.append((domain, service, entity_id, on_error, current))
+            if self._unstarted is None:
+                self._unstarted = async_at_started(self._hass, self._started)
+            return
         if not self._hass.services.has_service(domain, service):
             raise RuntimeError(f"service {domain}.{service} not found")
+        self._dispatch(domain, service, entity_id, on_error)
+
+    @callback
+    def _started(self, _hass: HomeAssistant) -> None:
+        """Send the calls deferred during the start, in the order they were fired, each once."""
+        self._unstarted = None
+        deferred, self._deferred = self._deferred, []
+        for domain, service, entity_id, on_error, current in deferred:
+            if self._stopped or not current():
+                continue  # the rule fired again, changed or went away: this call is stale
+            if not self._hass.services.has_service(domain, service):
+                _LOGGER.warning("rule action %s.%s %s failed: service not found", domain, service, entity_id)
+                on_error(f"service {domain}.{service} not found")
+                continue
+            self._dispatch(domain, service, entity_id, on_error)
+
+    def _dispatch(self, domain: str, service: str, entity_id: str, on_error: Callable[[str], None]) -> None:
         ctx = Context()
         self.runtime.ignore_context(ctx.id)  # its state change is not a press for a wall switch
         # A background task that starts on the next loop turn: the call cannot re-enter the engine from inside a firing.

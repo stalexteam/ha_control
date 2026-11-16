@@ -22,6 +22,9 @@ export function rulesFor(rules: Rule[], zoneId: Id | null, zoneExists: (id: Id) 
 
 const ruleRefs = (r: Rule): Id[] => r.inputs.flatMap(i => ('rule' in i.source ? [i.source.rule] : []));
 
+/** The other rules that take the given rule as an input. */
+export const ruleUsers = (rules: Rule[], id: Id): Rule[] => rules.filter(r => r.id !== id && ruleRefs(r).includes(id));
+
 /** Ids on a reference cycle through the candidate (the candidate first), else null. The candidate replaces the stored rule of its id. */
 export function ruleCycle(rules: Rule[], candidate: Rule): Id[] | null {
   const byId = new Map(rules.map(r => [r.id, r] as const));

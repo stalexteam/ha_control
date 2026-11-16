@@ -43,7 +43,7 @@ export function renderSide(h: PlanStudioPanel, level: Level): TemplateResult {
   if (h.mode === 'binding') return bindingSide(h, level);
   if (h.mode === 'automation') {
     return html`<div class="props">${renderRulesPanel({
-      level, rules: h.rules, selection: h.selection, trace: id => h.rulesFeed.trace(id), live: h.rulesFeed.ready,
+      level, rules: h.rules, saved: id => h.session.savedRules.find(r => r.id === id), selection: h.selection, trace: id => h.rulesFeed.trace(id), live: h.rulesFeed.ready,
       feedError: h.rulesFeed.error, onEdit: id => h.openRuleDialog('condition', id), onDelete: id => { h.dialog = { kind: 'delete-rule', id }; },
     })}</div>`;
   }

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { $, click, key, mount, press, stored, undo } from './helpers';
+import { $, click, key, mount, press, pressSave, stored, undo } from './helpers';
 import { createMockHass, STORAGE_KEY } from '../../dev/mock-hass';
 import { SCENES } from '../../dev/scenes';
 import type { Plan, Rule } from '../../src/model/types';
@@ -209,5 +209,38 @@ describe('Rule dialog', () => {
     await type(el, '[data-field="name"]', 'Leak Main -> valve'); // back to the saved values
     expect(el.shadowRoot!.querySelector('.rule-backdrop .fc-note')).toBeNull();
     expect(q(el, '.fc-blk[data-block="input-0"]').textContent).toContain('wet');
+  });
+
+  it('a rule changed with OK but not saved is compared with its saved version: no live values until Save', async () => {
+    const el = await open();
+    el.openRuleDialog('condition', 'rule-leak');
+    await el.updateComplete;
+    await type(el, '[data-field="name"]', 'Other name');
+    await press(el, 'button[data-action="rule-ok"]');
+    el.openRuleDialog('condition', 'rule-leak');
+    await el.updateComplete;
+    expect(q(el, '.fc-note').textContent).toBe('Saved version: your changes apply after Save');
+    expect(q(el, '.fc-blk[data-block="input-0"]').textContent).not.toContain('wet');
+    await type(el, '[data-field="name"]', 'Leak Main -> valve'); // back to the saved values
+    expect(el.shadowRoot!.querySelector('.rule-backdrop .fc-note')).toBeNull();
+    expect(q(el, '.fc-blk[data-block="input-0"]').textContent).toContain('wet');
+    await type(el, '[data-field="name"]', 'Other name');
+    await press(el, 'button[data-action="rule-cancel"]');
+    await pressSave(el);
+    el.openRuleDialog('condition', 'rule-leak');
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.rule-backdrop .fc-note')).toBeNull(); // saved now
+    expect(q(el, '.fc-blk[data-block="input-0"]').textContent).toContain('wet');
+  });
+
+  it('a rule added with OK but not saved still says "Live state appears after Save"', async () => {
+    const el = await open([]);
+    await press(el, 'button[data-template="condition"]');
+    await type(el, '[data-field="name"]', 'Water');
+    await choose(el, 'select[data-action="add-input"]', 'd:d-leak');
+    await press(el, 'button[data-action="rule-ok"]');
+    el.openRuleDialog('condition', el.rules[0].id);
+    await el.updateComplete;
+    expect(q(el, '.fc-note').textContent).toBe('Live state appears after Save');
   });
 });

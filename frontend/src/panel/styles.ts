@@ -183,6 +183,7 @@ export const panelStyles = css`
   .rbody { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .rname { font-weight: 500; overflow-wrap: anywhere; }
   .rname .orphan, .rstatus, .rlast { color: var(--ch-muted); font-size: 12px; }
+  .runsaved { font-size: 12px; font-style: italic; }
   .rstatus.error, .rwarn { color: var(--ch-error); font-size: 12px; }
   .ractions { display: flex; flex-direction: column; gap: 4px; }
   .ractions .btn { padding: 3px 10px; font-size: 12px; }

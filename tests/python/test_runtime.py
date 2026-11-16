@@ -297,3 +297,19 @@ def test_entity_ids_cover_all_containers():
         plan(wall(), pid="p2"),
     ])
     assert e.rt.entity_ids() == {"sensor.b", "light.f"}
+
+
+def test_own_contexts_are_bounded_to_the_latest_ones():
+    import runtime
+
+    e = Env(light__f="off")
+    e.rt.load_plans([plan(wall())])
+    frames = e.frames()
+    for n in range(runtime.OWN_LIMIT + 1):
+        e.rt.ignore_context(f"ctx-{n}")
+    e.rt.ignore_context(f"ctx-{runtime.OWN_LIMIT}")  # registering again does not grow the set
+    assert len(e.rt._own) == runtime.OWN_LIMIT
+    e.set("light.f", "on", context=(f"ctx-{runtime.OWN_LIMIT}", None))  # still own
+    assert frames == []
+    e.set("light.f", "off", context=("ctx-0", None))  # the oldest one is forgotten: a press
+    assert frames[-1][1]["w"]["last"]["action"] == "set"

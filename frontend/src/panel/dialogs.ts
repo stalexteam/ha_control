@@ -58,6 +58,8 @@ export interface ActiveDialogOpts {
   planName: string;
   /** The rule a 'delete-rule' dialog asks about. */
   ruleName: string;
+  /** Names of the rules that take it as an input (they lose that input). */
+  ruleUsers: string[];
   saving: boolean;
   message: string | null;
   restore(d: Draft): void;
@@ -97,7 +99,7 @@ export function renderActiveDialog(o: ActiveDialogOpts): TemplateResult | typeof
       return renderDialog(t('delete.rule.title'), t('delete.rule.text').replace('{name}', o.ruleName), [
         { action: 'delete-rule-confirm', label: t('delete.confirm'), primary: true, onClick: o.confirmDeleteRule },
         { ...cancel, action: 'delete-rule-cancel' },
-      ]);
+      ], o.ruleUsers.length > 0 ? t('delete.rule.usedBy').replace('{names}', o.ruleUsers.join(', ')) : null);
     case 'switch':
       return renderDialog(t('switch.title'), t('switch.text'), [
         { action: 'switch-discard', label: t('switch.discard'), primary: true, onClick: o.confirmSwitch },

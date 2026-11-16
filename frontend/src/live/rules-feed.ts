@@ -11,7 +11,7 @@ export interface RuleLast { action: 'on' | 'off' | 'open' | 'close'; target: str
 /** Live state of one saved rule, from `plan_studio/rules/subscribe`. */
 export interface RuleTrace {
   status: 'ok' | 'disabled' | 'waiting' | 'error';
-  /** Why the status is `error` (device missing, target missing, service failed, cycle, rule missing). */
+  /** Why the status is `error` (device missing, target missing, target unavailable, service failed, cycle, rule missing). */
   reason?: string;
   verdict: boolean | null;
   /** A debounce is running: the verdict is about to become `to` at epoch ms `at`. */

@@ -165,7 +165,7 @@ class _Rule:
         self.pending: _Pending | None = None
         self.last: dict | None = None
         self.seq = 0  # firing counter: a late failure counts only for the firing that sent it
-        self.failed = False  # a service call of the last firing raised
+        self.failed: str | None = None  # "service failed" / "target unavailable" for the last firing
         # derived on every evaluation
         self.raw: bool | None = None
         self.trace_inputs: list[dict] = []
@@ -200,7 +200,7 @@ class RuleEngine:
         self,
         lookup: Lookup,
         now: Callable[[], float],
-        call: Callable[..., None],  # call(domain, service, entity_id, on_error=cb(str))
+        call: Callable[..., None],  # call(domain, service, entity_id, on_error=cb(str), current=() -> bool)
         schedule: Callable[[float, Callable[[], None]], Callable[[], None]],
     ) -> None:
         self._lookup = lookup
@@ -364,32 +364,47 @@ class RuleEngine:
         rule.seq += 1
         seq = rule.seq
         last = first_error = None
-        failed = False
+        failed: str | None = None
         for a in actions:
             entry = {"action": a.do, "target": a.label, "at": at, "reason": reason}
             if a.call is None:
                 entry["error"] = "target missing"
             else:
+                st = self._lookup(a.call[2])
+                if st is None or st[0] in ("unavailable", "unknown"):
+                    # still sent (it may come back in time), but the action likely did nothing
+                    entry["error"] = "target unavailable"
+                    failed = failed or "target unavailable"
                 try:
-                    self._call(*a.call, on_error=lambda err, entry=entry: self._failed(rule, seq, entry, err))
+                    self._call(
+                        *a.call,
+                        on_error=lambda err, entry=entry: self._failed(rule, seq, entry, err),
+                        current=lambda: self._current(rule, seq) is not None,
+                    )
                 except Exception as err:  # noqa: BLE001 - one failing target must not stop the others
                     _LOGGER.warning("rule %s: %s.%s %s failed: %s", rule.name, *a.call, err)
                     entry["error"] = str(err) or type(err).__name__
-                    failed = True
+                    failed = "service failed"
             if "error" in entry and first_error is None:
                 first_error = entry
             last = entry
         rule.last = first_error or last
         rule.failed = failed
 
+    def _current(self, rule: _Rule, seq: int) -> "_Rule | None":
+        """The loaded rule when the firing `seq` of `rule` is still its latest one (an unchanged reload keeps it)."""
+        now = self._rules.get(rule.key)
+        return now if now is not None and now.sig == rule.sig and now.seq == seq else None
+
     def _failed(self, rule: _Rule, seq: int, entry: dict, error: str) -> None:
-        """A call that failed after it was sent (async service): record it unless the rule was replaced or removed."""
-        if self._rules.get(rule.key) is not rule or rule.seq != seq:
+        """A call that failed after it was sent (async service): record it unless the rule fired again, changed or went away."""
+        now = self._current(rule, seq)
+        if now is None:
             return
         entry["error"] = error
-        rule.failed = True
-        if rule.last is None or "error" not in rule.last:
-            rule.last = entry
+        now.failed = "service failed"
+        if now.last is None or "error" not in now.last:
+            now.last = entry
         self._flush()
 
     # --- state changes -------------------------------------------------------
@@ -410,7 +425,7 @@ class RuleEngine:
         if not rule.enabled:
             status, reason = "disabled", None
         else:
-            reason = rule.static_reason() or ("service failed" if rule.failed else None)
+            reason = rule.static_reason() or rule.failed
             status = "error" if reason else "waiting" if rule.raw is None else "ok"
         out: dict = {"status": status}
         if reason:
