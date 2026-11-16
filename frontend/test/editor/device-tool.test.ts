@@ -199,4 +199,15 @@ describe('wall-mounted equipment at a corner', () => {
     const pl = wallMountPlacement({ ...lv, devices: [d] }, d, true);
     expect(pl).toMatchObject({ mode: 'wall', wallId: lv.walls[0].id, side: 'right', offset: 2650 });
   });
+
+  it('Wall mount with the cursor on the corner node: flush on the wall whose face is nearer, not on the other wall', () => {
+    const lv = box();
+    const ctx = fakeContext(lv);
+    ctx.wallMount = () => true;
+    const t = createDeviceTool(ctx, 'equipment');
+    t.move(ev(2995, 15)); // within the pick tolerance of node (3000, 0); the top face (y = 50) is nearer than the right face (x = 2950)
+    const pv = t.preview().device!;
+    expect(pv.invalid).toBe(false);
+    expect(pv.placement).toMatchObject({ mode: 'wall', wallId: lv.walls[0].id, side: 'right', offset: 2650 });
+  });
 });

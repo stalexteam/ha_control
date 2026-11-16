@@ -46,13 +46,13 @@ export function deviceCandidate(
       return { mode: 'wall', wallId: ep.wallId, side: sideOf(level, ep.wallId, cursor), offset: ep.offset };
     }
     if (s.kind === 'node' && ep.kind === 'node') {
-      // Wall end: host on the nearest attached wall at offset 0 / len.
+      // Wall end: host on the attached wall whose face (on the cursor's side) is nearest the cursor, at offset 0 / len.
       let best: { id: string; offset: number; d: number } | null = null;
       for (const w of level.walls) {
         if (w.a !== ep.nodeId && w.b !== ep.nodeId) continue;
         const f = wallFrame(level, w);
-        const tt = Math.max(0, Math.min(f.len, wallLocal(f, cursor).t));
-        const d = Math.hypot(cursor.x - (f.a.x + f.dir.x * tt), cursor.y - (f.a.y + f.dir.y * tt));
+        const s = wallLocal(f, cursor).side;
+        const d = Math.abs(Math.abs(s) - (s > 0 ? f.leftOff : f.rightOff));
         if (!best || d < best.d) best = { id: w.id, offset: w.a === ep.nodeId ? 0 : f.len, d };
       }
       if (best) return { mode: 'wall', wallId: best.id, side: sideOf(level, best.id, cursor), offset: best.offset };

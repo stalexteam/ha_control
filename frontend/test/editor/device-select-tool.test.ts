@@ -270,4 +270,13 @@ describe('device select tool', () => {
     expect(ctx.commits).toHaveLength(1);
     expect(ctx.level().devices.find(d => d.id === id)!.placement).toMatchObject({ mode: 'wall', wallId: lv.walls[0].id, side: 'right', offset: 2650 });
   });
+
+  it('dragging wall-mounted equipment onto the corner node stays on its wall while the cursor is nearer its face', () => {
+    const { lv, id } = withDevice('equipment', onTop(2000));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    // Grab at the body centre column (face point offset (0,-250)); the cursor ends at (2995, 15): on node (3000, 0), nearer the top face.
+    t.down(ev(2000, 300)); t.move(ev(2500, 300)); t.move(ev(2995, 265)); t.up(ev(2995, 265));
+    expect(ctx.level().devices.find(d => d.id === id)!.placement).toMatchObject({ mode: 'wall', wallId: lv.walls[0].id, side: 'right', offset: 2650 });
+  });
 });
