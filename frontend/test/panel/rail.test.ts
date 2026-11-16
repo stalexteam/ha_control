@@ -92,7 +92,7 @@ describe('tool rail and status chip', () => {
     expect(el.toolId).toBe('wall');
     expect(e.defaultPrevented).toBe(true);
     // A non-Latin layout: e.key is another letter, e.code is the same.
-    await keyDown(el, { key: 'ц', code: 'KeyZ' });
+    await keyDown(el, { key: '\u0446', code: 'KeyZ' });
     expect(el.toolId).toBe('zone');
     for (const [code, id] of [['KeyV', 'select'], ['KeyB', 'box'], ['KeyD', 'door'], ['KeyN', 'window'],
       ['KeyO', 'opening'], ['KeyZ', 'zone']] as const) {
