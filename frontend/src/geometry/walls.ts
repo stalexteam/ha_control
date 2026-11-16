@@ -1,5 +1,5 @@
 import polygonClipping, { type Polygon, type Ring } from 'polygon-clipping';
-import type { Baseline, Id, Level, Opening, PlanNode, Pt, Wall } from '../model/types';
+import type { Baseline, Id, Level, Opening, PlanNode, Pt, Side, Wall } from '../model/types';
 import { add, cross, dist, dot, lineIntersect, norm, perpLeft, polygonArea, scale, sub } from './vec';
 
 export interface WallFrame { a: Pt; b: Pt; dir: Pt; len: number; leftOff: number; rightOff: number }
@@ -186,6 +186,22 @@ function joinedBodies(level: Level): Body[] {
     else if (ends.length >= 2) miter(ends, { x: node.x, y: node.y });
   }
   return bodies;
+}
+
+/** An end corner of a joined wall body: its face (side), end, and the axis offset dot(pt - a, dir). */
+export interface WallCorner { pt: Pt; wallId: Id; side: Side; end: 'a' | 'b'; offset: number }
+
+/** The four end corners of every wall body after joins: al (left, a), ar (right, a), bl (left, b), br (right, b). */
+export function wallCorners(level: Level): WallCorner[] {
+  const out: WallCorner[] = [];
+  const keys: [CornerKey, Side, 'a' | 'b'][] = [['al', 'left', 'a'], ['ar', 'right', 'a'], ['bl', 'left', 'b'], ['br', 'right', 'b']];
+  for (const b of joinedBodies(level)) {
+    for (const [k, side, end] of keys) {
+      const pt = b.c[k];
+      out.push({ pt, wallId: b.wall.id, side, end, offset: dot(sub(pt, b.f.a), b.f.dir) });
+    }
+  }
+  return out;
 }
 
 function ring(b: Body): Pt[] {

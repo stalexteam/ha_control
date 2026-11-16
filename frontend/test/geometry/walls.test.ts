@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { Level, Pt, Wall } from '../../src/model/types';
 import {
-  findNode, fromRing, nodePos, segmentFrame, toPoly, wallFrame, wallLen, wallLocal, wallOutlines, wallPieces, wallsUnion,
+  findNode, fromRing, nodePos, segmentFrame, toPoly, wallCorners, wallFrame, wallLen, wallLocal, wallOutlines, wallPieces, wallsUnion,
 } from '../../src/geometry/walls';
 import { polygonArea } from '../../src/geometry/vec';
 import { rectRoomLevel } from '../fixtures';
@@ -262,5 +262,30 @@ describe('wallsUnion', () => {
   });
   it('empty level -> []', () => {
     expect(wallsUnion(lvl([], []), true)).toEqual([]);
+  });
+});
+
+describe('wallCorners', () => {
+  const L = lvl([{ id: 'n0', x: 0, y: 0 }, { id: 'n1', x: 4000, y: 0 }, { id: 'n2', x: 4000, y: 3000 }],
+    [wall('A', 'n0', 'n1', 100), wall('B', 'n1', 'n2', 100)]);
+  const cs = wallCorners(L);
+  it('four corners per wall', () => {
+    expect(cs.filter(c => c.wallId === 'A')).toHaveLength(4);
+    expect(cs).toHaveLength(8);
+  });
+  it('inner corner of an L: wall A, right face, end b, offset 3950', () => {
+    const c = cs.find(x => x.wallId === 'A' && x.end === 'b' && x.side === 'right')!;
+    expect(c.pt.x).toBeCloseTo(3950); expect(c.pt.y).toBeCloseTo(50);
+    expect(c.offset).toBeCloseTo(3950);
+  });
+  it('outer corner lies beyond the axis length', () => {
+    const c = cs.find(x => x.wallId === 'A' && x.end === 'b' && x.side === 'left')!;
+    expect(c.pt.x).toBeCloseTo(4050); expect(c.pt.y).toBeCloseTo(-50);
+    expect(c.offset).toBeCloseTo(4050);
+  });
+  it('a free end gives corners at offset 0', () => {
+    const a = cs.filter(x => x.wallId === 'A' && x.end === 'a');
+    expect(a.map(x => x.side).sort()).toEqual(['left', 'right']);
+    for (const c of a) { expect(c.offset).toBeCloseTo(0); expect(Math.abs(c.pt.y)).toBeCloseTo(50); }
   });
 });

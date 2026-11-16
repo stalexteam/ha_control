@@ -1,6 +1,6 @@
 import type { Id, Level, Pt } from '../model/types';
 import type { Endpoint } from '../model/ops';
-import { wallFrame } from './walls';
+import { wallFrame, type WallCorner } from './walls';
 import { add, dist, dot, lineIntersect, norm, perpLeft, scale, sub } from './vec';
 
 /**
@@ -8,8 +8,8 @@ import { add, dist, dot, lineIntersect, norm, perpLeft, scale, sub } from './vec
  * attached to them (those walls move with the drag). zones: zone outlines whose vertices, then edges, are snap
  * targets after the walls and before the grid (zone vertices are placed with them).
  */
-export interface SnapOpts { tolMm: number; grid: number | null; from?: Pt; ortho: boolean; excludeNodeIds?: Id[]; zones?: Pt[][] }
-export interface SnapResult { pt: Pt; kind: 'node' | 'mid' | 'wall' | 'zoneVertex' | 'zoneEdge' | 'grid' | 'none'; endpoint: Endpoint }
+export interface SnapOpts { tolMm: number; grid: number | null; from?: Pt; ortho: boolean; excludeNodeIds?: Id[]; zones?: Pt[][]; corners?: WallCorner[] }
+export interface SnapResult { pt: Pt; kind: 'node' | 'corner' | 'mid' | 'wall' | 'zoneVertex' | 'zoneEdge' | 'grid' | 'none'; endpoint: Endpoint; corner?: WallCorner }
 
 /** Lock p onto the nearest global axis (0/90/180/270 deg) through from. */
 export function orthoConstrain(from: Pt, p: Pt): Pt {
@@ -44,6 +44,15 @@ export function snap(level: Level, p: Pt, opts: SnapOpts): SnapResult {
     const pt = { x: n.x, y: n.y };
     const d = dist(pt, q);
     if (d <= tolMm && onLine(pt) && (!bestNode || d < bestNode.d)) bestNode = { id: n.id, pt, d };
+  }
+  let bestCorner: { c: WallCorner; d: number } | null = null;
+  for (const c of opts.corners ?? []) {
+    const d = dist(c.pt, q);
+    if (d <= tolMm && onLine(c.pt) && (!bestCorner || d < bestCorner.d)) bestCorner = { c, d };
+  }
+  if (bestCorner && (!bestNode || bestCorner.d < bestNode.d)) {
+    const pt = bestCorner.c.pt;
+    return { pt, kind: 'corner', endpoint: { kind: 'free', pt }, corner: bestCorner.c };
   }
   if (bestNode) return { pt: bestNode.pt, kind: 'node', endpoint: { kind: 'node', nodeId: bestNode.id } };
 

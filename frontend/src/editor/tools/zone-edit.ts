@@ -2,7 +2,7 @@ import type { Id, Level, Pt, ZoneVertex } from '../../model/types';
 import { insertZoneVertex, moveZoneVertex, removeZoneVertex } from '../../model/zones';
 import { zoneContains, zoneOutline } from '../../geometry/zones';
 import { orthoConstrain, snap, type SnapResult } from '../../geometry/snap';
-import { wallFrame, wallLocal } from '../../geometry/walls';
+import { wallCorners, wallFrame, wallLen, wallLocal } from '../../geometry/walls';
 import { facePoint } from '../../geometry/devices';
 import { dist, distToSegment, lerp, polygonArea, projectT } from '../../geometry/vec';
 import { t } from '../../i18n';
@@ -15,7 +15,7 @@ const zoneRings = (level: Level, exclude?: Id): Pt[][] =>
 /**
  * The zone vertex placed at the pointer, and the snap result for the marker (null with Alt). Alt: a free vertex at
  * the pointer (ortho from `from` with Shift), no snapping. Otherwise snap (Shift: ortho from `from`): a node gives a
- * node vertex; a wall midpoint, axis or face gives a wall vertex on the face of the pointer's side; a vertex or an edge
+ * node vertex; a wall face corner gives a wall vertex on that face (an inner corner) or a free vertex (an outer one); a wall midpoint, axis or face gives a wall vertex on the face of the pointer's side; a vertex or an edge
  * of another zone (every zone but `exclude`), the grid or nothing gives a free vertex. A wall vertex's x,y and the
  * marker's point are the resolved face point (facePoint), not the axis point a midpoint or axis snap returns.
  */
@@ -25,10 +25,17 @@ export function zoneVertexAt(ctx: ToolContext, level: Level, e: ToolEvent, from:
     const p = e.shift && from ? orthoConstrain(from, e.pt) : e.pt;
     return { vertex: { kind: 'free', x: p.x, y: p.y }, snap: null };
   }
-  const s = snap(level, e.pt, { tolMm: ctx.tolMm(), grid: ctx.grid(), from, ortho: e.shift, zones: zoneRings(level, exclude) });
+  const s = snap(level, e.pt, { tolMm: ctx.tolMm(), grid: ctx.grid(), from, ortho: e.shift, zones: zoneRings(level, exclude), corners: wallCorners(level) });
   const ep = s.endpoint;
   if (s.kind === 'node' && ep.kind === 'node') {
     return { vertex: { kind: 'node', nodeId: ep.nodeId, x: s.pt.x, y: s.pt.y }, snap: s };
+  }
+  if (s.kind === 'corner' && s.corner) {
+    // An inner corner (on the axis span) stays on its face and follows the wall; an outer one is a free vertex.
+    const c = s.corner;
+    const len = wallLen(level, c.wallId);
+    const p = len !== null && c.offset >= 0 && c.offset <= len ? facePoint(level, c.wallId, c.side, c.offset) : null;
+    if (p) return { vertex: { kind: 'wall', wallId: c.wallId, offset: c.offset, side: c.side, x: p.x, y: p.y }, snap: s };
   }
   if ((s.kind === 'mid' || s.kind === 'wall') && ep.kind === 'wall') {
     const w = level.walls.find(x => x.id === ep.wallId);

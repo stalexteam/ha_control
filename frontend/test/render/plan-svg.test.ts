@@ -94,11 +94,11 @@ describe('renderLevel', () => {
     expect(root.querySelector('.preview-opening.invalid')).not.toBeNull();
   });
 
-  const snapOf = (kind: 'node' | 'mid' | 'wall' | 'grid', pt = { x: 1000, y: 0 }): Preview => ({
+  const snapOf = (kind: 'node' | 'mid' | 'wall' | 'grid' | 'corner', pt = { x: 1000, y: 0 }): Preview => ({
     snap: {
       pt, kind,
       endpoint: kind === 'node' ? { kind: 'node', nodeId: 'n0' }
-        : kind === 'grid' ? { kind: 'free', pt } : { kind: 'wall', wallId: 'w0', offset: pt.x },
+        : kind === 'grid' || kind === 'corner' ? { kind: 'free', pt } : { kind: 'wall', wallId: 'w0', offset: pt.x },
     },
   });
 
@@ -112,6 +112,11 @@ describe('renderLevel', () => {
       for (const other of cases) if (other[0] !== kind) expect(root.querySelector(other[1])).toBeNull();
       expect(root.querySelector('.snap-label')?.textContent?.trim()).toBe(label);
     }
+  });
+
+  it('draws a corner snap like the node marker', () => {
+    const root = draw(sample(), null, snapOf('corner'));
+    expect(root.querySelector('g.snap-corner rect')).not.toBeNull();
   });
 
   it('sizes snap markers in screen pixels', () => {

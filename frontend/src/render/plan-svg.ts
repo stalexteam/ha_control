@@ -250,9 +250,9 @@ function renderSnap(level: Level, o: RenderOpts): SVGTemplateResult | typeof not
   const halo = { stroke: p.background, width: '3' };
   let marker: SVGTemplateResult;
   let hl: SVGTemplateResult | typeof nothing = nothing;
-  if (s.kind === 'node') {
+  if (s.kind === 'node' || s.kind === 'corner') {
     const h = px(5);
-    marker = svg`<g class="snap-node"><rect x=${x - h} y=${y - h} width=${2 * h} height=${2 * h} fill=${p.snap}
+    marker = svg`<g class=${s.kind === 'node' ? 'snap-node' : 'snap-corner'}><rect x=${x - h} y=${y - h} width=${2 * h} height=${2 * h} fill=${p.snap}
       stroke=${halo.stroke} stroke-width=${halo.width} paint-order="stroke" vector-effect=${NS}></rect></g>`;
   } else if (s.kind === 'mid') {
     const r = px(11) / Math.sqrt(3); // circumradius of an 11 px equilateral triangle

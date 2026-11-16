@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { orthoConstrain, pointAlong, snap } from '../../src/geometry/snap';
+import { wallCorners } from '../../src/geometry/walls';
 import { rectRoomLevel } from '../fixtures';
 
 const level = rectRoomLevel(4000, 3000, 200);
@@ -81,5 +82,35 @@ describe('orthoConstrain', () => {
 describe('pointAlong', () => {
   it('moves along the direction', () => {
     expect(pointAlong({ x: 0, y: 0 }, { x: 10, y: 0 }, 500)).toEqual({ x: 500, y: 0 });
+  });
+});
+
+describe('snap corners', () => {
+  const lv = { ...rectRoomLevel(4000, 3000, 100) };
+  const corners = wallCorners(lv);
+  const inner = { x: 50, y: 50 };
+  const opts = { tolMm: 80, grid: null, ortho: false, corners };
+  it('a corner nearer than the node wins', () => {
+    const r = snap(lv, { x: 55, y: 60 }, opts);
+    expect(r.kind).toBe('corner');
+    expect(r.pt.x).toBeCloseTo(inner.x); expect(r.pt.y).toBeCloseTo(inner.y);
+    expect(r.corner).toBeDefined();
+    expect(r.endpoint).toEqual({ kind: 'free', pt: r.pt });
+  });
+  it('a node nearer than the corner wins', () => {
+    expect(snap(lv, { x: 5, y: 5 }, opts).kind).toBe('node');
+  });
+  it('a corner beats a face hit', () => {
+    const r = snap(lv, { x: 52, y: 50 }, opts);
+    expect(r.kind).toBe('corner');
+  });
+  it('without corners nothing changes', () => {
+    expect(snap(lv, { x: 55, y: 60 }, { ...opts, corners: undefined }).kind).not.toBe('corner');
+  });
+  it('under ortho a corner off the constraining line is ignored', () => {
+    const r = snap(lv, { x: 3000, y: 52 }, { ...opts, ortho: true, from: { x: 1000, y: 0 }, tolMm: 80 });
+    expect(r.kind).not.toBe('corner');
+    const on = snap(lv, { x: 3900, y: 55 }, { ...opts, ortho: true, from: { x: 1000, y: 50 } });
+    expect(on.kind).toBe('corner');
   });
 });

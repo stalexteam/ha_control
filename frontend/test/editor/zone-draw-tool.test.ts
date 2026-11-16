@@ -256,4 +256,39 @@ describe('zone draw tool', () => {
     click(t, 1500, 1022);
     expect(t.preview().zoneDraft?.points).toEqual([{ x: 1500, y: 1010 }]);
   });
+
+  describe('wall corners', () => {
+    const lShape = (): Level => ({
+      id: 'l', name: 'L', kind: 'floor', order: 0, openings: [], zones: [], devices: [],
+      nodes: [{ id: 'n0', x: 0, y: 0 }, { id: 'n1', x: 4000, y: 0 }, { id: 'n2', x: 4000, y: 3000 }],
+      walls: [{ id: 'A', a: 'n0', b: 'n1', thickness: 100, type: 'partition', baseline: 'center' },
+        { id: 'B', a: 'n1', b: 'n2', thickness: 100, type: 'partition', baseline: 'center' }],
+    });
+    it('a click on an inner corner adds a wall vertex on the face', () => {
+      const { ctx, t } = setup(lShape());
+      click(t, 3960, 60);
+      click(t, 2000, 1000); click(t, 3000, 1500); key(t, 'Enter');
+      const v = verts(ctx.level())[0];
+      expect(v.kind).toBe('wall');
+      if (v.kind !== 'wall') return;
+      expect(v.wallId).toBe('A'); expect(v.side).toBe('right');
+      expect(v.offset).toBeCloseTo(3950);
+      expect(v.x).toBeCloseTo(3950); expect(v.y).toBeCloseTo(50);
+    });
+    it('a click on an outer corner adds a free vertex and the zone is valid', () => {
+      const { ctx, t } = setup(lShape());
+      click(t, 4055, -45);
+      click(t, 2000, 1000); click(t, 3000, 1500); key(t, 'Enter');
+      const v = verts(ctx.level())[0];
+      expect(v.kind).toBe('free');
+      expect(v.x).toBeCloseTo(4050); expect(v.y).toBeCloseTo(-50);
+      expect(ctx.level().zones[0].invalid).toBeFalsy();
+    });
+    it('Alt-click at a corner adds a free vertex at the pointer', () => {
+      const { ctx, t } = setup(lShape());
+      t.down(ev(3960, 60, { alt: true })); t.up(ev(3960, 60, { alt: true }));
+      click(t, 2000, 1000); click(t, 3000, 1500); key(t, 'Enter');
+      expect(verts(ctx.level())[0]).toEqual({ kind: 'free', x: 3960, y: 60 });
+    });
+  });
 });
