@@ -27,18 +27,19 @@ export const panelStyles = css`
     --ch-radius: var(--ha-card-border-radius, 12px);
     --ch-tint: rgba(var(--rgb-primary-color, 3, 169, 244), .14);
     --ch-hover: rgba(var(--rgb-primary-color, 3, 169, 244), .06);
-    display: grid; grid-template-columns: 64px 240px 1fr; grid-template-rows: auto 1fr 30px;
+    display: grid; grid-template-columns: 84px 240px 1fr; grid-template-rows: auto 1fr 30px;
     height: 100vh; overflow: hidden; position: relative;
     background: var(--ch-bg); color: var(--ch-text);
     font-size: 14px; font-family: var(--ha-font-family-body, Roboto, "Noto Sans", system-ui, sans-serif);
   }
   .ed.binding { grid-template-columns: 250px 300px 1fr; }
   .ed.binding.rail-off { grid-template-columns: 36px 300px 1fr; }
-  .ed.power { grid-template-columns: 64px 300px 1fr; }
+  .ed.power { grid-template-columns: 84px 300px 1fr; }
   @media (max-width: 700px) {
-    .ed { grid-template-columns: 54px 170px 1fr; }
+    .ed { grid-template-columns: 72px 170px 1fr; }
     .ed.binding { grid-template-columns: 170px 200px 1fr; }
-    .ed.power { grid-template-columns: 54px 200px 1fr; }
+    .ed.power { grid-template-columns: 72px 200px 1fr; }
+    .tools .tool { font-size: 10.5px; }
     .ed.binding.rail-off { grid-template-columns: 36px 200px 1fr; }
     .props .row { flex-wrap: wrap; }
     .props .val { max-width: 100%; }
@@ -101,12 +102,21 @@ export const panelStyles = css`
 
   /* Left rail: tools, the binding device list, or the Zones tools above the zone list. */
   .tools { background: var(--ch-card); border-right: 1px solid var(--ch-divider); display: flex;
-    flex-direction: column; align-items: center; gap: 4px; padding-top: 8px; }
-  .tool { width: 54px; height: 40px; border-radius: 8px; border: 0; background: transparent; font-size: 11px;
-    color: var(--ch-muted); line-height: 1.1; padding: 0 2px; }
-  .tool:hover { background: var(--ch-hover); color: var(--ch-text); }
-  .tool.on { background: var(--ch-tint); color: var(--ch-primary); font-weight: 500; }
-  .tool-sep { height: 1px; width: 36px; background: var(--ch-divider); margin: 4px 0; }
+    flex-direction: column; gap: 4px; padding: 8px 6px; min-height: 0; overflow-y: auto; box-sizing: border-box; }
+  /* A tool button: a 24 px icon above a label that wraps to two lines (never cut); the Plan shortcut in the corner. */
+  .tool { position: relative; flex: none; min-height: 58px; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 3px; padding: 4px 2px; border-radius: 8px; border: 0; background: transparent;
+    color: var(--ch-text); font-size: 11px; line-height: 1.1; text-align: center; }
+  .tool .ticon { width: 24px; height: 24px; fill: currentColor; flex: none; opacity: .8; }
+  .tool .tlabel { max-width: 100%; overflow-wrap: break-word; }
+  .tool:hover { background: var(--ch-hover); }
+  .tool.on { background: var(--ch-tint); color: var(--ch-primary); font-weight: 600; }
+  .tool.on .ticon { opacity: 1; }
+  .tool.on::before { content: ''; position: absolute; left: -6px; top: 10px; bottom: 10px; width: 3px; border-radius: 2px;
+    background: var(--ch-primary); }
+  .tool[data-key]::after { content: attr(data-key); position: absolute; right: 5px; top: 4px; font-size: 9.5px;
+    font-weight: 400; color: var(--ch-muted); opacity: .75; }
+  .tool-sep { flex: none; height: 1px; background: var(--ch-divider); margin: 2px 8px; }
   .blist { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ch-card);
     border-right: 1px solid var(--ch-divider); }
   /* Plan step zones: the list in the properties, the Zone tool's method switch, the zone properties. */
@@ -235,6 +245,9 @@ export const panelStyles = css`
   .status { grid-column: 1 / 4; background: var(--ch-card); border-top: 1px solid var(--ch-divider); display: flex;
     gap: 18px; align-items: center; padding: 0 10px; font-size: 12px; color: var(--ch-muted); white-space: nowrap;
     overflow: hidden; }
+  .tool-chip { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 5px;
+    background: var(--ch-tint); color: var(--ch-primary); font-weight: 600; }
+  .tool-chip .ticon { width: 14px; height: 14px; fill: currentColor; }
   .kbd { border: 1px solid var(--ch-divider); border-radius: 3px; padding: 0 4px; color: var(--ch-text); }
   .grid-toggle { display: flex; align-items: center; gap: 4px; cursor: pointer; }
   .backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, .45); display: flex; align-items: center;

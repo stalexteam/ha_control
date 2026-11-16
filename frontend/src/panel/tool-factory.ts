@@ -24,6 +24,11 @@ export const BINDING_TOOL_IDS: ToolId[] = ['binding-select'];
 export const POWER_TOOL_IDS: ToolId[] = ['power-select', 'power-device', 'power-bus', 'power-battery', 'power-pv',
   'power-transfer', 'power-remainder'];
 
+/** Plan step single-key shortcuts (the letter of the physical key, e.code `Key<letter>`); other steps have none. */
+export const PLAN_SHORTCUTS: Partial<Record<ToolId, string>> = {
+  select: 'V', box: 'B', wall: 'W', door: 'D', window: 'N', opening: 'O', zone: 'Z',
+};
+
 const TOOL_IDS: Record<EditorMode, ToolId[]> = {
   plan: PLAN_TOOL_IDS, equipment: EQUIPMENT_TOOL_IDS, binding: BINDING_TOOL_IDS, power: POWER_TOOL_IDS,
 };

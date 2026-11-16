@@ -1,6 +1,6 @@
 import type { ToolEvent } from '../editor/tools/types';
 import type { PlanStudioPanel } from './plan-studio-panel';
-import type { EditorMode, ToolId } from './tool-factory';
+import { PLAN_SHORTCUTS, type EditorMode, type ToolId } from './tool-factory';
 import { panBy, zoomAt } from './viewport';
 
 /** The panel members the pointer / keyboard handlers use. */
@@ -14,6 +14,10 @@ const HOME_TOOL: Partial<Record<EditorMode, ToolId>> = {
   plan: 'select', equipment: 'device-select', power: 'power-select',
 };
 
+/** Plan step tools by physical key code (`KeyW` -> wall). */
+const PLAN_KEYS = new Map(Object.entries(PLAN_SHORTCUTS).map(([id, k]) => [`Key${k}`, id as ToolId]));
+
+/** The first element of the composed path, so a field inside a nested shadow root counts too. */
 function inField(e: KeyboardEvent): boolean {
   const el = e.composedPath()[0] as HTMLElement | undefined;
   return !!el && ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName);
@@ -112,6 +116,15 @@ export class EditorInput {
       // Deferred to keyup so a Space held for panning never lands in the tool's length buffer.
       e.preventDefault();
       if (!e.repeat && !this.spaceDown) { this.spaceDown = true; this.spacePending = true; }
+      return;
+    }
+    // Plan step tool shortcuts: a bare letter key (no modifier, so Ctrl+W / Ctrl+Z keep their meaning). The typed
+    // lengths of the Wall and Box tools take digits and Space only, so no letter is ever part of a length.
+    const shortcut = this.h.mode === 'plan' && !ctrl && !e.altKey && !e.shiftKey ? PLAN_KEYS.get(e.code) : undefined;
+    if (shortcut) {
+      e.preventDefault();
+      if (shortcut !== this.h.toolId) this.h.pickTool(shortcut); // the active tool's own key keeps its draft
+      this.h.requestUpdate();
       return;
     }
     let consumed = this.h.activeTool.key(e.key, { shift: e.shiftKey });

@@ -71,12 +71,16 @@
       });
     }
 
-    // step=<EditorMode> and select=<kind>:<id>: applied once the panel has loaded its plan.
-    if (params.get('render') !== 'power' && (step || select)) {
+    // step=<EditorMode>, tool=<ToolId> (zone=polygon: the Zone tool's method) and select=<kind>:<id>: applied once
+    // the panel has loaded its plan.
+    const tool = params.get('tool'), zoneMethod = params.get('zone');
+    if (params.get('render') !== 'power' && (step || select || tool)) {
       const timer = setInterval(() => {
         if (!panel.plan) return;
         clearInterval(timer);
         if (step) panel.setMode(step);
+        if (zoneMethod) panel.nextObj = { ...panel.nextObj, zone: { ...panel.nextObj.zone, method: zoneMethod } };
+        if (tool) panel.pickTool(tool);
         if (selection) panel.selection = selection;
       }, 50);
     }

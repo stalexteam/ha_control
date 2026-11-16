@@ -2,7 +2,8 @@ import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
 import type { SaveState } from '../editor/save';
 import { t } from '../i18n';
-import { toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
+import { PLAN_SHORTCUTS, toolIdsFor, type EditorMode, type ToolId } from './tool-factory';
+import { toolIcon } from './tool-icons';
 
 export interface TopBarOpts {
   /** The wizard title block (renderSteps) under the action bar. */
@@ -70,15 +71,27 @@ export function renderTopBar(o: TopBarOpts): TemplateResult {
     </div>${o.steps}</div>`;
 }
 
-/** Tools that start a group on the rail: the Zone tool, the first device tool, the Power step's Device tool and the service blocks. */
-const GROUP_STARTS: ToolId[] = ['zone', 'ceiling_light', 'power-device', 'power-bus'];
+/**
+ * Tools that start a group on the rail: Plan groups Select · Box, Wall · Door, Window, Opening · Zone; Equipment puts
+ * the device kinds after Select; Power puts the Device tool, then the service blocks, after Select.
+ */
+const GROUP_STARTS: ToolId[] = ['box', 'door', 'zone', 'ceiling_light', 'power-device', 'power-bus'];
 
-/** The step's tool buttons (with a separator before each group). */
+/**
+ * The step's tool buttons (with a separator before each group): an icon above the label, the Plan step's shortcut
+ * letter in `data-key` (drawn faintly in the corner by CSS, so it is not part of the label text).
+ */
 export function toolButtons(mode: EditorMode, active: ToolId, onPick: (id: ToolId) => void): TemplateResult[] {
-  return toolIdsFor(mode).map(id => html`
-    ${GROUP_STARTS.includes(id) ? html`<div class="tool-sep"></div>` : nothing}
-    <button class="tool ${active === id ? 'on' : ''}" data-tool=${id} @click=${() => onPick(id)}>
-      ${t(`tool.${id}`)}</button>`);
+  return toolIdsFor(mode).map(id => {
+    const k = mode === 'plan' ? PLAN_SHORTCUTS[id] : undefined;
+    const label = t(`tool.${id}`);
+    return html`
+      ${GROUP_STARTS.includes(id) ? html`<div class="tool-sep"></div>` : nothing}
+      <button class="tool ${active === id ? 'on' : ''}" data-tool=${id} data-key=${k ?? nothing}
+        aria-pressed=${active === id ? 'true' : 'false'} aria-keyshortcuts=${k ?? nothing}
+        title=${k ? `${label} (${k})` : label} @click=${() => onPick(id)}>
+        ${toolIcon(id)}<span class="tlabel">${label}</span></button>`;
+  });
 }
 
 export function renderToolRail(mode: EditorMode, active: ToolId, onPick: (id: ToolId) => void): TemplateResult {

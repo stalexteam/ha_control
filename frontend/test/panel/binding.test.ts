@@ -325,6 +325,7 @@ describe('binding step', () => {
     expect(el.shadowRoot!.querySelector('.status input[data-toggle="cones"]')).not.toBeNull();
     expect(text()).toContain('Grid 100 mm');
     await press(el, '[data-mode="plan"]');
+    await press(el, '.tools button[data-tool="wall"]'); // the drawing hints belong to the Wall tool
     expect(text()).toContain('Shift');
     expect(text()).toContain('Esc finish');
   });

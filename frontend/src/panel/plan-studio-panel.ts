@@ -466,7 +466,7 @@ export class PlanStudioPanel extends LitElement {
           grid: this.grid, zoomPct: Math.round(scale * (power ? 100 : 1000)),
           snap: preview.snap && preview.snap.kind !== 'none' ? t(`snap.${preview.snap.kind}`) : null,
           onGrid: on => { this.grid = on; }, cones: this.cones, onCones: on => { this.cones = on; },
-          binding: this.mode === 'binding' || power, power,
+          tool: this.toolId, zoneMethod: this.nextObj.zone.method, power,
         })}
         ${this.renderDialog()}
       </div>`;
