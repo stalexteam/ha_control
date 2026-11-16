@@ -154,7 +154,8 @@ class _Rule:
         self.on_delay = _delay(raw.get("onDelay"))
         self.off_delay = _delay(raw.get("offDelay"))
         self.sig = (
-            json.dumps(raw, sort_keys=True, default=str),
+            # name and zoneId are cosmetic: changing only them keeps the runtime state
+            json.dumps({k: v for k, v in raw.items() if k not in ("name", "zoneId")}, sort_keys=True, default=str),
             tuple(i.sig for i in self.inputs),
             tuple(a.call for a in self.on_true + self.on_false),
         )

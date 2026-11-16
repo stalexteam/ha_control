@@ -422,3 +422,28 @@ def test_subscribe_full_snapshot_then_changes():
     unsub()
     w.set("binary_sensor.s2", "on")
     assert len(frames) == n
+
+
+@pytest.mark.parametrize("change", [{"name": "Renamed"}, {"zoneId": "z2"}])
+def test_reload_with_a_cosmetic_change_keeps_the_state(change):
+    w = leak_world(binary_sensor__s1="on")
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE), rule("c", [ref("r")])])])
+    assert len(w.calls) == 1
+    last = trace(w)["last"]
+    w.t = 2000
+    changed = rule("r", ["s1"], on_true=CLOSE, on_delay=0)
+    changed.update(change)
+    w.engine.load_plans([plan(LEAKS + [VALVE], [changed, rule("c", [ref("r")])])])
+    assert len(w.calls) == 1
+    assert trace(w)["last"] == last and trace(w)["verdict"] is True
+    assert trace(w, "c")["inputs"][0]["label"] == changed["name"]
+
+
+def test_rename_keeps_a_pending_timer():
+    w = leak_world()
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE, on_delay=5)])])
+    w.set("binary_sensor.s1", "on")
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE, on_delay=5, name="New")])])
+    assert len(w.pending()) == 1 and trace(w)["pending"] == {"to": True, "at": 1005000}
+    w.advance(1005)
+    assert w.calls == [("valve", "close_valve", "valve.v")]
