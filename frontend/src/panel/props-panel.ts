@@ -135,15 +135,18 @@ const zoneList = (o: PropsOpts): TemplateResult => renderZonesList({
 });
 
 /**
- * The Plan step properties. The Zone tool: its settings and the zone list. Otherwise the selected wall, opening,
- * zone or node; with nothing selected the active tool's next-object settings, or (Select) the zone list.
+ * The Plan step properties. The Zone tool: its settings, the selected zone's properties (e.g. of the zone just made)
+ * and the zone list. Otherwise the selected wall, opening, zone or node; with nothing selected the active tool's
+ * next-object settings, or (Select) the zone list.
  */
 export function renderProps(o: PropsOpts): TemplateResult {
   const { level, selection: s } = o;
   if (o.tool === 'zone') {
+    const z = s?.kind === 'zone' ? level.zones.find(x => x.id === s.id) : undefined;
     return html`<div class="props">
       ${renderNextZone({ level, next: o.next, setNext: o.setNext, onMethod: o.onZoneMethod })}
       ${o.notice ? html`<p class="warn">${o.notice}</p>` : nothing}
+      ${z ? renderZoneProps(level, z, o.commit) : nothing}
       ${zoneList(o)}
     </div>`;
   }

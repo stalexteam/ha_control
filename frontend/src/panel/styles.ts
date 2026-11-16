@@ -209,7 +209,8 @@ export const panelStyles = css`
   .reg-error { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 8px;
     border: 1px solid var(--ch-error); border-radius: 8px; }
   .reg-error .warn { flex: 1; margin: 0; }
-  /* Zones properties: the member list with its Participates column. */
+  /* Zones properties: below the Zone tool's next-zone settings, a divider; the member list with its Participates column. */
+  .props .zprops:not(:first-child) { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--ch-divider); }
   .zmembers { margin-top: 14px; padding-top: 8px; border-top: 1px solid var(--ch-divider); }
   .zhead { display: flex; justify-content: space-between; gap: 8px; color: var(--ch-muted); font-size: 12px; }
   .member { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0; cursor: pointer; }

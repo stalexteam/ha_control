@@ -135,6 +135,25 @@ describe('zones in the Plan step', () => {
     expect(el.selection).toEqual(az(z.id));
   });
 
+  it('the Zone tool shows the selected zone\'s properties between the next-zone settings and the list', async () => {
+    const el = await mountLevel(rectRoomLevel(6000, 4000, 200));
+    await zoneTool(el);
+    expect(el.shadowRoot!.querySelector('.props .zprops')).toBeNull();
+    click(el, 3000, 2000);
+    await el.updateComplete;
+    const z = zones(el)[0];
+    expect($<HTMLInputElement>(el, '.props .zprops input[data-field="zone-name"]').value).toBe('Zone 1');
+    expect(text(el, '.props .zprops [data-field="zone-area"]')).toBe('22.0 m²');
+    const order = [...el.shadowRoot!.querySelectorAll('.props [data-field="next-zone-name"], .props .zprops, .props .zlist')]
+      .map(n => n.getAttribute('data-field') ?? n.className);
+    expect(order).toEqual(['next-zone-name', 'zprops', 'zlist']);
+    await check(el, '.props .zprops input[data-field="zone-automation"]', false);
+    expect(zone(el, z.id).automation).toBe(false);
+    expect(el.toolId).toBe('zone');
+    // The next zone's settings stay its own.
+    expect($<HTMLInputElement>(el, '.props input[data-field="next-zone-automation"]').checked).toBe(true);
+  });
+
   it('By walls: a click outside walls shows the notice and creates nothing', async () => {
     const el = await mountLevel(rectRoomLevel(6000, 4000, 200));
     await zoneTool(el);
