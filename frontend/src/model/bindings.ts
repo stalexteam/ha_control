@@ -82,6 +82,11 @@ export function setBinding(level: Level, deviceId: Id, role: BindingRole, entity
     delete rest[role];
     const next: Device = { ...d, bindings: rest };
     if (Object.keys(rest).length === 0) delete next.bindings;
+    // Controllable belongs to the switch: a switch bound later starts read-only.
+    if (role === 'control' && d.props.kind === 'equipment' && d.props.controllable) {
+      const { controllable: _drop, ...props } = d.props;
+      next.props = props;
+    }
     return { ...level, devices: level.devices.map(x => (x === d ? next : x)) };
   }
   if (cur === entityId) return level;

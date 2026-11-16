@@ -31,6 +31,17 @@ describe('setBinding', () => {
     expect(b.devices[0].bindings).toBeUndefined();
     expect(setBinding(b, id, 'control', null)).toBe(b);
   });
+  it('clearing an equipment control drops its controllable flag, so a later switch starts read-only', () => {
+    const { level, id } = withDevice('equipment');
+    const bound = setBinding(level, id, 'control', 'switch.a');
+    const operable = { ...bound, devices: bound.devices.map(d => (d.id === id
+      ? { ...d, props: { ...d.props, controllable: true } as DeviceProps } : d)) };
+    const cleared = setBinding(operable, id, 'control', null);
+    expect('controllable' in cleared.devices[0].props).toBe(false);
+    expect(cleared.devices[0].bindings).toBeUndefined();
+    const other = setBinding(setBinding(operable, id, 'power', 'sensor.p'), id, 'power', null);
+    expect(other.devices[0].props).toMatchObject({ controllable: true });
+  });
   it('role invalid for kind -> same level', () => {
     const { level, id } = withDevice('socket');
     expect(setBinding(level, id, 'motion', 'binary_sensor.m')).toBe(level);
