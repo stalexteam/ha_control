@@ -22,7 +22,6 @@ type Drag =
  * keeps the selection (the panel clears it where it should).
  */
 export function createSelectTool(ctx: ToolContext): Tool {
-  let sel: Selection | null = null;
   let drag: Drag | null = null;
   let start: Level | null = null; // level captured at `down` (after any detach); drag base
   let working: Level | null = null; // preview copy
@@ -30,7 +29,7 @@ export function createSelectTool(ctx: ToolContext): Tool {
   let downPt: Pt = { x: 0, y: 0 };
   let original: Level | null = null; // level before the gesture; commit only when working differs
 
-  const setSel = (s: Selection | null) => { sel = s; ctx.select(s); };
+  const setSel = (s: Selection | null) => { ctx.select(s); };
   const reset = () => { drag = null; start = null; working = null; original = null; moved = false; };
   const zones = createZoneEditor(ctx, setSel);
 
@@ -103,7 +102,7 @@ export function createSelectTool(ctx: ToolContext): Tool {
         return;
       }
       if (zones.press(e)) return;
-      const prev = sel;
+      const prev = ctx.selection(); // the panel's: Esc, undo or a list pick may have changed it
       const hit = hitTest(level, e.pt, ctx.tolMm(), prev);
       if (!hit) { zones.pick(e.pt); return; }
       zones.forget();

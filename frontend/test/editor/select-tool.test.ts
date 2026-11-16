@@ -261,4 +261,18 @@ describe('select tool', () => {
     t.up(ev(500, 300));
     expect(ctx.commits).toHaveLength(0);
   });
+
+  it('reads the panel selection at each press: a wall deselected elsewhere gives no node hit at its end', () => {
+    const ctx = fakeContext(box());
+    const t = createSelectTool(ctx);
+    click(t, 500, 0);
+    const wall = ctx.selection();
+    expect(wall?.kind).toBe('wall');
+    ctx.select(null); // Esc in the panel
+    const w = ctx.level().walls.find(x => x.id === wall!.id)!;
+    const end = ctx.level().nodes.find(n => n.id === w.b)!;
+    t.down(ev(end.x - 5, end.y + 5));
+    expect(ctx.selection()?.kind).toBe('wall');
+    t.up(ev(end.x - 5, end.y + 5));
+  });
 });

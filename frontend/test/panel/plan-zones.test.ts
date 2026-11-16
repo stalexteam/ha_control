@@ -209,6 +209,27 @@ describe('zones in the Plan step', () => {
     expect(el.selection).toBeNull();
   });
 
+  it('Select follows the panel selection: after Esc, undo or a list pick a press at a wall end picks the wall, not its node', async () => {
+    const { el } = await mountZones();
+    const n1 = () => el.history!.current.level.nodes.find(n => n.id === 'n1')!;
+    const clearings: [string, () => Promise<void>][] = [
+      ['Esc', async () => { key(el, 'keydown', 'Escape'); await el.updateComplete; }],
+      ['undo', () => undo(el)],
+      ['list pick', () => press(el, '.zrow[data-id="door"]')],
+    ];
+    for (const [name, clear] of clearings) {
+      click(el, 3000, 0);
+      expect(el.selection, name).toEqual({ kind: 'wall', id: 'w0' });
+      await clear();
+      expect(el.selection?.kind === 'wall', name).toBe(false);
+      pointer(el, 'pointerdown', 5990, 5); // next to n1, the end of w0
+      expect(el.selection, name).toEqual({ kind: 'wall', id: 'w0' });
+      pointer(el, 'pointerup', 5990, 5);
+      expect(n1(), name).toMatchObject({ x: 6000, y: 0 });
+      key(el, 'keydown', 'Escape');
+    }
+  });
+
   it('Select: a double-click on an edge of the selected polygon inserts a vertex; Delete on a selected vertex removes it', async () => {
     const { el } = await mountZones();
     click(el, 1500, 1500);
@@ -394,11 +415,18 @@ describe('zones in the Plan step', () => {
     expect(q('g.zones')).toHaveLength(0);
   });
 
-  it('the selected zone is drawn last (raised)', async () => {
+  it('the selected zone raises only its outline: the fills and labels keep level order, nested labels stay visible', async () => {
     const { el, kitchen } = await mountZones();
     const order = () => [...el.shadowRoot!.querySelectorAll('svg.plan g.zones path.zone')].map(p => p.getAttribute('data-id'));
     expect(order()).toEqual([kitchen, 'door', 'lost']);
     await press(el, `.zrow[data-id="${kitchen}"]`);
-    expect(order()).toEqual(['door', 'lost', kitchen]);
+    expect(order()).toEqual([kitchen, 'door', 'lost']);
+    const raised = el.shadowRoot!.querySelector('svg.plan .zone-overlay path.zone-outline')!;
+    expect(raised.getAttribute('data-id')).toBe(kitchen);
+    expect(raised.getAttribute('fill')).toBe('none');
+    // The overlay is drawn after the zone layer.
+    const all = [...el.shadowRoot!.querySelectorAll('svg.plan path.zone, svg.plan path.zone-outline')];
+    expect(all[all.length - 1]).toBe(raised);
+    expect(el.shadowRoot!.querySelectorAll('svg.plan .zone-label')).toHaveLength(3);
   });
 });

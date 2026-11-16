@@ -54,15 +54,16 @@ describe('renderZoneAreas', () => {
     expect(root.querySelector('pattern#zone-hatch line')!.getAttribute('stroke')).toBe(pal.invalid);
   });
 
-  it('the selected zone is drawn last with the selection stroke; the others are dimmed', () => {
+  it('a selection keeps the fills and labels in level order; only the other fills and outlines are dimmed', () => {
     const { level, a, b } = twoZones();
     const root = areas(level, a);
     const paths = [...root.querySelectorAll('g.zones path.zone')];
-    expect(paths.map(p => p.getAttribute('data-id'))).toEqual([b, a]);
-    expect(paths[1].classList.contains('selected')).toBe(true);
-    expect(paths[1].getAttribute('stroke')).toBe(pal.selection);
-    expect(root.querySelector(`g.zone-item[data-id="${b}"]`)!.getAttribute('opacity')).toBe('0.55');
-    expect(root.querySelector(`g.zone-item[data-id="${a}"]`)!.getAttribute('opacity')).toBeNull();
+    expect(paths.map(p => p.getAttribute('data-id'))).toEqual([a, b]);
+    expect(paths[0].classList.contains('selected')).toBe(true);
+    expect(paths.map(p => p.getAttribute('fill-opacity'))).toEqual(['0.16', '0.16']);
+    expect(paths.map(p => p.getAttribute('stroke'))).toEqual([ZONE_HUES[0], ZONE_HUES[1]]);
+    expect(paths.map(p => p.getAttribute('opacity'))).toEqual([null, '0.55']);
+    expect([...root.querySelectorAll('text.zone-label')].map(t => t.closest('[opacity]'))).toEqual([null, null]);
   });
 
   it('Equipment and Binding: thin outlines in the zone hue, no fill and no labels', () => {
@@ -94,6 +95,16 @@ describe('renderZoneAreas', () => {
 
 describe('renderZoneOverlay', () => {
   beforeEach(() => { document.body.innerHTML = ''; });
+
+  it('the selected zone outline is raised here, in the selection colour, with no fill', () => {
+    const { level, a } = twoZones();
+    const root = host(renderZoneOverlay(level, { palette: pal, scale: 0.1, selectedId: a }));
+    const outline = [...root.querySelectorAll('path.zone-outline')];
+    expect(outline.map(p => p.getAttribute('data-id'))).toEqual([a]);
+    expect(outline[0].getAttribute('fill')).toBe('none');
+    expect(outline[0].getAttribute('stroke')).toBe(pal.selection);
+    expect(host(renderZoneOverlay(level, { palette: pal, scale: 0.1, selectedId: null })).querySelector('path.zone-outline')).toBeNull();
+  });
 
   it('the selected polygon zone shows one handle per vertex; lost and selected vertices are marked', () => {
     const { level, a } = twoZones();
