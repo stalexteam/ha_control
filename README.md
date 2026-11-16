@@ -32,7 +32,7 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 
 ### Equipment tab
 
-- The steps Plan, Equipment, Binding and Power sit in the title block under the top bar: click any step, or use Back / Next. Walls, openings and zones are dimmed and locked in the Equipment step (zones as thin outlines only); devices are dimmed and locked in the Plan step.
+- The steps Plan, Equipment, Binding and Power sit in the title block under the top bar: click any step, or use Back / Next. Walls, openings and zones are dimmed and locked in the Equipment step (zones as thin outlines only). The Plan step does not show devices at all; the Equipment step only places them (no live state there).
 - Tools: Select, Ceiling light, Wall light, Motion sensor, Illuminance sensor, Climate sensor, Leak sensor, Wall switch, Smart button, Valve, Socket, Exhaust fan, Device. One click places one device. On a short screen the tool rail scrolls.
 - Wall switches and sockets snap to the nearest wall face (wall only). Wall lights, sensors (the leak sensor too), smart buttons and valves go on a wall face near the cursor, otherwise at a free grid point (wall or free). Near a corner, a wall device goes on the wall whose face is nearer the cursor. Ceiling lights are always free. A Device is free unless "Wall mount" is checked (see below).
 - Leak sensor (a circle with a drop): its Leak binding takes only a binary sensor with the moisture device class.
@@ -67,6 +67,14 @@ Binding links every device on the plan to Home Assistant entities, one field per
   - Partly bound: some role is set, but not the primary one.
   - A Device has no required role: with nothing bound it shows "Dummy" and counts as done; its Switch row is called Switch. Devices not on the plan are listed in their own group, "Not on the plan".
   - Missing (red): a bound entity is neither in the live states nor in the entity registry. A disabled or unavailable entity is only noted; the device still counts as bound. Nothing is ever removed automatically.
+- Live state (Binding step only), read from Home Assistant as it changes:
+  - Lights: filled with a soft glow while on, with a bubble saying how long they have been on. Exhaust fans: filled while on, with the same timer. Off: outline only.
+  - Sockets and Devices: filled while on; a bubble with the power while they draw at least 1 W (a Device without a Switch shows only the power).
+  - Motion sensors: while detecting, the symbol and its zone light up, with a bubble saying for how long. Leak sensors: red while wet, with the same timer.
+  - Wall switches are filled while on, valves while open (a valve bound to a switch: on = open).
+  - Timer text: seconds (`42`), then `m:ss` (`3:12`), from an hour `h:mm:ss` (`1:05:12`). It counts from the entity's last change, so it is right as soon as the plan opens; after a Home Assistant restart it counts from the restart.
+  - Events: a button press shows the raw action (`single`, `2_double`), a wall switch `on` / `off`, a valve `open` / `closed`, in a bubble for 10 s. Only events while the panel is open count.
+  - Bubbles pop in and fade out (no animation with reduced motion). A bound entity that is unknown or unavailable draws a dashed outline and no bubble.
 - One entity may be bound to several devices; the field then says "Also bound to". For smart button triggers it compares the entity and the action value, so two buttons of one physical switch are not reported.
 - The entity, device and area registries load once, when the Binding step first opens. If that fails, a notice offers Retry; the fields keep working from the live states and nothing is flagged Missing.
 - Delete does nothing in this step. Bindings are saved with the plan.
@@ -94,9 +102,9 @@ Wall switches, smart buttons and valves are input containers: virtual objects th
   - "Status: error, unavailable (ids)"
   - "Not saved yet" (the saved plan has no such container, or has it as the other type)
   - or the feed error.
-- Plan badge, top-right of the symbol, in every step:
+- Plan badge, top-right of the symbol, in the Binding step:
   - A red alert while the status is `error`. An unbound or partly bound container shows it permanently.
-  - An intent icon (toggle, auto, power, power-off) for 3 s, only for events that arrive while the panel is open.
+  - The intent icon of earlier versions is gone: the Binding step shows the raw action in a 10 s bubble instead (see Live state).
   - A dashed outline when there is no live data. When the connection drops, the reconnect is retried every 5 s for up to 1 minute; reopen the panel if Home Assistant took longer.
 - Upgrade note: reload any open Plan Studio tab after updating.
 
