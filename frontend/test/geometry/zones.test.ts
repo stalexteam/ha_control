@@ -86,7 +86,7 @@ describe('vertexPoint and zoneOutline', () => {
   it('zoneArea is the own area in m2 with 1 decimal', () => {
     expect(zoneArea(box, room('r0', false))).toBe(9.4); // 2600 x 3600 = 9.36 m2
     expect(zoneArea(box, square('s', 0, 0, 1000))).toBe(1);
-    expect(zoneArea(box, poly('e', []))).toBe(0);
+    expect(zoneArea(box, poly('e', []))).toBeNull();
   });
 });
 

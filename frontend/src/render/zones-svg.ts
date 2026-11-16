@@ -40,7 +40,7 @@ function planZone(level: Level, z: Zone, i: number, o: ZoneAreasOpts): SVGTempla
   const p = o.palette;
   const hue = zoneHue(i);
   const selected = o.selectedId === z.id;
-  const at = cached(labelCache, level, zoneLabelPoints).get(z.id) ?? { x: 0, y: 0 };
+  const at = cached(labelCache, level, zoneLabelPoints).get(z.id); // none for an outline of fewer than 3 points
   const fs = 12 / o.scale;
   return svg`
     <g class="zone-item" data-id=${z.id}>
@@ -48,10 +48,10 @@ function planZone(level: Level, z: Zone, i: number, o: ZoneAreasOpts): SVGTempla
         d=${ringD(zoneOutline(level, z))} fill=${z.invalid ? 'url(#zone-hatch)' : hue}
         fill-opacity=${z.invalid ? nothing : '0.16'} stroke=${hue} stroke-width="1.5" vector-effect=${NS}
         opacity=${o.selectedId !== null && !selected ? OTHERS : nothing}></path>
-      <text class="zone-label" x=${at.x} y=${at.y} text-anchor="middle" font-size=${fs} font-family="system-ui, sans-serif">
+      ${at ? svg`<text class="zone-label" x=${at.x} y=${at.y} text-anchor="middle" font-size=${fs} font-family="system-ui, sans-serif">
         <tspan x=${at.x} dy=${-0.2 * fs} font-weight="600" fill=${z.invalid ? p.invalid : p.text}>${z.name}</tspan>
         <tspan x=${at.x} dy=${1.2 * fs} font-size=${fs * 0.9} fill=${p.zoneLabel}>${formatArea(zoneArea(level, z))}</tspan>
-      </text>
+      </text>` : nothing}
     </g>`;
 }
 

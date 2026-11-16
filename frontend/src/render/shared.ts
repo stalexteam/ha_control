@@ -14,7 +14,7 @@ export function cached<K extends object, V>(map: WeakMap<K, V>, key: K, make: (k
   return v;
 }
 
-/** An area in m2 with 1 decimal: 12 -> "12.0 m²". */
-export function formatArea(m2: number): string {
-  return `${m2.toFixed(1)} ${t('unit.m2')}`;
+/** An area in m2 with 1 decimal: 12 -> "12.0 m²"; null (no area) -> "—". */
+export function formatArea(m2: number | null): string {
+  return m2 === null ? '—' : `${m2.toFixed(1)} ${t('unit.m2')}`;
 }

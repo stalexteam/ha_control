@@ -46,9 +46,13 @@ export function zoneOutline(level: Level, z: Zone): Pt[] {
   return s.vertices.map(v => vertexPoint(level, v) ?? { x: v.x, y: v.y });
 }
 
-/** The zone's own area in m2, rounded to 1 decimal (overlapping zones are not subtracted). */
-export function zoneArea(level: Level, z: Zone): number {
-  return Math.round(Math.abs(polygonArea(zoneOutline(level, z))) / 1e5) / 10;
+/**
+ * The zone's own area in m2, rounded to 1 decimal (overlapping zones are not subtracted); null when its outline has
+ * fewer than 3 points (no area to show).
+ */
+export function zoneArea(level: Level, z: Zone): number | null {
+  const outline = zoneOutline(level, z);
+  return outline.length < 3 ? null : Math.round(Math.abs(polygonArea(outline)) / 1e5) / 10;
 }
 
 /** Sign of the turn a -> b -> c (Y down: the sign of the cross product); 0 when collinear or two points coincide. */
@@ -182,7 +186,8 @@ function edgeDistance(p: Pt, rings: Pt[][]): number {
 }
 
 /**
- * The label point of every zone (by id). A zone with no smaller zone nested inside it (every outline point within it)
+ * The label point of every zone (by id); a zone whose outline has fewer than 3 points has none (no label). A zone with
+ * no smaller zone nested inside it (every outline point within it)
  * uses zoneLabelPoint. Otherwise its label takes the largest free spot: of a grid of sample points inside its outline
  * and outside the nested zones, the one farthest from its own edges and the nested outlines (zoneLabelPoint when no
  * sample is free), so it keeps clear of the nested zones' labels.
@@ -193,9 +198,10 @@ export function zoneLabelPoints(level: Level): Map<Id, Pt> {
   const out = new Map<Id, Pt>();
   level.zones.forEach((z, i) => {
     const ring = rings[i];
+    if (ring.length < 3) return;
     const nested = rings.filter((r, j) => j !== i && r.length >= 3 && areas[j] < areas[i] && r.every(p => zoneContains(ring, p)));
     const plain = zoneLabelPoint(ring);
-    if (nested.length === 0 || ring.length < 3) { out.set(z.id, plain); return; }
+    if (nested.length === 0) { out.set(z.id, plain); return; }
     const xs = ring.map(p => p.x), ys = ring.map(p => p.y);
     const x0 = Math.min(...xs), y0 = Math.min(...ys);
     const step = Math.max(Math.max(...xs) - x0, Math.max(...ys) - y0) / LABEL_SAMPLES;

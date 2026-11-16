@@ -415,6 +415,20 @@ describe('zones in the Plan step', () => {
     expect(q('g.zones')).toHaveLength(0);
   });
 
+  it('a zone with fewer than 3 outline points shows "—" as its area and gets no label', async () => {
+    const empty: Zone = { id: 'empty', name: 'Empty', shape: { kind: 'polygon', vertices: [] }, invalid: true };
+    const two: Zone = { id: 'two', name: 'Two', shape: { kind: 'polygon', vertices: [free(100, 100), free(900, 100)] }, invalid: true };
+    const { el } = await mountZones([empty, two]);
+    expect(text(el, '.zrow[data-id="empty"] .zarea')).toBe('—');
+    expect(text(el, '.zrow[data-id="two"] .zarea')).toBe('—');
+    expect(text(el, '.zrow[data-id="door"] .zarea')).toBe('1.0');
+    const labels = [...el.shadowRoot!.querySelectorAll('svg.plan .zone-label')].map(t => t.textContent!.replace(/\s+/g, ' ').trim());
+    expect(labels).toHaveLength(3);
+    expect(labels.some(l => l.startsWith('Empty') || l.startsWith('Two'))).toBe(false);
+    await press(el, '.zrow[data-id="empty"]');
+    expect(text(el, '.zprops [data-field="zone-area"]')).toBe('—');
+  });
+
   it('the selected zone raises only its outline: the fills and labels keep level order, nested labels stay visible', async () => {
     const { el, kitchen } = await mountZones();
     const order = () => [...el.shadowRoot!.querySelectorAll('svg.plan g.zones path.zone')].map(p => p.getAttribute('data-id'));

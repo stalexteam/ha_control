@@ -32,7 +32,7 @@ describe('zones v2 model', () => {
     expect(z).toMatchObject({ name: 'Kitchen', invalid: false, shape: { kind: 'walls', seed: { x: 2000, y: 1500 }, broken: false } });
     expect('automation' in z).toBe(false);
     expect(zoneArea(r.level, z)).toBe(12);
-    expect(zoneArea(r.level, z).toFixed(1)).toBe('12.0');
+    expect(zoneArea(r.level, z)!.toFixed(1)).toBe('12.0');
     // Outside every loop: nothing.
     const out = addWallsZone(room(), { x: 9000, y: 9000 }, 'X');
     expect(out.zoneId).toBeNull();

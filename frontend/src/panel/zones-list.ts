@@ -31,7 +31,7 @@ export function zoneInvalidText(level: Level, z: Zone): string | null {
 
 /**
  * The zone list of the Plan step's properties: a text filter, then one row per zone in level order (its plan hue,
- * name, method icon and area in m²; an invalid zone's swatch is the warning marker). A row click picks the zone.
+ * name, method icon and area in m², "—" without one; an invalid zone's swatch is the warning marker). A row click picks the zone.
  */
 export function renderZonesList(o: ZonesListOpts): TemplateResult {
   const q = o.query.trim().toLowerCase();
@@ -53,7 +53,7 @@ export function renderZonesList(o: ZonesListOpts): TemplateResult {
               : html`<span class="zswatch zinvalid" role="img" aria-label=${invalid} title=${invalid}></span>`}
             <span class="name">${z.name}</span>
             <span class="zkind" data-kind=${z.shape.kind} title=${zoneKindLabel(z)}>${methodIcon(z.shape.kind)}</span>
-            <span class="zarea">${zoneArea(o.level, z).toFixed(1)}</span>
+            <span class="zarea">${zoneArea(o.level, z)?.toFixed(1) ?? '—'}</span>
           </button>`;
         })}
       </div>
