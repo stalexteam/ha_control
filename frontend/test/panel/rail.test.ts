@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest';
-import { $, click, mount } from './helpers';
+import { $, click, mount, pointer } from './helpers';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 import { TOOL_ICONS } from '../../src/panel/tool-icons';
 import { BINDING_TOOL_IDS, EQUIPMENT_TOOL_IDS, PLAN_TOOL_IDS, POWER_TOOL_IDS } from '../../src/panel/tool-factory';
@@ -127,6 +127,16 @@ describe('tool rail and status chip', () => {
     expect(el.toolId).toBe('wall');
     await keyDown(el, { key: 'w', code: 'KeyW' }); // already the Wall tool: nothing is cancelled
     expect(el.activeTool.preview().tracker?.first).toBe('35');
+  });
+
+  it('a shortcut never switches the tool in the middle of a drag', async () => {
+    const el = await mount();
+    pointer(el, 'pointerdown', 0, 0);
+    await keyDown(el, { key: 'w', code: 'KeyW' });
+    expect(el.toolId).toBe('select');
+    pointer(el, 'pointerup', 0, 0);
+    await keyDown(el, { key: 'w', code: 'KeyW' });
+    expect(el.toolId).toBe('wall');
   });
 
   it('no shortcuts outside the Plan step', async () => {

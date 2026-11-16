@@ -118,9 +118,11 @@ export class EditorInput {
       if (!e.repeat && !this.spaceDown) { this.spaceDown = true; this.spacePending = true; }
       return;
     }
-    // Plan step tool shortcuts: a bare letter key (no modifier, so Ctrl+W / Ctrl+Z keep their meaning). The typed
-    // lengths of the Wall and Box tools take digits and Space only, so no letter is ever part of a length.
-    const shortcut = this.h.mode === 'plan' && !ctrl && !e.altKey && !e.shiftKey ? PLAN_KEYS.get(e.code) : undefined;
+    // Plan step tool shortcuts: a bare letter key (no modifier, so Ctrl+W / Ctrl+Z keep their meaning), never in the
+    // middle of a drag. The typed lengths of the Wall and Box tools take digits and Space only, so no letter is ever
+    // part of a length.
+    const bare = !ctrl && !e.altKey && !e.shiftKey && !this.pointerActive;
+    const shortcut = this.h.mode === 'plan' && bare ? PLAN_KEYS.get(e.code) : undefined;
     if (shortcut) {
       e.preventDefault();
       if (shortcut !== this.h.toolId) this.h.pickTool(shortcut); // the active tool's own key keeps its draft
