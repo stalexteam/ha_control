@@ -104,7 +104,7 @@ def test_validate_requires_v2():
     assert CURRENT_SCHEMA == 2
     validate_plan({"id": "p", "name": "P", "schemaVersion": 2, "levels": [{"id": "l1"}]})
     for version in (1, 3, True, None):
-        with pytest.raises(vol.Invalid):
+        with pytest.raises(vol.Invalid, match="^schemaVersion must be 2: reload the Plan Studio page$"):
             validate_plan({"id": "p", "name": "P", "schemaVersion": version, "levels": [{"id": "l1"}]})
 
 

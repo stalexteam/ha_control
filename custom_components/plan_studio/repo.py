@@ -30,7 +30,7 @@ def validate_plan(plan: dict) -> None:
     schema_version = plan.get("schemaVersion")
     # bool is a subclass of int: True must not pass as schema version 1.
     if type(schema_version) is not int or schema_version != CURRENT_SCHEMA:
-        raise vol.Invalid(f"schemaVersion must be {CURRENT_SCHEMA}")
+        raise vol.Invalid(f"schemaVersion must be {CURRENT_SCHEMA}: reload the Plan Studio page")
     levels = plan.get("levels")
     if not isinstance(levels, list) or not levels:
         raise vol.Invalid("levels must be a non-empty list")
