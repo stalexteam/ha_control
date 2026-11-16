@@ -344,6 +344,19 @@ def test_through_device_binding():
     assert f["blocks"]["g"] == {}
 
 
+def test_through_device_with_unavailable_power_passes_values():
+    s = Scheme(
+        [blk("g", "grid", power="sensor.grid"), dev("d"), blk("rem", "remainder")],
+        [wire("g_d", "g.OUT", "d.IN"), wire("d_rem", "d.OUT", "rem.IN")],
+        {"d": {"power": "sensor.d"}},
+        {"sensor.grid": 700, "sensor.d": ("unavailable", {})},
+    )
+    f = s.run()
+    assert f["wires"]["g_d"] == live(700.0)
+    assert f["wires"]["d_rem"] == live(700.0)
+    assert f["blocks"]["d"] == {"power": None}
+
+
 def test_inverter_reads_power_in_and_out_not_power():
     s = Scheme(
         [blk("g", "grid"), dev("inv"), dev("load")],
