@@ -68,12 +68,13 @@ Binding links every device on the plan to Home Assistant entities, one field per
   - A Device has no required role: with nothing bound it shows "Dummy" and counts as done; its Switch row is called Switch. Devices not on the plan are listed in their own group, "Not on the plan".
   - Missing (red): a bound entity is neither in the live states nor in the entity registry. A disabled or unavailable entity is only noted; the device still counts as bound. Nothing is ever removed automatically.
 - Live state (Binding step only), read from Home Assistant as it changes:
-  - Lights: filled with a soft glow while on, with a bubble saying how long they have been on. Exhaust fans: filled while on, with the same timer. Off: outline only.
+  - Lights: filled while on, and their light cone or pool is drawn as a soft gradient from the light (no outlines; nothing while off), with a bubble saying how long they have been on. Exhaust fans: filled while on, with the same timer. Off: outline only.
   - Sockets and Devices: filled while on; a bubble with the power while they draw at least 1 W (a Device without a Switch shows only the power).
-  - Motion sensors: while detecting, the symbol and its zone light up, with a bubble saying for how long. Leak sensors: red while wet, with the same timer.
+  - Motion sensors: while detecting, the symbol lights up and its zone is drawn (transparent), with a bubble saying for how long; while idle the zone is not drawn. Leak sensors: red while wet, with the same timer.
   - Wall switches are filled while on, valves while open (a valve bound to a switch: on = open).
   - Timer text: seconds (`42`), then `m:ss` (`3:12`), from an hour `h:mm:ss` (`1:05:12`). It counts from the entity's last change, so it is right as soon as the plan opens; after a Home Assistant restart it counts from the restart.
   - Events: a button press shows the raw action (`single`, `2_double`), a wall switch `on` / `off`, a valve `open` / `closed`, in a bubble for 10 s. Only events while the panel is open count.
+  - Bubbles sit beside the symbol inside its zone: a wall device's perpendicular to the wall into the room, a free device's to the right or left; where that does not fit (in a corner), at 45 degrees into the zone, then the remaining sides. Several bubbles stack. The "Cones & zones" checkbox hides the light gradients and motion zones.
   - Bubbles pop in and fade out (no animation with reduced motion). A bound entity that is unknown or unavailable draws a dashed outline and no bubble.
 - One entity may be bound to several devices; the field then says "Also bound to". For smart button triggers it compares the entity and the action value, so two buttons of one physical switch are not reported.
 - The entity, device and area registries load once, when the Binding step first opens. If that fails, a notice offers Retry; the fields keep working from the live states and nothing is flagged Missing.
