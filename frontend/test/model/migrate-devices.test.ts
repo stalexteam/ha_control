@@ -38,7 +38,7 @@ describe('migrateDevices', () => {
     });
     expect(dv.props.kind).toBe('equipment');
     expect('controllable' in dv.props).toBe(false);
-    expect(m.power!.blocks[1]).toEqual({ id: 'rcbo', kind: 'device', deviceId: dv.id, x: 10, y: 200, name: 'RCBO output', portPins: pins });
+    expect(m.power!.blocks[1]).toEqual({ id: 'rcbo', kind: 'device', deviceId: dv.id, x: 10, y: 200, portPins: pins });
     expect(m.power!.blocks[0]).toBe(d.power!.blocks[0]);
     expect(m.power!.wires).toEqual(wires);
   });

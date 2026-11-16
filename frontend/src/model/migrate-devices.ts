@@ -36,8 +36,8 @@ function convertMeter(level: Level, b: Raw, name: string): { level: Level; id: I
  * 1. A `meter` block (with an id and a finite position; a malformed one is left for normalizePower to drop) becomes a
  *    new device not on the plan (addUnplacedDevice), named after the block or "Meter N" (N counting the converted
  *    meters from 1), with the meter's power, voltage and switch entity as its `power`, `voltage` and `control`, and
- *    `controllable` when the switch was. The block becomes a device block with the same id, position, name and pins,
- *    so its wires stay attached.
+ *    `controllable` when the switch was. The block becomes a device block with the same id, position and pins (the name
+ *    went to the device), so its wires stay attached.
  * 2. A device block's `inverter` flag is removed; when it was true and the device is equipment, the device becomes an
  *    inverter (setDeviceInverter: its `power` moves to `power_out`).
  * 3. On a level not marked `switchesMigrated`, every equipment device that had a switch and no controllable flag before
@@ -62,7 +62,7 @@ export function migrateDevices(doc: PlanDoc): PlanDoc {
         changed = true;
         return {
           id: b.id, kind: 'device', deviceId: made.id, x: b.x, y: b.y,
-          ...('name' in b ? { name: b.name } : {}), ...('portPins' in b ? { portPins: b.portPins } : {}),
+          ...('portPins' in b ? { portPins: b.portPins } : {}), // the name went to the device
         };
       }
       if (b.kind === 'device' && 'inverter' in b) {
