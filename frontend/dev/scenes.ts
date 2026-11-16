@@ -109,7 +109,7 @@ function powerPlan(): Plan {
 /*
  * Frames computed by the server evaluator (power.py `evaluate`) for powerPlan() from these readings: grid 1060 W at
  * 231.4 V, inverter input -300 W (exporting through its input) and output 0 W, PV roof 500 W, batteries +40 / +38 /
- * +37 W at 62 / 61 / 63 %, RCBO 0 W at 229.8 V with its read-only switch on, PC 251.4 W, Boiler 0 W with its switch off.
+ * +37 W at 62 / 61 / 63 %, RCBO 0 W at 229.8 V with its read-only switch on, PC unavailable (position B) or 0 W (position 0), Boiler 0 W with its switch off.
  */
 
 /**

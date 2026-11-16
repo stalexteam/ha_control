@@ -100,7 +100,7 @@ export const panelStyles = css`
     .step { padding: 6px 10px; }
   }
 
-  /* Left rail: tools, the binding device list, or the Zones tools above the zone list. */
+  /* Left rail: tools, or the binding device list. */
   .tools { background: var(--ch-card); border-right: 1px solid var(--ch-divider); display: flex;
     flex-direction: column; gap: 4px; padding: 8px 6px; min-height: 0; overflow-y: auto; box-sizing: border-box; }
   /* A tool button: a 24 px icon above a label that wraps to two lines (never cut); the Plan shortcut in the corner. */
@@ -153,9 +153,9 @@ export const panelStyles = css`
   .brow:hover, .zrow:hover { background: var(--ch-hover); }
   .brow.sel, .zrow.sel { background: var(--ch-tint); box-shadow: inset 3px 0 0 var(--ch-primary); }
   .brow .name, .zrow .name, .member .name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .brow .kind, .zrow .kind, .member .kind { display: block; color: var(--ch-muted); font-size: 12px; }
+  .brow .kind, .member .kind { display: block; color: var(--ch-muted); font-size: 12px; }
   .bgroup h5 { margin: 12px 12px 4px; color: var(--ch-muted); font-size: 12px; font-weight: 600; }
-  .brow .cnt, .zrow .zcount { color: var(--ch-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .brow .cnt { color: var(--ch-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
   .zswatch { width: 12px; height: 12px; box-sizing: border-box; border-radius: 3px; }
   .zswatch.zinvalid { border: 1.5px solid var(--ch-error);
     background: repeating-linear-gradient(45deg, var(--ch-error) 0 1.5px, transparent 1.5px 4px); }

@@ -6,9 +6,7 @@ export interface PlanPalette {
   gridMajor: string;
   wall: string;
   railing: string;
-  zone: string;
   zoneLabel: string;
-  hatch: string;
   window: string;
   door: string;
   selection: string;
@@ -63,9 +61,7 @@ const DARK: PlanPalette = {
   gridMajor: '#26355a',
   wall: '#cbd5e1',
   railing: '#94a3b8',
-  zone: '#111a2e',
   zoneLabel: '#94a3b8',
-  hatch: '#f43f5e',
   window: '#38bdf8',
   door: '#94a3b8',
   selection: '#60a5fa',
@@ -107,9 +103,7 @@ const LIGHT: PlanPalette = {
   gridMajor: '#d8cfc1',
   wall: '#2b2622',
   railing: '#7a7067',
-  zone: '#ffffff',
   zoneLabel: '#7a7067',
-  hatch: '#e5484d',
   window: '#4a9fd0',
   door: '#7a7067',
   selection: '#2563eb',
