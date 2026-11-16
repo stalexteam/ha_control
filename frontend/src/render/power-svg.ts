@@ -47,6 +47,8 @@ const ARROW_W = 4.5;
 /** Font sizes in units. */
 const NAME_PX = 12;
 const VALUE_PX = 11.5;
+/** A secondary value line (a remainder's loads without data). */
+const NOTE_PX = 10;
 const BUS_PX = 10.5;
 /** Smallest font a bus name is shrunk to inside the bar; thinner buses carry it beside. */
 const BUS_MIN_PX = 6;
@@ -156,16 +158,39 @@ function renderPort(pl: PortPlace, style: WireStyle | undefined, p: PlanPalette)
   </g>`;
 }
 
+/** A text line: `small` is a secondary line (NOTE_PX, normal weight); `title` is its tooltip. */
 type Line =
-  | { kind: 'text'; value: string; label?: string; note?: string; fill?: string }
+  | { kind: 'text'; value: string; label?: string; note?: string; fill?: string; small?: true; title?: string }
   | { kind: 'switch'; state: BlockLive['switch']; controllable: boolean }
   | { kind: 'chips' };
+
+/** `text` cut with an ellipsis to fit `width` units at NOTE_PX (an average glyph of 0.55 em). */
+function fit(text: string, width: number): string {
+  const max = Math.max(4, Math.floor(width / (NOTE_PX * 0.55)));
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+/** The line naming the loads without data a remainder absorbs ("incl. Socket" / "incl. 2 without data"). */
+function absorbedLine(s: PowerSchema, ids: Id[], g: GeoCtx, width: number): Line {
+  const names = ids.map((id) => {
+    const b = s.blocks.find((x) => x.id === id);
+    return b ? blockName(b, g) || t(`power.kind.${b.kind}`) : id;
+  });
+  // only a name is cut: the count text always fits the narrowest block
+  const one = t('power.absorbed.one');
+  const text = names.length === 1
+    ? one.replace('{name}', fit(names[0], width - 12 - one.replace('{name}', '').length * NOTE_PX * 0.55))
+    : t('power.absorbed.many').replace('{n}', String(names.length));
+  return { kind: 'text', value: text, small: true, title: names.join(', ') };
+}
 
 /**
  * The value lines of a block: one per blockLines (geometry) line, from the configuration and the live values. A device
  * block: power (or In and Out for an inverter), voltage, the switch, and loss for an inverter, each only when bound.
+ * A remainder: its power, then the loads without data it absorbs (the second line stays empty without them).
  */
-function blockContent(b: PowerBlock, g: GeoCtx, live: BlockLive | undefined, p: PlanPalette): Line[] {
+function blockContent(s: PowerSchema, b: PowerBlock, g: GeoCtx, live: BlockLive | undefined, p: PlanPalette,
+  width: number): Line[] {
   const watts = (): Line => ({ kind: 'text', value: formatWatts(live?.power) });
   const sw = (controllable: boolean): Line => ({ kind: 'switch', state: live?.switch, controllable });
   switch (b.kind) {
@@ -194,9 +219,8 @@ function blockContent(b: PowerBlock, g: GeoCtx, live: BlockLive | undefined, p: 
     case 'transfer':
       return [{ kind: 'chips' }];
     case 'remainder':
-      return live?.hint === 'disagree'
-        ? [{ kind: 'text', value: '—', note: t('power.hint.disagree'), fill: p.blockInvalid }]
-        : [watts()];
+      if (live?.hint === 'disagree') return [{ kind: 'text', value: '—', note: t('power.hint.disagree'), fill: p.blockInvalid }];
+      return live?.absorbed?.length ? [watts(), absorbedLine(s, live.absorbed, g, width)] : [watts()];
     case 'bus':
       return [];
   }
@@ -289,7 +313,7 @@ function renderBlock(s: PowerSchema, b: PowerBlock, o: PowerRenderOpts,
   const missing = b.kind === 'device' && !dev;
   const cx = r.x + r.w / 2;
   const name = blockName(b, o.geo) || t(`power.kind.${b.kind}`);
-  const lines = blockContent(b, o.geo, live, p);
+  const lines = blockContent(s, b, o.geo, live, p, r.w);
   const remainder = b.kind === 'remainder';
   return svg`<g class=${`block block-${b.kind}${missing ? ' missing' : ''}`} data-id=${b.id}>
     <rect class="body" x=${r.x} y=${r.y} width=${r.w} height=${r.h} rx="4" fill=${p.blockFill}
@@ -307,8 +331,9 @@ function renderBlock(s: PowerSchema, b: PowerBlock, o: PowerRenderOpts,
       const fill = l.fill ?? p.blockValue;
       const label = l.label ? svg`<tspan>${l.label} </tspan>` : nothing;
       const note = l.note ? svg`<tspan> ${l.note}</tspan>` : nothing;
-      return svg`<text x=${cx} y=${y} text-anchor="middle" dominant-baseline="central" font-size=${VALUE_PX} fill=${fill}
-        font-family=${FONT}>${label}<tspan font-weight="600">${l.value}</tspan>${note}</text>`;
+      return svg`<text x=${cx} y=${y} text-anchor="middle" dominant-baseline="central" font-size=${l.small ? NOTE_PX : VALUE_PX}
+        fill=${fill} font-family=${FONT}>${l.title ? svg`<title>${l.title}</title>` : nothing}${label}<tspan
+        font-weight=${l.small ? nothing : '600'}>${l.value}</tspan>${note}</text>`;
     })}
     ${portPlaces(s, b, o.geo).map((pl) => renderPort(pl, styleOf(b.id, pl.name), p))}
   </g>`;

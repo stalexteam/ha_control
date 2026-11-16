@@ -326,6 +326,24 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
 
     settle()
 
+    # a remainder absorbs the loads without data on its bus: a load tap (bus -> IN of a device that is not an inverter
+    # and has OUT unwired) has no downstream that could be metered. Through devices, sub-buses and transfers might.
+    def load_of(wid: str) -> str | None:
+        node = valid[wid][1]
+        return node[1] if node[0] == "p" and node[2] == "IN" and roles.get(node[1]) == "load" else None
+
+    absorbed: dict[str, list[str]] = {}
+    for bid, kind in kinds.items():
+        in_w = wire(bid, "IN") if kind == "remainder" else None
+        if in_w is None or in_w in known or valid[in_w][0][0] != "b":
+            continue
+        fs, ts = feeds.get(valid[in_w][0][1], []), taps.get(valid[in_w][0][1], [])
+        others = [load_of(w) for w in ts if w not in known and w != in_w]
+        if not others or None in others or any(w not in known for w in fs):
+            continue
+        known[in_w] = sum(known[w] for w in fs) - sum(known[w] for w in ts if w in known)
+        absorbed[bid] = list(dict.fromkeys(others))
+
     # remainders: a small negative on a bus is meter disagreement within tolerance
     hints: dict[str, str] = {}
     for bid, kind in kinds.items():
@@ -339,6 +357,7 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
         else:
             del known[in_w]
             hints[bid] = "disagree"
+            absorbed.pop(bid, None)
 
     frame_blocks: dict[str, dict] = {}
     for bid, kind in kinds.items():
@@ -353,6 +372,8 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
             entry = {"power": _w(known.get(in_w) if in_w is not None else None)}
             if bid in hints:
                 entry["hint"] = hints[bid]
+            if bid in absorbed:
+                entry["absorbed"] = absorbed[bid]
         else:
             continue
         if bid in switches:

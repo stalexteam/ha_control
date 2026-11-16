@@ -309,6 +309,38 @@ describe('renderPower blocks', () => {
     expect(line.getAttribute('fill')).toBe(P.blockInvalid);
   });
 
+  describe('a remainder that absorbs loads without data', () => {
+    const r: PowerBlock = { id: 'r', kind: 'remainder', x: 0, y: 0, name: 'Other' };
+    const sock: PowerBlock = { id: 's', kind: 'device', x: 200, y: 0, deviceId: 'sock', output: false };
+    const kettle: PowerBlock = { id: 'k', kind: 'device', x: 400, y: 0, deviceId: 'kettle', output: false };
+    const g = geo(dev('sock', 'Socket', { power: 'sensor.sock' }), dev('kettle', 'Kettle'));
+    const s: PowerSchema = { blocks: [r, sock, kettle], wires: [] };
+    const block = (absorbed: string[]) =>
+      draw(s, { geo: g, frame: frameOf({}, { r: { power: 112, absorbed } }) }).querySelector('g.block[data-id="r"]')!;
+    const incl = (b: Element) => [...b.querySelectorAll('text')].find((t) => t.textContent!.includes('incl.'));
+
+    it('one: names it on the second line, the name also in the tooltip', () => {
+      const b = block(['s']);
+      const line = incl(b)!;
+      expect(line.textContent).toContain('incl. Socket');
+      expect(line.querySelector('title')!.textContent).toBe('Socket');
+      expect([...b.querySelectorAll('text')].map((t) => t.textContent)).toContain('112 W');
+      // the second line lies inside the block (blockLines reserves it)
+      const rect = blockRect(r, g, s);
+      expect(Number(line.getAttribute('y'))).toBeLessThan(rect.y + rect.h);
+    });
+
+    it('several: counts them, the tooltip lists every name', () => {
+      const line = incl(block(['s', 'k']))!;
+      expect(line.textContent).toContain('incl. 2 without data');
+      expect(line.querySelector('title')!.textContent).toBe('Socket, Kettle');
+    });
+
+    it('none: no second line', () => {
+      expect(incl(block([]))).toBeUndefined();
+    });
+  });
+
   it('a remainder has a dashed outline in the remainder colour', () => {
     const r: PowerBlock = { id: 'r', kind: 'remainder', x: 0, y: 0, name: 'Other' };
     const body = draw({ blocks: [r], wires: [] }).querySelector('g.block[data-id="r"] rect.body')!;

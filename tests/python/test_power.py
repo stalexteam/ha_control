@@ -271,6 +271,98 @@ def test_remainder_tolerance():
     assert tap_scheme(250).run()["blocks"]["rem"] == {"power": 750.0}
 
 
+def apartments(sock="unavailable", extra=None, sock_binding=True):
+    """The live case: feed 434 W on a bus with loads 232 / 81 / 9 / 0 W, a socket without data and the remainder."""
+    loads = {"l1": 232, "l2": 81, "l3": 9, "l4": 0}
+    blocks = [blk("g", "grid", power="sensor.grid"), bus("apt"), *[dev(k) for k in loads], dev("sock"),
+              blk("rem", "remainder")]
+    wires = [wire("g_apt", "g.OUT", "apt"), *[wire(f"apt_{k}", "apt", f"{k}.IN") for k in loads],
+             wire("apt_sock", "apt", "sock.IN"), wire("apt_rem", "apt", "rem.IN")]
+    devices = {k: {"power": f"sensor.{k}"} for k in loads}
+    devices["sock"] = {"power": "sensor.sock"} if sock_binding else {}
+    states = {"sensor.grid": 434, **{f"sensor.{k}": v for k, v in loads.items()}}
+    if sock is not None:
+        states["sensor.sock"] = sock if isinstance(sock, tuple) else (sock, {})
+    s = Scheme(blocks, wires, devices, states)
+    if extra:
+        extra(s)
+    return s
+
+
+@pytest.mark.parametrize(
+    "sock, binding",
+    [("unavailable", True), (None, True), (("5", {"unit_of_measurement": "VA"}), True), (None, False)],
+)
+def test_remainder_absorbs_a_load_without_data(sock, binding):
+    f = apartments(sock=sock, sock_binding=binding).run()
+    assert f["blocks"]["rem"]["power"] == 112.0  # 434 - 232 - 81 - 9 - 0
+    assert f["blocks"]["rem"]["absorbed"] == ["sock"]
+    assert f["wires"]["apt_rem"] == live(112.0)
+    assert f["wires"]["apt_sock"] == live(None)  # the absorbed load stays unknown
+
+
+def test_remainder_absorbs_two_loads_without_data():
+    def second(s):
+        s.schema["blocks"].append(dev("sock2"))
+        s.schema["wires"].append(wire("apt_sock2", "apt", "sock2.IN"))
+        s.devices["sock2"] = {"power": "sensor.sock2"}
+        s.states["sensor.sock2"] = ("unavailable", {})
+
+    f = apartments(extra=second).run()
+    assert f["blocks"]["rem"]["power"] == 112.0
+    assert f["blocks"]["rem"]["absorbed"] == ["sock", "sock2"]
+    assert f["wires"]["apt_sock"] == live(None)
+    assert f["wires"]["apt_sock2"] == live(None)
+
+
+def test_remainder_does_not_absorb_an_unknown_through_device():
+    """A through device's downstream may be metered: the remainder stays unknown."""
+
+    def through(s):
+        s.schema["blocks"] += [dev("sub"), dev("far")]
+        s.schema["wires"] += [wire("apt_sub", "apt", "sub.IN"), wire("sub_far", "sub.OUT", "far.IN")]
+        s.devices["sub"] = {"power": "sensor.sub"}
+        s.devices["far"] = {"power": "sensor.far"}
+        s.states["sensor.sub"] = ("unavailable", {})
+        s.states["sensor.far"] = ("unavailable", {})
+
+    f = apartments(extra=through).run()
+    assert f["blocks"]["rem"]["power"] is None
+    assert "absorbed" not in f["blocks"]["rem"]
+    assert f["wires"]["apt_rem"] == live(None)
+
+
+@pytest.mark.parametrize("kind", ["bus", "transfer"])
+def test_remainder_does_not_absorb_a_sub_bus_or_transfer(kind):
+    def tap(s):
+        if kind == "bus":
+            s.schema["blocks"] += [bus("sub"), dev("far")]
+            s.schema["wires"] += [{"id": "apt_x", "from": end("apt"), "to": {"bus": "sub", "at": 0.5}},
+                                  wire("sub_far", "sub", "far.IN")]  # a load without data behind the sub-bus
+        else:
+            s.schema["blocks"].append(blk("ts", "transfer", form="1in2out"))
+            s.schema["wires"].append(wire("apt_x", "apt", "ts.IN"))
+
+    f = apartments(extra=tap).run()
+    assert f["blocks"]["rem"]["power"] is None
+    assert "absorbed" not in f["blocks"]["rem"]
+
+
+def test_absorbed_remainder_keeps_the_tolerance_rules():
+    def big(s):
+        s.states["sensor.l1"] = reading(440)  # 434 - 440 - 81 - 9 = -96: beyond max(10, 13)
+    f = apartments(extra=big).run()
+    assert f["blocks"]["rem"]["power"] is None
+    assert f["blocks"]["rem"]["hint"] == "disagree"
+    assert "absorbed" not in f["blocks"]["rem"]
+
+    def small(s):
+        s.states["sensor.l1"] = reading(349)  # 434 - 349 - 81 - 9 = -5: within tolerance
+    f = apartments(extra=small).run()
+    assert f["blocks"]["rem"]["power"] == 0.0
+    assert f["blocks"]["rem"]["absorbed"] == ["sock"]
+
+
 def test_negative_grid_export():
     f = owner_chain(grid=-500).run()
     assert f["wires"]["g_main"] == live(-500.0)

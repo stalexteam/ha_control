@@ -46,6 +46,8 @@ export interface BlockLive {
   switch?: 'on' | 'off' | 'unknown';
   position?: Position;
   hint?: 'disagree';
+  /** A remainder's loads without data (device block ids) counted in its value. */
+  absorbed?: Id[];
   missing?: true;
 }
 export interface PowerFrame { wires: Record<Id, WireLive>; blocks: Record<Id, BlockLive> }

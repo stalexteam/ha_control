@@ -136,6 +136,8 @@ const en: Dict = {
   'power.out': 'Out',
   'power.soc': 'SOC',
   'power.hint.disagree': 'meters disagree',
+  'power.absorbed.one': 'incl. {name}',
+  'power.absorbed.many': 'incl. {n} without data',
   'power.switch.on': 'On',
   'power.switch.off': 'Off',
   'power.switch.unknown': 'Unknown',

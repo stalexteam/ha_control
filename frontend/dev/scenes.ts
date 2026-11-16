@@ -112,7 +112,10 @@ function powerPlan(): Plan {
  * +37 W at 62 / 61 / 63 %, RCBO 0 W at 229.8 V with its read-only switch on, PC 251.4 W, Boiler 0 W with its switch off.
  */
 
-/** Position B: the inverter output path is idle, the bypass is live, the Boiler is off, the remainder is solved. */
+/**
+ * Position B: the inverter output path is idle, the bypass is live, the Boiler is off. The PC's power entity is
+ * unavailable, so the remainder absorbs it: 1360 W less the Boiler's 0 W.
+ */
 const POWER_FRAME: PowerFrame = {
   wires: {
     'w-grid': { power: 1060, state: 'live' },
@@ -126,9 +129,9 @@ const POWER_FRAME: PowerFrame = {
     'w-inv-out': { power: 0, state: 'live' },
     'w-rcbo': { power: 0, state: 'live' },
     'w-apt': { power: 1360, state: 'live' },
-    'w-pc': { power: 251.4, state: 'live' },
+    'w-pc': { power: null, state: 'live' },
     'w-boiler': { power: 0, state: 'live' },
-    'w-rem': { power: 1108.6, state: 'live' },
+    'w-rem': { power: 1360, state: 'live' },
   },
   blocks: {
     grid: { power: 1060, voltage: 231.4 },
@@ -139,9 +142,9 @@ const POWER_FRAME: PowerFrame = {
     b3: { power: 37, soc: 63 },
     rcbo: { power: 0, voltage: 229.8, switch: 'on' },
     ts: { position: 'B' },
-    pc: { power: 251.4 },
+    pc: { power: null },
     boiler: { power: 0, switch: 'off' },
-    rem: { power: 1108.6 },
+    rem: { power: 1360, absorbed: ['pc'] },
   },
 };
 

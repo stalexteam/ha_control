@@ -235,7 +235,8 @@ describe('blockLines and blockRect', () => {
     expect(blockLines({ id: 'b', kind: 'battery', ...at }, g)).toBe(2);
     expect(blockLines({ id: 'p', kind: 'pv', ...at }, g)).toBe(1);
     expect(blockLines({ id: 't', kind: 'transfer', form: '2in1out', ...at }, g)).toBe(1);
-    expect(blockLines({ id: 'r', kind: 'remainder', ...at }, g)).toBe(1);
+    // power and the line of the loads without data it absorbs (kept when empty, so the block does not jump)
+    expect(blockLines({ id: 'r', kind: 'remainder', ...at }, g)).toBe(2);
   });
 
   it('grows with a longer name', () => {
