@@ -74,6 +74,11 @@ describe('rule flowchart', () => {
     expect(host.querySelector('.fc-note')!.textContent).toBe('Saved version: your changes apply after Save');
   });
 
+  it('an invalid delay shows a question mark, not NaN', () => {
+    const { host } = draw({ rule: { ...rule, onDelay: NaN } });
+    expect(text(host, '[data-block="delays"]')).toBe('Result delay on ? s, off 120 s');
+  });
+
   it('gate values follow the server rules (ANY ignores unknown inputs)', () => {
     expect(gateValue('any', [null, false])).toBe(false);
     expect(gateValue('any', [null, true])).toBe(true);

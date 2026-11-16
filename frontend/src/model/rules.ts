@@ -46,11 +46,14 @@ export function ruleCycle(rules: Rule[], candidate: Rule): Id[] | null {
   return null;
 }
 
-export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay';
+export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action';
 
 const delayOk = (n: unknown): boolean => Number.isInteger(n) && (n as number) >= 0 && (n as number) <= RULE_DELAY_MAX;
 
-export function ruleProblems(rules: Rule[], r: Rule, deviceExists: (id: Id) => boolean): RuleProblem[] {
+/** `actionsOf` (optional) gives the actions a device takes; an action outside them is the 'action' problem. */
+export function ruleProblems(
+  rules: Rule[], r: Rule, deviceExists: (id: Id) => boolean, actionsOf?: (id: Id) => RuleDo[] | undefined,
+): RuleProblem[] {
   const out: RuleProblem[] = [];
   if (!r.name.trim()) out.push('name');
   if (r.inputs.length === 0) out.push('inputs');
@@ -63,6 +66,7 @@ export function ruleProblems(rules: Rule[], r: Rule, deviceExists: (id: Id) => b
   if (ruleRefs(r).some(id => id !== r.id && !known.has(id))) out.push('rule-missing');
   if (ruleCycle(rules, r)) out.push('cycle');
   if (!delayOk(r.onDelay) || !delayOk(r.offDelay)) out.push('delay');
+  if (actionsOf && [...r.onTrue, ...r.onFalse].some(a => { const ok = actionsOf(a.device); return ok !== undefined && !ok.includes(a.do); })) out.push('action');
   return out;
 }
 

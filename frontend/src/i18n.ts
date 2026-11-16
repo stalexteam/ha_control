@@ -326,6 +326,7 @@ const en: Dict = {
   'rules.problem.device-missing': 'A device of this rule is no longer on the plan.',
   'rules.problem.rule-missing': 'An input rule no longer exists.',
   'rules.problem.cycle': 'These inputs make the rules depend on each other in a loop.',
+  'rules.problem.action': 'An action is not available for its device.',
   'rules.problem.delay': 'Delays are whole seconds from 0 to 3600.',
   'rules.flow.title': 'Rule flowchart',
   'rules.flow.result': 'Result',

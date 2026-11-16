@@ -174,6 +174,7 @@ describe('Rule dialog', () => {
     key(el, 'keydown', 'Escape');
     await el.updateComplete;
     expect(el.dialog).toBeNull();
+    expect(el.ruleDraft).toBeNull();
     expect(el.rules).toEqual([]);
     expect(el.shadowRoot!.querySelector('.rule-backdrop')).toBeNull();
     for (const x of el.shadowRoot!.querySelectorAll('.ed > *')) expect(x.hasAttribute('inert')).toBe(false);
@@ -203,6 +204,10 @@ describe('Rule dialog', () => {
     expect(q(el, '.fc-blk[data-block="input-0"]').textContent).toContain('wet');
     await type(el, '[data-field="name"]', 'Other name');
     expect(q(el, '.fc-note').textContent).toBe('Saved version: your changes apply after Save');
-    expect(q(el, '.fc-blk[data-block="input-0"]').textContent).toContain('wet'); // the saved overlay stays
+    expect(q(el, '.fc-blk[data-block="input-0"]').textContent).not.toContain('wet'); // no live values after an edit
+    expect(q(el, '.fc-blk[data-block="input-0"]').classList.contains('on')).toBe(false);
+    await type(el, '[data-field="name"]', 'Leak Main -> valve'); // back to the saved values
+    expect(el.shadowRoot!.querySelector('.rule-backdrop .fc-note')).toBeNull();
+    expect(q(el, '.fc-blk[data-block="input-0"]').textContent).toContain('wet');
   });
 });

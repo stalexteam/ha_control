@@ -98,6 +98,18 @@ describe('rules model', () => {
     expect(r.onTrue).toEqual([{ device: 'v1', do: 'close' }]);
   });
 
+  it('an action its device cannot take is a problem', () => {
+    const valve = dev('v', 'valve');
+    const acts = (id: string) => (id === 'v' ? ruleActionsFor(valve) : undefined);
+    const ok = rule('a', { onTrue: [{ device: 'v', do: 'close' }] });
+    expect(ruleProblems([], ok, exists, acts)).toEqual([]);
+    const bad = rule('a', { onFalse: [{ device: 'v', do: 'on' }] });
+    expect(ruleProblems([], bad, exists, acts)).toEqual(['action']);
+    expect(ruleProblems([], bad, exists)).toEqual([]); // no lookup, no check
+    const cleared = rule('a', { onTrue: [{ device: 'v', do: 'close' }] });
+    expect(ruleProblems([], cleared, exists, () => [])).toEqual(['action']);
+  });
+
   it('input devices and action targets', () => {
     for (const k of ['leak_sensor', 'motion_sensor', 'ceiling_light', 'wall_light', 'socket', 'exhaust_fan', 'equipment', 'wall_switch', 'valve'] as const)
       expect(isRuleInputDevice(dev('d', k))).toBe(true);

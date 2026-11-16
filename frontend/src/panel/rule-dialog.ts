@@ -53,7 +53,8 @@ function actionRow(o: RuleDialogOpts, side: 'true' | 'false', k: number, a: Rule
   const list = r[key];
   const set = (next: RuleAction[]) => o.onChange({ ...r, [key]: next });
   const dev = o.deviceById(a.device);
-  const acts: RuleDo[] = dev ? ruleActionsFor(dev) : [a.do];
+  const takes = dev ? ruleActionsFor(dev) : [];
+  const acts: RuleDo[] = takes.includes(a.do) ? takes : [...takes, a.do]; // a stale action stays visible (and flagged)
   const field = fieldOf({ action: side, index: k });
   return html`
     <div class="rline" data-field=${field} tabindex="-1">

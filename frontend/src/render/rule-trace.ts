@@ -34,6 +34,7 @@ const IN_W = 210, IN_H = 50, GATE_W = 90, VERDICT_W = 150, ACT_W = 230, ACT_H = 
 const X_GATE = PAD + IN_W + GAP, X_VERDICT = X_GATE + GATE_W + GAP, X_ACT = X_VERDICT + VERDICT_W + GAP;
 const WIDTH = X_ACT + ACT_W + PAD;
 
+const secs = (n: number): string => (Number.isFinite(n) ? String(n) : '?');
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /** Three-valued gate of the inputs' values after NOT, as the server combines them (an ANY ignores unknown inputs). */
@@ -96,7 +97,7 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
     { side: 'true' as const, y0: actY0, list: rule.onTrue, head: t('rules.whenTrue') },
     { side: 'false' as const, y0: falseY0, list: rule.onFalse, head: t('rules.whenFalse') },
   ];
-  const delayText = t('rules.flow.delay').replace('{on}', String(rule.onDelay)).replace('{off}', String(rule.offDelay));
+  const delayText = t('rules.flow.delay').replace('{on}', secs(rule.onDelay)).replace('{off}', secs(rule.offDelay));
   const verdictLine = trace === undefined ? delayText
     : `${word(verdict ?? null)}${pending ? `, ${t('rules.flow.pending').replace('{to}', word(pending.to)).replace('{n}', String(left))}` : ''}`;
 

@@ -202,6 +202,7 @@ export class PlanStudioPanel extends LitElement {
   }
 
   protected willUpdate(changed: PropertyValues): void {
+    if (this.ruleDraft && !this.modal) this.ruleDraft = null; // Esc closed the rule dialog
     if (changed.has('hass') && this.hass && !this.plan && !this.loading && !this.loadError) void this.session.load();
     // New states, or a new level whose devices have no baseline yet.
     const cur = this.history?.current.level ?? null;
@@ -377,8 +378,11 @@ export class PlanStudioPanel extends LitElement {
     const devices = levels.flatMap(l => l.devices);
     const rule = d.rule;
     const stored = this.rules.find(r => r.id === rule.id);
-    const trace = stored ? this.rulesFeed.trace(rule.id) : undefined;
-    const note = trace === undefined ? t('rules.flow.new') : ruleEqual(stored!, rule) ? null : t('rules.flow.edited');
+    const saved = stored ? this.rulesFeed.trace(rule.id) : undefined;
+    // Live values only for an unchanged saved rule: after an edit they would land on the wrong blocks.
+    const same = !!stored && ruleEqual(stored, rule);
+    const trace = same ? saved : undefined;
+    const note = saved === undefined ? t('rules.flow.new') : same ? null : t('rules.flow.edited');
     const multi = levels.length > 1;
     return renderRuleDialog({
       draft: d,
@@ -388,7 +392,8 @@ export class PlanStudioPanel extends LitElement {
       otherRules: this.rules.filter(r => r.id !== rule.id),
       ruleName: id => this.rules.find(r => r.id === id)?.name,
       zones: levels.flatMap(l => l.zones.map(z => ({ id: z.id, name: multi ? `${z.name} (${l.name})` : z.name }))),
-      problems: ruleProblems(this.rules, rule, id => devices.some(x => x.id === id)),
+      problems: ruleProblems(this.rules, rule, id => devices.some(x => x.id === id),
+        id => { const x = devices.find(v => v.id === id); return x && ruleActionsFor(x); }),
       trace, note, now: Date.now(),
       onChange: r => { this.ruleDraft = { ...d, rule: r }; },
       onFocus: f => this.focusRuleField(f),
