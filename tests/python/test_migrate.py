@@ -130,6 +130,12 @@ def test_malformed_v1_does_not_raise():
     assert z1["shape"] == {"kind": "polygon", "vertices": []} and z1["invalid"] is True
     assert z3["shape"] == {"kind": "polygon", "vertices": []}
     assert migrate_plan({"id": "p", "schemaVersion": 1, "levels": "bad"})["schemaVersion"] == 2
+    odd = {"id": "l1", "zones": [{"id": ["x"]}, {}],
+           "automationZones": [{"id": "z1", "shape": {"kind": "room", "roomId": ["x"]}},
+                               {"id": "z2", "shape": {"kind": "room"}}]}
+    zones = migrate_plan({"id": "p", "schemaVersion": 1, "levels": [odd]})["levels"][0]["zones"]
+    assert [(z["id"], z["shape"]["kind"]) for z in zones] == [
+        (["x"], "walls"), (None, "walls"), ("z1", "polygon"), ("z2", "polygon")]
 
 
 def test_repo_marks_migrated():

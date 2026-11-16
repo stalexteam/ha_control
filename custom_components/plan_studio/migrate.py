@@ -30,6 +30,12 @@ def _dicts(value: object) -> list[dict]:
     return [v for v in value if isinstance(v, dict)] if isinstance(value, list) else []
 
 
+def _rid(entry: dict, key: str = "id") -> str | None:
+    """A string id, or None for a missing or junk one (which links nothing)."""
+    value = entry.get(key)
+    return value if isinstance(value, str) else None
+
+
 def _walls_zone(zone_id: object, name: object, room: dict) -> dict:
     seed = room.get("seed")
     outline = room.get("outline")
@@ -59,19 +65,19 @@ def _polygon_zone(zone: dict, vertices: list, invalid: bool) -> dict:
 
 def _level_v1_to_v2(level: dict) -> dict:
     rooms = _dicts(level.get("zones"))
-    room_ids = {r.get("id") for r in rooms} - {None}
+    room_ids = {_rid(r) for r in rooms} - {None}
     on_room: dict[object, list[dict]] = {}  # room id -> its automation zones of kind room, in order
     others: list[dict] = []  # polygon zones and zones whose room is missing (or whose shape is junk)
     for az in _dicts(level.get("automationZones")):
         shape = az.get("shape")
-        if isinstance(shape, dict) and shape.get("kind") == "room" and shape.get("roomId") in room_ids:
+        if isinstance(shape, dict) and shape.get("kind") == "room" and _rid(shape, "roomId") in room_ids:
             on_room.setdefault(shape["roomId"], []).append(az)
         else:
             others.append(az)
 
     zones: list[dict] = []
     for room in rooms:
-        linked = on_room.pop(room.get("id"), [])
+        linked = on_room.pop(_rid(room), [])
         if not linked:
             zones.append(_walls_zone(room.get("id"), room.get("name"), room))
             continue
