@@ -212,6 +212,7 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
     inverters: list[str] = []
     roles: dict[str, str] = {}  # seed role: grid, battery, pv, or through / load / inverter for a device
     readings: dict[str, dict[str, float | None]] = {}
+    alerts: dict[str, list[str]] = {}  # reason codes: unavailable:<entity_id>, missing-device, disagree
     forms: dict[str, str] = {}
     pos: dict[str, str] = {}
     for bid, b in blocks.items():
@@ -237,6 +238,13 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
             if form in _COMMON:
                 forms[bid] = form
         readings[bid] = {k: _read(lookup, _str(src.get(k)), k) for k in keys if _str(src.get(k))}
+        # alert codes: a bound entity without a usable value (a switch included), a missing device
+        bad = [_str(src.get(k)) for k, v in readings[bid].items() if v is None]
+        if switches.get(bid) == "unknown":
+            bad.append(_str(src.get("control")))
+        alerts[bid] = [f"unavailable:{e}" for e in dict.fromkeys(bad)]
+        if kind == "device" and bindings[bid] is None:
+            alerts[bid].append("missing-device")
 
     # energized: wires plus closed block internals; `plain` has wires only
     uf, plain = _UnionFind(), _UnionFind()
@@ -357,6 +365,7 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
         else:
             del known[in_w]
             hints[bid] = "disagree"
+            alerts[bid].append("disagree")
             absorbed.pop(bid, None)
 
     frame_blocks: dict[str, dict] = {}
@@ -382,6 +391,8 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
             terms = [(wire(bid, port), sign) for port, sign in _LOSS if wire(bid, port) is not None]
             ok = terms and all(w in known for w, _ in terms)
             entry["loss"] = _w(sum(sign * known[w] for w, sign in terms)) if ok else None
+        if alerts[bid]:
+            entry["alert"] = alerts[bid]
         frame_blocks[bid] = entry
 
     frame_wires = {

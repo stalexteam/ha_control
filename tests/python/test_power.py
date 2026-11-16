@@ -214,7 +214,7 @@ def test_power_units_convert_to_w(unit, value, expected):
 def test_unknown_power_unit_is_none(unit):
     f = owner_chain(grid=("500", {"unit_of_measurement": unit})).run()
     assert f["wires"]["g_main"] == live(None)
-    assert f["blocks"]["g"] == {"power": None}
+    assert f["blocks"]["g"] == {"power": None, "alert": ["unavailable:sensor.grid"]}
 
 
 def test_device_power_unit_converts_or_is_none():
@@ -222,7 +222,7 @@ def test_device_power_unit_converts_or_is_none():
     c.states["sensor.pc"] = ("0.25", {"unit_of_measurement": "kW"})
     assert c.run()["blocks"]["pc"] == {"power": 250.0}
     c.states["sensor.pc"] = ("250", {"unit_of_measurement": "VA"})
-    assert c.run()["blocks"]["pc"] == {"power": None}
+    assert c.run()["blocks"]["pc"] == {"power": None, "alert": ["unavailable:sensor.pc"]}
 
 
 @pytest.mark.parametrize(
@@ -234,7 +234,8 @@ def test_voltage_units_convert_to_v_or_are_none(unit, value, expected):
     c = owner_chain()
     c.block("g")["voltage"] = "sensor.grid_v"
     c.states["sensor.grid_v"] = (value, {"unit_of_measurement": unit} if unit else {})
-    assert c.run()["blocks"]["g"] == {"power": 1000.0, "voltage": expected}
+    alert = {} if expected is not None else {"alert": ["unavailable:sensor.grid_v"]}
+    assert c.run()["blocks"]["g"] == {"power": 1000.0, "voltage": expected, **alert}
 
 
 def test_soc_keeps_its_value():
@@ -247,7 +248,7 @@ def test_soc_keeps_its_value():
 def test_unavailable_reading_is_none(state):
     f = owner_chain(grid=state).run()
     assert f["wires"]["g_main"] == live(None)
-    assert f["blocks"]["g"] == {"power": None}
+    assert f["blocks"]["g"] == {"power": None, "alert": ["unavailable:sensor.grid"]}
 
 
 def tap_scheme(tap, feed=1000):
@@ -264,10 +265,10 @@ def test_remainder_tolerance():
     assert f["blocks"]["rem"] == {"power": 0.0}
     assert f["wires"]["m_rem"] == live(0.0)
     f = tap_scheme(1100).run()  # -100 beyond 30
-    assert f["blocks"]["rem"] == {"power": None, "hint": "disagree"}
+    assert f["blocks"]["rem"] == {"power": None, "hint": "disagree", "alert": ["disagree"]}
     assert f["wires"]["m_rem"] == live(None)
     assert tap_scheme(109, feed=100).run()["blocks"]["rem"] == {"power": 0.0}  # the 10 W floor
-    assert tap_scheme(111, feed=100).run()["blocks"]["rem"] == {"power": None, "hint": "disagree"}
+    assert tap_scheme(111, feed=100).run()["blocks"]["rem"] == {"power": None, "hint": "disagree", "alert": ["disagree"]}
     assert tap_scheme(250).run()["blocks"]["rem"] == {"power": 750.0}
 
 
@@ -446,7 +447,7 @@ def test_through_device_with_unavailable_power_passes_values():
     f = s.run()
     assert f["wires"]["g_d"] == live(700.0)
     assert f["wires"]["d_rem"] == live(700.0)
-    assert f["blocks"]["d"] == {"power": None}
+    assert f["blocks"]["d"] == {"power": None, "alert": ["unavailable:sensor.d"]}
 
 
 def test_inverter_reads_power_in_and_out_not_power():
@@ -610,7 +611,7 @@ def test_missing_device():
         {"sensor.grid": 1000},
     )
     f = s.run()
-    assert f["blocks"]["ghost"] == {"missing": True}
+    assert f["blocks"]["ghost"] == {"missing": True, "alert": ["missing-device"]}
     assert f["wires"]["g_ghost"] == live(1000.0)
     assert f["wires"]["ghost_rem"] == live(None)
 
@@ -662,11 +663,52 @@ def test_malformed_schema_is_ignored():
     assert f["blocks"]["t"] == {"position": "A"}
     assert f["blocks"]["m"] == {"power": 5.0}
     assert not {"old", "j", "i"} & set(f["blocks"])
-    assert evaluate({"blocks": blocks, "wires": wires}, {"m": "junk"}, states.get, {})["blocks"]["m"] == {"missing": True}
+    assert evaluate({"blocks": blocks, "wires": wires}, {"m": "junk"}, states.get, {})["blocks"]["m"] == {
+        "missing": True, "alert": ["missing-device"]}
 
     f = evaluate({"blocks": None, "wires": [wire("ok", "g.OUT", "main")]}, {}, {}.get, {})
     assert f == {"wires": {"ok": {"power": None, "state": "dead"}}, "blocks": {}}
     assert evaluate(None, {}, {}.get, None) == {"wires": {}, "blocks": {}}
+
+
+def test_no_alert_when_every_entity_reads():
+    f = owner_chain().run()
+    assert not [bid for bid, e in f["blocks"].items() if "alert" in e]
+
+
+@pytest.mark.parametrize("state", ["unavailable", "unknown", "abc", None, ("5", {"unit_of_measurement": "VA"})])
+def test_alert_on_a_grid_reading_without_a_usable_value(state):
+    f = owner_chain(grid=state).run()
+    assert f["blocks"]["g"]["alert"] == ["unavailable:sensor.grid"]
+
+
+def test_alert_on_battery_and_pv_readings():
+    f = owner_chain(b1_soc="unavailable", pv=None).run()
+    assert f["blocks"]["b1"]["alert"] == ["unavailable:sensor.b1_soc"]
+    assert f["blocks"]["p1"]["alert"] == ["unavailable:sensor.pv"]
+
+
+def test_alert_on_device_fields_and_its_switch():
+    c = owner_chain(pc="unavailable")
+    c.devices["rcbo"]["control"] = "switch.rcbo"
+    c.devices["rcbo"]["voltage"] = "sensor.rcbo_v"
+    c.states["switch.rcbo"] = ("unknown", {})
+    c.states["sensor.rcbo_v"] = ("230", {"unit_of_measurement": "VA"})
+    c.devices["inv"] = inverter(power_in="sensor.inv_in")
+    f = c.run()
+    assert f["blocks"]["pc"]["alert"] == ["unavailable:sensor.pc"]
+    assert f["blocks"]["rcbo"]["alert"] == ["unavailable:sensor.rcbo_v", "unavailable:switch.rcbo"]
+    assert f["blocks"]["inv"]["alert"] == ["unavailable:sensor.inv_in"]  # missing entity
+
+
+def test_alert_on_a_missing_device():
+    f = Scheme([dev("ghost")], [], {}, {}).run()
+    assert f["blocks"]["ghost"] == {"missing": True, "alert": ["missing-device"]}
+
+
+def test_alert_on_a_disagreeing_remainder():
+    assert tap_scheme(1100).run()["blocks"]["rem"]["alert"] == ["disagree"]
+    assert "alert" not in tap_scheme(250).run()["blocks"]["rem"]
 
 
 def test_entity_ids_and_device_bindings():

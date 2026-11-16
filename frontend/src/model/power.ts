@@ -49,6 +49,8 @@ export interface BlockLive {
   /** A remainder's loads without data (device block ids) counted in its value. */
   absorbed?: Id[];
   missing?: true;
+  /** Problem codes from the server: `unavailable:<entity_id>`, `missing-device`, `disagree`. */
+  alert?: string[];
 }
 export interface PowerFrame { wires: Record<Id, WireLive>; blocks: Record<Id, BlockLive> }
 

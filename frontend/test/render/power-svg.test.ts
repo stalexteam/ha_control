@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { html, render } from 'lit';
 import {
-  mdiConnection, mdiElectricSwitch, mdiElectricSwitchClosed, mdiLock, mdiMapMarker, mdiPowerPlug, mdiPowerPlugBattery,
+  mdiAlert, mdiConnection, mdiElectricSwitch, mdiElectricSwitchClosed, mdiLock, mdiMapMarker, mdiPowerPlug, mdiPowerPlugBattery,
   mdiPowerSocketEu, mdiSolarPowerVariant,
 } from '@mdi/js';
 import { formatWatts, renderPower, type PowerRenderOpts } from '../../src/render/power-svg';
@@ -353,6 +353,54 @@ describe('renderPower blocks', () => {
     const texts = (id: string) => [...root.querySelectorAll(`g.block[data-id="${id}"] text`)].map((t) => t.textContent);
     expect(texts('g')).toContain('1.32 kW');
     expect(texts('m')).toContain('—');
+  });
+
+  describe('the alert mark', () => {
+    const mark = (root: Element, id: string) =>
+      [...root.querySelectorAll(`g.block[data-id="${id}"] g.alert`)];
+    /** The icon box (x, y, size) from its transform. */
+    const box = (g: Element) => {
+      const tr = g.querySelector('path')!.getAttribute('transform')!;
+      const [x, y, k] = /translate\(([-\d.]+) ([-\d.]+)\) scale\(([\d.]+)\)/.exec(tr)!.slice(1).map(Number);
+      return { x, y, size: 24 * k };
+    };
+    const clearOf = (b: { x: number; y: number; size: number }, c: { x: number; y: number }) => {
+      const dx = Math.max(b.x - c.x, 0, c.x - b.x - b.size);
+      const dy = Math.max(b.y - c.y, 0, c.y - b.y - b.size);
+      return Math.hypot(dx, dy) > PORT_R;
+    };
+
+    it('draws mdi:alert in the error colour in the top-right corner, with readable reasons as a tooltip', () => {
+      const alert = ['unavailable:sensor.rcbo_power', 'missing-device', 'disagree'];
+      const root = draw(two, { frame: frameOf({}, { m: { power: null, alert } }) });
+      const [g] = mark(root, 'm');
+      const icon = g.querySelector('path')!;
+      expect(icon.getAttribute('d')).toBe(mdiAlert);
+      expect(icon.getAttribute('fill')).toBe(P.blockInvalid);
+      expect(g.querySelector('title')!.textContent).toBe('No data: sensor.rcbo_power\nDevice missing\nMeters disagree');
+      const r = blockRect(meter, geo(), two);
+      const b = box(g);
+      // inside the block, in its top-right corner
+      expect(b.x).toBeGreaterThan(r.x + r.w / 2);
+      expect(b.x + b.size).toBeLessThanOrEqual(r.x + r.w);
+      expect(b.y).toBeGreaterThanOrEqual(r.y);
+      expect(b.y + b.size).toBeLessThan(r.y + r.h / 2);
+      for (const p of portPlaces(two, meter, geo())) expect(clearOf(b, p.pt)).toBe(true);
+    });
+
+    it('moves to another corner when a port is pinned at the top-right one', () => {
+      const pinned: PowerBlock = { ...meter, portPins: { OUT: { side: 'right', at: 0.05 } } };
+      const s: PowerSchema = { blocks: [grid, pinned], wires: [w1] };
+      const root = draw(s, { frame: frameOf({}, { m: { alert: ['unavailable:sensor.rcbo_power'] } }) });
+      const b = box(mark(root, 'm')[0]);
+      for (const p of portPlaces(s, pinned, geo())) expect(clearOf(b, p.pt)).toBe(true);
+    });
+
+    it('is absent when the alert list is empty or missing', () => {
+      expect(mark(draw(two, { frame: frameOf({}, { m: { power: 5, alert: [] } }) }), 'm').length).toBe(0);
+      expect(mark(draw(two, { frame: frameOf({}, { m: { power: 5 } }) }), 'm').length).toBe(0);
+      expect(mark(draw(two), 'm').length).toBe(0);
+    });
   });
 
   it('the selected block gets an outline in the selection colour, a constant screen size off its edge', () => {

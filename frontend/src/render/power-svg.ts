@@ -1,6 +1,6 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
 import {
-  mdiConnection, mdiElectricSwitch, mdiElectricSwitchClosed, mdiLock, mdiMapMarker, mdiPowerPlug, mdiPowerPlugBattery,
+  mdiAlert, mdiConnection, mdiElectricSwitch, mdiElectricSwitchClosed, mdiLock, mdiMapMarker, mdiPowerPlug, mdiPowerPlugBattery,
   mdiPowerSocketEu, mdiSolarPowerVariant,
 } from '@mdi/js';
 import type { Id, Pt } from '../model/types';
@@ -41,6 +41,9 @@ const TERMINAL_ICON = 11;
 const SWITCH_ICON = 18;
 const LOCK_ICON = 12;
 const PIN_ICON = 11;
+/** The alert mark and its inset from the block corner, in units. */
+const ALERT_ICON = 13;
+const ALERT_INSET = 3;
 /** Arrowhead length and half-width in screen pixels. */
 const ARROW_L = 10;
 const ARROW_W = 4.5;
@@ -304,6 +307,35 @@ function renderChips(s: PowerSchema, b: Transfer, live: BlockLive | undefined, o
   });
 }
 
+/** A readable reason for an alert code from the server; an unknown code reads as itself. */
+function alertText(code: string): string {
+  const entity = /^unavailable:(.*)$/.exec(code);
+  if (entity) return t('power.alert.unavailable').replace('{entity}', entity[1]);
+  if (code === 'missing-device') return t('power.alert.missingDevice');
+  if (code === 'disagree') return t('power.alert.disagree');
+  return code;
+}
+
+/**
+ * The alert mark: mdi:alert inside a corner of r, the top-right one unless a port circle reaches it (a pinned port),
+ * then the next clear corner clockwise; the reasons as a tooltip.
+ */
+function renderAlert(codes: string[], r: Rect, ports: PortPlace[], p: PlanPalette): SVGTemplateResult {
+  const lo = ALERT_INSET + ALERT_ICON / 2;
+  const corners: Pt[] = [
+    { x: r.x + r.w - lo, y: r.y + lo }, { x: r.x + r.w - lo, y: r.y + r.h - lo },
+    { x: r.x + lo, y: r.y + r.h - lo }, { x: r.x + lo, y: r.y + lo },
+  ];
+  const clear = (c: Pt) => ports.every(({ pt }) => {
+    const dx = Math.max(Math.abs(pt.x - c.x) - ALERT_ICON / 2, 0);
+    const dy = Math.max(Math.abs(pt.y - c.y) - ALERT_ICON / 2, 0);
+    return Math.hypot(dx, dy) > PORT_R;
+  });
+  const at = corners.find(clear) ?? corners[0];
+  return svg`<g class="alert"><title>${codes.map(alertText).join('\n')}</title>
+    ${icon(mdiAlert, at, ALERT_ICON, p.blockInvalid)}</g>`;
+}
+
 function renderBlock(s: PowerSchema, b: PowerBlock, o: PowerRenderOpts,
   styleOf: (block: Id, port: PortName) => WireStyle | undefined, still: boolean): SVGTemplateResult {
   const p = o.palette;
@@ -315,6 +347,7 @@ function renderBlock(s: PowerSchema, b: PowerBlock, o: PowerRenderOpts,
   const name = blockName(b, o.geo) || t(`power.kind.${b.kind}`);
   const lines = blockContent(s, b, o.geo, live, p, r.w);
   const remainder = b.kind === 'remainder';
+  const ports = portPlaces(s, b, o.geo);
   return svg`<g class=${`block block-${b.kind}${missing ? ' missing' : ''}`} data-id=${b.id}>
     <rect class="body" x=${r.x} y=${r.y} width=${r.w} height=${r.h} rx="4" fill=${p.blockFill}
       stroke=${remainder ? p.powerRemainder : p.blockStroke} stroke-width=${remainder ? 1.5 : 1.25}
@@ -335,7 +368,8 @@ function renderBlock(s: PowerSchema, b: PowerBlock, o: PowerRenderOpts,
         fill=${fill} font-family=${FONT}>${l.title ? svg`<title>${l.title}</title>` : nothing}${label}<tspan
         font-weight=${l.small ? nothing : '600'}>${l.value}</tspan>${note}</text>`;
     })}
-    ${portPlaces(s, b, o.geo).map((pl) => renderPort(pl, styleOf(b.id, pl.name), p))}
+    ${live?.alert?.length ? renderAlert(live.alert, r, ports, p) : nothing}
+    ${ports.map((pl) => renderPort(pl, styleOf(b.id, pl.name), p))}
   </g>`;
 }
 

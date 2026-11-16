@@ -114,7 +114,7 @@ function powerPlan(): Plan {
 
 /**
  * Position B: the inverter output path is idle, the bypass is live, the Boiler is off. The PC's power entity is
- * unavailable, so the remainder absorbs it: 1360 W less the Boiler's 0 W.
+ * unavailable (its block carries the alert mark), so the remainder absorbs it: 1360 W less the Boiler's 0 W.
  */
 const POWER_FRAME: PowerFrame = {
   wires: {
@@ -142,7 +142,7 @@ const POWER_FRAME: PowerFrame = {
     b3: { power: 37, soc: 63 },
     rcbo: { power: 0, voltage: 229.8, switch: 'on' },
     ts: { position: 'B' },
-    pc: { power: null },
+    pc: { power: null, alert: ['unavailable:sensor.pc_power'] },
     boiler: { power: 0, switch: 'off' },
     rem: { power: 1360, absorbed: ['pc'] },
   },
