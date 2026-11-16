@@ -45,16 +45,8 @@ export interface Opening {
   invalid: boolean;
 }
 
-export interface Zone {
-  id: Id;
-  name: string;
-  seed: Pt;
-  outline: Pt[];
-  broken: boolean;
-}
-
 /**
- * A corner of a custom automation zone. `x, y` of an anchored vertex are a cache of its last resolved position.
+ * A corner of a polygon zone. `x, y` of an anchored vertex are a cache of its last resolved position.
  * free: a plain point; lost = it was anchored and the anchor disappeared. node: a wall corner or end. wall: a point on
  * a wall face, offset along the axis from node A, side = the face (left = the left face looking from A to B).
  */
@@ -62,10 +54,18 @@ export type ZoneVertex =
   | { kind: 'free'; x: number; y: number; lost?: true }
   | { kind: 'node'; nodeId: Id; x: number; y: number }
   | { kind: 'wall'; wallId: Id; offset: number; side: Side; x: number; y: number };
-/** room: the outline of that room (`Level.zones`); polygon: three or more vertices. */
-export type ZoneShape = { kind: 'room'; roomId: Id } | { kind: 'polygon'; vertices: ZoneVertex[] };
-/** An automation zone; `invalid` is derived (see zoneInvalidReason in geometry/zones). */
-export interface AutomationZone { id: Id; name: string; shape: ZoneShape; invalid: boolean }
+/**
+ * walls: the outline follows the inner wall faces around `seed`; it is a cache re-detected on every wall edit, and a
+ * zone left without its own wall loop is `broken` and keeps its last outline. polygon: three or more vertices.
+ */
+export type ZoneShape =
+  | { kind: 'walls'; seed: Pt; outline: Pt[]; broken: boolean }
+  | { kind: 'polygon'; vertices: ZoneVertex[] };
+/**
+ * A zone: a space inside or outside the building. `automation: false` opts it out of automation (missing = it takes
+ * part). `invalid` is derived (see zoneInvalidReason in geometry/zones).
+ */
+export interface Zone { id: Id; name: string; automation?: false; shape: ZoneShape; invalid: boolean }
 
 /** A smart button trigger: slot 0..9 (0 = a one-button device) and a non-empty event (`single`, `double`, `hold` or free text). */
 export interface Trigger { slot: number; event: string }
@@ -87,7 +87,7 @@ export type DeviceProps =
   | { kind: 'wall_light'; coneAngle: number; coneRange: number }
   | { kind: 'motion_sensor'; zoneAngle: number; zoneRange: number }
   | { kind: 'exhaust_fan'; diameter: FanDiameter }
-  // A climate sensor's reading applies to the automation zones containing it (its stage-2a `zoneIds` is retired).
+  // A climate sensor's reading applies to the zones containing it (its stage-2a `zoneIds` is retired).
   | { kind: 'illuminance_sensor' } | { kind: 'socket' } | { kind: 'climate_sensor' }
   // inverter: Power is replaced by Input / Output power; controllable: Plan Studio may switch its control.
   // A missing flag means false. Shape, size, icon and label matter only while the device is on the plan.
@@ -107,7 +107,7 @@ export const TRIGGER_EVENTS = ['single', 'double', 'hold'] as const;
 export type BindingRole = 'control' | 'motion' | 'illuminance' | 'temperature' | 'humidity' | 'state' | 'power'
   | 'on' | 'off' | 'auto' | 'voltage' | 'power_in' | 'power_out';
 
-/** zoneBlacklist: automation zones the device opts out of (missing = []; the field is removed when it becomes empty). */
+/** zoneBlacklist: zones the device opts out of (missing = []; the field is removed when it becomes empty). */
 export interface Device {
   id: Id; name: string; placement: DevicePlacement; props: DeviceProps; invalid: boolean;
   bindings?: Partial<Record<BindingRole, string>>; zoneBlacklist?: Id[];
@@ -121,11 +121,8 @@ export interface Level {
   nodes: PlanNode[];
   walls: Wall[];
   openings: Opening[];
-  /** Rooms (the stored key stays `zones`). */
   zones: Zone[];
   devices: Device[];
-  /** Missing = []: read it through levelZones. */
-  automationZones?: AutomationZone[];
   /**
    * The level's equipment switches went through the v0.7 migration (see migrateDevices): from then on a switch without
    * the controllable flag is read-only. Missing on levels saved before v0.7.2 and on levels without an equipment switch.
@@ -133,15 +130,10 @@ export interface Level {
   switchesMigrated?: true;
 }
 
-/** The level's automation zones (a missing field means none). */
-export function levelZones(level: Level): AutomationZone[] {
-  return level.automationZones ?? [];
-}
-
 export interface Plan {
   id: Id;
   name: string;
-  schemaVersion: 1;
+  schemaVersion: 2;
   revision: number;
   levels: Level[];
   /** Power-flow schematic; absent until the schematic is edited. */
@@ -171,7 +163,7 @@ export function emptyPlan(name: string): Plan {
   return {
     id: newId(),
     name,
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision: 0,
     levels: [emptyLevel()],
   };
@@ -279,7 +271,7 @@ function completeContainer(d: Device): Device {
   return next ? { ...d, props: next as unknown as DeviceProps } : d;
 }
 
-/** A climate sensor's stored `zoneIds` (retired by automation zones) is dropped; same device when it has none. */
+/** A climate sensor's stored `zoneIds` (retired by zones) is dropped; same device when it has none. */
 function dropClimateZoneIds(d: Device): Device {
   if (d.props.kind !== 'climate_sensor' || !('zoneIds' in d.props)) return d;
   const { zoneIds: _dropped, ...props } = d.props as DeviceProps & { zoneIds: unknown };
@@ -296,8 +288,7 @@ function dropDefaultOutput(d: Device): Device {
 /**
  * Stage-1 plans have no `devices`; a missing field means []. Legacy kinds are migrated, missing or invalid container
  * props take their defaults, a stored container `defaultOutput` and a stored climate `zoneIds` are dropped, then
- * invalid bindings (such as a v0.4 `final`) are dropped. A missing `automationZones` stays missing (it means []).
- * Same object back when nothing changes.
+ * invalid bindings (such as a v0.4 `final`) are dropped. Same object back when nothing changes.
  */
 export function normalizeLevel(level: Level): Level {
   if (!level.devices) return { ...level, devices: [] };

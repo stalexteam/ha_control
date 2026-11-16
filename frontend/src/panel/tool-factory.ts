@@ -13,7 +13,7 @@ import { createPowerSelectTool } from '../editor/tools/power-select-tool';
 import { createPowerPlaceTool } from '../editor/tools/power-place-tool';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
 import type { PowerSchema } from '../model/power';
-import { levelZones, type Level } from '../model/types';
+import type { Level } from '../model/types';
 
 export type ToolId = Tool['id'];
 export type EditorMode = 'plan' | 'equipment' | 'binding' | 'zones' | 'power';
@@ -62,7 +62,6 @@ export function createTool(id: ToolId, ctx: ToolContext): Tool {
 export function selectionExists(level: Level, s: Selection, power: PowerSchema): boolean {
   if (s.kind === 'powerBlock') return power.blocks.some(x => x.id === s.id);
   if (s.kind === 'powerWire') return power.wires.some(x => x.id === s.id);
-  if (s.kind === 'automationZone') return levelZones(level).some(x => x.id === s.id);
   const list = s.kind === 'wall' ? level.walls : s.kind === 'node' ? level.nodes
     : s.kind === 'opening' ? level.openings : s.kind === 'device' ? level.devices : level.zones;
   return list.some(x => x.id === s.id);

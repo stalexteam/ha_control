@@ -41,8 +41,8 @@ describe('createToolContext', () => {
     const h = host();
     const c = createToolContext(h);
     expect(c.selection()).toBeNull();
-    h.selection = { kind: 'automationZone', id: 'z' };
-    expect(c.selection()).toEqual({ kind: 'automationZone', id: 'z' });
+    h.selection = { kind: 'zone', id: 'z' };
+    expect(c.selection()).toEqual({ kind: 'zone', id: 'z' });
   });
 
   it('Power services: armed device, notice, position and tool switch go through the host', () => {

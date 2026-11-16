@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createZoneDrawTool } from '../../src/editor/tools/zone-draw-tool';
 import { createTool } from '../../src/panel/tool-factory';
-import { levelZones, type Level, type ZoneVertex } from '../../src/model/types';
+import { type Level, type ZoneVertex } from '../../src/model/types';
 import type { Selection, Tool } from '../../src/editor/tools/types';
 import { facePoint } from '../../src/geometry/devices';
 import { rectRoomLevel, twoRoomsLevel } from '../fixtures';
@@ -12,7 +12,7 @@ const ev = (x: number, y: number, o: { shift?: boolean; alt?: boolean } = {}) =>
 const click = (t: Tool, x: number, y: number) => { t.down(ev(x, y)); t.up(ev(x, y)); };
 const key = (t: Tool, k: string) => t.key(k, { shift: false });
 const verts = (l: Level, i = 0): ZoneVertex[] => {
-  const s = levelZones(l)[i].shape;
+  const s = l.zones[i].shape;
   if (s.kind !== 'polygon') throw new Error('not a polygon');
   return s.vertices;
 };
@@ -33,10 +33,10 @@ describe('zone draw tool', () => {
     expect(ctx.commits).toHaveLength(0);
     expect(key(t, 'Enter')).toBe(true);
     expect(ctx.commits).toHaveLength(1);
-    const z = levelZones(ctx.level())[0];
+    const z = ctx.level().zones[0];
     expect(z.name).toBe('Zone 1');
     expect(verts(ctx.level())).toHaveLength(3);
-    expect(selected).toEqual([{ kind: 'automationZone', id: z.id }]);
+    expect(selected).toEqual([{ kind: 'zone', id: z.id }]);
     expect(t.preview().zoneDraft).toBeUndefined();
   });
 
@@ -44,11 +44,11 @@ describe('zone draw tool', () => {
     const a = setup();
     triangle(a.t);
     click(a.t, 10, 10); // within tolMm (20) of the first vertex
-    expect(levelZones(a.ctx.level())).toHaveLength(1);
+    expect(a.ctx.level().zones).toHaveLength(1);
     const b = setup();
     triangle(b.t);
     click(b.t, 1005, 1005);
-    expect(levelZones(b.ctx.level())).toHaveLength(1);
+    expect(b.ctx.level().zones).toHaveLength(1);
     expect(verts(b.ctx.level())).toHaveLength(3);
   });
 
@@ -199,7 +199,7 @@ describe('zone draw tool', () => {
     const { ctx, t } = setup();
     triangle(t); key(t, 'Enter');
     click(t, 3000, 0); click(t, 4000, 0); click(t, 4000, 1000); key(t, 'Enter');
-    expect(levelZones(ctx.level()).map(z => z.name)).toEqual(['Zone 1', 'Zone 2']);
+    expect(ctx.level().zones.map(z => z.name)).toEqual(['Zone 1', 'Zone 2']);
   });
 
   it('the factory builds it', () => {

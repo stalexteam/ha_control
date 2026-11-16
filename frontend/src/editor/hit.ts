@@ -1,6 +1,7 @@
 import type { Id, Level, Pt } from '../model/types';
 import { wallFrame, wallLocal, wallOutlines } from '../geometry/walls';
-import { dist, distToSegment, pointInPolygon } from '../geometry/vec';
+import { dist, distToSegment, pointInPolygon, polygonArea } from '../geometry/vec';
+import { zoneOutline } from '../geometry/zones';
 import type { Selection } from './tools/types';
 
 function nearRing(p: Pt, ring: Pt[], tol: number): boolean {
@@ -31,7 +32,19 @@ function openingAt(level: Level, p: Pt): Id | null {
   return null;
 }
 
-/** Order: opening > node (ends of the selected wall) > wall > zone. */
+/** The smallest zone whose outline contains p (ties: level order), or null. */
+function zoneAt(level: Level, p: Pt): Id | null {
+  let best: { id: Id; area: number } | null = null;
+  for (const z of level.zones) {
+    const o = zoneOutline(level, z);
+    if (o.length < 3 || !pointInPolygon(p, o)) continue;
+    const area = Math.abs(polygonArea(o));
+    if (!best || area < best.area) best = { id: z.id, area };
+  }
+  return best?.id ?? null;
+}
+
+/** Order: opening > node (ends of the selected wall) > wall > zone (the smallest one where zones overlap). */
 export function hitTest(level: Level, p: Pt, tolMm: number, selection: Selection | null): Selection | null {
   const op = openingAt(level, p);
   if (op) return { kind: 'opening', id: op };
@@ -46,8 +59,6 @@ export function hitTest(level: Level, p: Pt, tolMm: number, selection: Selection
   }
   const wall = wallAt(level, p, tolMm);
   if (wall) return { kind: 'wall', id: wall };
-  for (const z of level.zones) {
-    if (z.outline.length >= 3 && pointInPolygon(p, z.outline)) return { kind: 'zone', id: z.id };
-  }
-  return null;
+  const zone = zoneAt(level, p);
+  return zone ? { kind: 'zone', id: zone } : null;
 }

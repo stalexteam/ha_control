@@ -32,7 +32,7 @@ function v07Plan(): Plan {
   const level = { ...emptyLevel('L1'), devices: [
     equipment('inverter', { power: 'sensor.inv_power' }), equipment('boiler', { control: 'switch.boiler' }),
   ] };
-  return { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level], power };
+  return { id: 'P1', name: 'Home', schemaVersion: 2, revision: 1, levels: [level], power };
 }
 
 const flags = (d: Device) => (d.props.kind === 'equipment' ? { inverter: !!d.props.inverter, controllable: !!d.props.controllable } : null);

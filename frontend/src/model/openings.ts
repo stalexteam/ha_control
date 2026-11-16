@@ -1,7 +1,8 @@
 import { newId } from './ids';
-import { refreshZones } from './zones';
 import { wallLen } from '../geometry/walls';
 import { OPENING_DEFAULT_WIDTH, type Id, type Level, type Opening, type OpeningKind } from './types';
+
+// Opening edits leave zones alone: walls zone outlines ignore openings (see roomHoles in geometry/rooms).
 
 const EPS = 1e-6; // mm
 
@@ -48,21 +49,21 @@ export function addOpening(
   const o: Opening = { id: newId(), wallId, kind, offset, width: w, invalid: false };
   if (DOOR_KINDS.includes(kind)) { o.hinge = extra.hinge ?? 'start'; o.swing = extra.swing ?? 'left'; }
   if (kind === 'window') o.outside = extra.outside ?? 'left';
-  return { level: refreshZones(withOpenings(level, [...level.openings, o])), openingId: o.id };
+  return { level: withOpenings(level, [...level.openings, o]), openingId: o.id };
 }
 
 /** Rejected (same level returned) when the new place is out of the wall or overlaps. */
 export function moveOpening(level: Level, id: Id, offset: number): Level {
   const o = level.openings.find(x => x.id === id);
   if (!o || !fits(level, o.wallId, offset, o.width, id)) return level;
-  return refreshZones(refreshOpenings(withOpenings(level, level.openings.map(x => (x.id === id ? { ...x, offset } : x)))));
+  return refreshOpenings(withOpenings(level, level.openings.map(x => (x.id === id ? { ...x, offset } : x))));
 }
 
 /** New width keeping the start offset; rejected (same level returned) when it does not fit or overlaps. */
 export function resizeOpening(level: Level, id: Id, width: number): Level {
   const o = level.openings.find(x => x.id === id);
   if (!o || !fits(level, o.wallId, o.offset, width, id)) return level;
-  return refreshZones(refreshOpenings(withOpenings(level, level.openings.map(x => (x.id === id ? { ...x, width } : x)))));
+  return refreshOpenings(withOpenings(level, level.openings.map(x => (x.id === id ? { ...x, width } : x))));
 }
 
 /** Patch for a kind switch: doors get hinge+swing, windows get outside, irrelevant fields are dropped. */
@@ -80,11 +81,11 @@ export function setOpeningProps(level: Level, id: Id, patch: OpeningPatch): Leve
     for (const k of Object.keys(patch) as (keyof OpeningPatch)[]) if (patch[k] === undefined) delete c[k];
     return c;
   };
-  return refreshZones(refreshOpenings(withOpenings(level, level.openings.map(x => (x.id === id ? patched(x) : x)))));
+  return refreshOpenings(withOpenings(level, level.openings.map(x => (x.id === id ? patched(x) : x))));
 }
 
 export function deleteOpening(level: Level, id: Id): Level {
-  return refreshZones(refreshOpenings(withOpenings(level, level.openings.filter(x => x.id !== id))));
+  return refreshOpenings(withOpenings(level, level.openings.filter(x => x.id !== id)));
 }
 
 /** invalid = outside [0, len] of its wall or overlapping another opening. Never deletes or clamps. */

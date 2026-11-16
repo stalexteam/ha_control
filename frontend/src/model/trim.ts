@@ -1,7 +1,7 @@
 import { newId } from './ids';
-import { levelZones, type Id, type Level, type PlanNode, type Pt, type Wall } from './types';
+import type { Id, Level, PlanNode, Pt, Wall } from './types';
 import { clone, deleteWall, dropOrphans, finalize, hostPoint } from './ops';
-import { lostVertex } from './automation-zones';
+import { lostVertex } from './zones';
 import { findNode, nodePos } from '../geometry/walls';
 import { dist, dot, lineIntersect, norm, projectT, sub } from '../geometry/vec';
 
@@ -109,7 +109,7 @@ export function trimWall(level: Level, wallId: Id, at: Pt): Level {
   out.openings = out.openings.filter(o => keep(o, o.offset + o.width / 2));
   out.devices = out.devices.filter(d => d.placement.mode !== 'wall' || keep(d.placement, d.placement.offset));
   for (const n of out.nodes) if (n.host && !keep(n.host, n.host.offset)) delete n.host;
-  for (const z of levelZones(out)) {
+  for (const z of out.zones) {
     const s = z.shape;
     if (s.kind === 'polygon') s.vertices = s.vertices.map(v => (v.kind !== 'wall' || keep(v, v.offset) ? v : lostVertex(v)));
   }

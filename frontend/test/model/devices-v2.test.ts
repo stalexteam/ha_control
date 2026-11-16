@@ -16,7 +16,7 @@ import { deviceZones, zoneMembers } from '../../src/geometry/zones';
 import { renderDevices } from '../../src/render/devices-svg';
 import { paletteFor } from '../../src/render/theme';
 import {
-  DEVICE_PLACEMENTS, deviceDefaults, normalizeLevel, type AutomationZone, type Device, type DeviceKind, type Level,
+  DEVICE_PLACEMENTS, deviceDefaults, normalizeLevel, type Zone, type Device, type DeviceKind, type Level,
 } from '../../src/model/types';
 
 const room = (): Level => rectRoomLevel(3000, 4000, 400);
@@ -174,7 +174,7 @@ describe('addUnplacedDevice', () => {
 });
 
 describe('an unplaced device is skipped everywhere', () => {
-  const zone: AutomationZone = {
+  const zone: Zone = {
     id: 'z', name: 'Z', invalid: false,
     shape: { kind: 'polygon', vertices: [
       { kind: 'free', x: -100000, y: -100000 }, { kind: 'free', x: 100000, y: -100000 },
@@ -186,7 +186,7 @@ describe('an unplaced device is skipped everywhere', () => {
     const placed = addDevice(room(), deviceDefaults('socket', 'wall'),
       { mode: 'wall', wallId: 'w0', side: 'right', offset: 1500 }, 'S');
     const { level, id } = addUnplacedDevice(placed.level, 'U');
-    return { level: { ...level, automationZones: [zone] }, id };
+    return { level: { ...level, zones: [zone] }, id };
   }
   const unplaced = (l: Level, id: string) => l.devices.find(d => d.id === id);
 
@@ -299,14 +299,14 @@ describe('wall-mounted equipment pose', () => {
 
   it('is a member of the zone around its body centre', () => {
     const { level, d } = mount('rect');
-    const inner: AutomationZone = {
+    const inner: Zone = {
       id: 'z', name: 'Z', invalid: false,
       shape: { kind: 'polygon', vertices: [
         { kind: 'free', x: 1000, y: 300 }, { kind: 'free', x: 2000, y: 300 },
         { kind: 'free', x: 2000, y: 400 }, { kind: 'free', x: 1000, y: 400 },
       ] },
     };
-    expect(zoneMembers({ ...level, automationZones: [inner] }, 'z').map(m => m.device.id)).toEqual([d.id]);
+    expect(zoneMembers({ ...level, zones: [inner] }, 'z').map(m => m.device.id)).toEqual([d.id]);
   });
 
   it('other wall devices keep the face point as their pose', () => {

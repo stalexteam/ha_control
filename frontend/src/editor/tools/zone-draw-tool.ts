@@ -1,5 +1,5 @@
-import { levelZones, type Level, type Pt, type ZoneVertex } from '../../model/types';
-import { addPolygonZone } from '../../model/automation-zones';
+import type { Level, Pt, ZoneVertex } from '../../model/types';
+import { addPolygonZone } from '../../model/zones';
 import { nextFreeName } from '../../model/ids';
 import { segmentsMeet, selfIntersects } from '../../geometry/zones';
 import { cross, dist, dot, sub } from '../../geometry/vec';
@@ -14,7 +14,7 @@ const SAME_MM = 1;
 const pt = (v: ZoneVertex): Pt => ({ x: v.x, y: v.y });
 
 /**
- * Custom zone drawing tool. Each click adds a vertex placed by the same snap rules as the zone vertex drag (node ->
+ * Polygon zone drawing tool. Each click adds a vertex placed by the same snap rules as the zone vertex drag (node ->
  * node vertex; wall midpoint, axis or face -> wall vertex on the face of the pointer's side; grid or nothing -> free;
  * Alt: free; Shift: ortho from the last vertex). The snap marker shows where the vertex lands, before the first click
  * too. A vertex is rejected within 1 mm of the previous one or when its edge would cross an earlier, non-adjacent
@@ -56,12 +56,12 @@ export function createZoneDrawTool(ctx: ToolContext): Tool {
   function close(): boolean {
     if (draft.length < MIN_VERTICES || selfIntersects(draft.map(pt))) return false;
     const level: Level = ctx.level();
-    const name = nextFreeName(t('zones.default'), levelZones(level).map(z => z.name));
+    const name = nextFreeName(t('zones.default'), level.zones.map(z => z.name));
     const res = addPolygonZone(level, draft, name);
     if (res.zoneId === null) return false;
     draft = []; cursor = null; invalid = false;
     ctx.commit(res.level);
-    ctx.select({ kind: 'automationZone', id: res.zoneId });
+    ctx.select({ kind: 'zone', id: res.zoneId });
     return true;
   }
 

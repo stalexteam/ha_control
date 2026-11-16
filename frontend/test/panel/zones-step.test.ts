@@ -1,32 +1,30 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest';
 import { STORAGE_KEY } from '../../dev/mock-hass';
-import { addRoomZone } from '../../src/model/automation-zones';
-import { addZone } from '../../src/model/zones';
-import { deviceDefaults, levelZones, type AutomationZone, type Device, type Id, type Level, type ZoneVertex } from '../../src/model/types';
+import { addWallsZone } from '../../src/model/zones';
+import { deviceDefaults, type Device, type Id, type Level, type Zone, type ZoneVertex } from '../../src/model/types';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 import { rectRoomLevel } from '../fixtures';
 import { $, click, device, key, mount, pointer, press, undo } from './helpers';
 
 const free = (x: number, y: number): ZoneVertex => ({ kind: 'free', x, y });
-const square = (id: Id, name: string, x0: number, y0: number, x1: number, y1: number, first: ZoneVertex = free(x0, y0)): AutomationZone =>
+const square = (id: Id, name: string, x0: number, y0: number, x1: number, y1: number, first: ZoneVertex = free(x0, y0)): Zone =>
   ({ id, name, shape: { kind: 'polygon', vertices: [first, free(x1, y0), free(x1, y1), free(x0, y1)] }, invalid: false });
 const dev = (id: string, name: string, x: number, y: number, extra: Partial<Device> = {}): Device =>
   ({ id, name, invalid: false, placement: { mode: 'free', x, y, rotation: 0 }, props: deviceDefaults('ceiling_light', 'free'), ...extra });
 
 /**
- * A 6000 x 4000 room "Kitchen" (200 mm walls) with three zones in level order: the room zone "Kitchen", the custom
- * zone "Door" (1000,1000)-(2000,2000) and the custom zone "Lost" (4000,500)-(5000,1500) whose first vertex lost its
+ * A 6000 x 4000 room (200 mm walls) with three zones in level order: the walls zone "Kitchen", the polygon zone
+ * "Door" (1000,1000)-(2000,2000) and the polygon zone "Lost" (4000,500)-(5000,1500) whose first vertex lost its
  * anchor. Devices: Lamp (1500,1500) in Kitchen and Door; Fan (5000,3000) in Kitchen only, opted out of it.
  */
 function zonesPlan(): { level: Level; kitchen: Id } {
-  const room = addZone(rectRoomLevel(6000, 4000, 200), { x: 3000, y: 2000 }, 'Kitchen');
-  const rz = addRoomZone(room.level, room.zoneId!, 'Kitchen');
+  const rz = addWallsZone(rectRoomLevel(6000, 4000, 200), { x: 3000, y: 2000 }, 'Kitchen');
   const kitchen = rz.zoneId!;
   const lost = { ...square('lost', 'Lost', 4000, 500, 5000, 1500, { kind: 'free', x: 4000, y: 500, lost: true }), invalid: true };
   const level: Level = {
     ...rz.level,
-    automationZones: [...levelZones(rz.level), square('door', 'Door', 1000, 1000, 2000, 2000), lost],
+    zones: [...rz.level.zones, square('door', 'Door', 1000, 1000, 2000, 2000), lost],
     devices: [dev('lamp', 'Lamp', 1500, 1500), dev('fan', 'Fan', 5000, 3000, { zoneBlacklist: [kitchen] })],
   };
   return { level, kitchen };
@@ -34,17 +32,17 @@ function zonesPlan(): { level: Level; kitchen: Id } {
 
 async function mountZones(): Promise<{ el: PlanStudioPanel; kitchen: Id }> {
   const { level, kitchen } = zonesPlan();
-  const plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level] };
+  const plan = { id: 'P1', name: 'Home', schemaVersion: 2, revision: 1, levels: [level] };
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
   const el = await mount();
   await press(el, '.steps [data-mode="zones"]');
   return { el, kitchen };
 }
 
-const zones = (el: PlanStudioPanel) => levelZones(el.history!.current.level);
+const zones = (el: PlanStudioPanel) => el.history!.current.level.zones;
 const rowIds = (el: PlanStudioPanel) => [...el.shadowRoot!.querySelectorAll('.zlist .zrow')].map(r => r.getAttribute('data-id'));
 const text = (el: PlanStudioPanel, sel: string) => $(el, sel).textContent!.replace(/\s+/g, ' ').trim();
-const az = (id: Id) => ({ kind: 'automationZone', id });
+const az = (id: Id) => ({ kind: 'zone', id });
 
 async function type(el: PlanStudioPanel, sel: string, value: string, ev: 'input' | 'change'): Promise<void> {
   const input = $<HTMLInputElement>(el, sel);
@@ -98,8 +96,8 @@ describe('the Zones step', () => {
 
     expect(rowIds(el)).toEqual([kitchen, 'door', 'lost']);
     expect(text(el, `.zrow[data-id="${kitchen}"] .name`)).toBe('Kitchen');
-    expect(text(el, `.zrow[data-id="${kitchen}"] .kind`)).toBe('Room');
-    expect(text(el, '.zrow[data-id="door"] .kind')).toBe('Custom');
+    expect(text(el, `.zrow[data-id="${kitchen}"] .kind`)).toBe('By walls');
+    expect(text(el, '.zrow[data-id="door"] .kind')).toBe('Polygon');
     // Participating members: the Fan opted out of Kitchen.
     expect(text(el, `.zrow[data-id="${kitchen}"] .zcount`)).toBe('1');
     expect(text(el, '.zrow[data-id="door"] .zcount')).toBe('1');
@@ -110,7 +108,7 @@ describe('the Zones step', () => {
     expect($<HTMLInputElement>(el, 'input[data-field="zone-filter"]').placeholder).toBe('Filter zones');
     await type(el, 'input[data-field="zone-filter"]', 'KIT', 'input');
     expect(rowIds(el)).toEqual([kitchen]);
-    await type(el, 'input[data-field="zone-filter"]', 'custom', 'input'); // the kind label matches too
+    await type(el, 'input[data-field="zone-filter"]', 'polygon', 'input'); // the kind label matches too
     expect(rowIds(el)).toEqual(['door', 'lost']);
     await type(el, 'input[data-field="zone-filter"]', '', 'input');
     expect(rowIds(el)).toHaveLength(3);
@@ -171,15 +169,14 @@ describe('the Zones step', () => {
     expect(el.selection).toBeNull();
   });
 
-  it('the properties show the hint and count, then the kind, room, invalid reason and members', async () => {
+  it('the properties show the hint and count, then the kind, invalid reason and members', async () => {
     const { el, kitchen } = await mountZones();
     expect(text(el, '.zprops')).toContain('Pick a zone on the plan or in the list, or add one with Zone from room or Custom zone.');
     expect(text(el, '.zprops')).toContain('3 zones');
 
     await press(el, `.zrow[data-id="${kitchen}"]`);
     expect($<HTMLInputElement>(el, '.zprops input[data-field="zone-name"]').value).toBe('Kitchen');
-    expect(text(el, '.zprops [data-field="zone-kind"]')).toBe('Room');
-    expect(text(el, '.zprops [data-field="zone-room"]')).toBe('Kitchen');
+    expect(text(el, '.zprops [data-field="zone-kind"]')).toBe('By walls');
     expect(el.shadowRoot!.querySelector('.zprops p.warn[data-note="zone-invalid"]')).toBeNull();
     expect(text(el, '.zprops')).toContain('Members');
     expect(text(el, '.zprops')).toContain('Participates');
@@ -190,8 +187,7 @@ describe('the Zones step', () => {
     expect(text(el, '.zprops button[data-action="delete-zone"]')).toBe('Delete zone');
 
     await press(el, '.zrow[data-id="door"]');
-    expect(text(el, '.zprops [data-field="zone-kind"]')).toBe('Custom');
-    expect(el.shadowRoot!.querySelector('.zprops [data-field="zone-room"]')).toBeNull();
+    expect(text(el, '.zprops [data-field="zone-kind"]')).toBe('Polygon');
 
     await press(el, '.zrow[data-id="lost"]');
     expect(text(el, '.zprops p.warn[data-note="zone-invalid"]')).toBe('A vertex lost its wall or corner: drag it to place it again.');
@@ -240,7 +236,6 @@ describe('the Zones step', () => {
     await el.updateComplete;
     expect(zones(el).map(z => z.id)).toEqual([kitchen, 'lost']);
     expect(el.history!.current.level.walls).toBe(start.walls);
-    expect(el.history!.current.level.zones).toBe(start.zones);
     expect(el.history!.current.level.devices.map(d => d.id)).toEqual(['lamp', 'fan']);
     expect(el.selection).toBeNull();
     await undo(el);
@@ -298,11 +293,13 @@ describe('the Zones step', () => {
     expect(zones(el).map(z => z.id)).not.toContain('door');
   });
 
-  it('room labels are hidden in the Zones step, where the room zones carry the name', async () => {
+  it('plan zone labels are hidden in the Zones step, where its own layer carries the names', async () => {
     const { el } = await mountZones();
     expect(el.shadowRoot!.querySelectorAll('svg.plan .zone-label')).toHaveLength(0);
+    // The Zones step keeps the walls zone fill under its layer, as rooms were drawn before.
+    expect(el.shadowRoot!.querySelectorAll('svg.plan g.zones path.zone')).toHaveLength(1);
     await press(el, '.steps [data-mode="plan"]');
-    expect(el.shadowRoot!.querySelectorAll('svg.plan .zone-label')).toHaveLength(1);
+    expect(el.shadowRoot!.querySelectorAll('svg.plan .zone-label')).toHaveLength(3);
   });
 
   it('zones are drawn only in the Zones step', async () => {

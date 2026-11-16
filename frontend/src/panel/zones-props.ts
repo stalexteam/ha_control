@@ -1,8 +1,8 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { live } from 'lit/directives/live.js';
-import { levelZones, type AutomationZone, type Level } from '../model/types';
+import type { Level, Zone } from '../model/types';
 import type { Selection } from '../editor/tools/types';
-import { deleteAutomationZone, renameAutomationZone, setZoneParticipation } from '../model/automation-zones';
+import { deleteZone, renameZone, setZoneParticipation } from '../model/zones';
 import { zoneMembers } from '../geometry/zones';
 import { t } from '../i18n';
 import { fieldValue } from './field-value';
@@ -19,7 +19,7 @@ export interface ZonesPropsOpts {
 }
 
 /** The devices inside the zone, each with its Participates checkbox (unchecked: the zone is on its blacklist). */
-function members(o: ZonesPropsOpts, z: AutomationZone): TemplateResult {
+function members(o: ZonesPropsOpts, z: Zone): TemplateResult {
   const list = zoneMembers(o.level, z.id);
   return html`<div class="zmembers">
     <div class="zhead"><span>${t('zones.members')}</span>${list.length ? html`<span>${t('zones.participates')}</span>` : nothing}</div>
@@ -35,9 +35,7 @@ function members(o: ZonesPropsOpts, z: AutomationZone): TemplateResult {
   </div>`;
 }
 
-function zoneProps(o: ZonesPropsOpts, z: AutomationZone): TemplateResult {
-  const s = z.shape;
-  const room = s.kind === 'room' ? o.level.zones.find(r => r.id === s.roomId)?.name ?? '—' : null;
+function zoneProps(o: ZonesPropsOpts, z: Zone): TemplateResult {
   const invalid = zoneInvalidText(o.level, z);
   return html`
     <h4>${t('zones.default')}</h4>
@@ -46,21 +44,20 @@ function zoneProps(o: ZonesPropsOpts, z: AutomationZone): TemplateResult {
         const el = e.target as HTMLInputElement;
         const name = el.value.trim();
         if (!name || name === z.name) { el.value = z.name; return; }
-        o.commit(renameAutomationZone(o.level, z.id, name));
+        o.commit(renameZone(o.level, z.id, name));
       }} />`)}
     ${row(t('props.kind'), html`<span class="val ro" data-field="zone-kind">${zoneKindLabel(z)}</span>`)}
-    ${room === null ? nothing : row(t('zones.room'), html`<span class="val ro" data-field="zone-room">${room}</span>`)}
     ${invalid ? html`<p class="warn" data-note="zone-invalid">${invalid}</p>` : nothing}
     ${members(o, z)}
-    <button class="btn danger" data-action="delete-zone" @click=${() => o.commit(deleteAutomationZone(o.level, z.id))}>
+    <button class="btn danger" data-action="delete-zone" @click=${() => o.commit(deleteZone(o.level, z.id))}>
       ${t('zones.delete')}</button>`;
 }
 
 /** The Zones step properties: the selected zone, or a hint and the zone count. */
 export function renderZonesProps(o: ZonesPropsOpts): TemplateResult {
   const s = o.selection;
-  const zones = levelZones(o.level);
-  const z = s?.kind === 'automationZone' ? zones.find(x => x.id === s.id) ?? null : null;
+  const zones = o.level.zones;
+  const z = s?.kind === 'zone' ? zones.find(x => x.id === s.id) ?? null : null;
   return html`<div class="props zprops">
     ${z ? zoneProps(o, z) : html`
       <p class="muted">${t('zones.hint')}</p>

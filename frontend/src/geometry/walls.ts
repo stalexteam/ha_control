@@ -265,7 +265,7 @@ export function unionOf(polys: Pt[][]): Pt[][][] {
   try {
     mp = polygonClipping.union(geoms[0], ...geoms.slice(1));
   } catch {
-    // Degenerate geometry: never crash rendering; no holes means no rooms are detected.
+    // Degenerate geometry: never crash rendering; no holes means no walls zone outlines are detected.
     return polys.map(r => [r.map(p => ({ x: p.x, y: p.y }))]);
   }
   return mp.map(poly => poly.map(fromRing));

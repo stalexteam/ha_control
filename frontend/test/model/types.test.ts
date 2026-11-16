@@ -6,10 +6,10 @@ import {
 import { rectRoomLevel } from "../fixtures";
 
 describe("emptyPlan", () => {
-  it("creates one empty floor level with schemaVersion 1", () => {
+  it("creates one empty floor level with schemaVersion 2", () => {
     const p = emptyPlan("Flat");
     expect(p.name).toBe("Flat");
-    expect(p.schemaVersion).toBe(1);
+    expect(p.schemaVersion).toBe(2);
     expect(p.revision).toBe(0);
     expect(p.levels).toHaveLength(1);
     const l = p.levels[0];

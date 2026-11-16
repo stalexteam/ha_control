@@ -1,14 +1,20 @@
 import { describe, it, expect, vi } from 'vitest';
 import polygonClipping from 'polygon-clipping';
-import type { Level, Wall } from '../../src/model/types';
-import { outlineFromHoles, roomAreaM2, roomHoles } from '../../src/geometry/rooms';
+import type { Level, Pt, Wall, Zone } from '../../src/model/types';
+import { outlineFromHoles, roomHoles } from '../../src/geometry/rooms';
 import { wallsUnion } from '../../src/geometry/walls';
-import { addZone, deleteZone, refreshZones, renameZone } from '../../src/model/zones';
+import { addWallsZone, deleteZone, refreshZones, renameZone } from '../../src/model/zones';
 import { addBox, addWallSegment, deleteWall, moveNode, moveWall, type WallProps } from '../../src/model/ops';
 import { addOpening } from '../../src/model/openings';
 import { polygonArea } from '../../src/geometry/vec';
 import { rectRoomLevel } from '../fixtures';
 
+/** A walls zone's shape. */
+function ws(z: Zone): { seed: Pt; outline: Pt[]; broken: boolean } {
+  if (z.shape.kind !== 'walls') throw new Error('not a walls zone');
+  return z.shape;
+}
+const areaM2 = (outline: Pt[]): number => Math.round(Math.abs(polygonArea(outline)) / 1e6 * 100) / 100;
 const findRoomOutline = (level: Level, seed: { x: number; y: number }) => outlineFromHoles(roomHoles(level), seed);
 
 const part: WallProps = { type: 'partition', thickness: 100, baseline: 'center' };
@@ -29,7 +35,7 @@ describe('findRoomOutline', () => {
   it('rectangle: inner face, 9.36 m2', () => {
     const o = findRoomOutline(rectRoomLevel(3000, 4000, 400), { x: 1500, y: 2000 })!;
     expect(o).not.toBeNull();
-    expect(roomAreaM2(o)).toBe(9.36);
+    expect(areaM2(o)).toBe(9.36);
     for (const p of o) {
       expect([200, 2800]).toContain(p.x);
       expect([200, 3800]).toContain(p.y);
@@ -58,7 +64,7 @@ describe('findRoomOutline', () => {
     l = addWallSegment(l.level, { kind: 'node', nodeId: l.endNodeId! }, { kind: 'node', nodeId: start }, part);
     const o = findRoomOutline(l.level, { x: 1500, y: 800 });
     expect(o).not.toBeNull();
-    expect(roomAreaM2(o!)).toBeGreaterThan(2);
+    expect(areaM2(o!)).toBeGreaterThan(2);
   });
   it('node-less cross inside a box -> 4 distinct outlines', () => {
     const base = rectRoomLevel(3000, 4000, 400);
@@ -77,20 +83,20 @@ describe('findRoomOutline', () => {
 });
 
 describe('zones', () => {
-  it('addZone on room, second zone in same room rejected', () => {
+  it('addWallsZone on room, second zone in same room returns the existing one', () => {
     const room = rectRoomLevel(3000, 4000, 400);
-    const r = addZone(room, { x: 1500, y: 2000 }, 'Hall');
+    const r = addWallsZone(room, { x: 1500, y: 2000 }, 'Hall');
     expect(r.zoneId).not.toBeNull();
-    expect(r.level.zones[0]).toMatchObject({ name: 'Hall', broken: false });
-    const r2 = addZone(r.level, { x: 500, y: 500 }, 'Again');
-    expect(r2.zoneId).toBeNull();
+    expect(r.level.zones[0]).toMatchObject({ name: 'Hall', shape: { kind: 'walls', broken: false } });
+    const r2 = addWallsZone(r.level, { x: 500, y: 500 }, 'Again');
+    expect(r2).toEqual({ level: r.level, zoneId: r.zoneId, existing: true });
     expect(r2.level.zones).toHaveLength(1);
   });
-  it('addZone outside -> null', () => {
-    expect(addZone(rectRoomLevel(3000, 4000, 400), { x: 9000, y: 9000 }, 'x').zoneId).toBeNull();
+  it('addWallsZone outside -> null', () => {
+    expect(addWallsZone(rectRoomLevel(3000, 4000, 400), { x: 9000, y: 9000 }, 'x').zoneId).toBeNull();
   });
   it('rename / delete', () => {
-    const r = addZone(rectRoomLevel(3000, 4000, 400), { x: 1500, y: 2000 }, 'A');
+    const r = addWallsZone(rectRoomLevel(3000, 4000, 400), { x: 1500, y: 2000 }, 'A');
     const renamed = renameZone(r.level, r.zoneId!, 'B');
     expect(renamed.zones[0].name).toBe('B');
     expect(deleteZone(renamed, r.zoneId!).zones).toHaveLength(0);
@@ -99,56 +105,56 @@ describe('zones', () => {
     const { level, partId } = splitRoom();
     const d = addOpening(level, partId, 'door', 2000).level;
     expect(d.openings).toHaveLength(1);
-    const z1 = addZone(d, { x: 700, y: 2000 }, 'L');
-    const z2 = addZone(z1.level, { x: 2300, y: 2000 }, 'R');
+    const z1 = addWallsZone(d, { x: 700, y: 2000 }, 'L');
+    const z2 = addWallsZone(z1.level, { x: 2300, y: 2000 }, 'R');
     expect(z1.zoneId).not.toBeNull();
     expect(z2.zoneId).not.toBeNull();
-    expect(refreshZones(z2.level).zones.every(z => !z.broken)).toBe(true);
+    expect(refreshZones(z2.level).zones.every(z => !ws(z).broken)).toBe(true);
   });
   it('deleting the partition breaks the second zone only', () => {
     const { level, partId } = splitRoom();
-    const z1 = addZone(level, { x: 700, y: 2000 }, 'L');
-    const z2 = addZone(z1.level, { x: 2300, y: 2000 }, 'R');
+    const z1 = addWallsZone(level, { x: 700, y: 2000 }, 'L');
+    const z2 = addWallsZone(z1.level, { x: 2300, y: 2000 }, 'R');
     const after = deleteWall(z2.level, partId);
-    expect(after.zones[0].broken).toBe(false);
-    expect(after.zones[1].broken).toBe(true);
-    expect(after.zones[1].outline).toEqual(z2.level.zones[1].outline);
+    expect(ws(after.zones[0]).broken).toBe(false);
+    expect(ws(after.zones[1]).broken).toBe(true);
+    expect(ws(after.zones[1]).outline).toEqual(ws(z2.level.zones[1]).outline);
   });
   it('deleting a box wall breaks the zone, outline kept', () => {
-    const z = addZone(rectRoomLevel(3000, 4000, 400), { x: 1500, y: 2000 }, 'A');
+    const z = addWallsZone(rectRoomLevel(3000, 4000, 400), { x: 1500, y: 2000 }, 'A');
     const after = deleteWall(z.level, 'w1');
-    expect(after.zones[0].broken).toBe(true);
-    expect(after.zones[0].outline).toEqual(z.level.zones[0].outline);
+    expect(ws(after.zones[0]).broken).toBe(true);
+    expect(ws(after.zones[0]).outline).toEqual(ws(z.level.zones[0]).outline);
   });
 });
 
 describe('zones follow edits', () => {
   it('moving a box corner updates the zone outline', () => {
-    const z = addZone(rectRoomLevel(3000, 4000, 400), { x: 1000, y: 1000 }, 'A');
+    const z = addWallsZone(rectRoomLevel(3000, 4000, 400), { x: 1000, y: 1000 }, 'A');
     const moved = moveNode(z.level, 'n2', { x: 4000, y: 4000 });
-    expect(moved.zones[0].broken).toBe(false);
-    expect(moved.zones[0].outline).not.toEqual(z.level.zones[0].outline);
-    expect(roomAreaM2(moved.zones[0].outline)).toBeGreaterThan(9.36);
+    expect(ws(moved.zones[0]).broken).toBe(false);
+    expect(ws(moved.zones[0]).outline).not.toEqual(ws(z.level.zones[0]).outline);
+    expect(areaM2(ws(moved.zones[0]).outline)).toBeGreaterThan(9.36);
   });
   it('addBox then moveWall keeps zones fresh', () => {
     const box = addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 4000 }, bearing, 'axis');
-    const z = addZone(box, { x: 1500, y: 2000 }, 'A');
+    const z = addWallsZone(box, { x: 1500, y: 2000 }, 'A');
     const moved = moveWall(z.level, z.level.walls[1].id, { x: 500, y: 0 });
-    expect(Math.max(...moved.zones[0].outline.map(p => p.x))).toBeGreaterThan(2800);
+    expect(Math.max(...ws(moved.zones[0]).outline.map(p => p.x))).toBeGreaterThan(2800);
   });
 });
 
 describe('wallsUnion fallback', () => {
   it('returns un-unioned polygons without holes when polygonClipping throws; zones become broken', () => {
-    const z = addZone(rectRoomLevel(3000, 4000, 400), { x: 1500, y: 2000 }, 'A');
+    const z = addWallsZone(rectRoomLevel(3000, 4000, 400), { x: 1500, y: 2000 }, 'A');
     const spy = vi.spyOn(polygonClipping, 'union').mockImplementation(() => { throw new Error('boom'); });
     try {
       const u = wallsUnion(z.level, false);
       expect(u).toHaveLength(4);
       expect(u.every(p => p.length === 1)).toBe(true);
       const r = refreshZones(z.level);
-      expect(r.zones[0].broken).toBe(true);
-      expect(r.zones[0].outline).toEqual(z.level.zones[0].outline);
+      expect(ws(r.zones[0]).broken).toBe(true);
+      expect(ws(r.zones[0]).outline).toEqual(ws(z.level.zones[0]).outline);
     } finally {
       spy.mockRestore();
     }

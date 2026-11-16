@@ -1,16 +1,20 @@
-import { addZone } from '../../model/zones';
+import { addWallsZone } from '../../model/zones';
 import type { Preview, Tool, ToolContext, ToolEvent } from './types';
 
-/** Zone tool: a click inside a closed room creates a zone and selects it. */
+/**
+ * Room tool: a click inside closed walls creates a walls zone and selects it; a click in a loop that already holds a
+ * walls zone selects that zone without a commit. Outside every loop nothing happens.
+ */
 export function createZoneTool(ctx: ToolContext): Tool {
   return {
     id: 'zone',
     down(e: ToolEvent) {
-      const level = ctx.level();
-      const res = addZone(level, e.pt, ctx.zoneName());
+      const res = addWallsZone(ctx.level(), e.pt, ctx.zoneName());
       if (res.zoneId === null) return;
-      ctx.commit(res.level);
-      ctx.zonePlaced?.();
+      if (!res.existing) {
+        ctx.commit(res.level);
+        ctx.zonePlaced?.();
+      }
       ctx.select({ kind: 'zone', id: res.zoneId });
     },
     move() {},

@@ -24,7 +24,7 @@ const bus = (x = 300, y = 100): PowerBlock => ({ id: 'bus', kind: 'bus', x, y, w
 
 /** Mounts a stored plan (with `power` when given), enters the Power step and sets a 1:1 view at the origin. */
 async function mountPower(power?: PowerSchema, hass?: HassLike): Promise<PlanStudioPanel> {
-  const plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level()], ...(power ? { power } : {}) };
+  const plan = { id: 'P1', name: 'Home', schemaVersion: 2, revision: 1, levels: [level()], ...(power ? { power } : {}) };
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
   const el = await mount(hass);
   el.setMode('power');
@@ -329,7 +329,7 @@ describe('Power step', () => {
   });
 
   it('the first entry to the Power step after a plan is opened fits the schematic; later entries keep the view', async () => {
-    const plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level()],
+    const plan = { id: 'P1', name: 'Home', schemaVersion: 2, revision: 1, levels: [level()],
       power: { blocks: [grid(0, 0), meter(0, 200)], wires: [] } };
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
     const el = await mount();

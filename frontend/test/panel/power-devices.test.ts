@@ -214,7 +214,7 @@ describe('Power step device blocks', () => {
 async function mountPower(power?: PowerSchema, devices: Device[] = [dev('s', 'Hall socket', { kind: 'socket', placement: FREE })]):
 Promise<PlanStudioPanel> {
   const level = { ...emptyLevel('L1'), devices };
-  const plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level], ...(power ? { power } : {}) };
+  const plan = { id: 'P1', name: 'Home', schemaVersion: 2, revision: 1, levels: [level], ...(power ? { power } : {}) };
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
   const el = await mount();
   el.setMode('power');

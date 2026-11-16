@@ -8,7 +8,7 @@ import type { Selection } from '../editor/tools/types';
 import { wallMountPlacement } from '../editor/tools/device-tool';
 import { withAim } from '../geometry/devices';
 import { deviceZones } from '../geometry/zones';
-import { setZoneParticipation } from '../model/automation-zones';
+import { setZoneParticipation } from '../model/zones';
 import { t } from '../i18n';
 import { numField, row, select } from './fields';
 import type { WholeRule } from '../geometry/parse';
@@ -39,7 +39,7 @@ export interface DevicePropsOpts {
   onNext(patch: Partial<DeviceProps>): void;
   /** Turns the selected input container into the other kind (returns false when refused). */
   onKind?(kind: ContainerKind): boolean;
-  /** Sets whether the device takes part in an automation zone (returns false when refused). */
+  /** Sets whether the device takes part in a zone (returns false when refused). */
   onZone?(zoneId: string, participates: boolean): boolean;
   /** Equipment: Wall mount on (onto the nearest wall face) or off (free in place); false when refused. */
   onWallMount?(on: boolean): boolean;
@@ -209,7 +209,7 @@ function typeRow(o: DevicePropsOpts, d: Device): TemplateResult | typeof nothing
     v => o.onKind?.(v), 'kind'));
 }
 
-/** The automation zones containing the device, each with a participation checkbox. */
+/** The zones containing the device, each with a participation checkbox. */
 function zoneList(o: DevicePropsOpts, d: Device): TemplateResult {
   const zones = o.level ? deviceZones(o.level, d) : [];
   return html`<fieldset data-field="zone-membership"><legend>${t('props.zoneList')}</legend>

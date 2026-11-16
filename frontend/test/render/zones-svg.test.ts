@@ -4,8 +4,7 @@ import { html, render } from 'lit';
 import { renderZones, ZONE_HUES } from '../../src/render/zones-svg';
 import { renderLevel } from '../../src/render/plan-svg';
 import { paletteFor } from '../../src/render/theme';
-import { addPolygonZone, addRoomZone, setZoneParticipation } from '../../src/model/automation-zones';
-import { addZone } from '../../src/model/zones';
+import { addPolygonZone, addWallsZone, setZoneParticipation } from '../../src/model/zones';
 import { addDevice } from '../../src/model/devices';
 import { selectionExists } from '../../src/panel/tool-factory';
 import { deviceDefaults, type Id, type Level, type ZoneVertex } from '../../src/model/types';
@@ -46,7 +45,7 @@ describe('renderZones', () => {
 
   it('an invalid zone is hatched', () => {
     const { level, a } = twoZones();
-    const bad: Level = { ...level, automationZones: level.automationZones!.map(z => z.id === a ? { ...z, invalid: true } : z) };
+    const bad: Level = { ...level, zones: level.zones.map(z => z.id === a ? { ...z, invalid: true } : z) };
     const root = host(renderZones(bad, { palette: pal, scale: 0.1, selectedId: null }));
     const zone = root.querySelector(`g.azone[data-id="${a}"]`)!;
     expect(zone.classList.contains('invalid')).toBe(true);
@@ -59,7 +58,7 @@ describe('renderZones', () => {
     const { level, a, b } = twoZones();
     const lost: Level = {
       ...level,
-      automationZones: level.automationZones!.map(z => z.id === a && z.shape.kind === 'polygon'
+      zones: level.zones.map(z => z.id === a && z.shape.kind === 'polygon'
         ? { ...z, shape: { kind: 'polygon', vertices: z.shape.vertices.map((v, i) => i === 1 ? { ...v, lost: true as const } : v) } } : z),
     };
     const root = host(renderZones(lost, { palette: pal, scale: 0.1, selectedId: a }));
@@ -75,9 +74,8 @@ describe('renderZones', () => {
     expect(root.querySelector(`g.azone[data-id="${b}"]`)!.classList.contains('selected')).toBe(false);
   });
 
-  it('a selected room zone has no vertex handles', () => {
-    const rl = addZone(rectRoomLevel(3000, 4000, 400), { x: 1500, y: 2000 }, 'Kitchen');
-    const r = addRoomZone(rl.level, rl.zoneId!, 'Kitchen');
+  it('a selected walls zone has no vertex handles', () => {
+    const r = addWallsZone(rectRoomLevel(3000, 4000, 400), { x: 1500, y: 2000 }, 'Kitchen');
     const root = host(renderZones(r.level, { palette: pal, scale: 0.1, selectedId: r.zoneId }));
     expect(root.querySelectorAll('circle.azone-vertex').length).toBe(0);
     expect(root.querySelector('text.azone-label')!.textContent).toBe('Kitchen');
@@ -113,14 +111,14 @@ describe('renderLevel zones layer', () => {
 
   it('draws zones only in zones mode and dims walls there', () => {
     const { level, a } = twoZones();
-    const draw = (mode: 'plan' | 'zones', selection: { kind: 'automationZone'; id: Id } | null = null): SVGSVGElement => {
+    const draw = (mode: 'plan' | 'zones', selection: { kind: 'zone'; id: Id } | null = null): SVGSVGElement => {
       const el = document.createElement('div');
       document.body.appendChild(el);
       render(html`<svg xmlns="http://www.w3.org/2000/svg">${renderLevel(level, { palette: pal, selection, preview: {}, scale: 0.1, mode })}</svg>`, el);
       return el.querySelector('svg')!;
     };
     expect(draw('plan').querySelector('.azones')).toBeNull();
-    const z = draw('zones', { kind: 'automationZone', id: a });
+    const z = draw('zones', { kind: 'zone', id: a });
     expect(z.querySelector('.azones')).not.toBeNull();
     expect(z.querySelector('g.azone.selected')).not.toBeNull();
     expect(z.querySelector('path.walls')!.getAttribute('opacity')).toBe(String(pal.dimOpacity));
@@ -130,10 +128,10 @@ describe('renderLevel zones layer', () => {
 const NO_POWER = { blocks: [], wires: [] };
 
 describe('selectionExists', () => {
-  it('handles automationZone', () => {
+  it('handles a zone', () => {
     const { level, a } = twoZones();
-    expect(selectionExists(level, { kind: 'automationZone', id: a }, NO_POWER)).toBe(true);
-    expect(selectionExists(level, { kind: 'automationZone', id: 'nope' }, NO_POWER)).toBe(false);
-    expect(selectionExists(rectRoomLevel(1000, 1000, 100), { kind: 'automationZone', id: a }, NO_POWER)).toBe(false);
+    expect(selectionExists(level, { kind: 'zone', id: a }, NO_POWER)).toBe(true);
+    expect(selectionExists(level, { kind: 'zone', id: 'nope' }, NO_POWER)).toBe(false);
+    expect(selectionExists(rectRoomLevel(1000, 1000, 100), { kind: 'zone', id: a }, NO_POWER)).toBe(false);
   });
 });

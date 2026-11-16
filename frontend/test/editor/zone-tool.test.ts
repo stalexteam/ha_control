@@ -10,7 +10,7 @@ const empty = (): Level => ({ id: 'l0', name: 'L', kind: 'floor', order: 0, node
 const box = () => addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 4000 }, props, 'axis');
 
 describe('zone tool', () => {
-  it('click in the room creates zone and selects it', () => {
+  it('click in the room creates a walls zone and selects it', () => {
     const name = 'Room 1';
     const ctx = fakeContext(box());
     const selected: unknown[] = [];
@@ -18,14 +18,25 @@ describe('zone tool', () => {
     const t = createZoneTool(ctx);
     t.down(ev(1500, 2000));
     expect(ctx.level().zones.map(z => z.name)).toEqual([name]);
+    expect(ctx.level().zones[0].shape.kind).toBe('walls');
     expect(selected).toEqual([{ kind: 'zone', id: ctx.level().zones[0].id }]);
   });
 
-  it('second click in the same room creates nothing', () => {
+  it('second click in the same room creates nothing and selects the existing zone', () => {
     const ctx = fakeContext(box());
     const t = createZoneTool(ctx);
-    t.down(ev(1500, 2000)); t.down(ev(1000, 1000));
+    t.down(ev(1500, 2000));
+    ctx.select(null);
+    t.down(ev(1000, 1000));
     expect(ctx.level().zones).toHaveLength(1);
     expect(ctx.commits).toHaveLength(1);
+    expect(ctx.selection()).toEqual({ kind: 'zone', id: ctx.level().zones[0].id });
+  });
+
+  it('a click outside closed walls does nothing', () => {
+    const ctx = fakeContext(box());
+    createZoneTool(ctx).down(ev(9000, 9000));
+    expect(ctx.commits).toHaveLength(0);
+    expect(ctx.selection()).toBeNull();
   });
 });

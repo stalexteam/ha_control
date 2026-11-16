@@ -18,7 +18,7 @@ async function mountWithDevices(): Promise<PlanStudioPanel> {
       dev('d', 'Desk climate', 'climate_sensor', 5000),
     ],
   };
-  const plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level] };
+  const plan = { id: 'P1', name: 'Home', schemaVersion: 2, revision: 1, levels: [level] };
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
   return mount();
 }

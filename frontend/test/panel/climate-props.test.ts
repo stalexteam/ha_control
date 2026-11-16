@@ -3,7 +3,7 @@ import { describe, it, expect } from 'vitest';
 import { render } from 'lit';
 import { renderEquipmentProps } from '../../src/panel/device-props';
 import { addBox } from '../../src/model/ops';
-import { addZone } from '../../src/model/zones';
+import { addWallsZone } from '../../src/model/zones';
 import { addDevice } from '../../src/model/devices';
 import { deviceDefaults } from '../../src/model/types';
 import { defaultPower } from '../../src/model/power';
@@ -16,8 +16,8 @@ const empty = (): Level => ({ id: 'l0', name: 'L', kind: 'floor', order: 0, node
 function twoRooms(): { level: Level; dev: string } {
   let l = addBox(empty(), { x: 0, y: 0 }, { x: 3000, y: 3000 }, bp, 'axis');
   l = addBox(l, { x: 5000, y: 0 }, { x: 8000, y: 3000 }, bp, 'axis');
-  const a = addZone(l, { x: 1500, y: 1500 }, 'A');
-  const b = addZone(a.level, { x: 6500, y: 1500 }, 'B');
+  const a = addWallsZone(l, { x: 1500, y: 1500 }, 'A');
+  const b = addWallsZone(a.level, { x: 6500, y: 1500 }, 'B');
   const d = addDevice(b.level, deviceDefaults('climate_sensor', 'free'), { mode: 'free', x: 1000, y: 1000, rotation: 0 }, 'C');
   return { level: d.level, dev: d.deviceId! };
 }

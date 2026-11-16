@@ -5,7 +5,7 @@ import type { ContainerFlash, ContainerState } from '../live/container-feed';
 import type { WallProps } from '../model/ops';
 import type { Preview, Selection } from '../editor/tools/types';
 import { segmentFrame, wallFrame, wallOutlines, wallPieces, wallsUnion, type WallFrame } from '../geometry/walls';
-import { roomAreaM2 } from '../geometry/rooms';
+import { zoneArea, zoneLabelPoint, zoneOutline } from '../geometry/zones';
 import { add, cross, dist, perpLeft, pointInPolygon, scale as mul, sub } from '../geometry/vec';
 import { t } from '../i18n';
 import type { PlanPalette } from './theme';
@@ -19,7 +19,7 @@ export interface RenderOpts {
   preview: Preview;
   /** Screen pixels per millimetre; used to keep strokes, text and handles a constant on-screen size. */
   scale: number;
-  /** plan: devices dimmed; equipment, binding and zones: walls, openings and rooms dimmed. Default plan. */
+  /** plan: devices dimmed; equipment, binding and zones: walls, openings and zones dimmed. Default plan. */
   mode?: 'plan' | 'equipment' | 'binding' | 'zones';
   /** Binding status per device; drawn as rings in the binding mode only. */
   bindingStatus?: (d: Device) => BindStatus;
@@ -38,8 +38,9 @@ export function formatMm(v: number): string {
   return n < 0 ? `-${s}` : s;
 }
 
+/** An area in m2 with 1 decimal: 12 -> "12.0 m²". */
 export function formatArea(m2: number): string {
-  const s = m2.toFixed(2);
+  const s = m2.toFixed(1);
   return `${s} ${t('unit.m2')}`;
 }
 
@@ -111,19 +112,24 @@ function renderWallBreaks(level: Level, o: RenderOpts): SVGTemplateResult | type
   return marks.length ? svg`${marks}` : nothing;
 }
 
-/** A room's fill and its name and area label; the zones mode drops the label (the room zone's label sits there). */
-function renderZone(z: Zone, o: RenderOpts, selected: boolean): SVGTemplateResult {
+/**
+ * A zone's fill and its name and area label (an invalid zone is hatched). The zones mode draws walls zones only, with
+ * no label: the Zones step layer (renderZones) draws every zone with its label over them.
+ */
+function renderZone(level: Level, z: Zone, o: RenderOpts, selected: boolean): SVGTemplateResult | typeof nothing {
+  if (o.mode === 'zones' && z.shape.kind !== 'walls') return nothing;
   const p = o.palette;
-  const at = centroid(z.outline, z.seed);
+  const outline = zoneOutline(level, z);
+  const at = centroid(outline, z.shape.kind === 'walls' ? z.shape.seed : zoneLabelPoint(outline));
   const fs = 12 / o.scale;
   return svg`
-    <path class="zone${z.broken ? ' broken' : ''}" d=${ringD(z.outline)}
-      fill=${z.broken ? 'url(#hatch)' : p.zone}
+    <path class="zone${z.invalid ? ' broken' : ''}" d=${ringD(outline)}
+      fill=${z.invalid ? 'url(#hatch)' : p.zone}
       stroke=${selected ? p.selection : 'none'} stroke-width="2" vector-effect=${NS}></path>
     ${o.mode === 'zones' ? nothing : svg`<text class="zone-label" x=${at.x} y=${at.y} text-anchor="middle" font-size=${fs}
-      fill=${z.broken ? p.invalid : p.zoneLabel} font-family="system-ui, sans-serif">
+      fill=${z.invalid ? p.invalid : p.zoneLabel} font-family="system-ui, sans-serif">
       <tspan x=${at.x} dy=${-0.2 * fs}>${z.name}</tspan>
-      <tspan x=${at.x} dy=${1.2 * fs} font-size=${fs * 0.9}>${formatArea(roomAreaM2(z.outline))}</tspan>
+      <tspan x=${at.x} dy=${1.2 * fs} font-size=${fs * 0.9}>${formatArea(zoneArea(level, z))}</tspan>
     </text>`}`;
 }
 
@@ -334,14 +340,15 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
         <line x1="0" y1="0" x2="0" y2=${hs} stroke=${p.hatch} stroke-width=${1.5 / o.scale}></line>
       </pattern>
     </defs>
-    <g class="zones" opacity=${dimOp}>${lv.zones.map(z => renderZone(z, o, sel?.kind === 'zone' && sel.id === z.id))}</g>
+    <g class="zones" opacity=${dimOp}>${lv.zones.map(z =>
+      renderZone(lv, z, o, o.mode !== 'zones' && sel?.kind === 'zone' && sel.id === z.id))}</g>
     <path class="walls" d=${union.map(poly => poly.map(ringD).join('')).join('')} fill=${p.wall} fill-rule="evenodd" opacity=${dimOp}></path>
     ${pieces ? svg`<g class="railings" opacity=${dimOp}>${lightWalls.flatMap(w => (pieces.get(w.id) ?? []).map(r =>
       svg`<path d=${ringD(r)} fill=${p.railing}></path>`))}</g>` : nothing}
     <g class="openings" opacity=${dimOp}>${lv.openings.map(op => renderOpening(lv, op, o))}</g>
     <g class="wall-breaks" opacity=${dimOp}>${renderWallBreaks(lv, o)}</g>
     ${o.mode === 'zones' ? renderZones(lv, {
-      palette: p, scale: o.scale, selectedId: sel?.kind === 'automationZone' ? sel.id : null, draft: o.preview.zoneDraft,
+      palette: p, scale: o.scale, selectedId: sel?.kind === 'zone' ? sel.id : null, draft: o.preview.zoneDraft,
     }) : nothing}
     <g class="devices-layer">${renderDevices(lv, {
       palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: plan, preview: o.preview.device,

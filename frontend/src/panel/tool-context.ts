@@ -50,7 +50,7 @@ export function createToolContext(h: ToolHost): ToolContext {
     wallMount: () => h.nextObj.wallMount,
     openingDefaults: (k: OpeningKind) => openingDefaults(h.nextObj, k),
     zoneName: () => h.nextObj.zoneName ?? defaultZoneName(h.history?.current.level ?? EMPTY_LEVEL),
-    /** A custom zone name is single-use: the next default is "Room N" again. */
+    /** A typed zone name is single-use: the next default is "Room N" again. */
     zonePlaced: () => { h.nextObj = { ...h.nextObj, zoneName: null }; },
     geo: () => {
       const devices = (h.history?.current.level ?? EMPTY_LEVEL).devices;

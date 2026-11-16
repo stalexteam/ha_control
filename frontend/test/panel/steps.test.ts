@@ -4,22 +4,25 @@ import { render } from 'lit';
 import { renderSteps } from '../../src/panel/steps';
 import type { EditorMode } from '../../src/panel/tool-factory';
 import type { BindStatus } from '../../src/model/bindings';
-import { deviceDefaults, emptyLevel, type AutomationZone, type Device, type Level, type Wall, type Zone } from '../../src/model/types';
+import { deviceDefaults, emptyLevel, type Device, type Level, type Wall, type Zone } from '../../src/model/types';
 import type { PowerSchema } from '../../src/model/power';
 
 const dev = (id: string): Device =>
   ({ id, name: id, invalid: false, placement: { mode: 'free', x: 0, y: 0, rotation: 0 }, props: deviceDefaults('socket', 'free') });
 
-function level(walls: number, zones: number, devices: number, automationZones = 0): Level {
+/** `zones` walls zones, then `polygons` invalid polygon zones. */
+function level(walls: number, zones: number, devices: number, polygons = 0): Level {
   const w = { id: 'w', a: 'a', b: 'b', thickness: 100, type: 'bearing', baseline: 'center' } as Wall;
-  const z = { id: 'z', name: 'Z', seed: { x: 0, y: 0 }, outline: [], broken: false } as unknown as Zone;
-  const az: AutomationZone = { id: 'az', name: 'Zone', shape: { kind: 'polygon', vertices: [] }, invalid: true };
+  const z: Zone = { id: 'z', name: 'Z', shape: { kind: 'walls', seed: { x: 0, y: 0 }, outline: [], broken: false }, invalid: false };
+  const pz: Zone = { id: 'pz', name: 'Zone', shape: { kind: 'polygon', vertices: [] }, invalid: true };
   return {
     ...emptyLevel('l0'),
     walls: Array.from({ length: walls }, (_, i) => ({ ...w, id: `w${i}` })),
-    zones: Array.from({ length: zones }, (_, i) => ({ ...z, id: `z${i}` })),
+    zones: [
+      ...Array.from({ length: zones }, (_, i) => ({ ...z, id: `z${i}` })),
+      ...Array.from({ length: polygons }, (_, i) => ({ ...pz, id: `pz${i}` })),
+    ],
     devices: Array.from({ length: devices }, (_, i) => dev(`d${i}`)),
-    ...(automationZones ? { automationZones: Array.from({ length: automationZones }, (_, i) => ({ ...az, id: `az${i}` })) } : {}),
   };
 }
 
@@ -50,12 +53,12 @@ describe('renderSteps', () => {
     expect(s.onRename).toHaveBeenCalledWith('Flat');
   });
 
-  it('cell statuses read "15 walls, 6 rooms", "3 devices", "1 of 3 bound", "0 zones", "1 block", "Comes later"', () => {
+  it('cell statuses read "15 walls, 6 zones", "3 devices", "1 of 3 bound", "6 zones", "1 block", "Comes later"', () => {
     const s = draw('plan', level(15, 6, 3), ['d1']);
-    expect(s.text('[data-mode="plan"] .state')).toBe('15 walls, 6 rooms');
+    expect(s.text('[data-mode="plan"] .state')).toBe('15 walls, 6 zones');
     expect(s.text('[data-mode="equipment"] .state')).toBe('3 devices');
     expect(s.text('[data-mode="binding"] .state')).toBe('1 of 3 bound');
-    expect(s.text('[data-mode="zones"] .state')).toBe('0 zones');
+    expect(s.text('[data-mode="zones"] .state')).toBe('6 zones');
     expect(s.text('[data-mode="power"] .state')).toBe('1 block');
     expect(s.text('[data-step="automation"] .state')).toBe('Comes later');
     expect(s.text('[data-mode="binding"] .name')).toBe('Binding');
@@ -88,13 +91,13 @@ describe('renderSteps', () => {
     expect(done(draw('plan', level(0, 0, 0), [], metered(wired)))).toBe(true);
   });
 
-  it('singular counts read "1 wall, 1 room" and "1 device"', () => {
+  it('singular counts read "1 wall, 1 zone" and "1 device"', () => {
     const s = draw('plan', level(1, 1, 1));
-    expect(s.text('[data-mode="plan"] .state')).toBe('1 wall, 1 room');
+    expect(s.text('[data-mode="plan"] .state')).toBe('1 wall, 1 zone');
     expect(s.text('[data-mode="equipment"] .state')).toBe('1 device');
   });
 
-  it('done: plan needs walls and rooms, equipment needs devices, binding needs every device bound', () => {
+  it('done: plan needs walls and zones, equipment needs devices, binding needs every device bound', () => {
     const done = (s: ReturnType<typeof draw>, m: string) => s.q(`[data-mode="${m}"]`)!.classList.contains('done');
     const empty = draw('plan', level(3, 0, 0));
     expect(done(empty, 'plan')).toBe(false);

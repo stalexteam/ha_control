@@ -55,7 +55,7 @@ function level(): Level {
 /** Opens the plan above (or `lv`) with the HA mock and enters the Binding step; resolves once the registries are loaded. */
 async function open(hass: HassLike = registryHass(STATES, REGISTRY).hass, lv: unknown = level()): Promise<PlanStudioPanel> {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    plans: { P1: { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [lv] } },
+    plans: { P1: { id: 'P1', name: 'Home', schemaVersion: 2, revision: 1, levels: [lv] } },
   }));
   const el = await mount(hass);
   $<HTMLButtonElement>(el, '[data-mode="binding"]').click();
@@ -674,7 +674,7 @@ describe('binding step: output line', () => {
     await push(el, live.subs[0], { full: true, containers: { b: { kind: 'smart_button', status: 'ok' } } });
     expect(coloured(el)).toEqual(['b']);
     const data = JSON.parse(localStorage.getItem(STORAGE_KEY)!) as { plans: Record<string, unknown> };
-    data.plans.P2 = { id: 'P2', name: 'Cottage', schemaVersion: 1, revision: 1, levels: [level()] };
+    data.plans.P2 = { id: 'P2', name: 'Cottage', schemaVersion: 2, revision: 1, levels: [level()] };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
 
     el.session.pickPlan('P2');
@@ -702,7 +702,7 @@ describe('binding step: output line', () => {
       dev('l', 'Lamp', 'wall_light', 4500),
     ];
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      plans: { P1: { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [{ ...level(), devices }] } },
+      plans: { P1: { id: 'P1', name: 'Home', schemaVersion: 2, revision: 1, levels: [{ ...level(), devices }] } },
     }));
     const el = await mount(createMockHass());
     await vi.waitFor(() => expect(el.feed.ready).toBe(true));

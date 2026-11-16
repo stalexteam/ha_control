@@ -1,5 +1,5 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import { levelZones, type Device, type Level } from '../model/types';
+import type { Device, Level } from '../model/types';
 import { countNotBound, type BindStatus } from '../model/bindings';
 import { stepDone, type PowerSchema } from '../model/power';
 import { t } from '../i18n';
@@ -30,7 +30,7 @@ export function stepState(mode: EditorMode, level: Level, status: (d: Device) =>
   const { walls, zones, devices } = level;
   switch (mode) {
     case 'plan':
-      return { text: `${countText(walls.length, 'steps.wall', 'steps.walls')}, ${countText(zones.length, 'steps.room', 'steps.rooms')}`,
+      return { text: `${countText(walls.length, 'steps.wall', 'steps.walls')}, ${countText(zones.length, 'steps.zone', 'steps.zones')}`,
         done: walls.length > 0 && zones.length > 0 };
     case 'equipment':
       return { text: countText(devices.length, 'steps.device', 'steps.devices'), done: devices.length > 0 };
@@ -39,10 +39,8 @@ export function stepState(mode: EditorMode, level: Level, status: (d: Device) =>
       return { text: t('steps.bound').replace('{b}', String(bound)).replace('{n}', String(devices.length)),
         done: devices.length > 0 && bound === devices.length };
     }
-    case 'zones': {
-      const n = levelZones(level).length;
-      return { text: countText(n, 'steps.zone', 'steps.zones'), done: n > 0 };
-    }
+    case 'zones':
+      return { text: countText(zones.length, 'steps.zone', 'steps.zones'), done: zones.length > 0 };
     case 'power':
       return { text: countText(power.blocks.length, 'steps.block', 'steps.blocks'), done: stepDone(power) };
   }

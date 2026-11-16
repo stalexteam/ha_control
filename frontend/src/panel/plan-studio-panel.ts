@@ -1,11 +1,10 @@
 import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from 'lit';
 import { property, state } from 'lit/decorators.js';
 import type { BindingRole, Device, Id, Level, Plan, Pt, WallType } from '../model/types';
-import { WALL_PRESETS, levelZones } from '../model/types';
+import { WALL_PRESETS } from '../model/types';
 import { deleteWall } from '../model/ops';
 import { deleteOpening } from '../model/openings';
 import { deleteZone } from '../model/zones';
-import { deleteAutomationZone } from '../model/automation-zones';
 import { zoneLabelPoint, zoneOutline } from '../geometry/zones';
 import { bindingStatus, type BindStatus } from '../model/bindings';
 import { presence } from '../binding/ha-meta';
@@ -243,8 +242,7 @@ export class PlanStudioPanel extends LitElement {
 
   /**
    * Delete/Backspace: remove the selected element (commit() drops the tool state and the selection). Not in the
-   * Binding step; the Zones step deletes an automation zone only, and no other step deletes one; the Power step
-   * deletes power blocks and wires only.
+   * Binding step; the Zones step deletes a zone only; the Power step deletes power blocks and wires only.
    */
   deleteSelection(): boolean {
     const s = this.selection;
@@ -252,14 +250,14 @@ export class PlanStudioPanel extends LitElement {
     if (this.mode === 'binding' || !s || !level || s.kind === 'node' || !selectionExists(level, s, this.power)) return false;
     if (this.mode === 'power') return this.deletePower(s);
     if (s.kind === 'powerBlock' || s.kind === 'powerWire') return false;
-    if ((this.mode === 'zones') !== (s.kind === 'automationZone')) return false;
+    if (this.mode === 'zones' && s.kind !== 'zone') return false;
     if (s.kind === 'device') {
       const edit = deleteDeviceDoc(level, this.power, s.id);
       this.commit(edit.level, edit.power);
       return true;
     }
     this.commit(s.kind === 'wall' ? deleteWall(level, s.id) : s.kind === 'opening' ? deleteOpening(level, s.id)
-      : s.kind === 'automationZone' ? deleteAutomationZone(level, s.id) : deleteZone(level, s.id));
+      : deleteZone(level, s.id));
     return true;
   }
 
@@ -339,12 +337,12 @@ export class PlanStudioPanel extends LitElement {
     if (pose) this.view = revealPt(this.view, pose.pt, this.size.w, this.size.h);
   }
 
-  /** Selects an automation zone (zone list) and pans the plan to its label when it is off-screen. */
+  /** Selects a zone (zone list) and pans the plan to its label when it is off-screen. */
   pickZone(id: Id): void {
     const level = this.level;
-    const z = level ? levelZones(level).find(x => x.id === id) : undefined;
+    const z = level?.zones.find(x => x.id === id);
     if (!level || !z) return;
-    this.ctx.select({ kind: 'automationZone', id });
+    this.ctx.select({ kind: 'zone', id });
     this.view = revealPt(this.view, zoneLabelPoint(zoneOutline(level, z)), this.size.w, this.size.h);
   }
 

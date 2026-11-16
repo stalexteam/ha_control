@@ -315,7 +315,7 @@ describe('Power properties', () => {
 
 /** Mounts a stored plan with the level above (and `power` when given) and enters the Power step at a 1:1 view. */
 async function mountPower(power?: PowerSchema): Promise<PlanStudioPanel> {
-  const plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level()], ...(power ? { power } : {}) };
+  const plan = { id: 'P1', name: 'Home', schemaVersion: 2, revision: 1, levels: [level()], ...(power ? { power } : {}) };
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
   const el = await mount();
   el.setMode('power');

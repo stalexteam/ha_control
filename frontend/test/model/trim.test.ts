@@ -5,7 +5,7 @@ import { nodePos } from '../../src/geometry/walls';
 import { vertexPoint } from '../../src/geometry/zones';
 import { dist, lerp } from '../../src/geometry/vec';
 import {
-  deviceDefaults, levelZones, type Device, type Id, type Level, type Opening, type PlanNode, type Pt, type Wall,
+  deviceDefaults, type Device, type Id, type Level, type Opening, type PlanNode, type Pt, type Wall,
   type ZoneVertex,
 } from '../../src/model/types';
 
@@ -174,11 +174,11 @@ describe('trimWall', () => {
     const wv = (offset: number): ZoneVertex => ({ kind: 'wall', wallId: 'w', offset, side: 'right', x: 0, y: 0 });
     /** A zone with wall vertices on 'w' at the given offsets and one free vertex below; caches resolved by finalize. */
     const zoned = (l: Level, offsets: number[]): Level => finalize({
-      ...l, automationZones: [{ id: 'z', name: 'Z', invalid: false,
+      ...l, zones: [{ id: 'z', name: 'Z', invalid: false,
         shape: { kind: 'polygon', vertices: [...offsets.map(wv), { kind: 'free', x: 4500, y: 1500 }] } }],
     });
     const verts = (l: Level): ZoneVertex[] => {
-      const s = levelZones(l)[0].shape;
+      const s = l.zones[0].shape;
       return s.kind === 'polygon' ? s.vertices : [];
     };
 
@@ -194,7 +194,7 @@ describe('trimWall', () => {
     near(vertexPoint(l, v0)!, b0);
     near(vertexPoint(l, v2)!, b2);
     near(v2, b2);
-    expect(levelZones(l)[0].invalid).toBe(true);
+    expect(l.zones[0].invalid).toBe(true);
 
     // One side holding node A: the wall now starts at t1 (2000), so kept offsets shift by 2000.
     const oneSided = zoned(lvl(

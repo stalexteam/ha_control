@@ -1,3 +1,4 @@
+/** Outline detection for walls zones: the closed loops (holes) of the wall union. */
 import type { Level, Pt } from '../model/types';
 import { pointInPolygon, polygonArea } from './vec';
 import { wallsUnion } from './walls';
@@ -9,6 +10,7 @@ export function roomHoles(level: Level): Pt[][] {
   return holes;
 }
 
+/** The smallest hole containing the seed, or null. */
 export function outlineFromHoles(holes: Pt[][], seed: Pt): Pt[] | null {
   let best: Pt[] | null = null;
   let bestArea = Infinity;
@@ -18,10 +20,6 @@ export function outlineFromHoles(holes: Pt[][], seed: Pt): Pt[] | null {
     if (a < bestArea) { best = h; bestArea = a; }
   }
   return best;
-}
-
-export function roomAreaM2(outline: Pt[]): number {
-  return Math.round(Math.abs(polygonArea(outline)) / 1e6 * 100) / 100;
 }
 
 const TOL = 1e-3;

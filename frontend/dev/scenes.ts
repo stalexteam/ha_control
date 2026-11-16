@@ -8,8 +8,11 @@ export interface Scene { plans: Plan[]; powerFrame?: PowerFrame }
 function room(): Plan {
   const level = rectRoomLevel(4000, 3000, 100);
   level.zones = [{
-    id: 'r0', name: 'Room 1', seed: { x: 2000, y: 1500 }, broken: false,
-    outline: [{ x: 50, y: 50 }, { x: 3950, y: 50 }, { x: 3950, y: 2950 }, { x: 50, y: 2950 }],
+    id: 'r0', name: 'Room 1', invalid: false,
+    shape: {
+      kind: 'walls', seed: { x: 2000, y: 1500 }, broken: false,
+      outline: [{ x: 50, y: 50 }, { x: 3950, y: 50 }, { x: 3950, y: 2950 }, { x: 50, y: 2950 }],
+    },
   }];
   level.devices = [
     {
@@ -23,7 +26,7 @@ function room(): Plan {
       props: { kind: 'socket' },
     },
   ];
-  return { id: 'room', name: 'Room', schemaVersion: 1, revision: 1, levels: [level] };
+  return { id: 'room', name: 'Room', schemaVersion: 2, revision: 1, levels: [level] };
 }
 
 const equipment = (id: string, name: string, placement: Device['placement'], bindings: Device['bindings'],
@@ -92,7 +95,7 @@ function powerPlan(): Plan {
       { id: 'w-rem', from: { bus: 'apt', at: 0.8 }, to: { block: 'rem', port: 'IN' } },
     ],
   };
-  return { id: 'power', name: 'Power', schemaVersion: 1, revision: 1, levels: [level], power };
+  return { id: 'power', name: 'Power', schemaVersion: 2, revision: 1, levels: [level], power };
 }
 
 /*

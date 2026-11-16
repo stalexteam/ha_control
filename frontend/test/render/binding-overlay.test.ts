@@ -22,7 +22,8 @@ function sample(): Level {
     { id: 'wl', name: 'wl', invalid: false, props: deviceDefaults('wall_light', 'wall'),
       placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 3000 } },
   ];
-  return { ...box, zones: [{ id: 'z', name: 'Room', seed: { x: 100, y: 100 }, outline: [{ x: 0, y: 0 }, { x: 6000, y: 0 }, { x: 6000, y: 5000 }], broken: false }], devices };
+  const outline = [{ x: 0, y: 0 }, { x: 6000, y: 0 }, { x: 6000, y: 5000 }];
+  return { ...box, zones: [{ id: 'z', name: 'Room', invalid: false, shape: { kind: 'walls', seed: { x: 100, y: 100 }, outline, broken: false } }], devices };
 }
 const STATUS: Record<string, BindStatus> = { u: 'unbound', p: 'partial', m: 'missing', b: 'bound', wl: 'unbound' };
 const status = (d: Device): BindStatus => STATUS[d.id];

@@ -53,7 +53,16 @@ export class PlanSession {
     if (this.h.dialog?.kind === kind) this.h.dialog = null;
   }
 
+  /**
+   * Offers a stored draft for restoring. A draft saved by an older version (schemaVersion other than 2) is dropped
+   * with a notice instead: the panel reads v2 plans only (the server converts stored plans, not browser drafts).
+   */
   offerDraft(d: Draft | null): void {
+    if (d && d.plan.schemaVersion !== 2) {
+      this.h.drafts.clear(d.planId);
+      this.h.notice = t('drafts.oldDiscarded');
+      d = null;
+    }
     this.h.pendingDraft = d;
     if (d) this.h.dialog = { kind: 'restore' }; else this.closeDialog('restore');
   }

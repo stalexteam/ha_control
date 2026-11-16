@@ -1,4 +1,4 @@
-import { levelZones, type AutomationZone, type Device, type Id, type Level, type Pt, type ZoneVertex } from '../model/types';
+import type { Device, Id, Level, Pt, Zone, ZoneVertex } from '../model/types';
 import { devicePose, facePoint } from './devices';
 import { cross, dist, distToSegment, dot, pointInPolygon, polygonArea, sub } from './vec';
 import { wallLen } from './walls';
@@ -13,11 +13,11 @@ const SAME_PT = 1e-6;
 const COLLINEAR = 1e-9;
 /** A ring with a smaller area (mm2) has no area centroid. */
 const AREA_EPS = 1e-6;
-/** A custom zone outline with a smaller area (mm2) has collapsed (e.g. to fewer than three distinct points). */
+/** A polygon zone outline with a smaller area (mm2) has collapsed (e.g. to fewer than three distinct points). */
 const MIN_ZONE_AREA = 1;
 
 /** Why a zone is invalid, in priority order (see zoneInvalidReason). */
-export type ZoneInvalidReason = 'room' | 'lost' | 'wall' | 'self';
+export type ZoneInvalidReason = 'broken' | 'lost' | 'beyond' | 'crossing';
 
 /**
  * Where a vertex lies now: a free vertex at its x,y; a node vertex at its node; a wall vertex at the face point of
@@ -39,11 +39,16 @@ export function vertexPoint(level: Level, v: ZoneVertex): Pt | null {
   }
 }
 
-/** The zone's outline: a room zone's room outline ([] when the room is gone); a polygon's vertexPoint, else its cached x,y. */
-export function zoneOutline(level: Level, z: AutomationZone): Pt[] {
+/** The zone's outline: a walls zone's cached outline; per polygon vertex its vertexPoint, else its cached x,y. */
+export function zoneOutline(level: Level, z: Zone): Pt[] {
   const s = z.shape;
-  if (s.kind === 'room') return level.zones.find(r => r.id === s.roomId)?.outline ?? [];
+  if (s.kind === 'walls') return s.outline;
   return s.vertices.map(v => vertexPoint(level, v) ?? { x: v.x, y: v.y });
+}
+
+/** The zone's own area in m2, rounded to 1 decimal (overlapping zones are not subtracted). */
+export function zoneArea(level: Level, z: Zone): number {
+  return Math.round(Math.abs(polygonArea(zoneOutline(level, z))) / 1e5) / 10;
 }
 
 /** Sign of the turn a -> b -> c (Y down: the sign of the cross product); 0 when collinear or two points coincide. */
@@ -92,26 +97,23 @@ export function selfIntersects(ring: Pt[]): boolean {
 }
 
 /**
- * Why the zone is invalid, or null. In priority order: 'room' (a room zone's room is broken or gone), 'lost' (a free
- * vertex lost its anchor, or a node or wall vertex's anchor is missing), 'wall' (a wall vertex offset lies outside
- * [-1, length + 1] mm), 'self' (the outline crosses itself or collapsed: fewer than three distinct points or under
- * 1 mm2 of area). A room zone is only checked for 'room'.
+ * Why the zone is invalid, or null. A walls zone: 'broken' (its walls no longer close it). A polygon, in priority
+ * order: 'lost' (a free vertex lost its anchor, or a node or wall vertex's anchor is missing), 'beyond' (a wall vertex
+ * offset lies outside [-1, length + 1] mm), 'crossing' (the outline crosses itself or collapsed: fewer than three
+ * distinct points or under 1 mm2 of area).
  */
-export function zoneInvalidReason(level: Level, z: AutomationZone): ZoneInvalidReason | null {
+export function zoneInvalidReason(level: Level, z: Zone): ZoneInvalidReason | null {
   const s = z.shape;
-  if (s.kind === 'room') {
-    const room = level.zones.find(r => r.id === s.roomId);
-    return !room || room.broken ? 'room' : null;
-  }
+  if (s.kind === 'walls') return s.broken ? 'broken' : null;
   if (s.vertices.some(v => (v.kind === 'free' ? v.lost === true : vertexPoint(level, v) === null))) return 'lost';
   const beyond = (v: ZoneVertex): boolean => {
     if (v.kind !== 'wall') return false;
     const len = wallLen(level, v.wallId);
     return len !== null && (v.offset < -WALL_TOL || v.offset > len + WALL_TOL);
   };
-  if (s.vertices.some(beyond)) return 'wall';
+  if (s.vertices.some(beyond)) return 'beyond';
   const outline = zoneOutline(level, z);
-  return Math.abs(polygonArea(outline)) < MIN_ZONE_AREA || selfIntersects(outline) ? 'self' : null;
+  return Math.abs(polygonArea(outline)) < MIN_ZONE_AREA || selfIntersects(outline) ? 'crossing' : null;
 }
 
 /** p lies inside the outline or within 1 mm of one of its edges. */
@@ -123,17 +125,17 @@ export function zoneContains(outline: Pt[], p: Pt): boolean {
 const participates = (d: Device, zoneId: Id): boolean => !(d.zoneBlacklist ?? []).includes(zoneId);
 
 /** The zones (in level order) containing the device's pose point; participates = the zone is not blacklisted. */
-export function deviceZones(level: Level, d: Device): { zone: AutomationZone; participates: boolean }[] {
+export function deviceZones(level: Level, d: Device): { zone: Zone; participates: boolean }[] {
   const pose = devicePose(level, d);
   if (!pose) return [];
-  return levelZones(level)
+  return level.zones
     .filter(z => zoneContains(zoneOutline(level, z), pose.pt))
     .map(zone => ({ zone, participates: participates(d, zone.id) }));
 }
 
 /** The devices (in level order) whose pose point lies in the zone; [] when the zone is missing. */
 export function zoneMembers(level: Level, zoneId: Id): { device: Device; participates: boolean }[] {
-  const zone = levelZones(level).find(z => z.id === zoneId);
+  const zone = level.zones.find(z => z.id === zoneId);
   if (!zone) return [];
   const outline = zoneOutline(level, zone);
   const out: { device: Device; participates: boolean }[] = [];

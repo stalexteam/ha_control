@@ -18,7 +18,7 @@ const none: DevicePlacement = { mode: 'none' };
 /** Stores one plan: a 4000 x 3000 room (200 mm walls, w0 on top, w3 on the left) with `devices` and raw `power`. */
 function seed(devices: Device[], power?: unknown): void {
   const level = { ...rectRoomLevel(4000, 3000, 200), devices, switchesMigrated: true as const };
-  const plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level], ...(power ? { power } : {}) } as Plan;
+  const plan = { id: 'P1', name: 'Home', schemaVersion: 2, revision: 1, levels: [level], ...(power ? { power } : {}) } as Plan;
   localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
 }
 

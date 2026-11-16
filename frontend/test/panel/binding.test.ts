@@ -81,7 +81,7 @@ const dot = (el: PlanStudioPanel, id: string) => [...$(el, `.blist .brow[data-id
 /** Opens the stored plan with the HA mock and enters the Binding step; resolves once the registry load settled. */
 async function open(fail: Fail = { on: false }): Promise<{ el: PlanStudioPanel; calls: string[] }> {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    plans: { P1: { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1, levels: [level()] } },
+    plans: { P1: { id: 'P1', name: 'Home', schemaVersion: 2, revision: 1, levels: [level()] } },
   }));
   const { hass, calls } = haHass(fail);
   const el = await mount(hass);

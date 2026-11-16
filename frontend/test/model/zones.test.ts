@@ -1,15 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addPolygonZone, addRoomZone, deleteAutomationZone, moveZoneVertex, refreshAutomationZones, renameAutomationZone,
-  setZoneParticipation,
-} from '../../src/model/automation-zones';
+  addPolygonZone, addWallsZone, deleteZone, moveZoneVertex, refreshZones, renameZone, setZoneParticipation,
+} from '../../src/model/zones';
 import { addWallSegment, deleteWall, detachWallEnd, mergeNodes, moveNode, setWallProps } from '../../src/model/ops';
-import { addZone, deleteZone } from '../../src/model/zones';
 import { addDevice, moveDevice } from '../../src/model/devices';
 import { deviceZones, vertexPoint, zoneInvalidReason } from '../../src/geometry/zones';
 import {
-  deviceDefaults, levelZones, normalizeLevel, type AutomationZone, type Device, type DeviceProps, type Id, type Level,
-  type ZoneVertex,
+  deviceDefaults, normalizeLevel, type Device, type DeviceProps, type Id, type Level, type Zone, type ZoneVertex,
 } from '../../src/model/types';
 import { rectRoomLevel } from '../fixtures';
 
@@ -24,7 +21,7 @@ function withQuad(level: Level = room()): { level: Level; id: Id } {
   const r = addPolygonZone(level, quad(), 'Zone');
   return { level: r.level, id: r.zoneId! };
 }
-const zoneOf = (l: Level, id: Id): AutomationZone => levelZones(l).find(z => z.id === id)!;
+const zoneOf = (l: Level, id: Id): Zone => l.zones.find(z => z.id === id)!;
 const verts = (l: Level, id: Id): ZoneVertex[] => {
   const s = zoneOf(l, id).shape;
   if (s.kind !== 'polygon') throw new Error('not a polygon');
@@ -35,27 +32,29 @@ const near = (p: { x: number; y: number }, x: number, y: number, digits = 6) => 
   expect(p.y).toBeCloseTo(y, digits);
 };
 
-/** A room level with a room 'Kitchen' detected from the centre. */
-function withRoom(): { level: Level; roomId: Id } {
-  const r = addZone(room(), { x: 1500, y: 2000 }, 'Kitchen');
-  return { level: r.level, roomId: r.zoneId! };
+/** A room level with a walls zone 'Kitchen' detected from the centre. */
+function withRoom(): { level: Level; zoneId: Id } {
+  const r = addWallsZone(room(), { x: 1500, y: 2000 }, 'Kitchen');
+  return { level: r.level, zoneId: r.zoneId! };
 }
 
-describe('addRoomZone', () => {
-  it('addRoomZone adds a room zone named after the room; a second call returns the existing id and the same level', () => {
-    const { level, roomId } = withRoom();
-    const a = addRoomZone(level, roomId, 'Kitchen');
-    expect(a.zoneId).not.toBeNull();
-    expect(levelZones(a.level)).toEqual([{ id: a.zoneId, name: 'Kitchen', shape: { kind: 'room', roomId }, invalid: false }]);
-    expect(a.level.walls).toBe(level.walls);
-    expect(a.level.nodes).toBe(level.nodes);
-    expect(a.level.openings).toBe(level.openings);
-    const b = addRoomZone(a.level, roomId, 'Other');
-    expect(b.level).toBe(a.level);
-    expect(b.zoneId).toBe(a.zoneId);
-    const c = addRoomZone(level, 'nope', 'X');
-    expect(c).toEqual({ level, zoneId: null });
-    expect(c.level).toBe(level);
+describe('addWallsZone', () => {
+  it('adds a walls zone along the inner faces; the walls, nodes and openings stay by reference', () => {
+    const l = room();
+    const r = addWallsZone(l, { x: 1500, y: 2000 }, 'Kitchen');
+    expect(r.level.zones).toEqual([{
+      id: r.zoneId, name: 'Kitchen', invalid: false,
+      shape: { kind: 'walls', seed: { x: 1500, y: 2000 }, broken: false, outline: expect.any(Array) },
+    }]);
+    const s = r.level.zones[0].shape;
+    if (s.kind !== 'walls') throw new Error('not walls');
+    for (const p of s.outline) {
+      expect([200, 2800]).toContain(p.x);
+      expect([200, 3800]).toContain(p.y);
+    }
+    expect(r.level.walls).toBe(l.walls);
+    expect(r.level.nodes).toBe(l.nodes);
+    expect(r.level.openings).toBe(l.openings);
   });
 });
 
@@ -87,16 +86,16 @@ describe('addPolygonZone', () => {
     expect(level.walls).toBe(l.walls);
     expect(level.nodes).toBe(l.nodes);
     expect(level.openings).toBe(l.openings);
-    expect(l.automationZones).toBeUndefined();
+    expect(l.zones).toEqual([]);
   });
 });
 
-describe('renameAutomationZone', () => {
+describe('renameZone', () => {
   it('renames; the same level for an unknown id or the same name', () => {
     const { level, id } = withQuad();
-    expect(zoneOf(renameAutomationZone(level, id, 'Hall'), id).name).toBe('Hall');
-    expect(renameAutomationZone(level, id, 'Zone')).toBe(level);
-    expect(renameAutomationZone(level, 'nope', 'Hall')).toBe(level);
+    expect(zoneOf(renameZone(level, id, 'Hall'), id).name).toBe('Hall');
+    expect(renameZone(level, id, 'Zone')).toBe(level);
+    expect(renameZone(level, 'nope', 'Hall')).toBe(level);
   });
 });
 
@@ -154,7 +153,7 @@ describe('zones follow wall edits', () => {
     // Vertex 3 dragged across the far side: the outline crosses itself.
     const crossed = moveZoneVertex(level, id, 3, free(3000, 1500));
     expect(zoneOf(crossed, id).invalid).toBe(true);
-    expect(zoneInvalidReason(crossed, zoneOf(crossed, id))).toBe('self');
+    expect(zoneInvalidReason(crossed, zoneOf(crossed, id))).toBe('crossing');
     expect(moveZoneVertex(level, id, 9, free(0, 0))).toBe(level);
     expect(moveZoneVertex(level, 'nope', 0, free(0, 0))).toBe(level);
   });
@@ -188,13 +187,13 @@ describe('zones follow wall edits', () => {
     expect(verts(r.level, id)[1]).toEqual({ kind: 'node', nodeId: 'n1', x: 3000, y: 0 });
   });
 
-  it("shortening a wall below a wall vertex offset marks the zone invalid ('wall'); lengthening it heals it", () => {
+  it("shortening a wall below a wall vertex offset marks the zone invalid ('beyond'); lengthening it heals it", () => {
     const base = addPolygonZone(room(), [onW0(2500), free(2500, 3000), free(1000, 3000)], 'Zone');
     const id = base.zoneId!;
     expect(zoneOf(base.level, id).invalid).toBe(false);
     const short = moveNode(base.level, 'n1', { x: 2000, y: 0 });
     expect(zoneOf(short, id).invalid).toBe(true);
-    expect(zoneInvalidReason(short, zoneOf(short, id))).toBe('wall');
+    expect(zoneInvalidReason(short, zoneOf(short, id))).toBe('beyond');
     const sv = verts(short, id)[0];
     expect(sv).toMatchObject({ kind: 'wall', wallId: 'w0', offset: 2500 });
     near(sv, 2000, 200); // drawn at the clamped wall end
@@ -203,31 +202,15 @@ describe('zones follow wall edits', () => {
     near(verts(healed, id)[0], 2500, 200);
   });
 
-  it('deleting a room converts its room zones into lost custom zones along the room outline', () => {
-    const { level, roomId } = withRoom();
-    const a = addRoomZone(level, roomId, 'Kitchen');
-    const outline = level.zones[0].outline;
-    const r = deleteZone(a.level, roomId);
-    expect(r.zones).toEqual([]);
-    const z = zoneOf(r, a.zoneId!);
-    expect(z.name).toBe('Kitchen');
-    expect(z.shape).toEqual({ kind: 'polygon', vertices: outline.map(p => ({ kind: 'free', x: p.x, y: p.y, lost: true })) });
-    expect(z.invalid).toBe(true);
-    expect(zoneInvalidReason(r, z)).toBe('lost');
-    expect(r.walls).toBe(a.level.walls);
-    expect(r.nodes).toBe(a.level.nodes);
-    expect(r.openings).toBe(a.level.openings);
-    // Without automation zones the field is not added.
-    expect(deleteZone(level, roomId).automationZones).toBeUndefined();
-  });
-
-  it('a broken room makes its room zone invalid', () => {
-    const { level, roomId } = withRoom();
-    const a = addRoomZone(level, roomId, 'Kitchen');
-    const r = deleteWall(a.level, 'w0');
-    expect(r.zones[0].broken).toBe(true);
-    expect(zoneOf(r, a.zoneId!).invalid).toBe(true);
-    expect(zoneInvalidReason(r, zoneOf(r, a.zoneId!))).toBe('room');
+  it('a broken walls zone is invalid; closing the walls again heals it', () => {
+    const { level, zoneId } = withRoom();
+    const r = deleteWall(level, 'w0');
+    expect(zoneOf(r, zoneId).shape).toMatchObject({ kind: 'walls', broken: true });
+    expect(zoneOf(r, zoneId).invalid).toBe(true);
+    expect(zoneInvalidReason(r, zoneOf(r, zoneId))).toBe('broken');
+    const healed = addWallSegment(r, { kind: 'node', nodeId: 'n0' }, { kind: 'node', nodeId: 'n1' },
+      { type: 'bearing', thickness: 400, baseline: 'center' }).level;
+    expect(zoneOf(healed, zoneId)).toMatchObject({ invalid: false, shape: { kind: 'walls', broken: false } });
   });
 });
 
@@ -266,7 +249,7 @@ describe('participation', () => {
     expect(setZoneParticipation(level, dev, 'nope', false)).toBe(level);
   });
 
-  it('deleteAutomationZone removes its id from every blacklist and drops empty blacklists', () => {
+  it('deleteZone removes its id from every blacklist and drops empty blacklists', () => {
     const { level, id: a, dev: d1 } = withLamp();
     const b = addPolygonZone(level, [free(0, 0), free(1000, 0), free(1000, 1000)], 'Zone 2');
     const idB = b.zoneId!;
@@ -275,43 +258,44 @@ describe('participation', () => {
     let l = setZoneParticipation(d3.level, d1, a, false);
     l = setZoneParticipation(l, d1, idB, false);
     l = setZoneParticipation(l, d2.deviceId!, a, false);
-    const r = deleteAutomationZone(l, a);
-    expect(levelZones(r).map(z => z.id)).toEqual([idB]);
+    const r = deleteZone(l, a);
+    expect(r.zones.map(z => z.id)).toEqual([idB]);
     expect(device(r, d1).zoneBlacklist).toEqual([idB]);
     expect('zoneBlacklist' in device(r, d2.deviceId!)).toBe(false);
     expect(device(r, d3.deviceId!)).toBe(device(l, d3.deviceId!));
     expect(r.walls).toBe(l.walls);
     expect(r.nodes).toBe(l.nodes);
     expect(r.openings).toBe(l.openings);
-    expect(deleteAutomationZone(r, 'nope')).toBe(r);
+    expect(deleteZone(r, 'nope')).toBe(r);
   });
 });
 
-describe('refreshAutomationZones', () => {
-  it('refreshAutomationZones returns the same level when nothing changed', () => {
+describe('refreshZones', () => {
+  it('refreshZones returns the same level when nothing changed', () => {
     const { level, id } = withQuad();
-    expect(refreshAutomationZones(level)).toBe(level);
+    expect(refreshZones(level)).toBe(level);
     const bare = room();
-    expect(refreshAutomationZones(bare)).toBe(bare);
-    expect(refreshAutomationZones(bare).automationZones).toBeUndefined();
+    expect(refreshZones(bare)).toBe(bare);
+    const walls = withRoom().level;
+    expect(refreshZones(walls)).toBe(walls);
     // An unrelated wall edit: the zone objects are identical.
     const edited = setWallProps(level, 'w2', { thickness: 200 });
     expect(zoneOf(edited, id)).toBe(zoneOf(level, id));
-    expect(refreshAutomationZones(edited)).toBe(edited);
+    expect(refreshZones(edited)).toBe(edited);
   });
 
   it('a missing anchor becomes a lost free vertex at its cached position', () => {
     const { level, id } = withQuad();
     const stale = verts(level, id)[1];
     const gone: Level = { ...level, walls: level.walls.filter(w => w.a !== 'n1' && w.b !== 'n1'), nodes: level.nodes.filter(n => n.id !== 'n1') };
-    const r = refreshAutomationZones(gone);
+    const r = refreshZones(gone);
     expect(verts(r, id)[1]).toEqual({ kind: 'free', x: stale.x, y: stale.y, lost: true });
     expect(zoneOf(r, id).invalid).toBe(true);
   });
 });
 
 describe('old plans', () => {
-  it('normalizeLevel drops climate zoneIds; plans without automationZones work', () => {
+  it('normalizeLevel drops climate zoneIds; zones work on the normalized level', () => {
     const stored: Level = {
       ...room(),
       devices: [{
@@ -321,10 +305,8 @@ describe('old plans', () => {
     };
     const n = normalizeLevel(stored);
     expect(n.devices[0].props).toEqual({ kind: 'climate_sensor' });
-    expect(n.automationZones).toBeUndefined();
     expect(normalizeLevel(n)).toBe(n);
-    const del = deleteWall(n, 'w0');
-    expect(del.automationZones).toBeUndefined();
+    expect(deleteWall(n, 'w0').zones).toEqual([]);
     const { level, id } = withQuad(n);
     expect(id).not.toBeNull();
     expect(deviceZones(level, level.devices[0]).map(x => x.zone.id)).toEqual([id]);

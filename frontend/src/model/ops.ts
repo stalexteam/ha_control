@@ -1,11 +1,10 @@
 import { newId } from './ids';
-import { levelZones, type Baseline, type Id, type Level, type PlanNode, type Pt, type Wall, type WallType } from './types';
+import type { Baseline, Id, Level, PlanNode, Pt, Wall, WallType } from './types';
 import { add, dist, lerp, norm, projectT, scale, sub } from '../geometry/vec';
 import { findNode, nodePos } from '../geometry/walls';
 import { refreshOpenings } from './openings';
 import { refreshDevices } from './devices';
-import { refreshZones } from './zones';
-import { refreshAutomationZones, reuseZones } from './automation-zones';
+import { refreshZones, reuseZones } from './zones';
 
 /** Result of snapping a cursor point. */
 export type Endpoint =
@@ -69,13 +68,13 @@ function settleNodes(out: Level): void {
 
 /**
  * Shared post-edit step on a private clone: settle T-nodes, re-anchor openings, wall devices and zone wall vertices of
- * walls whose node A moved (needs `before`), refresh opening and device validity, rooms, then automation zones. With
- * `before`, zones the edit left alone keep their objects.
+ * walls whose node A moved (needs `before`), refresh opening and device validity, then zones. With `before`, zones
+ * the edit left alone keep their objects.
  */
 function postEdit(out: Level, before?: Level): Level {
   settleNodes(out);
   if (before) reanchorHosted(before, out);
-  const next = refreshAutomationZones(refreshZones(refreshDevices(refreshOpenings(out))));
+  const next = refreshZones(refreshDevices(refreshOpenings(out)));
   return before ? reuseZones(next, before) : next;
 }
 
@@ -178,7 +177,7 @@ function reanchorHosted(before: Level, out: Level): void {
   const hosted: { wallId: Id; offset: number }[] = [
     ...out.openings,
     ...out.devices.flatMap(d => (d.placement.mode === 'wall' ? [d.placement] : [])),
-    ...levelZones(out).flatMap(z => (z.shape.kind === 'polygon' ? z.shape.vertices : []))
+    ...out.zones.flatMap(z => (z.shape.kind === 'polygon' ? z.shape.vertices : []))
       .flatMap(v => (v.kind === 'wall' ? [v] : [])),
   ];
   for (const w of out.walls) {
@@ -213,7 +212,7 @@ export function dropOrphans(level: Level): void {
 
 /** Mutating: zone node vertices on `fromId` point at `intoId`. */
 function repointZoneNodes(level: Level, fromId: Id, intoId: Id): void {
-  for (const z of levelZones(level)) {
+  for (const z of level.zones) {
     if (z.shape.kind !== 'polygon') continue;
     for (const v of z.shape.vertices) if (v.kind === 'node' && v.nodeId === fromId) v.nodeId = intoId;
   }

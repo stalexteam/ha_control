@@ -4,7 +4,7 @@ import { html, render } from 'lit';
 import { renderLevel } from '../../src/render/plan-svg';
 import { paletteFor } from '../../src/render/theme';
 import { addOpening } from '../../src/model/openings';
-import { addZone } from '../../src/model/zones';
+import { addPolygonZone, addWallsZone } from '../../src/model/zones';
 import type { Level } from '../../src/model/types';
 import type { Preview, Selection } from '../../src/editor/tools/types';
 import { rectRoomLevel } from '../fixtures';
@@ -13,7 +13,7 @@ import { rectRoomLevel } from '../fixtures';
 function sample(): Level {
   let level = rectRoomLevel(4000, 3000, 400);
   level = addOpening(level, 'w0', 'door', 2000).level;
-  const z = addZone(level, { x: 2000, y: 1500 }, 'Kitchen');
+  const z = addWallsZone(level, { x: 2000, y: 1500 }, 'Kitchen');
   expect(z.zoneId).not.toBeNull();
   return z.level;
 }
@@ -34,24 +34,29 @@ describe('renderLevel', () => {
     expect(root.querySelectorAll('path.walls').length).toBe(1);
     expect(root.querySelectorAll('.door').length).toBe(1);
     const texts = [...root.querySelectorAll('text')].map(t => t.textContent ?? '');
-    expect(texts.some(s => s.includes('Kitchen') && s.includes('9.36'))).toBe(true);
+    expect(texts.some(s => s.includes('Kitchen') && s.includes('9.4 m²'))).toBe(true);
   });
 
-  it('hides the room labels in the zones mode (room zones carry the name there)', () => {
-    const labels = (mode: 'plan' | 'equipment' | 'zones') => {
-      const content = renderLevel(sample(), { palette: paletteFor(true), selection: null, preview: {}, scale: 0.1, mode });
+  it('draws every zone with its label outside the zones mode; the zones mode keeps walls zone fills only', () => {
+    const level = addPolygonZone(sample(), [
+      { kind: 'free', x: 500, y: 500 }, { kind: 'free', x: 1500, y: 500 }, { kind: 'free', x: 1500, y: 1500 },
+    ], 'Corner').level;
+    const count = (mode: 'plan' | 'equipment' | 'zones', sel: string) => {
+      const content = renderLevel(level, { palette: paletteFor(true), selection: null, preview: {}, scale: 0.1, mode });
       const host = document.createElement('div');
       render(html`<svg xmlns="http://www.w3.org/2000/svg">${content}</svg>`, host);
-      return host.querySelectorAll('.zone-label').length;
+      return host.querySelectorAll(sel).length;
     };
-    expect(labels('plan')).toBe(1);
-    expect(labels('equipment')).toBe(1);
-    expect(labels('zones')).toBe(0);
+    expect(count('plan', '.zone-label')).toBe(2);
+    expect(count('equipment', '.zone-label')).toBe(2);
+    expect(count('zones', '.zone-label')).toBe(0);
+    expect(count('plan', 'g.zones path.zone')).toBe(2);
+    expect(count('zones', 'g.zones path.zone')).toBe(1);
   });
 
-  it('hatches a broken zone', () => {
+  it('hatches an invalid zone', () => {
     const level = sample();
-    const broken: Level = { ...level, zones: level.zones.map(z => ({ ...z, broken: true })) };
+    const broken: Level = { ...level, zones: level.zones.map(z => ({ ...z, invalid: true })) };
     const root = draw(broken);
     const zone = root.querySelector('.zone')!;
     expect(zone.getAttribute('fill')).toBe('url(#hatch)');

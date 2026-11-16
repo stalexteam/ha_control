@@ -1,5 +1,5 @@
-import { levelZones, type Id, type Level, type Pt, type ZoneVertex } from '../../model/types';
-import { moveZoneVertex } from '../../model/automation-zones';
+import type { Id, Level, Pt, ZoneVertex } from '../../model/types';
+import { moveZoneVertex } from '../../model/zones';
 import { zoneContains, zoneOutline } from '../../geometry/zones';
 import { orthoConstrain, snap, type SnapResult } from '../../geometry/snap';
 import { wallFrame, wallLocal } from '../../geometry/walls';
@@ -39,7 +39,7 @@ export function zoneVertexAt(ctx: ToolContext, level: Level, e: ToolEvent, from:
 /** Ids of the zones whose outline contains p or passes within tol of it: smallest area first, then by id. */
 function zonesAt(level: Level, p: Pt, tol: number): Id[] {
   const hits: { id: Id; area: number }[] = [];
-  for (const z of levelZones(level)) {
+  for (const z of level.zones) {
     const o = zoneOutline(level, z);
     const near = o.some((a, i) => distToSegment(p, a, o[(i + 1) % o.length]) <= tol);
     if (near || zoneContains(o, p)) hits.push({ id: z.id, area: Math.abs(polygonArea(o)) });
@@ -50,7 +50,7 @@ function zonesAt(level: Level, p: Pt, tol: number): Id[] {
 
 /** The vertex handle of polygon zone `id` nearest to p within tol, with the previous vertex's point; else null. */
 function handleAt(level: Level, id: Id, p: Pt, tol: number): { index: number; from: Pt } | null {
-  const z = levelZones(level).find(x => x.id === id);
+  const z = level.zones.find(x => x.id === id);
   if (!z || z.shape.kind !== 'polygon') return null;
   const o = zoneOutline(level, z);
   let best = -1;
@@ -61,7 +61,7 @@ function handleAt(level: Level, id: Id, p: Pt, tol: number): { index: number; fr
 /**
  * Zones select tool. A click picks the zone under the point (inside, or its edge within the pick tolerance); where
  * zones overlap, the smallest comes first and a click next to the previous one picks the next; an empty click clears.
- * With a custom zone selected, a press on one of its vertex handles drags the vertex: it re-snaps to a node, a wall
+ * With a polygon zone selected, a press on one of its vertex handles drags the vertex: it re-snaps to a node, a wall
  * face or the grid, Alt places it free, Shift keeps the angle to the previous vertex. One commit on `up`.
  * The selection is the panel's (a zone picked in the list drags with the first press); `cancel` drops a gesture only.
  */
@@ -75,8 +75,8 @@ export function createZonesSelectTool(ctx: ToolContext): Tool {
   let moved = false;
   let downPt: Pt = { x: 0, y: 0 };
 
-  const selected = (): Id | null => { const s = ctx.selection(); return s?.kind === 'automationZone' ? s.id : null; };
-  const setSel = (id: Id | null) => { ctx.select(id === null ? null : { kind: 'automationZone', id }); };
+  const selected = (): Id | null => { const s = ctx.selection(); return s?.kind === 'zone' ? s.id : null; };
+  const setSel = (id: Id | null) => { ctx.select(id === null ? null : { kind: 'zone', id }); };
   const reset = () => { drag = null; original = null; working = null; lastSnap = null; ortho = false; moved = false; };
 
   function update(e: ToolEvent): void {

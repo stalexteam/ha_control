@@ -1,18 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import {
-  defaultsMode, deviceDefaults, levelZones, type AutomationZone, type Device, type DevicePlacement, type Id, type Level, type Pt,
-  type Zone, type ZoneVertex,
+  defaultsMode, deviceDefaults, type Device, type DevicePlacement, type Id, type Level, type Pt, type Zone,
+  type ZoneVertex,
 } from '../../src/model/types';
 import { devicePose } from '../../src/geometry/devices';
 import {
-  deviceZones, selfIntersects, vertexPoint, zoneContains, zoneInvalidReason, zoneLabelPoint, zoneMembers, zoneOutline,
+  deviceZones, selfIntersects, vertexPoint, zoneArea, zoneContains, zoneInvalidReason, zoneLabelPoint, zoneMembers,
+  zoneOutline,
 } from '../../src/geometry/zones';
 import { rectRoomLevel } from '../fixtures';
 
 const free = (x: number, y: number, lost?: true): ZoneVertex => (lost ? { kind: 'free', x, y, lost } : { kind: 'free', x, y });
-const poly = (id: Id, vertices: ZoneVertex[]): AutomationZone =>
+const poly = (id: Id, vertices: ZoneVertex[]): Zone =>
   ({ id, name: id, shape: { kind: 'polygon', vertices }, invalid: false });
-const square = (id: Id, x0: number, y0: number, size: number): AutomationZone =>
+const square = (id: Id, x0: number, y0: number, size: number): Zone =>
   poly(id, [free(x0, y0), free(x0 + size, y0), free(x0 + size, y0 + size), free(x0, y0 + size)]);
 const pts = (...xy: [number, number][]): Pt[] => xy.map(([x, y]) => ({ x, y }));
 const dev = (id: Id, placement: DevicePlacement, zoneBlacklist?: Id[]): Device => ({
@@ -20,22 +21,11 @@ const dev = (id: Id, placement: DevicePlacement, zoneBlacklist?: Id[]): Device =
   props: deviceDefaults('socket', defaultsMode(placement.mode)),
 });
 const at = (x: number, y: number): DevicePlacement => ({ mode: 'free', x, y, rotation: 0 });
-const withZones = (level: Level, automationZones: AutomationZone[], devices: Device[] = []): Level =>
-  ({ ...level, automationZones, devices });
+const withZones = (level: Level, zones: Zone[], devices: Device[] = []): Level =>
+  ({ ...level, zones, devices });
 const room = (id: Id, broken: boolean): Zone => ({
-  id, name: 'Kitchen', seed: { x: 1500, y: 2000 }, broken,
-  outline: pts([200, 200], [2800, 200], [2800, 3800], [200, 3800]),
-});
-
-describe('levelZones', () => {
-  it('returns [] when the field is missing', () => {
-    expect(levelZones(rectRoomLevel(3000, 4000, 400))).toEqual([]);
-  });
-
-  it('returns the stored zones', () => {
-    const z = square('a', 0, 0, 1000);
-    expect(levelZones(withZones(rectRoomLevel(3000, 4000, 400), [z]))).toEqual([z]);
-  });
+  id, name: 'Kitchen', invalid: broken,
+  shape: { kind: 'walls', seed: { x: 1500, y: 2000 }, broken, outline: pts([200, 200], [2800, 200], [2800, 3800], [200, 3800]) },
 });
 
 describe('vertexPoint and zoneOutline', () => {
@@ -68,14 +58,14 @@ describe('vertexPoint and zoneOutline', () => {
     expect(zoneOutline(box, z)).toEqual(pts([10, 20], [30, 40], [3000, 4000]));
   });
 
-  it('wall vertex beyond the wall end is clamped in the outline and gives reason \'wall\'', () => {
+  it('wall vertex beyond the wall end is clamped in the outline and gives reason \'beyond\'', () => {
     const z = poly('z', [
       { kind: 'wall', wallId: 'w0', offset: 3500, side: 'right', x: 0, y: 0 }, free(2500, 2000), free(500, 2000),
     ]);
     const outline = zoneOutline(box, z);
     expect(outline[0].x).toBeCloseTo(3000);
     expect(outline[0].y).toBeCloseTo(200);
-    expect(zoneInvalidReason(box, z)).toBe('wall');
+    expect(zoneInvalidReason(box, z)).toBe('beyond');
     const near = poly('n', [
       { kind: 'wall', wallId: 'w0', offset: 3000.5, side: 'right', x: 0, y: 0 }, free(2500, 2000), free(500, 2000),
     ]);
@@ -84,14 +74,19 @@ describe('vertexPoint and zoneOutline', () => {
       { kind: 'wall', wallId: 'w0', offset: -2, side: 'right', x: 0, y: 0 }, free(2500, 2000), free(500, 2000),
     ]);
     expect(zoneOutline(box, before)[0].x).toBeCloseTo(0);
-    expect(zoneInvalidReason(box, before)).toBe('wall');
+    expect(zoneInvalidReason(box, before)).toBe('beyond');
   });
 
-  it('room zone outline is the room outline; a gone room gives []', () => {
-    const level: Level = { ...box, zones: [room('r0', false)] };
-    const rz: AutomationZone = { id: 'z', name: 'Kitchen', shape: { kind: 'room', roomId: 'r0' }, invalid: false };
-    expect(zoneOutline(level, rz)).toEqual(room('r0', false).outline);
-    expect(zoneOutline(box, rz)).toEqual([]);
+  it('a walls zone outline is its cached outline, broken or not', () => {
+    const outline = pts([200, 200], [2800, 200], [2800, 3800], [200, 3800]);
+    expect(zoneOutline(box, room('r0', false))).toEqual(outline);
+    expect(zoneOutline(box, room('r0', true))).toEqual(outline);
+  });
+
+  it('zoneArea is the own area in m2 with 1 decimal', () => {
+    expect(zoneArea(box, room('r0', false))).toBe(9.4); // 2600 x 3600 = 9.36 m2
+    expect(zoneArea(box, square('s', 0, 0, 1000))).toBe(1);
+    expect(zoneArea(box, poly('e', []))).toBe(0);
   });
 });
 
@@ -128,13 +123,12 @@ describe('zoneInvalidReason priority', () => {
   const box = rectRoomLevel(3000, 4000, 400);
   const bowTie = [free(0, 0), free(1000, 1000), free(1000, 0), free(0, 1000)];
 
-  it('a broken room gives \'room\'', () => {
-    const rz: AutomationZone = { id: 'z', name: 'Kitchen', shape: { kind: 'room', roomId: 'r0' }, invalid: false };
-    expect(zoneInvalidReason({ ...box, zones: [room('r0', true)] }, rz)).toBe('room');
-    expect(zoneInvalidReason({ ...box, zones: [room('r0', false)] }, rz)).toBeNull();
+  it('a broken walls zone gives \'broken\'', () => {
+    expect(zoneInvalidReason(box, room('r0', true))).toBe('broken');
+    expect(zoneInvalidReason(box, room('r0', false))).toBeNull();
   });
 
-  it('a lost vertex gives \'lost\', before \'wall\' and \'self\'', () => {
+  it('a lost vertex gives \'lost\', before \'beyond\' and \'crossing\'', () => {
     const lost = poly('z', [free(0, 0, true), ...bowTie.slice(1),
       { kind: 'wall', wallId: 'w0', offset: 9000, side: 'right', x: 0, y: 0 }]);
     expect(zoneInvalidReason(box, lost)).toBe('lost');
@@ -145,26 +139,26 @@ describe('zoneInvalidReason priority', () => {
     expect(zoneInvalidReason(box, z)).toBe('lost');
   });
 
-  it('a wall vertex beyond the end gives \'wall\' before \'self\'', () => {
+  it('a wall vertex beyond the end gives \'beyond\' before \'crossing\'', () => {
     const z = poly('z', [...bowTie, { kind: 'wall', wallId: 'w0', offset: 9000, side: 'right', x: 0, y: 0 }]);
-    expect(zoneInvalidReason(box, z)).toBe('wall');
+    expect(zoneInvalidReason(box, z)).toBe('beyond');
   });
 
   it('a valid square gives null', () => {
     expect(zoneInvalidReason(box, square('z', 0, 0, 1000))).toBeNull();
   });
 
-  it('a bow-tie gives \'self\'', () => {
-    expect(zoneInvalidReason(box, poly('z', bowTie))).toBe('self');
+  it('a bow-tie gives \'crossing\'', () => {
+    expect(zoneInvalidReason(box, poly('z', bowTie))).toBe('crossing');
   });
 
-  it('an outline collapsed to fewer than three distinct points or to no area gives \'self\'', () => {
+  it('an outline collapsed to fewer than three distinct points or to no area gives \'crossing\'', () => {
     // Two vertices on one corner (e.g. after merging nodes): two distinct points.
     const merged = poly('z', [{ kind: 'node', nodeId: 'n0', x: 0, y: 0 }, { kind: 'node', nodeId: 'n0', x: 0, y: 0 }, free(1000, 1000)]);
     expect(selfIntersects(zoneOutline(box, merged))).toBe(false);
-    expect(zoneInvalidReason(box, merged)).toBe('self');
+    expect(zoneInvalidReason(box, merged)).toBe('crossing');
     // Three distinct points, area 0.5 mm2.
-    expect(zoneInvalidReason(box, poly('z', [free(0, 0), free(1000, 0), free(500, 0.001)]))).toBe('self');
+    expect(zoneInvalidReason(box, poly('z', [free(0, 0), free(1000, 0), free(500, 0.001)]))).toBe('crossing');
     // A thin but real sliver (1000 x 1 mm, area 500 mm2) is valid.
     expect(zoneInvalidReason(box, poly('z', [free(0, 0), free(1000, 0), free(1000, 1)]))).toBeNull();
   });

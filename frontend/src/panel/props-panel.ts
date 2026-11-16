@@ -1,6 +1,6 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
-import type { Baseline, Level, Opening, OpeningKind, Side, Wall, WallType } from '../model/types';
+import type { Baseline, Level, Opening, OpeningKind, Side, Wall, WallType, Zone } from '../model/types';
 import { deleteWall, setWallProps } from '../model/ops';
 import {
   DOOR_KINDS, deleteOpening, kindPatch, moveOpening, passesLight, passesLightByDefault, passesPir, passesPirByDefault, resizeOpening, setOpeningProps,
@@ -8,13 +8,14 @@ import {
 } from '../model/openings';
 import { deleteZone, renameZone } from '../model/zones';
 import { wallFrame } from '../geometry/walls';
-import { roomAreaM2 } from '../geometry/rooms';
+import { zoneArea } from '../geometry/zones';
 import type { Selection } from '../editor/tools/types';
 import { formatArea, formatMm } from '../render/plan-svg';
 import { t } from '../i18n';
 import { numField, row, select } from './fields';
 import type { ToolId } from './tool-factory';
 import { isNextObjectTool, renderNextObject, type NextObjects } from './next-object';
+import { zoneInvalidText } from './zones-list';
 
 export type BoxMeasure = 'inner' | 'axis' | 'outer';
 
@@ -100,7 +101,8 @@ function openingProps(op: Opening, o: PropsOpts): TemplateResult {
       ${t('action.delete')}</button>`;
 }
 
-function zoneProps(z: Level['zones'][number], o: PropsOpts): TemplateResult {
+function zoneProps(z: Zone, o: PropsOpts): TemplateResult {
+  const invalid = zoneInvalidText(o.level, z);
   return html`
     <h4>${t('props.zone')}</h4>
     ${row(t('props.name'), html`<input class="val wide" type="text" .value=${fieldValue(z.name)}
@@ -110,8 +112,8 @@ function zoneProps(z: Level['zones'][number], o: PropsOpts): TemplateResult {
         if (!name) { el.value = z.name; return; }
         if (name !== z.name) o.commit(renameZone(o.level, z.id, name));
       }} />`)}
-    ${row(t('props.area'), html`<span class="val ro">${formatArea(roomAreaM2(z.outline))}</span>`)}
-    ${z.broken ? html`<p class="warn">${t('props.broken')}</p>` : nothing}
+    ${row(t('props.area'), html`<span class="val ro">${formatArea(zoneArea(o.level, z))}</span>`)}
+    ${invalid ? html`<p class="warn">${invalid}</p>` : nothing}
     <button class="btn danger" data-action="delete-zone" @click=${() => o.commit(deleteZone(o.level, z.id))}>
       ${t('action.delete')}</button>`;
 }

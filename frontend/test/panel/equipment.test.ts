@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { STORAGE_KEY, createMockHass } from '../../dev/mock-hass';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 import { $, click, drawBox, key, mount, pressSave, stored, undo } from './helpers';
-import { addPolygonZone } from '../../src/model/automation-zones';
+import { addPolygonZone } from '../../src/model/zones';
 import { deviceDefaults } from '../../src/model/types';
 import type { Device, DeviceKind } from '../../src/model/types';
 
@@ -25,7 +25,7 @@ describe('Equipment tab', () => {
 
   it('loads a stage-1 plan without devices, places a ceiling light and saves it', async () => {
     const level = { id: 'L1', name: 'Level 1', kind: 'floor', order: 0, nodes: [], walls: [], openings: [], zones: [] };
-    const plan = { id: 'P1', name: 'Old', schemaVersion: 1, revision: 1, levels: [level] };
+    const plan = { id: 'P1', name: 'Old', schemaVersion: 2, revision: 1, levels: [level] };
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
     const el = await mount();
     expect(el.plan!.id).toBe('P1');

@@ -42,7 +42,7 @@ export interface ToolContext {
   wallMount(): boolean;
   /** The panel's "next opening" values for the door / window / opening tool. */
   openingDefaults(kind: OpeningKind): OpeningDefaults;
-  /** Name the zone tool gives the next room. */
+  /** Name the zone tool gives the next zone. */
   zoneName(): string;
   /** Called after the zone tool placed a zone (the automatic name advances). */
   zonePlaced?(): void;
@@ -67,7 +67,7 @@ export interface OpeningDefaults {
   outside?: "left" | "right";
 }
 
-export type Selection = { kind: "wall" | "node" | "opening" | "zone" | "automationZone" | "device" | "powerBlock" | "powerWire"; id: Id };
+export type Selection = { kind: "wall" | "node" | "opening" | "zone" | "device" | "powerBlock" | "powerWire"; id: Id };
 
 /** Transient overlay a tool asks the renderer to draw. */
 export interface Preview {
@@ -81,7 +81,7 @@ export interface Preview {
   anchor?: Pt;
   /** Working copy of the level during a drag; the renderer draws it instead of the committed level. */
   level?: Level;
-  /** The custom automation zone being drawn: fixed points, the cursor (null while off the plan) and whether closing now is invalid. */
+  /** The polygon zone being drawn: fixed points, the cursor (null while off the plan) and whether closing now is invalid. */
   zoneDraft?: { points: Pt[]; cursor: Pt | null; invalid: boolean };
   device?: { placement: DevicePlacement; props: DeviceProps; invalid: boolean };
   /** Working copy of the power schematic during a drag; the renderer draws it instead of the committed one. */

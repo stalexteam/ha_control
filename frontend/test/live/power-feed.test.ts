@@ -398,7 +398,7 @@ describe('PowerFeed in the panel', () => {
 
   /** Mounts stored plan P1 (with `power` when given) in the Plan step. */
   async function open(hass: HassLike, power?: PowerSchema): Promise<PlanStudioPanel> {
-    const plan: Plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 1,
+    const plan: Plan = { id: 'P1', name: 'Home', schemaVersion: 2, revision: 1,
       levels: [{ ...emptyLevel('L1'), devices: [pc] }], ...(power ? { power } : {}) };
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
     return mount(hass);

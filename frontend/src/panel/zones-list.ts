@@ -1,5 +1,5 @@
 import { html, type TemplateResult } from 'lit';
-import { levelZones, type AutomationZone, type Id, type Level } from '../model/types';
+import type { Id, Level, Zone } from '../model/types';
 import type { Selection } from '../editor/tools/types';
 import { zoneInvalidReason, zoneMembers } from '../geometry/zones';
 import { ZONE_HUES } from '../render/zones-svg';
@@ -20,11 +20,11 @@ export interface ZonesListOpts {
   onPick(id: Id): void;
 }
 
-/** "Room" or "Custom". */
-export const zoneKindLabel = (z: AutomationZone): string => t(`zones.kind.${z.shape.kind}`);
+/** "By walls" or "Polygon". */
+export const zoneKindLabel = (z: Zone): string => t(`zones.kind.${z.shape.kind}`);
 
 /** Why the zone is invalid, as text; null for a valid zone. */
-export function zoneInvalidText(level: Level, z: AutomationZone): string | null {
+export function zoneInvalidText(level: Level, z: Zone): string | null {
   const r = zoneInvalidReason(level, z);
   return r ? t(`zones.invalid.${r}`) : null;
 }
@@ -34,7 +34,7 @@ const countCache = new WeakMap<Level, Map<Id, number>>();
 /** Participating members per zone id: the devices inside that did not opt out. */
 function memberCounts(level: Level): Map<Id, number> {
   return cached(countCache, level, l =>
-    new Map(levelZones(l).map(z => [z.id, zoneMembers(l, z.id).filter(m => m.participates).length])));
+    new Map(l.zones.map(z => [z.id, zoneMembers(l, z.id).filter(m => m.participates).length])));
 }
 
 /**
@@ -44,8 +44,8 @@ function memberCounts(level: Level): Map<Id, number> {
 export function renderZonesList(o: ZonesListOpts): TemplateResult {
   const counts = memberCounts(o.level);
   const q = o.query.trim().toLowerCase();
-  const sel = o.selection?.kind === 'automationZone' ? o.selection.id : null;
-  const rows = levelZones(o.level).map((z, i) => ({ z, hue: ZONE_HUES[i % ZONE_HUES.length] }))
+  const sel = o.selection?.kind === 'zone' ? o.selection.id : null;
+  const rows = o.level.zones.map((z, i) => ({ z, hue: ZONE_HUES[i % ZONE_HUES.length] }))
     .filter(({ z }) => !q || z.name.toLowerCase().includes(q) || zoneKindLabel(z).toLowerCase().includes(q));
   return html`
     <div class="zlist">
