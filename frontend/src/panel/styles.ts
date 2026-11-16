@@ -264,6 +264,44 @@ export const panelStyles = css`
   .bfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 18px;
     padding-top: 10px; border-top: 1px solid var(--ch-divider); color: var(--ch-muted); }
 
+  /* Rule dialog: about 90 % of the viewport; settings scroll on the left, the flowchart is on the right. */
+  .dialog.rdlg { box-sizing: border-box; width: 90%; height: 90%; max-width: none; display: flex; flex-direction: column; padding: 14px 18px; }
+  .rcols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 38%) 1fr; gap: 18px; margin-top: 4px; }
+  .rsettings { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 8px; min-width: 0; }
+  .rsettings .rlabel, .rfoot .rlabel { color: var(--ch-muted); font-size: 12px; margin-top: 6px; }
+  .rsettings input, .rsettings select, .rfoot select { font: inherit; color: var(--ch-text); background: var(--ch-bg);
+    border: 1px solid var(--ch-divider); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+  .rsettings .num { width: 72px; text-align: right; }
+  .rgroup { display: flex; flex-direction: column; gap: 6px; }
+  .rline { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; outline: none;
+    border: 1px solid transparent; }
+  .rline:focus-within, .rgroup[data-field]:focus-within { border-color: var(--ch-primary); background: var(--ch-tint); }
+  .rline.bad { border-color: var(--ch-error); }
+  .rline .grow, .rsettings .grow { flex: 1; min-width: 0; }
+  .rline .btn { padding: 1px 8px; }
+  .rnot { display: inline-flex; align-items: center; gap: 4px; color: var(--ch-muted); font-size: 12px; cursor: pointer; }
+  .rnot input { margin: 0; }
+  .radd { color: var(--ch-muted); }
+  .rproblems { margin: 8px 0 0; padding: 0 0 0 18px; color: var(--ch-error); font-size: 12px; }
+  .rfoot { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--ch-divider); }
+  .rfoot .rlabel { margin: 0; }
+  .flow { min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+  svg.fc { width: 100%; height: auto; max-height: 100%; flex: none; }
+  .fc-blk { cursor: pointer; }
+  .fc-box { fill: var(--ch-card); stroke: var(--ch-divider); stroke-width: 1.5; }
+  .fc-blk:hover .fc-box { stroke: var(--ch-primary); }
+  .fc-blk.hl .fc-box { stroke: var(--ch-primary); stroke-width: 2.5; fill: var(--ch-tint); }
+  .fc-blk.on .fc-box { stroke: #22c55e; }
+  .fc-blk.nodata .fc-box { stroke: #f59e0b; stroke-dasharray: 5 3; }
+  .fc-t1 { fill: var(--ch-text); font-size: 13px; font-weight: 500; }
+  .fc-t2, .fc-head { fill: var(--ch-muted); font-size: 12px; }
+  .fc-head { font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .fc-link { fill: none; stroke: var(--ch-muted); stroke-width: 1.5; opacity: .7; }
+  .fc-note { margin: 0; color: var(--ch-muted); font-size: 12px; }
+  .fc-warn { margin: 0; color: #f59e0b; font-size: 12px; }
+  .fc-last { margin: 0; color: var(--ch-text); font-size: 12px; }
+  @media (max-width: 700px) { .rcols { grid-template-columns: 1fr; overflow-y: auto; } }
+
   /* Status bar and dialogs. */
   .status { grid-column: 1 / 4; background: var(--ch-card); border-top: 1px solid var(--ch-divider); display: flex;
     gap: 18px; align-items: center; padding: 0 10px; font-size: 12px; color: var(--ch-muted); white-space: nowrap;

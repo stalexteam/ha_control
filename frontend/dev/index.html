@@ -74,6 +74,17 @@
     // step=<EditorMode>, tool=<ToolId> (zone=polygon: the Zone tool's method) and select=<kind>:<id>: applied once
     // the panel has loaded its plan.
     const tool = params.get('tool'), zoneMethod = params.get('zone');
+    // rule=<id>: open that rule in the rule dialog; ruleNew=leak|condition: open a new rule from the template (with select=zone:<id>
+    // the zone is the selected one). Both switch to the Automation step and wait for the first live message.
+    const ruleId = params.get('rule'), ruleNew = params.get('ruleNew');
+    if (ruleId || ruleNew) {
+      const timer = setInterval(() => {
+        if (!panel.plan || !panel.rulesFeed.ready) { if (panel.plan && panel.mode !== 'automation') panel.setMode('automation'); return; }
+        clearInterval(timer);
+        if (selection) panel.selection = selection;
+        panel.openRuleDialog(ruleNew ?? 'condition', ruleId ?? undefined);
+      }, 50);
+    }
     if (params.get('render') !== 'power' && (step || select || tool)) {
       const timer = setInterval(() => {
         if (!panel.plan) return;

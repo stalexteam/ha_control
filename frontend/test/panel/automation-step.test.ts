@@ -126,9 +126,9 @@ describe('Automation step', () => {
     expect(stored()[0].rules).toHaveLength(4); // nothing saved by the delete itself
   });
 
-  it('the templates and Edit call openRuleDialog (a stub until the dialog lands)', async () => {
+  it('the templates and Edit call openRuleDialog', async () => {
     const el = await open();
-    const spy = vi.spyOn(el, 'openRuleDialog');
+    const spy = vi.spyOn(el, 'openRuleDialog').mockImplementation(() => undefined);
     await press(el, 'button[data-template="condition"]');
     expect(spy).toHaveBeenLastCalledWith('condition');
     await press(el, 'button[data-template="leak"]');

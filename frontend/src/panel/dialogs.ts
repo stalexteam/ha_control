@@ -9,7 +9,9 @@ import type { Draft } from '../editor/draft';
 export type Dialog =
   | { kind: 'restore' | 'new' | 'delete' | 'conflict' | 'conflict-again' }
   | { kind: 'switch'; to: string }
-  | { kind: 'delete-rule'; id: string };
+  | { kind: 'delete-rule'; id: string }
+  /** The rule dialog; its content lives in the panel's `ruleDraft`. */
+  | { kind: 'rule' };
 
 export interface RestoreOpts {
   savedAt: number;

@@ -42,8 +42,9 @@ import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { RulesFeed } from '../live/rules-feed';
-import { deleteRule } from '../model/rules';
+import { addRule, deleteRule, isRuleInputDevice, leakTemplate, newRule, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import type { RuleTemplate } from './rule-templates';
+import { renderRuleDialog, type RuleDraft } from './rule-dialog';
 import { PowerFeed, powerPayload } from '../live/power-feed';
 import { deviceLive, liveBubbles } from '../live/device-live';
 import { DeviceEventTracker, eventSources } from '../live/device-events';
@@ -96,6 +97,8 @@ export class PlanStudioPanel extends LitElement {
    * plan, no new draft is written under its key (that would overwrite it).
    */
   @state() pendingDraft: Draft | null = null;
+  /** The rule the open 'rule' dialog edits (a copy; nothing reaches the plan before OK). */
+  @state() ruleDraft: RuleDraft | null = null;
   /** Stored plans for the selector. */
   @state() plans: PlanSummary[] = [];
   /** A delete request is running. */
@@ -247,8 +250,9 @@ export class PlanStudioPanel extends LitElement {
     const need = this.isConnected && (this.mode === 'binding' || this.mode === 'automation') && !!level && !!this.hass && level.devices.some(d =>
       deviceLive(d, this.hass!.states).timerSince !== undefined || this.events.event(d.id, now) !== null
       || this.events.leaving(d.id, now).length > 0);
-    if (need && !this.ticker) this.ticker = setInterval(() => this.requestUpdate(), 1000);
-    else if (!need) this.stopTicker();
+    const countdown = this.modal && !!this.ruleDraft && !!this.rulesFeed.trace(this.ruleDraft.rule.id)?.pending;
+    if ((need || countdown) && !this.ticker) this.ticker = setInterval(() => this.requestUpdate(), 1000);
+    else if (!need && !countdown) this.stopTicker();
   }
 
   private stopTicker(): void {
@@ -258,6 +262,10 @@ export class PlanStudioPanel extends LitElement {
 
   protected updated(): void {
     this.syncTicker();
+    // Behind the rule dialog nothing takes the focus or a click (the backdrop only covers it visually).
+    for (const el of this.renderRoot.querySelectorAll('.ed > :not(.backdrop)')) el.toggleAttribute('inert', this.modal);
+    // A dialog select shows its `data-value` once its options exist (a value set before them is lost).
+    for (const sel of this.renderRoot.querySelectorAll<HTMLSelectElement>('.rule-backdrop select[data-value]')) sel.value = sel.dataset.value ?? '';
     const canvas = this.renderRoot.querySelector('.canvas');
     if (canvas && !this.resizeObs && typeof ResizeObserver !== 'undefined') {
       this.resizeObs = new ResizeObserver(entries => {
@@ -308,8 +316,86 @@ export class PlanStudioPanel extends LitElement {
 
   get rules(): Rule[] { return this.history?.current.rules ?? []; }
 
-  /** Opens the rule dialog from a template (new rule) or for a rule id (edit). The dialog itself is not built yet. */
-  openRuleDialog(_template: RuleTemplate, _ruleId?: Id): void {}
+  /** True while the rule dialog is open: nothing behind it reacts. */
+  get modal(): boolean { return this.dialog?.kind === 'rule'; }
+
+  /** The plan's levels with the edited one in place of the stored first level (the plan keeps its stale copy). */
+  private planLevels(): Level[] {
+    const cur = this.level;
+    return (this.plan?.levels ?? []).map((l, i) => (i === 0 && cur ? cur : l));
+  }
+
+  /**
+   * Opens the rule dialog: a rule id edits that rule (the template does not matter then); otherwise a new rule
+   * from the template, in the selected zone. The dialog works on a copy; OK commits one edit, Cancel drops it.
+   */
+  openRuleDialog(template: RuleTemplate, ruleId?: Id): void {
+    if (!this.plan || !this.history || this.dialog !== null) return;
+    let draft: RuleDraft;
+    if (ruleId !== undefined) {
+      const rule = this.rules.find(r => r.id === ruleId);
+      if (!rule) return;
+      draft = { rule: structuredClone(rule), isNew: false, focused: null };
+    } else {
+      const levels = this.planLevels();
+      const zoneId = this.selection?.kind === 'zone' ? this.selection.id : null;
+      const zone = levels.flatMap(l => l.zones).find(z => z.id === zoneId);
+      const rule = template === 'leak' ? leakTemplate({ levels }, zone?.id ?? null, zone?.name ?? null) : newRule(zone?.id ?? null);
+      draft = { rule, isNew: true, focused: null };
+    }
+    this.ruleDraft = draft;
+    this.dialog = { kind: 'rule' };
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('.rule-backdrop [data-field="name"]')?.focus());
+  }
+
+  /** A click on a flowchart block: the matching form field gets the focus and the highlight. */
+  private focusRuleField(field: string): void {
+    if (this.ruleDraft) this.ruleDraft = { ...this.ruleDraft, focused: field };
+    void this.updateComplete.then(() => {
+      const row = this.renderRoot.querySelector<HTMLElement>(`.rule-backdrop [data-field="${field}"]`);
+      const el = row?.matches('input, select, button') ? row : row?.querySelector<HTMLElement>('select, input, button') ?? row;
+      el?.scrollIntoView?.({ block: 'nearest' });
+      el?.focus();
+    });
+  }
+
+  /** OK: the rule is added or changed as one undoable edit (an unchanged rule closes the dialog without an edit). */
+  private commitRuleDraft(): void {
+    const d = this.ruleDraft;
+    this.dialog = null;
+    this.ruleDraft = null;
+    if (!d) return;
+    const stored = this.rules.find(r => r.id === d.rule.id);
+    if (d.isNew) this.commitRules(addRule(this.rules, d.rule));
+    else if (stored && !ruleEqual(stored, d.rule)) this.commitRules(updateRule(this.rules, d.rule));
+  }
+
+  private renderRuleDialogNow(): TemplateResult | typeof nothing {
+    const d = this.ruleDraft;
+    if (!this.modal || !d || !this.plan) return nothing;
+    const levels = this.planLevels();
+    const devices = levels.flatMap(l => l.devices);
+    const rule = d.rule;
+    const stored = this.rules.find(r => r.id === rule.id);
+    const trace = stored ? this.rulesFeed.trace(rule.id) : undefined;
+    const note = trace === undefined ? t('rules.flow.new') : ruleEqual(stored!, rule) ? null : t('rules.flow.edited');
+    const multi = levels.length > 1;
+    return renderRuleDialog({
+      draft: d,
+      inputDevices: devices.filter(isRuleInputDevice),
+      actionDevices: devices.filter(x => ruleActionsFor(x).length > 0),
+      deviceById: id => devices.find(x => x.id === id),
+      otherRules: this.rules.filter(r => r.id !== rule.id),
+      ruleName: id => this.rules.find(r => r.id === id)?.name,
+      zones: levels.flatMap(l => l.zones.map(z => ({ id: z.id, name: multi ? `${z.name} (${l.name})` : z.name }))),
+      problems: ruleProblems(this.rules, rule, id => devices.some(x => x.id === id)),
+      trace, note, now: Date.now(),
+      onChange: r => { this.ruleDraft = { ...d, rule: r }; },
+      onFocus: f => this.focusRuleField(f),
+      onOk: () => this.commitRuleDraft(),
+      onCancel: () => { this.dialog = null; this.ruleDraft = null; },
+    });
+  }
 
   /** Deletes the rule a 'delete-rule' dialog asked about (undoable until the plan is saved). */
   private confirmDeleteRule(): void {
@@ -361,8 +447,8 @@ export class PlanStudioPanel extends LitElement {
     this.powerFeed.setPosition(blockId, p).catch((err: unknown) => { this.notice = messageOf(err); });
   }
 
-  undo(): void { this.step(() => this.history?.undo() ?? null); }
-  redo(): void { this.step(() => this.history?.redo() ?? null); }
+  undo(): void { if (!this.modal) this.step(() => this.history?.undo() ?? null); }
+  redo(): void { if (!this.modal) this.step(() => this.history?.redo() ?? null); }
 
   /**
    * Undo / redo drop the selection, except in the Binding step, which keeps the selected device while it exists;
@@ -383,6 +469,7 @@ export class PlanStudioPanel extends LitElement {
   }
 
   pickTool(id: ToolId): void {
+    if (this.modal) return;
     this.activeTool.cancel();
     this.selection = null;
     this.notice = null;
@@ -405,7 +492,7 @@ export class PlanStudioPanel extends LitElement {
 
   /** Wizard step switch: cancels the tool, clears the selection, activates the step's first tool. */
   setMode(mode: EditorMode): void {
-    if (mode === this.mode) return;
+    if (mode === this.mode || this.modal) return;
     if (this.mode === 'power') this.placeDeviceId = null;
     this.mode = mode;
     this.pickTool(toolIdsFor(mode)[0]);
@@ -567,6 +654,7 @@ export class PlanStudioPanel extends LitElement {
           tool: this.toolId, zoneMethod: this.nextObj.zone.method, power,
         })}
         ${this.renderDialog()}
+        ${this.renderRuleDialogNow()}
       </div>`;
   }
 }

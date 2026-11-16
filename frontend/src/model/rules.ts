@@ -73,7 +73,7 @@ export function leakTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneN
   if (zoneId === null) return rule;
   const level = plan.levels.find(l => l.zones.some(z => z.id === zoneId));
   if (!level) return rule;
-  const members = zoneMembers(level, zoneId).map(m => m.device);
+  const members = zoneMembers(level, zoneId).filter(m => m.participates).map(m => m.device);
   rule.inputs = members.filter(d => d.props.kind === 'leak_sensor').map(d => ({ source: { device: d.id } }));
   const valves = members.filter(d => d.props.kind === 'valve');
   if (valves.length === 1) rule.onTrue = [{ device: valves[0].id, do: 'close' }];
@@ -89,4 +89,11 @@ export function ruleActionsFor(d: Device): RuleDo[] {
   if (p.kind === 'equipment') return p.controllable === true ? ['on', 'off'] : [];
   if (p.kind === 'ceiling_light' || p.kind === 'wall_light' || p.kind === 'socket' || p.kind === 'exhaust_fan') return ['on', 'off'];
   return [];
+}
+
+/** Same content, whatever the key order (a dialog copy edited back to the saved values is equal). */
+export function ruleEqual(a: Rule, b: Rule): boolean {
+  const canon = (_k: string, v: unknown): unknown =>
+    v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([x], [y]) => (x < y ? -1 : 1))) : v;
+  return JSON.stringify(a, canon) === JSON.stringify(b, canon);
 }

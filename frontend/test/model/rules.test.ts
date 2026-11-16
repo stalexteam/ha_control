@@ -84,6 +84,20 @@ describe('rules model', () => {
     expect(g.onTrue).toEqual([]);
   });
 
+  it('leakTemplate skips devices that opted out of the zone (ruling A1)', () => {
+    const zone: Zone = {
+      id: 'z1', name: 'Bath', invalid: false,
+      shape: { kind: 'polygon', vertices: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
+    };
+    const out = { ...dev('l2', 'leak_sensor', 200, 200), zoneBlacklist: ['z1'] };
+    const level = { ...emptyLevel('L'), zones: [zone], devices: [
+      dev('l1', 'leak_sensor', 100, 100), out, dev('v1', 'valve', 300, 300), { ...dev('v2', 'valve', 400, 400), zoneBlacklist: ['z1'] },
+    ] };
+    const r = leakTemplate({ levels: [level] }, 'z1', 'Bath');
+    expect(r.inputs).toEqual([{ source: { device: 'l1' } }]);
+    expect(r.onTrue).toEqual([{ device: 'v1', do: 'close' }]);
+  });
+
   it('input devices and action targets', () => {
     for (const k of ['leak_sensor', 'motion_sensor', 'ceiling_light', 'wall_light', 'socket', 'exhaust_fan', 'equipment', 'wall_switch', 'valve'] as const)
       expect(isRuleInputDevice(dev('d', k))).toBe(true);

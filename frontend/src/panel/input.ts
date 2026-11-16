@@ -39,6 +39,7 @@ export class EditorInput {
   }
 
   readonly pointerDown = (e: PointerEvent) => {
+    if (this.h.dialog !== null) return; // a modal dialog covers the canvas
     this.h.focus();
     const el = e.currentTarget as Element;
     if (e.button === 1 || (e.button === 0 && this.spaceDown)) {
@@ -56,6 +57,7 @@ export class EditorInput {
   };
 
   readonly pointerMove = (e: PointerEvent) => {
+    if (this.h.dialog !== null) return; // a modal dialog covers the canvas
     if (this.panFrom) {
       this.h.view = panBy(this.h.view, e.clientX - this.panFrom.x, e.clientY - this.panFrom.y);
       this.panFrom = { x: e.clientX, y: e.clientY };
@@ -66,6 +68,7 @@ export class EditorInput {
   };
 
   readonly pointerUp = (e: PointerEvent) => {
+    if (this.h.dialog !== null) return; // a modal dialog covers the canvas
     if (this.panFrom) { this.panFrom = null; return; }
     if (e.button !== 0 || !this.pointerActive) return;
     this.pointerActive = false;
@@ -84,12 +87,14 @@ export class EditorInput {
   };
 
   readonly dblClick = (e: MouseEvent) => {
+    if (this.h.dialog !== null) return; // a modal dialog covers the canvas
     if (e.button !== 0) return;
     this.h.activeTool.dblclick?.(this.toolEvent(e));
     this.h.requestUpdate();
   };
 
   readonly wheel = (e: WheelEvent) => {
+    if (this.h.dialog !== null) return; // a modal dialog covers the canvas
     e.preventDefault();
     this.h.view = zoomAt(this.h.view, this.h.toMm(e), e.deltaY);
   };
