@@ -1,6 +1,6 @@
 # Plan Studio
 
-Home Assistant custom integration that adds a "Plan Studio" sidebar panel: a 2D floor-plan editor in five steps. Plan: draw walls, openings and rooms. Equipment: place lights, sensors, switches and other devices. Binding: link each device to Home Assistant entities. Zones: mark automation zones, from rooms or drawn by hand, and see which devices each one contains. Power: draw the power-flow schematic from the grid to the devices and watch live values. Plans are saved to Home Assistant storage, and wall switches and smart buttons report button and switch events. Zones are a layer of the plan only: no automation uses them yet, and they create no Home Assistant entities.
+Home Assistant custom integration that adds a "Plan Studio" sidebar panel: a 2D floor-plan editor in four steps (a fifth, Automation, comes later). Plan: draw walls, openings and zones (the spaces of the home, inside or outdoors). Equipment: place lights, sensors, switches and other devices. Binding: link each device to Home Assistant entities. Power: draw the power-flow schematic from the grid to the devices and watch live values. Plans are saved to Home Assistant storage, and wall switches and smart buttons report button and switch events. No automation uses zones yet, and they create no Home Assistant entities.
 
 ## Install
 
@@ -12,16 +12,17 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 
 ## Usage
 
-- Tools: Select, Box, Wall, Door, Window, Opening and Room; pick from the toolbar.
+- Tools: Select, Box, Wall, Door, Window, Opening and Zone in the tool rail. Each button shows an icon and a name; the active tool is highlighted, and the status bar names it with its keys.
+- Shortcuts in the Plan step: V Select, B Box, W Wall, D Door, N Window, O Opening, Z Zone (shown on the buttons; ignored while typing in a field or with Ctrl, Alt or Shift held).
 - Trim: Ctrl+click (Cmd+click on macOS) a wall with the Select tool to remove the piece around the click, between the nearest intersections on either side (T-junctions or crossing walls), or up to the wall's end on a side without one. A wall with no intersections is deleted. One Undo step brings it back.
 - Wall type (bearing / partition / railing) is only a visual style; thickness is a separate field and never changes when you pick a type. Both live in the left properties panel.
-- With a placement tool active and nothing selected, the left panel shows the parameters of the next object (door: width, hinge, swing; window: width, outside side; opening: width; room: name, default "Room N"). Values are remembered per tool for the session; a custom room name is used once, then the default returns to the smallest unused "Room N".
+- With a placement tool active and nothing selected, the left panel shows the parameters of the next object (door: width, hinge, swing; window: width, outside side; opening: width; zone: method, name, default "Zone N", and Automation). Values are remembered per tool for the session; a custom zone name is used once, then the default returns to the smallest unused "Zone N".
 - Opening properties: the "Passes light" checkbox lets the light of wall and ceiling lights through the opening. It is on by default for a plain opening and off for doors, windows, gates and wickets. The "Passes PIR" checkbox does the same for motion zones: on by default for plain openings only.
 - Layout: tool rail, properties panel, plan.
 - Hold Shift while drawing to snap to 90 degrees.
 - Type a length in millimetres and press Enter to set the exact segment length.
 - Tab switches to angle input.
-- Esc works in two stages. The first Esc cancels the action in progress (a typed length, a wall chain, the first corner of a box, an aim drag). The next Esc switches to Select (Plan step) or the device Select (Equipment step). In the Zones step the first Esc drops the custom zone being drawn, and the next returns to the zone Select. In Select, Esc cancels a drag, then clears the selection.
+- Esc works in two stages. The first Esc cancels the action in progress (a typed length, a wall chain, the first corner of a box, an aim drag). The next Esc switches to Select (Plan step) or the device Select (Equipment step). With the Zone tool, the first Esc drops the polygon being drawn. In Select, Esc cancels a drag, then clears the selection.
 - Ctrl+Z / Ctrl+Y: undo / redo.
 - Grid toggle in the status bar turns the grid display and grid snapping (100 mm) on or off together.
 - Save: the indicator shows the saved/unsaved state. If the plan changed elsewhere, a conflict dialog offers to overwrite or "Save as new".
@@ -31,13 +32,13 @@ Then go to Settings -> Devices & services -> Add integration -> Plan Studio.
 
 ### Equipment tab
 
-- The steps Plan, Equipment, Binding and Zones sit in the title block under the top bar: click any step, or use Back / Next. Walls, openings and rooms are dimmed and locked in the Equipment step; devices are dimmed and locked in the Plan step.
+- The steps Plan, Equipment, Binding and Power sit in the title block under the top bar: click any step, or use Back / Next. Walls, openings and zones are dimmed and locked in the Equipment step (zones as thin outlines only); devices are dimmed and locked in the Plan step.
 - Tools: Select, Ceiling light, Wall light, Motion sensor, Illuminance sensor, Climate sensor, Wall switch, Smart button, Socket, Exhaust fan, Device. One click places one device.
 - Wall switches and sockets snap to the nearest wall face (wall only). Wall lights, sensors and smart buttons go on a wall face near the cursor, otherwise at a free grid point (wall or free). Ceiling lights are always free. A Device is free unless "Wall mount" is checked (see below).
 - Wall switch (a square) and smart button (a rounded square with a dot) are input containers: see "Wall switches and smart buttons" below. Their properties show a Type select that turns one into the other; it keeps the id, name and placement, resets the settings to the new type's defaults and drops bindings the new type does not have. A free smart button cannot become a wall switch until it is moved onto a wall. Plans with the former Switch device are migrated on load: a switch with a button-events binding becomes a smart button, any other becomes a wall switch.
-- Climate sensor (wall or free): temperature and humidity. Its reading applies to the automation zones that contain it (see "Zones"); the room checkboxes are gone.
+- Climate sensor (wall or free): temperature and humidity. Its reading applies to the zones that contain it (see "Zones").
 - Changed in 0.6.0: the climate sensor room list (zoneIds) is removed; stored values are dropped on load and leave the plan on the next save.
-- Every device's properties show a "Zones" list: each automation zone that contains the device, with a "Participates" checkbox (see "Zones"), or "Not in any zone.".
+- Every device's properties show a "Zones" list: each zone that contains the device, with a "Participates" checkbox (see "Zones"), or "Not in any zone.".
 - Exhaust fan (wall only): diameter 100, 125 or 150 mm; no cone and no aim.
 - Device (formerly Equipment): a generic device, drawn as a block with an icon and a label. Its role follows from what is bound in the Binding step: Power, Voltage and Switch are all optional (a measurement only: Meter; a switch only: Switch; both: Metered switch; nothing: Dummy).
   - "Wall mount": the block sits flush against a wall face, its width along the wall; it slides along walls when dragged. Unchecking it leaves the block where it is, free. The Device tool's next-device settings have the same checkbox.
@@ -98,33 +99,22 @@ Wall switches and smart buttons are input containers: virtual objects that repor
 
 ### Zones
 
-Automation zones are named areas for future automations: a room zone covers a room, a custom zone is a polygon you draw. For now they are a layer of the plan only: no automation uses them and no Home Assistant entities are created.
+A zone is a space of the home: a room, a part of a room, or an area outdoors. Zones replace the rooms and the separate Zones step of earlier versions; they are drawn in the Plan step.
 
-- Layout: tools and zone list | properties | plan.
-  - The rail holds the tools Select, Zone from room and Custom zone, then the zone list with a text filter. Each row shows the name, the kind (Room or Custom), the number of participating devices and a marker when the zone is invalid. A click on a row selects the zone and pans the plan to it.
-  - Zones are drawn only in this step: a translucent fill in its own colour, an outline and the name. Walls, openings and rooms are dimmed, and room labels are hidden (the room zone carries the name).
-- Zone from room: click inside a room to add a zone named after the room. Clicking a room that already has a zone selects that zone.
-- Custom zone: each click adds a vertex.
-  - Snapping, in order: node, then wall, then grid, with a visible snap marker. A node vertex sits at the wall's axis corner. A wall vertex sits on the face of the side you point at, and the marker shows that face point.
-  - Alt places a free vertex at the pointer. Shift keeps 90 degrees to the previous vertex.
-  - With 3 vertices or more, close the zone with Enter, a click on the first vertex or a second click on the last vertex. It is named "Zone N" and selected.
-  - Backspace or Delete removes the last vertex. Esc cancels the zone. A vertex whose edge would cross the outline is refused, and the preview turns red.
-- Select: click a zone to select it. Where zones overlap, repeated clicks cycle through them, smallest first. Drag a vertex of the selected custom zone to move it: it re-snaps like a new vertex, Alt places it free, Shift keeps 90 degrees to the previous vertex. Vertices cannot be added or removed yet.
-- Membership: a device belongs to every zone that contains its position (for a wall device, its point on the wall face). A device on the edge counts. Zones may overlap and may lie outdoors.
-- Participates: the zone's properties list its devices, each with a "Participates" checkbox; the Equipment step shows the same choice in each device's "Zones" list. An opt-out is kept when the device leaves the zone, and it is removed only when the zone is deleted.
-- Delete or Backspace (with no custom zone being drawn) and the "Delete zone" button delete only the selected zone, never a device or a wall. Ctrl+Z restores it.
-- Wall edits:
-  - Anchored vertices follow their walls and corners.
-  - Deleting a wall or a corner makes its vertices lost, at their last position: drag a lost vertex to place it again.
-  - A vertex beyond the end of a shortened wall makes the zone invalid; lengthening the wall heals it.
-  - Deleting a room turns its room zone into a custom zone with all vertices lost.
-  - Room zones follow their rooms when the rooms are re-detected.
-- After editing the plan, check the Zones step. An invalid zone is hatched and marked in the list, and its properties give the reason:
-  - "The room is broken: fix its walls."
-  - "A vertex lost its wall or corner: drag it to place it again."
-  - "A vertex lies beyond the end of its wall."
-  - "The outline crosses itself: move a vertex." (also for an outline collapsed to no area)
-- Tip: adjacent custom zones do not snap to each other yet. Place their shared vertices on the same wall points (a corner, a wall midpoint) so that their edges meet.
+- Zone tool: pick the method in its properties.
+  - By walls: click inside closed walls. The zone follows the inner faces of the walls and is re-detected on every wall edit. Clicking where a by-walls zone already exists selects it. A click outside closed walls shows "Click inside closed walls, or use Polygon".
+  - Polygon: each click adds a vertex, anywhere, outdoors too. Snapping, in order: node, wall, other zones' vertices and edges, then grid, with a snap marker. Alt places a free vertex, Shift keeps 90 degrees. Close with Enter, a click on the first vertex or a second click on the last one. Backspace or Ctrl+Z removes the last vertex, Esc cancels. A vertex whose edge would cross the outline is refused.
+  - The properties also hold the next zone's name ("Zone N") and the Automation checkbox.
+- Zones may overlap (for example, "door" and "middle" inside "Main"). A device belongs to every zone that contains its position (for a wall device, its point on the wall face). Each zone shows its own area in m².
+- Select tool: walls, openings and nodes are picked first, then zones. Where zones overlap, repeated clicks cycle through them, smallest first. The selected zone's outline is drawn on top. Drag a vertex of a selected polygon to move it; double-click an edge to add a vertex; select a vertex and press Delete to remove it (at least 3 stay).
+- With nothing selected, or with the Zone tool active, the left panel lists the zones (filter, colour, method, area, invalid marker); a click selects the zone and pans to it.
+- Zone properties: name, area, outline method, "Takes part in automation" (on by default), the devices inside with a "Participates" checkbox each, and "Delete zone". The Equipment step shows the same choice in each device's "Zones" list; an opt-out is kept when the device leaves the zone and removed only with the zone.
+- Wall edits: anchored polygon vertices follow their walls and corners; a deleted wall or corner leaves its vertices "lost" where they were (drag them to place them again). A by-walls zone whose walls no longer close keeps its last outline and is flagged; "Keep outline as a polygon" turns it into a polygon zone with the same name and opt-outs.
+- Invalid zones are marked in the list and in the Plan step cell ("1 invalid"), and their properties give the reason: "The walls no longer close this zone.", "A vertex lost its wall or corner: drag it to place it again.", "A vertex lies beyond the end of its wall.", "The outline crosses itself: move a vertex.".
+- Upgrade to 0.8.0:
+  - When Home Assistant starts, every stored plan is converted to plan schema 2 and saved: each room becomes a by-walls zone (keeping the name of its automation zone, if it had one), custom zones become polygon zones, and device opt-outs are kept.
+  - Save or discard unsaved edits in any open Plan Studio tab before updating: browser drafts of the old format are discarded ("A draft from an older version was discarded."). A page that is older or newer than the integration says so and asks for a reload.
+  - Rollback to 0.7.x needs the storage backup taken before the update: stop Home Assistant core, restore `/config/.storage/plan_studio*` together with the old integration files, then start. Version 0.7.x cannot read schema 2 plans.
 
 ### Power
 
@@ -138,13 +128,14 @@ The Power step draws how electricity reaches the devices: a schematic of blocks 
   - Bus: a bar, horizontal or vertical (Orientation in the properties), that any number of wires can join anywhere along its length. Drag its ends to resize it, or set Length and Thickness.
   - Battery: power (positive while charging) and state of charge. It connects to an inverter's battery port, directly or through a bus.
   - PV field: power. It connects to an inverter's PV port, directly or through a bus.
-  - Transfer switch: "2 inputs → 1 output" or "1 input → 2 outputs", with the position A, 0 (off) or B.
-  - Remainder: the consumption no meter accounts for (dashed amber outline). One per bus.
+  - Transfer switch: "2 inputs → 1 output" or "1 input → 2 outputs", with the position A, 0 (off) or B. The active path is drawn as a thicker part of the block's outline, from the selected input to the output, in the colour of the wire.
+  - Remainder: the consumption no meter accounts for (dashed amber outline). One per bus. Loads on the same bus whose power is unknown (unavailable, or no Power bound) are counted into it; the block then says "incl. <name>" (or "incl. N without data", with the names in a tooltip). An unknown through device, bus or transfer switch still makes it "—".
+  - "Enable output" in a device block's properties shows or hides its OUT port. New device blocks start without it (a load); an inverter always has it. Unchecking it removes the wire on that port.
 - Wiring: drag from a free port to another port or onto a bus. A wire always runs from an output to an input, whichever end you start from. Each port takes one wire; branch through a bus. A wire that would close a loop, or join a battery or PV line to a different line, is refused with a message.
 - Ports place themselves on the side facing the other end of their wire. Drag a wired port along the block edge to pin it there; "Auto ports" in the properties drops the pins.
 - Editing: drag a block to move it, and its wires follow. Delete removes the selected block with its wires, or the selected wire. Ctrl+Z / Ctrl+Y undo and redo, in one history with the plan steps. The schematic is saved with the plan.
 - Live values are computed by the integration and shown inside the blocks: power, voltage, state of charge, and the inverter's loss. Power is converted to W (from W, kW, MW, mW) and voltage to V (from V, kV, mV). A missing or unavailable entity, or an unsupported unit, shows "—": nothing is estimated.
-- Wires show the flow: an arrow in the direction of the power, a glow while energized, a thin line while de-energized, and a grey dashed line when there is no data. When the live feed fails, the reason is shown at the top of the properties.
+- Wires show the flow: an arrow in the direction of the power, a glow while energized, a thin line while de-energized, and a grey dashed line when there is no data. When the live feed fails, the reason is shown at the top of the properties. A block with a problem (an entity without data, a device that is gone, meters that disagree) carries a red alert mark; its tooltip names the problem.
 - Transfer position: click A, 0 or B on the block or in its properties. The position is live state kept by the integration (default A); it is not part of the plan and needs no Save.
 - The step is done when the grid source has a power entity and at least one wire exists.
 
@@ -175,8 +166,8 @@ Expected output: `SMOKE OK`.
 
 Manual scenario on a live instance.
 
-1. Open Plan Studio. Draw a box 6000 x 4000 mm measured by inner face. Draw a balcony with a railing outside (wall chain using Shift and typed lengths). Add two partitions joined with T-nodes. Add doors in the partitions and windows in the load-bearing walls. Create three named rooms. Save. Expected: walls join without gaps, room areas are plausible, the indicator says "saved".
+1. Open Plan Studio. Draw a box 6000 x 4000 mm measured by inner face. Draw a balcony with a railing outside (wall chain using Shift and typed lengths). Add two partitions joined with T-nodes. Add doors in the partitions and windows in the load-bearing walls. Create three named zones by walls. Save. Expected: walls join without gaps, zone areas are plausible, the indicator says "saved".
 2. Restart Home Assistant core and reopen the panel. Expected: the plan is intact and looks the same; edit and save still work and the revision increases.
 3. Open the panel in two tabs. Save in the second, then save in the first. Expected: a conflict dialog; "Save as new" creates a second plan and leaves the first untouched.
-4. Zones. On a plan with the rooms kitchen, entrance, WC and main, add a room zone for each with Zone from room. Draw the custom zones "door" (at the entrance door) and "middle" (in the middle of the main room), renaming them in the properties, and one zone outdoors. Expected: every device is listed in each zone that contains it (member lists, list counts and the Equipment "Zones" list). Uncheck Participates for one device, move the device out of the zone and back: the opt-out stays. Delete a wall under a custom zone vertex: the zone turns invalid with "A vertex lost its wall or corner: drag it to place it again."; Ctrl+Z restores the wall and the zone is valid again. Save and reopen: the zones, memberships and opt-outs are intact.
-5. Power. Set the grid source's power entity. Place the inverter as a Device with "Inverter" checked, a battery on its battery port, a metered Device ("New device", Power and Switch) after it, and a transfer switch (2 inputs → 1 output) with A from the meter and B from a bus fed by the grid. Wire the transfer output to a bus with two plan devices and a remainder. Expected: values appear in the blocks, energized wires glow with arrows in the flow direction, and the remainder shows the consumption no meter accounts for. Click B on the transfer switch: the energized path moves to B at once, with no Save. Make one entity unavailable: every value that depends on it shows "—". Delete a wire and press Ctrl+Z: it comes back. Save and reopen: the schematic is intact.
+4. Zones. On a plan with the spaces kitchen, entrance, WC and main, add a zone by walls for each. Draw the polygon zones "door" (at the entrance door) and "middle" (in the middle of the main room), renaming them in the properties, and one zone outdoors. Expected: every device is listed in each zone that contains it (member lists, list counts and the Equipment "Zones" list). Uncheck Participates for one device, move the device out of the zone and back: the opt-out stays. Delete a wall under a polygon vertex: the zone turns invalid with "A vertex lost its wall or corner: drag it to place it again."; Ctrl+Z restores the wall and the zone is valid again. Save and reopen: the zones, memberships and opt-outs are intact.
+5. Power. Set the grid source's power entity. Place the inverter as a Device with "Inverter" checked, a battery on its battery port, a metered Device ("New device", Power and Switch) after it, and a transfer switch (2 inputs → 1 output) with A from the meter and B from a bus fed by the grid. Wire the transfer output to a bus with two plan devices and a remainder. Expected: values appear in the blocks, energized wires glow with arrows in the flow direction, and the remainder shows the consumption no meter accounts for. Click B on the transfer switch: the energized path moves to B at once, with no Save. Make one load's entity unavailable: its block shows "—" with an alert mark, and the remainder on its bus says "incl. <name>". Delete a wire and press Ctrl+Z: it comes back. Save and reopen: the schematic is intact.
