@@ -54,9 +54,6 @@ const BUS_MIN_PX = 6;
 const PORT_ICONS: Partial<Record<PortName, string>> = {
   IN: mdiPowerPlug, OUT: mdiPowerSocketEu, BAT: mdiPowerPlugBattery, PV: mdiSolarPowerVariant,
 };
-const INWARD: Record<PortPlace['side'], Pt> = {
-  top: { x: 0, y: 1 }, right: { x: -1, y: 0 }, bottom: { x: 0, y: -1 }, left: { x: 1, y: 0 },
-};
 const RANK: Record<WireStyle, number> = { dead: 0, nodata: 1, idle: 2, live: 3 };
 
 /** Watts as shown: `—` when unknown; under 1000 W whole watts, else kW with two decimals; a minus sign (U+2212). */
@@ -87,6 +84,11 @@ const reducedMotion = (): boolean =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 /** The slow pulse of a live wire's glow. */
 const PULSE = svg`<animate attributeName="stroke-opacity" values="0.12;0.3;0.12" dur="3s" repeatCount="indefinite"></animate>`;
+
+/** The glow under a live line (`still`: no pulse). */
+const glow = (cls: string, d: string, colour: string, still: boolean) => svg`<path class=${cls} d=${d} fill="none"
+  stroke=${colour} stroke-width="8" stroke-opacity="0.2" stroke-linejoin="round" stroke-linecap="round"
+  vector-effect=${NS}>${still ? nothing : PULSE}</path>`;
 
 const pathD = (pts: Pt[]): string => `M${pts.map((q) => `${q.x} ${q.y}`).join('L')}`;
 const icon = (d: string, at: Pt, size: number, fill: string) =>
@@ -132,9 +134,7 @@ function renderWire(d: DrawnWire, o: PowerRenderOpts, still: boolean): SVGTempla
   return svg`<g data-wire=${d.w.id}>
     ${selected ? svg`<path class="wire-selection" d=${dp} fill="none" stroke=${p.selection} stroke-width="9"
       stroke-dasharray="4 3" stroke-opacity="0.8" vector-effect=${NS}></path>` : nothing}
-    ${d.style === 'live' ? svg`<path class="glow" d=${dp} fill="none" stroke=${colour} stroke-width="8"
-      stroke-opacity="0.2" stroke-linejoin="round" stroke-linecap="round" vector-effect=${NS}>${still ? nothing : PULSE}</path>`
-      : nothing}
+    ${d.style === 'live' ? glow('glow', dp, colour, still) : nothing}
     <path class=${`wire ${d.style}`} d=${dp} fill="none" stroke=${colour} stroke-width=${width}
       stroke-dasharray=${d.style === 'nodata' ? '5 4' : nothing} stroke-linejoin="round" vector-effect=${NS}></path>
     ${arrow ? svg`<path class="arrow" d=${`M${ARROW_L / 2} 0L${-ARROW_L / 2} ${-ARROW_W}L${-ARROW_L / 2} ${ARROW_W}Z`}
@@ -216,9 +216,42 @@ function renderSwitch(l: Line & { kind: 'switch' }, c: Pt, p: PlanPalette): SVGT
   </g>`;
 }
 
-/** The transfer's selected path: a faint line inside the block from the selected port to the common port. */
+/** The perimeter coordinate of a point on r's outline, clockwise from the top-left corner. */
+function perimeterAt(r: Rect, side: PortPlace['side'], q: Pt): number {
+  switch (side) {
+    case 'top': return q.x - r.x;
+    case 'right': return r.w + (q.y - r.y);
+    case 'bottom': return r.w + r.h + (r.x + r.w - q.x);
+    case 'left': return 2 * r.w + r.h + (r.y + r.h - q.y);
+  }
+}
+
+/** The points of r's outline from `a` to `b` (both on it), the shorter way round; a tie goes clockwise. */
+function outlineRoute(r: Rect, a: { pt: Pt; side: PortPlace['side'] }, b: { pt: Pt; side: PortPlace['side'] }): Pt[] {
+  const per = 2 * (r.w + r.h);
+  const ta = perimeterAt(r, a.side, a.pt);
+  const cw = (((perimeterAt(r, b.side, b.pt) - ta) % per) + per) % per;
+  const dir = cw <= per / 2 ? 1 : -1;
+  const len = dir > 0 ? cw : per - cw;
+  const corners = [
+    { t: 0, pt: { x: r.x, y: r.y } }, { t: r.w, pt: { x: r.x + r.w, y: r.y } },
+    { t: r.w + r.h, pt: { x: r.x + r.w, y: r.y + r.h } }, { t: 2 * r.w + r.h, pt: { x: r.x, y: r.y + r.h } },
+  ];
+  const passed = corners
+    .map((c) => ({ c, d: ((((c.t - ta) * dir) % per) + per) % per }))
+    .filter(({ d }) => d > 0 && d < len)
+    .sort((u, v) => u.d - v.d)
+    .map(({ c }) => c.pt);
+  return [a.pt, ...passed, b.pt];
+}
+
+/**
+ * The transfer's active path: the stretch of its own outline from the selected port to the common port (the shorter
+ * way), thicker than the outline and styled as the wire on the common port; nothing at position 0.
+ */
 function transferPath(
   s: PowerSchema, b: Transfer, live: BlockLive | undefined, o: PowerRenderOpts, styleOf: (port: PortName) => WireStyle | undefined,
+  still: boolean,
 ): SVGTemplateResult | typeof nothing {
   const pos = live?.position;
   if (pos !== 'A' && pos !== 'B') return nothing;
@@ -226,15 +259,12 @@ function transferPath(
   const from = places.find((x) => x.name === pos);
   const common = places.find((x) => x.name === (b.form === '2in1out' ? 'OUT' : 'IN'));
   if (!from || !common) return nothing;
-  const r = blockRect(b, o.geo, s);
-  const k = Math.min(r.w, r.h) / 2;
-  const c1 = { x: from.pt.x + INWARD[from.side].x * k, y: from.pt.y + INWARD[from.side].y * k };
-  const c2 = { x: common.pt.x + INWARD[common.side].x * k, y: common.pt.y + INWARD[common.side].y * k };
-  const st = styleOf(common.name);
-  const colour = st === 'live' ? o.palette.powerLive : o.palette.blockStroke;
-  const d = `M${from.pt.x} ${from.pt.y}C${c1.x} ${c1.y} ${c2.x} ${c2.y} ${common.pt.x} ${common.pt.y}`;
-  return svg`<path class="ts-path" d=${d} fill="none" stroke=${colour} stroke-opacity="0.4" stroke-width="4"
-    stroke-linecap="round" vector-effect=${NS}></path>`;
+  const st = styleOf(common.name) ?? 'nodata';
+  const colour = styleColour(st, o.palette);
+  const d = pathD(outlineRoute(blockRect(b, o.geo, s), from, common));
+  return svg`${st === 'live' ? glow('ts-glow', d, colour, still) : nothing}
+    <path class="ts-path" d=${d} fill="none" stroke=${colour} stroke-width="3" stroke-dasharray=${st === 'nodata' ? '5 4' : nothing}
+      stroke-linejoin="round" stroke-linecap="round" vector-effect=${NS}></path>`;
 }
 
 function renderChips(s: PowerSchema, b: Transfer, live: BlockLive | undefined, o: PowerRenderOpts) {
@@ -251,7 +281,7 @@ function renderChips(s: PowerSchema, b: Transfer, live: BlockLive | undefined, o
 }
 
 function renderBlock(s: PowerSchema, b: PowerBlock, o: PowerRenderOpts,
-  styleOf: (block: Id, port: PortName) => WireStyle | undefined): SVGTemplateResult {
+  styleOf: (block: Id, port: PortName) => WireStyle | undefined, still: boolean): SVGTemplateResult {
   const p = o.palette;
   const r = blockRect(b, o.geo, s);
   const live = o.frame?.blocks[b.id];
@@ -265,7 +295,7 @@ function renderBlock(s: PowerSchema, b: PowerBlock, o: PowerRenderOpts,
     <rect class="body" x=${r.x} y=${r.y} width=${r.w} height=${r.h} rx="4" fill=${p.blockFill}
       stroke=${remainder ? p.powerRemainder : p.blockStroke} stroke-width=${remainder ? 1.5 : 1.25}
       stroke-dasharray=${remainder ? '6 4' : nothing} vector-effect=${NS}></rect>
-    ${b.kind === 'transfer' ? transferPath(s, b, live, o, (port) => styleOf(b.id, port)) : nothing}
+    ${b.kind === 'transfer' ? transferPath(s, b, live, o, (port) => styleOf(b.id, port), still) : nothing}
     ${dev && dev.placement.mode !== 'none' ? svg`<g class="pin"><title>${t('power.planDevice')}</title>
       ${icon(mdiMapMarker, { x: r.x + 4 + PIN_ICON / 2, y: r.y + 4 + PIN_ICON / 2 }, PIN_ICON, p.blockValue)}</g>` : nothing}
     <text class="name" x=${cx} y=${r.y + HEAD_H - 11.5} text-anchor="middle" dominant-baseline="central"
@@ -382,7 +412,7 @@ export function renderPower(schema: PowerSchema, o: PowerRenderOpts): SVGTemplat
       ? renderBus(b, busTerminals.get(b.id) ?? [], busStyle.get(b.id), o) : nothing))}</g>
     <g class="wires">${wires.map((d) => renderWire(d, o, still))}</g>
     ${renderSelection(s, o)}
-    <g class="blocks">${s.blocks.map((b) => (b.kind === 'bus' ? nothing : renderBlock(s, b, o, styleOf)))}</g>
+    <g class="blocks">${s.blocks.map((b) => (b.kind === 'bus' ? nothing : renderBlock(s, b, o, styleOf, still)))}</g>
     <g class="terminals">${terminals.map((x) => renderTerminal(x.at, x.style, p))}</g>
     ${draft ? svg`<line class="wire-draft" x1=${draft.from.x} y1=${draft.from.y} x2=${draft.to.x} y2=${draft.to.y}
       stroke=${draft.ok ? p.selection : p.invalid} stroke-width="2" stroke-dasharray="6 4" vector-effect=${NS}></line>`

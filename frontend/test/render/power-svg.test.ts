@@ -7,7 +7,7 @@ import {
 } from '@mdi/js';
 import { formatWatts, renderPower, type PowerRenderOpts } from '../../src/render/power-svg';
 import { paletteFor } from '../../src/render/theme';
-import { PORT_R, portPlaces, transferChips, type GeoCtx } from '../../src/geometry/power';
+import { PORT_R, blockRect, portPlaces, transferChips, type GeoCtx } from '../../src/geometry/power';
 import { deviceDefaults, type Device, type DeviceKind, type DeviceProps } from '../../src/model/types';
 import type { PowerBlock, PowerFrame, PowerSchema, PowerWire } from '../../src/model/power';
 
@@ -134,6 +134,53 @@ describe('renderPower wires', () => {
     const root = draw(two, { preview: { wireDraft: { from: { x: 0, y: 0 }, to: { x: 50, y: 60 }, ok: false } } });
     const d = root.querySelector('.wire-draft')!;
     expect(d.getAttribute('stroke')).toBe(P.invalid);
+  });
+});
+
+describe('renderPower transfer active path', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+  /** B pinned mid-right, A alone on top, OUT alone at the bottom wired to a remainder below. */
+  const ts: PowerBlock = {
+    id: 't', kind: 'transfer', x: 0, y: 0, name: 'TS', form: '2in1out', portPins: { B: { side: 'right', at: 0.5 } },
+  };
+  const rem: PowerBlock = { id: 'r', kind: 'remainder', x: 0, y: 300, name: 'Other' };
+  const wired: PowerSchema = { blocks: [ts, rem], wires: [{ id: 'wo', from: { block: 't', port: 'OUT' }, to: { block: 'r', port: 'IN' } }] };
+  const points = (d: string) => [...d.matchAll(/[ML]([-\d.]+) ([-\d.]+)/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }));
+  const at = (s: PowerSchema, name: string) => portPlaces(s, ts, geo()).find((p) => p.name === name)!.pt;
+  const path = (s: PowerSchema, frame: PowerFrame) => draw(s, { frame }).querySelector('g.block[data-id="t"] path.ts-path');
+
+  it('runs along the outline from the selected port to the common port, the shorter way round', () => {
+    const p = path(wired, frameOf({ wo: { power: 500, state: 'live' } }, { t: { position: 'B' } }))!;
+    expect(p.getAttribute('stroke-width')).toBe('3');
+    expect(p.getAttribute('vector-effect')).toBe('non-scaling-stroke');
+    const pts = points(p.getAttribute('d')!);
+    const r = blockRect(ts, geo(), wired);
+    for (const q of pts) {
+      const onV = (Math.abs(q.x - r.x) < 1e-6 || Math.abs(q.x - r.x - r.w) < 1e-6) && q.y >= r.y - 1e-6 && q.y <= r.y + r.h + 1e-6;
+      const onH = (Math.abs(q.y - r.y) < 1e-6 || Math.abs(q.y - r.y - r.h) < 1e-6) && q.x >= r.x - 1e-6 && q.x <= r.x + r.w + 1e-6;
+      expect(onV || onH).toBe(true);
+    }
+    // B (mid-right) -> the bottom-right corner -> OUT (mid-bottom): the short way, not over the top
+    expect(pts).toEqual([at(wired, 'B'), { x: r.x + r.w, y: r.y + r.h }, at(wired, 'OUT')]);
+  });
+
+  it('takes the style of the common port wire: live glows; idle, dead and no data do not', () => {
+    const live = draw(wired, { frame: frameOf({ wo: { power: 500, state: 'live' } }, { t: { position: 'B' } }) });
+    expect(live.querySelector('path.ts-path')!.getAttribute('stroke')).toBe(P.powerLive);
+    expect(live.querySelectorAll('path.ts-glow').length).toBe(1);
+    const idle = path(wired, frameOf({ wo: { power: 0, state: 'live' } }, { t: { position: 'A' } }))!;
+    expect(idle.getAttribute('stroke')).toBe(P.powerIdle);
+    const dead = path(wired, frameOf({ wo: { power: 0, state: 'dead' } }, { t: { position: 'A' } }))!;
+    expect(dead.getAttribute('stroke')).toBe(P.powerDead);
+    const none = draw({ blocks: [ts], wires: [] }, { frame: frameOf({}, { t: { position: 'A' } }) });
+    const p = none.querySelector('path.ts-path')!;
+    expect(p.getAttribute('stroke')).toBe(P.powerNoData);
+    expect(p.getAttribute('stroke-dasharray')).toBeTruthy();
+    expect(none.querySelectorAll('path.ts-glow').length).toBe(0);
+  });
+
+  it('position 0 draws nothing', () => {
+    expect(path(wired, frameOf({ wo: { power: 0, state: 'dead' } }, { t: { position: '0' } }))).toBeNull();
   });
 });
 
