@@ -17,6 +17,7 @@ class World:
         self.seq = itertools.count()
         self.calls = []
         self.fail = set()  # entity ids whose calls raise
+        self.hold = False  # True: calls are held back (sent later, like live.py before HA has started)
         self.engine = RuleEngine(self.lookup, lambda: self.t, self.call, self.schedule)
 
     def lookup(self, eid):
@@ -28,6 +29,7 @@ class World:
         self.calls.append((domain, service, eid))
         if eid in self.fail:
             raise RuntimeError("boom")
+        return self.hold or None
 
     def schedule(self, delay, cb):
         timer = [self.t + delay, next(self.seq), cb, True]
@@ -393,7 +395,7 @@ def test_failing_call_records_the_error_and_other_actions_run():
     assert w.calls == [("valve", "close_valve", "valve.v"), ("valve", "close_valve", "valve.v2")]
     t = trace(w)
     assert t["status"] == "error" and t["reason"] == "service failed"
-    assert t["last"]["target"] == "Valve" and t["last"]["error"] == "boom"
+    assert t["last"]["target"] == "Valve" and t["last"]["error"] == "waiting for target"
 
 
 def test_rules_of_every_level_and_plan():
@@ -401,7 +403,7 @@ def test_rules_of_every_level_and_plan():
     p = {"id": "p", "levels": [{"id": "l1", "devices": LEAKS}, {"id": "l2", "devices": [VALVE]}],
          "rules": [rule("r", ["s1"], on_true=CLOSE)]}
     w.engine.load_plans([p, plan([], [], pid="q")])
-    assert w.engine.entity_ids() == {"binary_sensor.s1"}
+    assert w.engine.entity_ids() == {"binary_sensor.s1", "valve.v"}
     w.set("binary_sensor.s1", "on")
     assert w.calls == [("valve", "close_valve", "valve.v")]
     assert w.engine.snapshot("q") == {}
@@ -528,7 +530,7 @@ def test_an_unavailable_target_is_still_called_but_recorded_as_an_error(state):
     assert w.calls == [("valve", "close_valve", "valve.v")]
     t = trace(w)
     assert t["status"] == "error" and t["reason"] == "target unavailable"
-    assert t["last"]["error"] == "target unavailable" and t["last"]["target"] == "Valve"
+    assert t["last"]["error"] == "waiting for target" and t["last"]["target"] == "Valve"
     # the next firing to an available target clears it
     w.states["valve.v"] = ("open", {})
     w.set("binary_sensor.s1", "off")
@@ -543,7 +545,7 @@ def test_a_raising_call_wins_over_an_unavailable_target():
     w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE)])])
     w.set("binary_sensor.s1", "on")
     t = trace(w)
-    assert t["reason"] == "service failed" and t["last"]["error"] == "boom"
+    assert t["reason"] == "service failed" and t["last"]["error"] == "waiting for target"
 
 
 def test_current_is_true_only_for_the_latest_firing_of_the_same_rule():
@@ -576,4 +578,163 @@ def test_a_late_failure_after_an_unchanged_reload_still_counts():
     w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE, name="Renamed")])])
     on_error("late boom")
     t = trace(w)
-    assert t["status"] == "error" and t["reason"] == "service failed" and t["last"]["error"] == "late boom"
+    assert t["status"] == "error" and t["reason"] == "service failed" and t["last"]["error"] == "waiting for target"
+
+
+# --- waiting for target and re-send (spec section 10) -------------------------
+
+CLOSE_RULE = [plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE)])]
+CLOSE_CALL = ("valve", "close_valve", "valve.v")
+
+
+def test_boot_missing_valve_is_closed_once_when_it_appears():
+    w = leak_world()
+    w.states.pop("valve.v")  # Zigbee2MQTT is not up yet
+    w.engine.load_plans(CLOSE_RULE)
+    w.set("binary_sensor.s1", "on")
+    assert w.calls == [CLOSE_CALL]  # still sent: HA may accept it
+    t = trace(w)
+    assert t["status"] == "error" and t["reason"] == "target unavailable"
+    assert t["last"]["error"] == "waiting for target"
+    w.set("valve.v", "unavailable")  # restored entity, not available yet
+    assert w.calls == [CLOSE_CALL]
+    w.t = 2000.0
+    w.set("valve.v", "open")
+    assert w.calls == [CLOSE_CALL, CLOSE_CALL]
+    t = trace(w)
+    assert t["status"] == "ok" and "reason" not in t
+    assert "error" not in t["last"] and t["last"]["at"] == 2000000 and t["last"]["action"] == "close"
+    w.set("valve.v", "closed")
+    assert len(w.calls) == 2
+
+
+def test_a_valve_reopened_by_hand_after_a_good_close_is_left_open():
+    w = leak_world()
+    w.engine.load_plans(CLOSE_RULE)
+    w.set("binary_sensor.s1", "on")
+    w.set("valve.v", "closed")
+    w.set("valve.v", "open")
+    assert w.calls == [CLOSE_CALL]
+
+
+@pytest.mark.parametrize("on_false", [(), (("v", "open"),)])
+def test_a_cleared_leak_drops_the_waiting_close(on_false):
+    w = leak_world(valve__v="unavailable")
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE, on_false=on_false)])])
+    w.set("binary_sensor.s1", "on")
+    w.set("binary_sensor.s1", "off")
+    n = len(w.calls)
+    w.set("valve.v", "closed")
+    assert CLOSE_CALL not in w.calls[n:]
+    if not on_false:
+        assert trace(w)["last"]["error"] == "target unavailable"  # given up: no longer waiting
+
+
+def test_a_flapping_target_after_a_good_resend_gets_nothing_more():
+    w = leak_world(valve__v="unavailable")
+    w.engine.load_plans(CLOSE_RULE)
+    w.set("binary_sensor.s1", "on")
+    first_error = w.on_error
+    w.set("valve.v", "open")
+    assert w.calls == [CLOSE_CALL, CLOSE_CALL]
+    first_error("timeout")  # a late failure of the first send does not count after the re-send
+    for state in ("unavailable", "open", "unknown", "closed", "unavailable", "closed"):
+        w.set("valve.v", state)
+    assert len(w.calls) == 2 and trace(w)["status"] == "ok"
+
+
+def test_a_failed_resend_waits_again():
+    w = leak_world(valve__v="unavailable")
+    w.engine.load_plans(CLOSE_RULE)
+    w.set("binary_sensor.s1", "on")
+    w.set("valve.v", "open")
+    w.on_error("boom")
+    t = trace(w)
+    assert t["reason"] == "service failed" and t["last"]["error"] == "waiting for target"
+    w.set("valve.v", "closed")
+    assert w.calls == [CLOSE_CALL] * 3 and trace(w)["status"] == "ok"
+
+
+@pytest.mark.parametrize("edit", ["disable", "retarget", "remove"])
+def test_a_rule_edited_or_disabled_while_waiting_sends_nothing_more(edit):
+    w = leak_world(valve__v="unavailable", valve__v2="open")
+    v2 = dev("v2", "valve", "Valve 2", state="valve.v2")
+    w.engine.load_plans([plan(LEAKS + [VALVE, v2], [rule("r", ["s1"], on_true=CLOSE)])])
+    w.set("binary_sensor.s1", "on")
+    changed = {
+        "disable": [plan(LEAKS + [VALVE, v2], [rule("r", ["s1"], on_true=CLOSE, enabled=False)])],
+        "retarget": [plan(LEAKS + [VALVE, v2], [rule("r", ["s1"], on_true=(("v2", "close"),))])],
+        "remove": [plan(LEAKS + [VALVE, v2], [])],
+    }[edit]
+    w.engine.load_plans(changed)
+    n = len(w.calls)
+    w.set("valve.v", "open")
+    assert CLOSE_CALL not in w.calls[n:]
+
+
+def test_a_cosmetic_reload_keeps_the_waiting_mark():
+    w = leak_world(valve__v="unavailable")
+    w.engine.load_plans(CLOSE_RULE)
+    w.set("binary_sensor.s1", "on")
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE, name="Renamed")])])
+    w.set("valve.v", "open")
+    assert w.calls == [CLOSE_CALL, CLOSE_CALL] and trace(w)["status"] == "ok"
+
+
+def test_a_raising_call_waits_and_is_resent_when_the_target_reports():
+    w = leak_world(valve__v2="open")
+    w.fail.add("valve.v")
+    v2 = dev("v2", "valve", "Valve 2", state="valve.v2")
+    w.engine.load_plans([plan(LEAKS + [VALVE, v2], [rule("r", ["s1"], on_true=(("v", "close"), ("v2", "close")))])])
+    w.set("binary_sensor.s1", "on")
+    w.fail.clear()
+    w.set("valve.v2", "closed")  # the good target reporting sends nothing
+    assert len(w.calls) == 2
+    w.set("valve.v", "open")
+    assert w.calls[2:] == [CLOSE_CALL]
+    assert trace(w)["status"] == "ok" and "error" not in trace(w)["last"]
+
+
+def test_a_late_failure_marks_waiting_and_is_resent():
+    w = leak_world()
+    w.engine.load_plans(CLOSE_RULE)
+    w.set("binary_sensor.s1", "on")
+    w.on_error("late boom")
+    t = trace(w)
+    assert t["reason"] == "service failed" and t["last"]["error"] == "waiting for target"
+    w.set("valve.v", "closed")
+    assert w.calls == [CLOSE_CALL, CLOSE_CALL] and trace(w)["status"] == "ok"
+
+
+def test_a_held_call_leaves_the_target_check_to_send_time():
+    w = leak_world(valve__v="unavailable")
+    w.hold = True
+    w.engine.load_plans(CLOSE_RULE)
+    w.set("binary_sensor.s1", "on")
+    t = trace(w)
+    assert t["status"] == "ok" and "error" not in t["last"]  # no stale fire-time error
+    w.set("valve.v", "open")  # not waiting yet: the held call has not been sent
+    assert w.calls == [CLOSE_CALL]
+    w.hold = False
+    w.on_error("target unavailable", "target unavailable")  # the send-time check failed
+    t = trace(w)
+    assert t["reason"] == "target unavailable" and t["last"]["error"] == "waiting for target"
+    w.set("valve.v", "closed")
+    assert w.calls == [CLOSE_CALL, CLOSE_CALL] and trace(w)["status"] == "ok"
+
+
+def test_a_verdict_change_without_actions_ends_the_firing():
+    w = leak_world()
+    w.engine.load_plans(CLOSE_RULE)
+    w.set("binary_sensor.s1", "on")
+    current = w.current
+    w.set("binary_sensor.s1", "off")  # no "when false" actions
+    assert current() is False
+
+
+def test_entity_ids_include_targets_of_enabled_rules():
+    w = leak_world(light__l="off")
+    light = dev("l", "ceiling_light", control="light.l")
+    rules = [rule("r", ["s1"], on_true=CLOSE), rule("off", ["s2"], on_false=(("l", "on"),), enabled=False)]
+    w.engine.load_plans([plan(LEAKS + [VALVE, light], rules)])
+    assert w.engine.entity_ids() == {"binary_sensor.s1", "binary_sensor.s2", "valve.v"}

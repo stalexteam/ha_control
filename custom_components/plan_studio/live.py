@@ -50,7 +50,7 @@ class LiveRuntime:
         self._stopped = False
         self._power_store: Store = Store(hass, 1, POWER_STORAGE_KEY)
         # rule actions fired before HA has started (a sensor known at boot), sent in order once it has
-        self._deferred: list[tuple[str, str, str, Callable[[str], None], Callable[[], bool]]] = []
+        self._deferred: list[tuple[str, str, str, Callable[..., None], Callable[[], bool]]] = []
         self._unstarted: CALLBACK_TYPE | None = None
 
     async def async_start(self) -> None:
@@ -122,22 +122,24 @@ class LiveRuntime:
         domain: str,
         service: str,
         entity_id: str,
-        on_error: Callable[[str], None],
+        on_error: Callable[..., None],
         current: Callable[[], bool] = lambda: True,
-    ) -> None:
+    ) -> bool:
         """Send a rule action as a task; a missing service fails now, a failing call is reported later.
 
-        Before HA has started (platforms may not have registered their services yet) the call waits for the start;
-        then it is sent only while its firing is still the rule's latest one (current()), and a missing service is
-        reported through on_error."""
+        Before HA has started (platforms may not have registered their services yet) the call waits for the start
+        and True is returned (held: the engine leaves the target check to the send). It is then sent only while its
+        firing is still the rule's latest one (current()); a missing service is reported through on_error, and so is
+        a target that is unavailable at that moment (with the reason "target unavailable"; the call is still sent)."""
         if self._hass.state is not CoreState.running:
             self._deferred.append((domain, service, entity_id, on_error, current))
             if self._unstarted is None:
                 self._unstarted = async_at_started(self._hass, self._started)
-            return
+            return True
         if not self._hass.services.has_service(domain, service):
             raise RuntimeError(f"service {domain}.{service} not found")
         self._dispatch(domain, service, entity_id, on_error)
+        return False
 
     @callback
     def _started(self, _hass: HomeAssistant) -> None:
@@ -151,9 +153,13 @@ class LiveRuntime:
                 _LOGGER.warning("rule action %s.%s %s failed: service not found", domain, service, entity_id)
                 on_error(f"service {domain}.{service} not found")
                 continue
+            st = self._hass.states.get(entity_id)
+            if st is None or st.state in ("unavailable", "unknown"):
+                # still sent (HA may accept it); the rule re-sends it when the target becomes available
+                on_error("target unavailable", "target unavailable")
             self._dispatch(domain, service, entity_id, on_error)
 
-    def _dispatch(self, domain: str, service: str, entity_id: str, on_error: Callable[[str], None]) -> None:
+    def _dispatch(self, domain: str, service: str, entity_id: str, on_error: Callable[..., None]) -> None:
         ctx = Context()
         self.runtime.ignore_context(ctx.id)  # its state change is not a press for a wall switch
         # A background task that starts on the next loop turn: the call cannot re-enter the engine from inside a firing.

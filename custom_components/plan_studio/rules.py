@@ -37,6 +37,11 @@ VALVE_SERVICES = {
 }
 # static error reasons, most important first
 STATIC_REASONS = ("cycle", "device missing", "rule missing", "target missing")
+WAITING = "waiting for target"
+
+
+def _available(st: "tuple[str, dict] | None") -> bool:
+    return st is not None and st[0] not in ("unavailable", "unknown")
 
 
 def _bound(device: dict, role: str | None) -> str | None:
@@ -137,6 +142,15 @@ class _Action:
         self.call = _target(device, self.do)
 
 
+class _Sent:
+    """One action of a rule's latest firing that has a target entity."""
+
+    def __init__(self, action: _Action, entry: dict) -> None:
+        self.action, self.entry = action, entry
+        self.waiting: str | None = None  # "target unavailable" / "service failed" while waiting for the target
+        self.attempt = 0  # a late failure counts only for the latest send of this action
+
+
 class _Pending:
     def __init__(self, to: bool, at: int) -> None:
         self.to, self.at = to, at
@@ -164,15 +178,17 @@ class _Rule:
         self.verdict: bool | None = None  # the debounced verdict; None until first known
         self.pending: _Pending | None = None
         self.last: dict | None = None
-        self.seq = 0  # firing counter: a late failure counts only for the firing that sent it
+        self.seq = 0  # verdict change counter: a late failure or a re-send counts only for the firing that sent it
         self.failed: str | None = None  # "service failed" / "target unavailable" for the last firing
+        self.entries: list[dict] = []  # the trace entries of the last firing
+        self.sent: list[_Sent] = []  # its actions with a target, while that firing is the latest one
         # derived on every evaluation
         self.raw: bool | None = None
         self.trace_inputs: list[dict] = []
 
     def adopt(self, old: "_Rule") -> None:
         self.verdict, self.pending, self.last, self.failed = old.verdict, old.pending, old.last, old.failed
-        self.seq = old.seq
+        self.seq, self.entries, self.sent = old.seq, old.entries, old.sent
 
     def cancel(self) -> None:
         if self.pending is not None:
@@ -211,6 +227,7 @@ class RuleEngine:
         self._order: dict[Key, int] = {}  # referenced rules before their consumers
         self._consumers: dict[Key, list[Key]] = {}
         self._readers: dict[str, list[Key]] = {}
+        self._targets: dict[str, list[Key]] = {}  # action target entity -> enabled rules
         self._published: dict[Key, dict] = {}
         self._subs: dict[str, list[Callback]] = {}
 
@@ -252,7 +269,7 @@ class RuleEngine:
 
     def _link(self) -> None:
         """Order rules so references come first; a reference closing a cycle is marked and ignored."""
-        self._order, self._consumers, self._readers = {}, {}, {}
+        self._order, self._consumers, self._readers, self._targets = {}, {}, {}, {}
         state: dict[Key, int] = {}
 
         def visit(key: Key) -> None:
@@ -277,6 +294,9 @@ class RuleEngine:
             for i in rule.inputs:
                 if i.eid is not None and key not in self._readers.get(i.eid, []):
                     self._readers.setdefault(i.eid, []).append(key)
+            for a in rule.on_true + rule.on_false if rule.enabled else []:
+                if a.call is not None and key not in self._targets.get(a.call[2], []):
+                    self._targets.setdefault(a.call[2], []).append(key)
 
     # --- evaluation ----------------------------------------------------------
 
@@ -348,6 +368,13 @@ class RuleEngine:
 
     def _commit(self, rule: _Rule, verdict: bool, why: str) -> None:
         rule.verdict = verdict
+        # A new verdict ends the previous firing, also without actions: its held calls are stale and its waiting
+        # actions are given up (their error shows why they did not get through).
+        rule.seq += 1
+        for s in rule.sent:
+            if s.waiting:
+                s.entry["error"] = s.waiting
+        rule.sent = []
         if verdict or why != "start":
             self._fire(rule, rule.on_true if verdict else rule.on_false, why)
 
@@ -361,63 +388,94 @@ class RuleEngine:
         ]
         reason = f"{why}: {', '.join(because)}" if because else why
         at = int(self._now() * 1000)
-        rule.seq += 1
-        seq = rule.seq
-        last = first_error = None
-        failed: str | None = None
+        rule.entries = []
         for a in actions:
             entry = {"action": a.do, "target": a.label, "at": at, "reason": reason}
+            rule.entries.append(entry)
             if a.call is None:
                 entry["error"] = "target missing"
             else:
-                st = self._lookup(a.call[2])
-                if st is None or st[0] in ("unavailable", "unknown"):
-                    # still sent (it may come back in time), but the action likely did nothing
-                    entry["error"] = "target unavailable"
-                    failed = failed or "target unavailable"
-                try:
-                    self._call(
-                        *a.call,
-                        on_error=lambda err, entry=entry: self._failed(rule, seq, entry, err),
-                        current=lambda: self._current(rule, seq) is not None,
-                    )
-                except Exception as err:  # noqa: BLE001 - one failing target must not stop the others
-                    _LOGGER.warning("rule %s: %s.%s %s failed: %s", rule.name, *a.call, err)
-                    entry["error"] = str(err) or type(err).__name__
-                    failed = "service failed"
-            if "error" in entry and first_error is None:
-                first_error = entry
-            last = entry
-        rule.last = first_error or last
-        rule.failed = failed
+                sent = _Sent(a, entry)
+                rule.sent.append(sent)
+                self._send(rule, sent)
+        self._refresh(rule)
+
+    def _send(self, rule: _Rule, sent: _Sent) -> None:
+        """Call one action of the rule's latest firing; an unavailable target or a failed call marks it waiting."""
+        seq = rule.seq
+        sent.attempt += 1
+        attempt = sent.attempt
+        sent.waiting = None
+        sent.entry.pop("error", None)
+        try:
+            held = self._call(
+                *sent.action.call,
+                on_error=lambda err, why="service failed": self._failed(rule, seq, sent, attempt, why),
+                current=lambda: self._current(rule, seq) is not None,
+            )
+        except Exception as err:  # noqa: BLE001 - one failing target must not stop the others
+            _LOGGER.warning("rule %s: %s.%s %s failed: %s", rule.name, *sent.action.call, err)
+            sent.waiting = "service failed"
+            return
+        # A held call (sent later) checks its target when it is sent and reports back through on_error. Otherwise
+        # the target is checked now: an unavailable one is still called (HA may accept it), but the action waits.
+        if held is not True and not _available(self._lookup(sent.action.call[2])):
+            sent.waiting = "target unavailable"
+
+    def _refresh(self, rule: _Rule) -> None:
+        """Last action and failure of the latest firing, from its entries and waiting marks."""
+        for s in rule.sent:
+            if s.waiting:
+                s.entry["error"] = WAITING
+        marks = {s.waiting for s in rule.sent}
+        rule.failed = next((r for r in ("service failed", "target unavailable") if r in marks), None)
+        if rule.entries:
+            rule.last = next((e for e in rule.entries if "error" in e), rule.entries[-1])
 
     def _current(self, rule: _Rule, seq: int) -> "_Rule | None":
         """The loaded rule when the firing `seq` of `rule` is still its latest one (an unchanged reload keeps it)."""
         now = self._rules.get(rule.key)
         return now if now is not None and now.sig == rule.sig and now.seq == seq else None
 
-    def _failed(self, rule: _Rule, seq: int, entry: dict, error: str) -> None:
-        """A call that failed after it was sent (async service): record it unless the rule fired again, changed or went away."""
+    def _failed(self, rule: _Rule, seq: int, sent: _Sent, attempt: int, why: str) -> None:
+        """A call that failed after it was sent (async service, or a held call whose target was unavailable at send
+        time): mark it waiting unless the rule fired again, changed or went away, or the action was sent again since."""
         now = self._current(rule, seq)
-        if now is None:
+        if now is None or sent.attempt != attempt or sent not in now.sent:
             return
-        entry["error"] = error
-        now.failed = "service failed"
-        if now.last is None or "error" not in now.last:
-            now.last = entry
+        sent.waiting = "service failed" if "service failed" in (sent.waiting, why) else why
+        self._refresh(now)
         self._flush()
+
+    def _resend(self, entity_id: str) -> None:
+        """The target came back: send its waiting actions again, once per such state change."""
+        if not _available(self._lookup(entity_id)):
+            return
+        for key in self._targets.get(entity_id, ()):
+            rule = self._rules.get(key)
+            if rule is None or not rule.enabled:
+                continue
+            waiting = [s for s in rule.sent if s.waiting and s.action.call[2] == entity_id]
+            for s in waiting:
+                s.entry["at"] = int(self._now() * 1000)
+                self._send(rule, s)
+            if waiting:
+                self._refresh(rule)
 
     # --- state changes -------------------------------------------------------
 
     def handle_state(self, entity_id: str) -> None:
         keys = self._readers.get(entity_id)
-        if not keys:
+        if not keys and entity_id not in self._targets:
             return
-        self._settle(set(keys))
+        if keys:
+            self._settle(set(keys))
+        self._resend(entity_id)  # after the inputs: a newer firing has already dropped stale waiting actions
         self._flush()
 
     def entity_ids(self) -> "set[str]":
-        return set(self._readers)
+        """Inputs of every rule and action targets of enabled rules."""
+        return set(self._readers) | set(self._targets)
 
     # --- live trace ----------------------------------------------------------
 

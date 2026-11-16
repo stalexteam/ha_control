@@ -239,7 +239,7 @@ def test_failed_service_is_recorded(env):
         await asyncio.gather(*hass.tasks, return_exceptions=True)
         trace = live.engine.snapshot("p1")["r1"]
         assert trace["status"] == "error" and trace["reason"] == "service failed"
-        assert trace["last"]["error"] == "boom"
+        assert trace["last"]["error"] == "waiting for target"
 
     asyncio.run(go())
 
@@ -399,7 +399,7 @@ def test_a_service_still_missing_after_start_is_reported(env):
         assert hass.services.calls == []
         trace = live.engine.snapshot("p1")["r1"]
         assert trace["status"] == "error" and trace["reason"] == "service failed"
-        assert "switch.turn_off" in trace["last"]["error"]
+        assert trace["last"]["error"] == "waiting for target"
 
     asyncio.run(go())
 
@@ -447,5 +447,96 @@ def test_stop_before_start_drops_the_deferred_calls(env):
         _fire_started(env, hass)
         await asyncio.gather(*hass.tasks)
         assert hass.services.calls == []
+
+    asyncio.run(go())
+
+
+# --- waiting for target and re-send -------------------------------------------
+
+
+def _event(env, hass, eid, state):
+    """Set a state and deliver its state_changed event through the tracked callback."""
+    if state is None:
+        hass.states.d.pop(eid, None)
+    else:
+        hass.states.d[eid] = state
+    assert eid in env.tracked[-1]["ids"] and env.tracked[-1]["on"]
+    ev = types.SimpleNamespace(
+        data={"entity_id": eid, "old_state": None, "new_state": hass.states.get(eid)}, context=Context()
+    )
+    env.tracked[-1]["cb"](ev)
+
+
+def test_rule_targets_are_tracked_and_retracked_on_reload(env):
+    async def go():
+        hass = FakeHass()
+        plans = FakePlans([_plan()])
+        live = env.live.LiveRuntime(hass, plans)
+        await live.async_start()
+        assert "switch.sock" in env.tracked[-1]["ids"]
+        moved = _plan()
+        moved["levels"][0]["devices"][1]["bindings"]["control"] = "switch.other"
+        plans._plans = [moved]
+        live.reload()
+        ids = env.tracked[-1]["ids"]
+        assert "switch.other" in ids and "switch.sock" not in ids
+
+    asyncio.run(go())
+
+
+def test_a_boot_call_finding_its_target_missing_is_resent_when_it_appears(env):
+    async def go():
+        hass = FakeHass()
+        live = await _boot(env, hass, _plan())
+        hass.states.d.pop("switch.sock")  # Zigbee2MQTT is not up yet
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1  # still sent: HA may accept it
+        trace = live.engine.snapshot("p1")["r1"]
+        assert trace["status"] == "error" and trace["reason"] == "target unavailable"
+        assert trace["last"]["error"] == "waiting for target"
+        _event(env, hass, "switch.sock", "unavailable")
+        _event(env, hass, "switch.sock", "on")
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 2
+        trace = live.engine.snapshot("p1")["r1"]
+        assert trace["status"] == "ok" and "error" not in trace["last"]
+        _event(env, hass, "switch.sock", "off")
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 2
+
+    asyncio.run(go())
+
+
+def test_a_boot_call_whose_target_came_back_before_start_has_no_stale_error(env):
+    async def go():
+        hass = FakeHass()
+        hass.state = CoreState.not_running
+        live = await _start(env, hass)
+        hass.states.d["switch.sock"] = "unavailable"
+        hass.states.d["binary_sensor.leak"] = "on"
+        live.engine.handle_state("binary_sensor.leak")  # fires while the target is unavailable
+        _event(env, hass, "switch.sock", "on")  # back before HA has started
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1
+        trace = live.engine.snapshot("p1")["r1"]
+        assert trace["status"] == "ok" and "error" not in trace["last"]
+
+    asyncio.run(go())
+
+
+def test_a_late_failure_is_resent_when_the_target_reports(env):
+    async def go():
+        hass = FakeHass()
+        live = await _start(env, hass)
+        hass.services.fail_first = True
+        _event(env, hass, "binary_sensor.leak", "on")
+        await asyncio.gather(*hass.tasks, return_exceptions=True)
+        assert live.engine.snapshot("p1")["r1"]["last"]["error"] == "waiting for target"
+        _event(env, hass, "switch.sock", "on")
+        await asyncio.gather(*hass.tasks, return_exceptions=True)
+        assert len(hass.services.calls) == 2
+        assert live.engine.snapshot("p1")["r1"]["status"] == "ok"
 
     asyncio.run(go())
