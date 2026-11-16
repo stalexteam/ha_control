@@ -1,6 +1,6 @@
 # Plan Studio
 
-Home Assistant custom integration that adds a "Plan Studio" sidebar panel: a 2D floor-plan editor in four steps (a fifth, Automation, comes later). Plan: draw walls, openings and zones (the spaces of the home, inside or outdoors). Equipment: place lights, sensors, switches and other devices. Binding: link each device to Home Assistant entities. Power: draw the power-flow schematic from the grid to the devices and watch live values. Plans are saved to Home Assistant storage, and wall switches and smart buttons report button and switch events. No automation uses zones yet, and they create no Home Assistant entities.
+Home Assistant custom integration that adds a "Plan Studio" sidebar panel: a 2D floor-plan editor in five steps. Plan: draw walls, openings and zones (the spaces of the home, inside or outdoors). Equipment: place lights, sensors, switches and other devices. Binding: link each device to Home Assistant entities. Power: draw the power-flow schematic from the grid to the devices and watch live values. Automation: condition rules that switch devices and close valves, run inside Home Assistant. Plans are saved to Home Assistant storage, and wall switches and smart buttons report button and switch events. Zones organise the automation rules; they create no Home Assistant entities.
 
 ## Install
 
@@ -150,6 +150,22 @@ The Power step draws how electricity reaches the devices: a schematic of blocks 
 - Wires show the flow: an arrow in the direction of the power, a glow while energized, a thin line while de-energized, and a grey dashed line when there is no data. When the live feed fails, the reason is shown at the top of the properties. A block with a problem (an entity without data, a device that is gone, meters that disagree) carries a red alert mark; its tooltip names the problem. A switch in the state `unknown` (for example after a Home Assistant restart, before anyone switched it) counts as on when its device draws power (more than 0 W); with no consumption it stays unknown.
 - Transfer position: click A, 0 or B on the block or in its properties. The position is live state kept by the integration (default A); it is not part of the plan and needs no Save.
 - The step is done when the grid source has a power entity and at least one wire exists.
+
+### Automation
+
+Condition rules, stored in the plan and run by the integration inside Home Assistant (also while the panel is closed). Changes take effect on Save.
+
+- Layout: tool rail | rules | live plan (as in Binding). Click a zone to select it: the rules panel lists that zone's rules. Esc or a click outside every zone lists the rules without a zone, including rules whose zone was deleted ("zone removed"). A zone only says where a rule is listed; a rule may use devices and rules of any zone or level.
+- A rule: inputs -> ANY or ALL (each input may be negated with NOT) -> a verdict, with an optional delay before it turns true (On delay) and before it turns false (Off delay), whole seconds 0 to 3600 -> actions "When true" and "When false".
+  - Inputs: leak sensors (wet), motion sensors (motion), lights, sockets, exhaust fans and Devices (on), wall switches (on), valves (open), and the verdicts of other rules. A rule cannot use itself, directly or through other rules.
+  - ANY is true when any input is true; inputs without data are ignored while any input has data. ALL is true only when every input is true; an input without data keeps it undecided. The rules list warns "N inputs without data".
+  - Actions: turn a light, socket, exhaust fan or controllable Device on or off; open or close a valve (`valve.open_valve` / `close_valve`, or `switch.turn_on` / `turn_off` for a valve bound to a switch).
+  - Actions run only when the verdict changes. When a rule starts (Home Assistant start, or a new or changed rule saved) and its verdict is true, its "When true" actions run once; a Save that does not change a rule, or only renames it or moves it to another zone, does not run them again. Actions before Home Assistant has fully started wait for the start.
+  - An action's own state change is not reported as a press by wall switches and valves.
+- Templates in the tool rail open the rule dialog pre-filled: "Condition" (empty) and "Leak -> valve" (the selected zone's leak sensors that take part in automation, ANY, close the zone's valve if it has exactly one).
+- The rule dialog (modal): name, ANY / ALL, inputs, delays, actions, and in the footer the zone, Enabled, Cancel and OK. OK is available only when the rule is valid (a name, at least one input, devices and rules that exist, no cycle, actions the device supports) and adds or changes the rule as one undoable edit. The right side draws the rule as a flowchart; a click on a block jumps to its field. For a saved, unchanged rule the flowchart shows live values: each input's state, the verdict, a running delay and the last action with its time and any error. A new or edited rule shows "Live state appears after Save" or "Saved version: your changes apply after Save".
+- Rules list: name, a verdict dot (true / false / no data), status (OK, disabled, waiting for data, or the error: device missing, target missing, target unavailable, service failed), the last action, and "Unsaved changes" for rules edited since the last Save. Edit opens the dialog; Delete asks first and names the rules that use this one.
+- Replacing an AppDaemon automation: create and save the rule, check its live state, then disable the AppDaemon code for it.
 
 ## Development
 
