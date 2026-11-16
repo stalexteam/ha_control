@@ -1,6 +1,7 @@
 """Tests for the pure rule engine (no homeassistant needed)."""
 
 import itertools
+from datetime import datetime, timedelta, timezone, tzinfo
 
 import pytest
 
@@ -10,15 +11,18 @@ from rules import RuleEngine
 class World:
     """Fake HA: states, an epoch clock, a scheduler and a service call recorder."""
 
-    def __init__(self, **states):
-        self.states = {k.replace("__", "."): (v, {}) for k, v in states.items()}
-        self.t = 1000.0
+    def __init__(self, tz=None, t=1000.0, **states):
+        self.states = {k.replace("__", "."): v if isinstance(v, tuple) else (v, {}) for k, v in states.items()}
+        self.t = t
         self.timers = []  # [due, seq, cb, alive]
         self.seq = itertools.count()
         self.calls = []
         self.fail = set()  # entity ids whose calls raise
         self.hold = False  # True: calls are held back (sent later, like live.py before HA has started)
-        self.engine = RuleEngine(self.lookup, lambda: self.t, self.call, self.schedule)
+        self.changed = {}  # entity id -> HA last_changed epoch
+        extra = {"local": lambda ts: datetime.fromtimestamp(ts, tz)} if tz is not None else {}
+        self.engine = RuleEngine(self.lookup, lambda: self.t, self.call, self.schedule,
+                                 changed_at=self.changed.get, **extra)
 
     def lookup(self, eid):
         return self.states.get(eid)
@@ -54,11 +58,11 @@ class World:
             timer[2]()
         self.t = to
 
-    def set(self, eid, state):
+    def set(self, eid, state, attrs=None):
         if state is None:
             self.states.pop(eid, None)
         else:
-            self.states[eid] = (state, {})
+            self.states[eid] = (state, attrs if attrs is not None else self.states.get(eid, (None, {}))[1])
         self.engine.handle_state(eid)
 
 
@@ -184,7 +188,8 @@ def test_light_follows_motion_on_and_off():
     w.engine.load_plans([plan(devs, [rule("r", ["m"], on_true=(("l", "on"),), on_false=(("l", "off"),))])])
     w.set("binary_sensor.m", "on")
     w.set("binary_sensor.m", "off")
-    assert w.calls == [("light", "turn_on", "light.l"), ("light", "turn_off", "light.l")]
+    off, on = ("light", "turn_off", "light.l"), ("light", "turn_on", "light.l")
+    assert w.calls == [off, on, off]  # start applies "when false" too
 
 
 def test_fan_and_controllable_equipment_targets():
@@ -271,11 +276,12 @@ def test_start_with_a_wet_sensor_fires_at_once():
     assert trace(w)["last"]["reason"].startswith("start")
 
 
-def test_start_false_fires_nothing():
-    w = World(binary_sensor__m="off")
+def test_start_false_fires_when_false():
+    w = World(binary_sensor__m="off", light__l="on")
     devs = [dev("m", "motion_sensor", motion="binary_sensor.m"), dev("l", "ceiling_light", control="light.l")]
-    w.engine.load_plans([plan(devs, [rule("r", ["m"], on_false=(("l", "off"),))])])
-    assert w.calls == []
+    w.engine.load_plans([plan(devs, [rule("r", ["m"], on_true=(("l", "on"),), on_false=(("l", "off"),))])])
+    assert w.calls == [("light", "turn_off", "light.l")]
+    assert trace(w)["last"]["reason"].startswith("start")
 
 
 def test_start_unknown_then_wet_fires_at_once():
@@ -561,7 +567,7 @@ def test_current_is_true_only_for_the_latest_firing_of_the_same_rule():
     assert first() is False and w.current() is True
     second = w.current
     w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1", "s2"], on_true=CLOSE, on_false=(("v", "open"),))])])
-    assert second() is False  # the rule changed (it restarts dry: nothing fired)
+    assert second() is False  # the rule changed (it restarted: a new firing)
     w.engine.load_plans([p])
     w.set("binary_sensor.s1", "on")
     third = w.current
@@ -738,3 +744,497 @@ def test_entity_ids_include_targets_of_enabled_rules():
     rules = [rule("r", ["s1"], on_true=CLOSE), rule("off", ["s2"], on_false=(("l", "on"),), enabled=False)]
     w.engine.load_plans([plan(LEAKS + [VALVE, light], rules)])
     assert w.engine.entity_ids() == {"binary_sensor.s1", "binary_sensor.s2", "valve.v"}
+
+
+# === stage 2: light, sun, time and held inputs, the gate ======================
+
+H = timedelta(hours=1)
+
+
+class Kyiv(tzinfo):
+    """Europe/Kyiv for 2026 without tzdata: EET +2 / EEST +3, switching at 01:00 UTC on 29 March and 25 October."""
+
+    SPRING, AUTUMN = datetime(2026, 3, 29, 1), datetime(2026, 10, 25, 1)
+
+    def utcoffset(self, dt):
+        n = dt.replace(tzinfo=None)
+        if n < self.SPRING + 2 * H:
+            return 2 * H
+        if n < self.SPRING + 3 * H:  # 03:00-04:00 does not exist (PEP 495: fold 0 = offset before the jump)
+            return 3 * H if dt.fold else 2 * H
+        if n < self.AUTUMN + 2 * H:
+            return 3 * H
+        if n < self.AUTUMN + 3 * H:  # 03:00-04:00 happens twice (fold 0 = the first time)
+            return 2 * H if dt.fold else 3 * H
+        return 2 * H
+
+    def dst(self, dt):
+        return self.utcoffset(dt) - 2 * H
+
+    def tzname(self, dt):
+        return "EEST" if self.dst(dt) else "EET"
+
+    def fromutc(self, dt):
+        u = dt.replace(tzinfo=None)
+        summer = self.SPRING <= u < self.AUTUMN
+        fold = 1 if self.AUTUMN <= u < self.AUTUMN + H else 0
+        return (u + (3 if summer else 2) * H).replace(tzinfo=self, fold=fold)
+
+
+KYIV = Kyiv()
+
+
+def kyiv(*args, fold=0):
+    return datetime(*args, tzinfo=KYIV, fold=fold).timestamp()
+
+
+def utc(*args):
+    return datetime(*args, tzinfo=timezone.utc).timestamp()
+
+
+def test_the_fake_zone_follows_the_2026_kyiv_rules():
+    assert kyiv(2026, 3, 29, 2, 59) == utc(2026, 3, 29, 0, 59)
+    assert kyiv(2026, 3, 29, 4, 0) == utc(2026, 3, 29, 1, 0)
+    assert kyiv(2026, 10, 25, 3, 30) == utc(2026, 10, 25, 0, 30)
+    assert kyiv(2026, 10, 25, 3, 30, fold=1) == utc(2026, 10, 25, 1, 30)
+    assert datetime.fromtimestamp(utc(2026, 10, 25, 1, 30), KYIV).replace(tzinfo=None) == datetime(2026, 10, 25, 3, 30)
+
+
+LUX = dev("lx", "illuminance_sensor", "Lux", illuminance="sensor.lux")
+EXT = dev("ext", "wall_light", "External", control="switch.ext")
+HALL = dev("m", "motion_sensor", "Hall", motion="binary_sensor.m")
+HALL2 = dev("m2", "motion_sensor", "Hall 2", motion="binary_sensor.m2")
+GATE = dev("g", "motion_sensor", "Gate", motion="binary_sensor.g")
+SUN = {"source": {"sun": True}}
+ON, OFF = ("switch", "turn_on", "switch.ext"), ("switch", "turn_off", "switch.ext")
+EXT_BOTH = {"on_true": (("ext", "on"),), "on_false": (("ext", "off"),)}
+G = {"source": {"device": "g"}}
+
+
+def lux(v, unit="lx"):
+    return (str(v), {"unit_of_measurement": unit})
+
+
+def light_in(did="lx", below=10, hysteresis=5):
+    return {"source": {"light": did, "below": below, "hysteresis": hysteresis}}
+
+
+def window(a, b):
+    return {"source": {"time": {"from": a, "to": b}}}
+
+
+def held(*sources, state="any", seconds=1800, negate=False):
+    srcs = [s if isinstance(s, dict) else {"device": s} for s in sources]
+    out = {"source": {"held": {"sources": srcs, "state": state, "seconds": seconds}}}
+    if negate:
+        out["not"] = True
+    return out
+
+
+def saved(w, plans):
+    """Load plans as a Save after HA start (the first load_plans is the HA start)."""
+    w.engine.load_plans([])
+    w.engine.load_plans(plans)
+
+
+# --- light --------------------------------------------------------------------
+
+def test_light_threshold_with_hysteresis():
+    w = World(sensor__lux=lux(12))
+    w.engine.load_plans([plan([LUX], [rule("r", [light_in()])])])
+    assert trace(w)["inputs"] == [{"label": "Lux", "value": False, "detail": "12 lx"}]  # between at start = false
+    for v, expected in [(9.5, True), (12, True), (15, True), (15.5, False), (12, False), (10, False), (9.9, True)]:
+        w.set("sensor.lux", str(v))
+        assert trace(w)["verdict"] is expected, v
+    assert trace(w)["inputs"][0]["detail"] == "9.9 lx"
+
+
+@pytest.mark.parametrize("state,detail", [
+    (lux(5, "lm"), "not lx"), (lux("dark"), "unknown"), (lux("nan"), "unknown"), (("unavailable", {}), "unavailable"),
+    (None, "missing"), (("5", {}), "not lx"),
+])
+def test_light_unknown_values(state, detail):
+    w = World(**({} if state is None else {"sensor__lux": state}))
+    w.engine.load_plans([plan([LUX], [rule("r", [light_in()])])])
+    assert trace(w)["inputs"] == [{"label": "Lux", "value": None, "detail": detail}]
+    assert trace(w)["verdict"] is None
+
+
+def test_light_keeps_its_value_through_an_unknown_reading():
+    w = World(sensor__lux=lux(5))
+    w.engine.load_plans([plan([LUX], [rule("r", [light_in()])])])
+    w.set("sensor.lux", "unavailable")
+    assert trace(w)["inputs"][0]["value"] is None
+    w.set("sensor.lux", "12")
+    assert trace(w)["verdict"] is True
+
+
+def test_light_needs_an_illuminance_sensor():
+    w = World(binary_sensor__m="on", sensor__lux=lux(5))
+    w.engine.load_plans([plan([HALL, LUX], [rule("r", [light_in("m")]), rule("q", [light_in("gone")])])])
+    assert trace(w)["inputs"] == [{"label": "Hall", "value": None, "detail": "missing"}]
+    assert trace(w, "q")["status"] == "error" and trace(w, "q")["reason"] == "device missing"
+    assert "sensor.lux" not in w.engine.entity_ids()
+
+
+# --- sun ----------------------------------------------------------------------
+
+@pytest.mark.parametrize("state,value,detail", [
+    ("below_horizon", True, "below horizon"), ("above_horizon", False, "above horizon"),
+    ("unavailable", None, "unavailable"), ("weird", None, "unknown"), (None, None, "missing"),
+])
+def test_sun_input(state, value, detail):
+    w = World(**({} if state is None else {"sun__sun": state}))
+    w.engine.load_plans([plan([], [rule("r", [SUN])])])
+    assert trace(w)["inputs"] == [{"label": "Sun", "value": value, "detail": detail}]
+
+
+def test_sun_is_tracked_and_follows_its_state():
+    w = World(sun__sun="above_horizon")
+    w.engine.load_plans([plan([], [rule("r", [SUN])])])
+    assert "sun.sun" in w.engine.entity_ids()
+    w.set("sun.sun", "below_horizon")
+    assert trace(w)["verdict"] is True
+    w.engine.load_plans([plan([], [])])
+    assert w.engine.entity_ids() == set()
+
+
+# --- time ---------------------------------------------------------------------
+
+def _walk(w, flips, start_calls):
+    """Each flip time changes the verdict exactly then (not a millisecond earlier), with one timer at a time."""
+    for k, at in enumerate(flips):
+        w.advance(at - 0.001)
+        assert len(w.calls) == start_calls + k, at
+        w.advance(at)
+        assert len(w.calls) == start_calls + k + 1, at
+        assert len(w.pending()) == 1
+
+
+@pytest.mark.parametrize("day", [(2026, 3, 28), (2026, 10, 24)])
+def test_time_window_across_midnight_on_a_dst_day(day):
+    y, m, d = day
+    w = World(tz=KYIV, t=kyiv(y, m, d, 16), switch__ext="off")
+    w.engine.load_plans([plan([EXT], [rule("r", [window("17:00", "01:00")], **EXT_BOTH)])])
+    assert w.calls == [OFF]
+    assert trace(w)["inputs"] == [{"label": "Time", "value": False, "detail": "outside window until 17:00"}]
+    assert [t[0] for t in w.pending()] == [kyiv(y, m, d, 17)]
+    flips = [kyiv(y, m, d, 17), kyiv(y, m, d + 1, 1), kyiv(y, m, d + 1, 17), kyiv(y, m, d + 2, 1)]
+    _walk(w, flips, 1)
+    assert w.calls == [OFF, ON, OFF, ON, OFF]
+    assert flips[2] - flips[1] == (15 if m == 3 else 17) * 3600  # the DST day is 23 / 25 hours long
+
+
+def test_time_detail_inside_the_window():
+    w = World(tz=KYIV, t=kyiv(2026, 10, 24, 23, 30))
+    w.engine.load_plans([plan([], [rule("r", [window("17:00", "01:00")])])])
+    assert trace(w)["inputs"] == [{"label": "Time", "value": True, "detail": "in window until 01:00"}]
+
+
+def test_time_boundary_in_the_spring_gap_flips_at_the_jump():
+    w = World(tz=KYIV, t=kyiv(2026, 3, 29, 2), switch__ext="off")
+    w.engine.load_plans([plan([EXT], [rule("r", [window("03:30", "05:00")], **EXT_BOTH)])])
+    assert w.calls == [OFF]
+    _walk(w, [utc(2026, 3, 29, 1), kyiv(2026, 3, 29, 5)], 1)  # 03:30 does not exist: it starts at 04:00 EEST
+    assert w.calls == [OFF, ON, OFF]
+
+
+def test_time_window_in_the_repeated_autumn_hour_fires_once():
+    w = World(tz=KYIV, t=kyiv(2026, 10, 25, 2), switch__ext="off")
+    w.engine.load_plans([plan([EXT], [rule("r", [window("03:30", "05:00")], **EXT_BOTH)])])
+    _walk(w, [kyiv(2026, 10, 25, 3, 30), kyiv(2026, 10, 25, 5)], 1)  # the second 03:00-04:00 stays in the window
+    assert w.calls == [OFF, ON, OFF]
+
+
+def test_time_window_within_a_day_defaults_to_utc():
+    w = World(t=utc(2026, 1, 1, 7, 59))
+    w.engine.load_plans([plan([], [rule("r", [window("08:00", "09:30")])])])
+    assert trace(w)["verdict"] is False
+    w.advance(utc(2026, 1, 1, 8))
+    assert trace(w)["verdict"] is True
+    w.advance(utc(2026, 1, 1, 9, 29, 59))
+    assert trace(w)["verdict"] is True
+    w.advance(utc(2026, 1, 1, 9, 30))
+    assert trace(w)["verdict"] is False
+    assert [t[0] for t in w.pending()] == [utc(2026, 1, 2, 8)]
+
+
+def test_time_timer_is_cancelled_on_stop_and_removal():
+    w = World(t=utc(2026, 1, 1, 7))
+    p = plan([], [rule("r", [window("08:00", "09:30")])])
+    w.engine.load_plans([p])
+    assert len(w.pending()) == 1
+    w.engine.load_plans([plan([], [])])
+    assert w.pending() == []
+    w.engine.load_plans([p])
+    w.engine.load_plans([])
+    assert w.pending() == []
+
+
+def test_time_timer_moves_with_a_changed_window_and_stays_on_an_unchanged_reload():
+    w = World(t=utc(2026, 1, 1, 7))
+    w.engine.load_plans([plan([], [rule("r", [window("08:00", "09:30")])])])
+    w.engine.load_plans([plan([], [rule("r", [window("08:00", "09:30")], name="Renamed")])])
+    assert [t[0] for t in w.pending()] == [utc(2026, 1, 1, 8)]
+    w.engine.load_plans([plan([], [rule("r", [window("07:30", "09:30")])])])
+    assert [t[0] for t in w.pending()] == [utc(2026, 1, 1, 7, 30)]
+
+
+# --- held ---------------------------------------------------------------------
+
+def test_held_at_ha_start_counts_as_held_long_ago():
+    w = World(binary_sensor__m="off", switch__ext="off")
+    w.engine.load_plans([plan([HALL, EXT], [rule("r", [held("m", state="off")], on_true=(("ext", "on"),))])])
+    assert w.calls == [ON]
+    assert trace(w)["inputs"] == [{"label": "Hall", "value": True, "detail": "off 30 / 30 min"}]
+    assert w.pending() == []
+
+
+def test_held_on_a_saved_rule_counts_from_last_changed():
+    w = World(binary_sensor__m="off", switch__ext="off")
+    w.changed["binary_sensor.m"] = 900.0
+    saved(w, [plan([HALL, EXT], [rule("r", [held("m", state="off", seconds=300)], on_true=(("ext", "on"),))])])
+    assert trace(w)["inputs"] == [{"label": "Hall", "value": False, "detail": "off 1 / 5 min", "until": 1200000}]
+    assert [t[0] for t in w.pending()] == [1200.0]
+    w.advance(1199.9)
+    assert w.calls == []
+    w.advance(1200)
+    assert w.calls == [ON] and trace(w)["inputs"][0]["detail"] == "off 5 / 5 min"
+
+
+def test_held_uses_the_latest_last_changed_and_now_when_absent():
+    w = World(binary_sensor__m="off", binary_sensor__m2="off")
+    w.changed.update({"binary_sensor.m": 100.0, "binary_sensor.m2": 900.0})
+    rules = [rule("r", [held("m", "m2", seconds=300)]), rule("q", [held("m", "gone", seconds=300)])]
+    saved(w, [plan([HALL, HALL2], rules)])
+    assert sorted(t[0] for t in w.pending()) == [1200.0, 1300.0]
+
+
+def test_held_with_a_rule_source_counts_from_the_save():
+    w = World(binary_sensor__m="off")
+    w.changed["binary_sensor.m"] = 0.0
+    saved(w, [plan([HALL], [rule("a", ["m"]), rule("b", [held({"rule": "a"}, state="off", seconds=60)])])])
+    assert trace(w, "b")["inputs"] == [{"label": "a", "value": False, "detail": "off 0 / 1 min", "until": 1060000}]
+    w.advance(1060)
+    assert trace(w, "b")["verdict"] is True
+    w.set("binary_sensor.m", "on")  # the rule's verdict changes: held again from now
+    assert trace(w, "b")["verdict"] is False and w.pending() == []
+
+
+def test_held_on_state_restarts_on_a_change():
+    w = World(binary_sensor__m="on")
+    w.engine.load_plans([plan([HALL], [rule("r", [held("m", state="on", seconds=60)])])])
+    assert trace(w)["verdict"] is True
+    w.t = 1010
+    w.set("binary_sensor.m", "off")
+    assert trace(w)["verdict"] is False and trace(w)["inputs"][0]["detail"] == "off" and w.pending() == []
+    w.t = 1020
+    w.set("binary_sensor.m", "on")
+    assert trace(w)["inputs"][0]["detail"] == "on 0 / 1 min"
+    w.advance(1079.9)
+    assert trace(w)["verdict"] is False
+    w.advance(1080)
+    assert trace(w)["verdict"] is True
+
+
+def test_held_detail_in_seconds_and_not():
+    w = World(binary_sensor__m="off")
+    saved(w, [plan([HALL], [rule("r", [held("m", seconds=45, negate=True)])])])
+    assert trace(w)["inputs"] == [{"label": "Hall", "value": False, "detail": "unchanged 0 / 45 s", "until": 1045000}]
+    assert trace(w)["verdict"] is True  # NOT held = changed within the last 45 s
+    w.advance(1045)
+    assert trace(w)["verdict"] is False
+
+
+def test_held_is_unknown_when_every_source_is_unknown():
+    w = World(binary_sensor__m="unavailable", binary_sensor__m2="off")
+    w.engine.load_plans([plan([HALL, HALL2], [rule("r", [held("m")]), rule("q", [held("m", "m2")])])])
+    assert trace(w)["inputs"] == [{"label": "Hall", "value": None, "detail": "unknown"}]
+    assert trace(w)["verdict"] is None
+    assert trace(w, "q")["verdict"] is True
+    assert trace(w, "q")["inputs"][0]["label"] == "Hall, Hall 2"
+
+
+@pytest.mark.parametrize("two", [False, True])
+def test_held_source_unavailable_for_a_moment_keeps_the_time(two):
+    w = World(binary_sensor__m="on", binary_sensor__m2="off")
+    sources = ("m", "m2") if two else ("m",)
+    saved(w, [plan([HALL, HALL2], [rule("r", [held(*sources)])])])
+    w.t = 1500
+    w.set("binary_sensor.m", "unavailable")
+    w.t = 1510
+    w.set("binary_sensor.m", "on")
+    w.advance(2799.9)
+    assert trace(w)["verdict"] is False
+    w.advance(2800)
+    assert trace(w)["verdict"] is True
+
+
+def test_held_change_time_survives_an_unchanged_reload_and_a_changed_one_restarts():
+    w = World(binary_sensor__m="off")
+    saved(w, [plan([HALL], [rule("r", [held("m")])])])
+    w.t = 2000
+    w.engine.load_plans([plan([HALL], [rule("r", [held("m")], name="Renamed")])])
+    assert [t[0] for t in w.pending()] == [2800.0]
+    w.engine.load_plans([plan([HALL], [rule("r", [held("m", seconds=1700)])])])  # changed: last_changed or now
+    assert [t[0] for t in w.pending()] == [3700.0]
+
+
+def test_held_timer_is_cancelled_when_the_source_changes_and_on_stop():
+    w = World(binary_sensor__m="off")
+    saved(w, [plan([HALL], [rule("r", [held("m", state="off", seconds=60)])])])
+    assert len(w.pending()) == 1
+    w.set("binary_sensor.m", "on")
+    assert w.pending() == []
+    w.set("binary_sensor.m", "off")
+    w.engine.load_plans([])
+    assert w.pending() == []
+
+
+# --- the gate -----------------------------------------------------------------
+
+def gate_world(gate_state="off", **states):
+    return World(**{"binary_sensor__m": "off", "binary_sensor__g": gate_state, "switch__ext": "off", **states})
+
+
+def test_closed_gate_holds_actions_and_opening_sends_the_current_verdict_once():
+    w = gate_world()
+    w.engine.load_plans([plan([HALL, GATE, EXT], [rule("r", ["m"], gate=G, **EXT_BOTH)])])
+    assert w.calls == []  # the start "off" waits for the gate
+    t = trace(w)
+    assert t["gate"] == {"value": False, "detail": "clear"} and t["held"] is True and t["verdict"] is False
+    w.set("binary_sensor.m", "on")
+    w.set("binary_sensor.m", "off")
+    w.set("binary_sensor.m", "on")
+    assert w.calls == [] and trace(w)["verdict"] is True
+    w.set("binary_sensor.g", "on")
+    assert w.calls == [ON]
+    t = trace(w)
+    assert t["gate"] == {"value": True, "detail": "motion"} and "held" not in t
+    assert t["last"]["reason"].startswith("gate opened")
+    w.set("binary_sensor.g", "on")
+    assert w.calls == [ON]
+
+
+@pytest.mark.parametrize("gate_state", ["unavailable", "unknown"])
+def test_unknown_gate_is_closed(gate_state):
+    w = gate_world(gate_state, binary_sensor__m="on")
+    w.engine.load_plans([plan([HALL, GATE, EXT], [rule("r", ["m"], gate=G, **EXT_BOTH)])])
+    assert w.calls == [] and trace(w)["gate"] == {"value": None, "detail": gate_state}
+
+
+def test_gate_with_not_and_no_gate_trace_without_one():
+    w = gate_world("on", binary_sensor__m="on")
+    w.engine.load_plans([plan([HALL, GATE, EXT], [rule("r", ["m"], gate=neg("g"), **EXT_BOTH), rule("q", ["m"])])])
+    assert w.calls == [] and trace(w)["gate"] == {"value": False, "detail": "motion"}
+    assert "gate" not in trace(w, "q") and "held" not in trace(w, "q")
+    w.set("binary_sensor.g", "off")
+    assert w.calls == [ON]
+
+
+def test_gate_reopening_sends_a_verdict_applied_before_it_closed():
+    w = gate_world("on")
+    w.engine.load_plans([plan([HALL, GATE, EXT], [rule("r", ["m"], gate=G, **EXT_BOTH)])])
+    w.set("binary_sensor.m", "on")
+    w.set("binary_sensor.g", "off")
+    w.set("binary_sensor.g", "on")
+    assert w.calls == [OFF, ON, ON]
+
+
+def test_gate_without_actions_for_the_verdict_holds_nothing():
+    w = gate_world()
+    w.engine.load_plans([plan([HALL, GATE, EXT], [rule("r", ["m"], gate=G, on_true=(("ext", "on"),))])])
+    assert "held" not in trace(w)
+    w.set("binary_sensor.g", "on")
+    assert w.calls == []
+
+
+def test_closed_gate_suppresses_resends_and_opening_sends_once():
+    w = leak_world(valve__v="unavailable", binary_sensor__g="on")
+    w.engine.load_plans([plan(LEAKS + [VALVE, GATE], [rule("r", ["s1"], on_true=CLOSE, gate=G)])])
+    w.set("binary_sensor.s1", "on")
+    assert w.calls == [CLOSE_CALL] and trace(w)["last"]["error"] == "waiting for target"
+    w.set("binary_sensor.g", "off")
+    w.set("valve.v", "open")
+    assert w.calls == [CLOSE_CALL]
+    w.set("binary_sensor.g", "on")
+    assert w.calls == [CLOSE_CALL, CLOSE_CALL] and trace(w)["status"] == "ok"
+
+
+def test_verdict_change_under_a_closed_gate_drops_the_waiting_action():
+    w = leak_world(valve__v="unavailable", binary_sensor__g="on")
+    w.engine.load_plans([plan(LEAKS + [VALVE, GATE], [rule("r", ["s1"], on_true=CLOSE, gate=G)])])
+    w.set("binary_sensor.s1", "on")
+    w.set("binary_sensor.g", "off")
+    w.set("binary_sensor.s1", "off")
+    assert trace(w)["last"]["error"] == "target unavailable"  # given up
+    w.set("valve.v", "open")
+    w.set("binary_sensor.g", "on")  # the current verdict (false) has no actions
+    assert w.calls == [CLOSE_CALL]
+
+
+def test_debounced_change_under_a_closed_gate_is_tracked():
+    w = gate_world()
+    w.engine.load_plans([plan([HALL, GATE, EXT], [rule("r", ["m"], gate=G, on_delay=5, **EXT_BOTH)])])
+    w.set("binary_sensor.m", "on")
+    w.advance(1005)
+    assert trace(w)["verdict"] is True and w.calls == []
+    w.set("binary_sensor.g", "on")
+    assert w.calls == [ON]
+
+
+def test_gate_and_held_sources_count_for_cycles_and_entities():
+    w = World(binary_sensor__m="on", binary_sensor__g="on")
+    rules = [rule("a", ["m"], gate=ref("b")), rule("b", [held({"rule": "a"}, "g")])]
+    w.engine.load_plans([plan([HALL, GATE], rules)])
+    assert {trace(w, "a")["status"], trace(w, "b")["status"]} == {"ok", "error"}
+    assert "cycle" in (trace(w, "a").get("reason"), trace(w, "b").get("reason"))
+    w.set("binary_sensor.m", "off")  # no endless re-evaluation
+    assert w.engine.entity_ids() == {"binary_sensor.m", "binary_sensor.g"}
+
+
+def test_gate_input_with_a_missing_device_is_an_error():
+    w = gate_world()
+    w.engine.load_plans([plan([HALL, EXT], [rule("r", ["m"], gate=G, **EXT_BOTH)])])
+    assert trace(w)["reason"] == "device missing" and w.calls == []
+
+
+# --- review focus: the outside light ------------------------------------------
+
+def outside_light():
+    return [plan([LUX, EXT], [rule("r", [light_in(), SUN], "all", gate=held("ext"), **EXT_BOTH)])]
+
+
+def test_outside_light_dusk_hysteresis_and_a_manual_switch():
+    w = World(sensor__lux=lux(50), sun__sun="above_horizon", switch__ext="off")
+    w.engine.load_plans(outside_light())
+    assert w.calls == [OFF]  # start, both ways, gate open (held since HA start)
+    w.t = 2000
+    w.set("sun.sun", "below_horizon")
+    w.set("sensor.lux", "9")
+    assert w.calls == [OFF, ON]
+    w.set("switch.ext", "on")  # the light follows: the gate closes for 30 min
+    assert trace(w)["held"] is True
+    assert trace(w)["gate"] == {"value": False, "detail": "unchanged 0 / 30 min", "until": 3800000}
+    for v in ("12", "14", "9.5", "15", "11"):
+        w.set("sensor.lux", v)
+    assert w.calls == [OFF, ON]
+    w.advance(3800)
+    assert w.calls == [OFF, ON, ON]  # the gate opens: the current verdict once more
+    w.t = 5000
+    w.set("switch.ext", "off")  # the owner switches it off
+    w.advance(6799.9)
+    assert w.calls == [OFF, ON, ON]
+    w.advance(6800)
+    assert w.calls == [OFF, ON, ON, ON] and trace(w)["last"]["reason"].startswith("gate opened")
+
+
+@pytest.mark.parametrize("late", [False, True])
+def test_outside_light_after_an_ha_restart_at_night_turns_on_at_once(late):
+    w = World(sensor__lux=lux(3), sun__sun="below_horizon", switch__ext="unavailable" if late else "off")
+    w.engine.load_plans(outside_light())
+    if late:  # the switch comes up after the rules started
+        assert w.calls == []
+        w.t = 1100
+        w.set("switch.ext", "off")
+    assert w.calls == [ON]
