@@ -3,11 +3,12 @@ import type { DevicePose } from '../geometry/devices';
 import { distToSegment, polygonArea } from '../geometry/vec';
 import { zoneContains, zoneOutline } from '../geometry/zones';
 
-export type BubbleSide = 'up' | 'down' | 'left' | 'right';
+export type BubbleSide = 'up' | 'down' | 'left' | 'right' | 'up-left' | 'up-right' | 'down-left' | 'down-right';
 
 /**
  * Top-left corner of a bubble stack of `stack` (w x h) on `side` of the symbol centre, relative to that centre; `gap`
- * is the distance from the centre to the stack's near edge. The stack is centred on the side's axis.
+ * is the distance from the centre to the stack's near edge (on both axes for a diagonal side). The stack is centred
+ * on the side's axis.
  */
 export function stackOrigin(side: BubbleSide, stack: { w: number; h: number }, gap: number): Pt {
   switch (side) {
@@ -15,6 +16,10 @@ export function stackOrigin(side: BubbleSide, stack: { w: number; h: number }, g
     case 'down': return { x: -stack.w / 2, y: gap };
     case 'left': return { x: -gap - stack.w, y: -stack.h / 2 };
     case 'right': return { x: gap, y: -stack.h / 2 };
+    case 'up-left': return { x: -gap - stack.w, y: -gap - stack.h };
+    case 'up-right': return { x: gap, y: -gap - stack.h };
+    case 'down-left': return { x: -gap - stack.w, y: gap };
+    case 'down-right': return { x: gap, y: gap };
   }
 }
 
@@ -46,9 +51,9 @@ function clearance(outline: Pt[], x: number, y: number, w: number, h: number): n
 
 /**
  * The side of the device (right, left, below, above; world units) where its bubble stack goes: inside the smallest
- * zone containing the device. A wall device: into the room (face normal snapped to an axis), else along the wall (the
- * side farther from the zone edges), else the remaining side. A free device: right / left (farther from the edges),
- * then below / above. When none fits (or there is no zone): a wall device into the room, a free one right.
+ * zone containing the device. A wall device: into the room (face normal snapped to an axis), else a diagonal on the room
+ * side, else along the wall, else the remaining side. A free device: right / left, then the diagonals, then below /
+ * above (each step: the side farther from the zone edges, ties in the listed order). When none fits (or there is no zone): a wall device into the room, a free one right.
  * `stack` is the stack size and `gap` the distance from the symbol centre to the stack, both in world units.
  */
 export function bubbleSide(level: Level, d: Device, pose: DevicePose, stack: { w: number; h: number }, gap: number): BubbleSide {
@@ -76,13 +81,17 @@ export function bubbleSide(level: Level, d: Device, pose: DevicePose, stack: { w
     }
     return best;
   };
+  const DIAGONALS: BubbleSide[] = ['down-right', 'down-left', 'up-right', 'up-left'];
   if (wall) {
-    // Into the room first, then along the wall (a tie goes right / down), then the remaining side.
+    // Into the room, then the two diagonals on the room side, then along the wall, then the remaining side.
     const vertical = fallback === 'up' || fallback === 'down';
-    const opposite: BubbleSide = { up: 'down', down: 'up', left: 'right', right: 'left' }[fallback] as BubbleSide;
+    const opposite: BubbleSide = { up: 'down', down: 'up', left: 'right', right: 'left' }[fallback as 'up' | 'down' | 'left' | 'right'] as BubbleSide;
     if (room(fallback) !== null) return fallback;
-    return farther(vertical ? ['right', 'left'] : ['down', 'up']) ?? (room(opposite) !== null ? opposite : fallback);
+    const roomSide = DIAGONALS.filter(x => (vertical ? x.startsWith(fallback) : x.endsWith(fallback)))
+      .sort((a, b) => (a.endsWith('right') || a.startsWith('down') ? 0 : 1) - (b.endsWith('right') || b.startsWith('down') ? 0 : 1));
+    return farther(roomSide) ?? farther(vertical ? ['right', 'left'] : ['down', 'up'])
+      ?? (room(opposite) !== null ? opposite : fallback);
   }
-  // Free: right / left (a tie goes right), then below / above.
-  return farther(['right', 'left']) ?? farther(['down', 'up']) ?? fallback;
+  // Free: right / left (a tie goes right), then the diagonals, then below / above.
+  return farther(['right', 'left']) ?? farther(DIAGONALS) ?? farther(['down', 'up']) ?? fallback;
 }

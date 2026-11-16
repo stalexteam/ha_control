@@ -54,12 +54,29 @@ describe('bubbleSide', () => {
   });
 });
 
+describe('bubbleSide diagonals', () => {
+  it('a free device in a box corner where right / left do not fit goes to the diagonal into the zone', () => {
+    const l = lv(zone('z', 0, 0, 1000, 1000)), st = { w: 400, h: 800 };
+    expect(bubbleSide(l, freeDev(100, 100), pose(100, 100), st, 100)).toBe('down-right');
+    expect(bubbleSide(l, freeDev(900, 900), pose(900, 900), st, 100)).toBe('up-left');
+    expect(bubbleSide(l, freeDev(900, 100), pose(900, 100), st, 100)).toBe('down-left');
+  });
+  it('a wall device near a corner whose perpendicular side does not fit takes the room-side diagonal away from the adjacent wall', () => {
+    // Top wall device 100 from the left wall: down is 800 wide, crossing the left edge; down-right fits.
+    const l = lv(zone('z', 0, 0, 2000, 1000));
+    expect(bubbleSide(l, wallDev(), pose(100, 0, 0, 1), { w: 800, h: 200 }, 100)).toBe('down-right');
+    expect(bubbleSide(l, wallDev(), pose(1900, 0, 0, 1), { w: 800, h: 200 }, 100)).toBe('down-left');
+  });
+});
+
 describe('stackOrigin', () => {
   it('centres the stack on the chosen side', () => {
     expect(stackOrigin('down', { w: 100, h: 40 }, 30)).toEqual({ x: -50, y: 30 });
     expect(stackOrigin('up', { w: 100, h: 40 }, 30)).toEqual({ x: -50, y: -70 });
     expect(stackOrigin('right', { w: 100, h: 40 }, 30)).toEqual({ x: 30, y: -20 });
     expect(stackOrigin('left', { w: 100, h: 40 }, 30)).toEqual({ x: -130, y: -20 });
+    expect(stackOrigin('up-left', { w: 100, h: 40 }, 30)).toEqual({ x: -130, y: -70 });
+    expect(stackOrigin('down-right', { w: 100, h: 40 }, 30)).toEqual({ x: 30, y: 30 });
   });
 });
 

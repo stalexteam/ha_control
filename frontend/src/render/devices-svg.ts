@@ -294,7 +294,7 @@ function renderBubbles(level: Level, d: Device, pose: DevicePose, b: { shown: Li
   return svg`${all.map(([x, cls], i) => {
     const w = widths[i];
     const bx = origin.x + (stack.w - w) / 2;
-    const by = origin.y + (side === 'up' ? all.length - 1 - i : i) * step;
+    const by = origin.y + (side.startsWith('up') ? all.length - 1 - i : i) * step;
     const c = toneColor(x.tone, o.palette);
     // A keyed (action) bubble that is replaced is a new element, so its pop-in plays again.
     return keyed(`${cls}:${x.key ?? ''}`, svg`<g class=${`bubble ${cls}`} data-tone=${x.tone}>
