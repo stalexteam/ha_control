@@ -130,6 +130,11 @@ describe('changeDeviceKind', () => {
     expect(back.devices[0].props).toEqual(deviceDefaults('wall_switch', 'wall'));
     expect('bindings' in back.devices[0]).toBe(false);
   });
+  it('a valve is not converted', () => {
+    const l = addDevice(room(), deviceDefaults('valve', 'wall'), onWall('w0', 1000), 'V').level;
+    expect(changeDeviceKind(l, l.devices[0].id, 'smart_button')).toBe(l);
+    expect(changeDeviceKind(l, l.devices[0].id, 'wall_switch')).toBe(l);
+  });
   it('a free smart button -> wall_switch returns the same level', () => {
     const l = addDevice(room(), deviceDefaults('smart_button', 'free'), free, 'B').level;
     expect(changeDeviceKind(l, l.devices[0].id, 'wall_switch')).toBe(l);

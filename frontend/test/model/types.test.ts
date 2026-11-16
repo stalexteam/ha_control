@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { addDevice } from "../../src/model/devices";
 import {
-  DEVICE_PLACEMENTS, deviceDefaults, emptyPlan, normalizeLevel, type Device, type DeviceProps, type Level,
+  DEVICE_PLACEMENTS, deviceDefaults, emptyPlan, isContainerKind, normalizeLevel, type Device, type DeviceProps, type Level,
 } from "../../src/model/types";
 import { rectRoomLevel } from "../fixtures";
 
@@ -19,6 +19,28 @@ describe("emptyPlan", () => {
     expect(l.walls).toEqual([]);
     expect(l.openings).toEqual([]);
     expect(l.zones).toEqual([]);
+  });
+});
+
+describe("valve and leak sensor kinds", () => {
+  it("defaults, placements and container membership", () => {
+    expect(deviceDefaults("valve", "wall")).toEqual({ kind: "valve", autoByDoubleToggle: false, windowSec: 3 });
+    expect(deviceDefaults("leak_sensor", "free")).toEqual({ kind: "leak_sensor" });
+    expect(DEVICE_PLACEMENTS.valve).toEqual(["wall", "free"]);
+    expect(DEVICE_PLACEMENTS.leak_sensor).toEqual(["free", "wall"]);
+    expect(isContainerKind("valve")).toBe(true);
+    expect(isContainerKind("leak_sensor")).toBe(false);
+  });
+  it("a stored valve gets the wall switch completion", () => {
+    const room = (): Level => rectRoomLevel(3000, 4000, 400);
+    const stored = (props: Record<string, unknown>): Device => ({
+      id: "v1", name: "V", invalid: false, placement: { mode: "free", x: 0, y: 0, rotation: 0 },
+      props: props as unknown as DeviceProps,
+    });
+    const bad = normalizeLevel({ ...room(), devices: [stored({ kind: "valve", windowSec: 0, autoByDoubleToggle: 1 })] }).devices[0];
+    expect(bad.props).toEqual(deviceDefaults("valve", "free"));
+    const missing = normalizeLevel({ ...room(), devices: [stored({ kind: "valve" })] }).devices[0];
+    expect(missing.props).toEqual(deviceDefaults("valve", "free"));
   });
 });
 

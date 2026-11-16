@@ -1,7 +1,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
-import type { ContainerKind, Device, DeviceKind, DevicePlacement, DeviceProps, Id, Level, Side } from '../model/types';
-import { AIM_KINDS, AIM_MAX, DEVICE_PLACEMENTS, FAN_DIAMETERS, deviceDefaults, isContainerKind, type FanDiameter } from '../model/types';
+import type { Device, DeviceKind, DevicePlacement, DeviceProps, Id, Level, Side, SwitchKind } from '../model/types';
+import { AIM_KINDS, AIM_MAX, DEVICE_PLACEMENTS, FAN_DIAMETERS, deviceDefaults, type FanDiameter } from '../model/types';
 import { changeDeviceKind, moveDevice, setDeviceControllable, setDeviceProps } from '../model/devices';
 import { deleteDeviceDoc, setDeviceInverterDoc, type DocEdit, type PowerSchema } from '../model/power';
 import type { Selection } from '../editor/tools/types';
@@ -38,7 +38,7 @@ export interface DevicePropsOpts {
   onPlacement(p: DevicePlacement): boolean;
   onNext(patch: Partial<DeviceProps>): void;
   /** Turns the selected input container into the other kind (returns false when refused). */
-  onKind?(kind: ContainerKind): boolean;
+  onKind?(kind: SwitchKind): boolean;
   /** Sets whether the device takes part in a zone (returns false when refused). */
   onZone?(zoneId: string, participates: boolean): boolean;
   /** Equipment: Wall mount on (onto the nearest wall face) or off (free in place); false when refused. */
@@ -201,11 +201,11 @@ export function deviceNameRow(d: Device, onName: (name: string) => void): Templa
 /** Container type select; a free smart button cannot change type, so it gets a hint instead. */
 function typeRow(o: DevicePropsOpts, d: Device): TemplateResult | typeof nothing {
   const kind = d.props.kind;
-  if (!isContainerKind(kind)) return nothing;
+  if (kind !== 'wall_switch' && kind !== 'smart_button') return nothing; // a valve is never converted
   if (kind === 'smart_button' && d.placement.mode === 'free') {
     return html`<p class="muted" data-note="type-free">${t('props.typeFreeHint')}</p>`;
   }
-  return row(t('props.type'), select<ContainerKind>(kind, labelled<ContainerKind>(['wall_switch', 'smart_button'], 'device'),
+  return row(t('props.type'), select<SwitchKind>(kind, labelled<SwitchKind>(['wall_switch', 'smart_button'], 'device'),
     v => o.onKind?.(v), 'kind'));
 }
 

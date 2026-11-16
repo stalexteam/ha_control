@@ -58,4 +58,14 @@ describe('entityLabel', () => {
     expect(entityLabel(fixtureMeta(), 'sensor.hum').context).toBe('sensor.hum');
     expect(entityLabel(fixtureMeta(), 'nope.x')).toEqual({ name: 'nope.x', context: 'nope.x' });
   });
+  it('leak: binary_sensor of class moisture only; valve state: valve and switch domains', () => {
+    const m = makeMeta([
+      ent('binary_sensor.wet', { deviceClass: 'moisture' }),
+      ent('binary_sensor.door', { deviceClass: 'door' }),
+      ent('binary_sensor.leak_x'),
+      ent('valve.x'), ent('switch.x'), ent('light.x'),
+    ]);
+    expect(ids(candidates(m, spec('leak_sensor', 'leak'), false))).toEqual(['binary_sensor.wet']);
+    expect(ids(candidates(m, spec('valve', 'state'), false))).toEqual(['switch.x', 'valve.x']);
+  });
 });

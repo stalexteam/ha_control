@@ -316,3 +316,10 @@ describe('wall-mounted equipment pose', () => {
     expect(pose.dir.y).toBeCloseTo(1, 9);
   });
 });
+
+describe('valve and leak sensor roles', () => {
+  it('role specs are exact', () => {
+    expect(ROLE_SPECS.leak_sensor).toEqual([{ role: 'leak', domains: ['binary_sensor'], deviceClasses: ['moisture'], primary: true }]);
+    expect(ROLE_SPECS.valve).toEqual([{ role: 'state', domains: ['valve', 'switch'], primary: true }]);
+  });
+});

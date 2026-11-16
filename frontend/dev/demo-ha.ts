@@ -18,6 +18,8 @@ const DEVICES = [
   { id: 'kitchen_socket', name: 'Kitchen socket', model: 'Plug-16A', area_id: 'kitchen' },
   { id: 'bath_fan', name: 'Bath fan', model: null, area_id: 'bath' },
   { id: 'boiler', name: 'Boiler', model: 'B-80', area_id: 'utility' },
+  { id: 'bath_leak', name: 'Bath leak sensor', model: 'LS-1', area_id: 'bath' },
+  { id: 'water_valve', name: 'Water valve', model: 'V-1', area_id: 'utility' },
 ];
 
 const ENTITIES: DemoEntity[] = [
@@ -35,6 +37,8 @@ const ENTITIES: DemoEntity[] = [
   { id: 'fan.bath_fan', name: 'Bath fan', state: 'unavailable', device: 'bath_fan' },
   { id: 'switch.boiler', name: 'Boiler', state: 'on', device: 'boiler' },
   { id: 'sensor.boiler_power', name: 'Boiler power', state: '1.8', device: 'boiler', cls: 'power', unit: 'kW' },
+  { id: 'binary_sensor.bath_leak', name: 'Bath leak', state: 'off', device: 'bath_leak', cls: 'moisture' },
+  { id: 'valve.water_valve', name: 'Water valve', state: 'open', device: 'water_valve' },
   { id: 'sensor.boiler_voltage', name: 'Boiler voltage', state: '229', device: 'boiler', cls: 'voltage', unit: 'V' },
 ];
 

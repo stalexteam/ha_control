@@ -37,6 +37,10 @@ def ws(bindings=None, **props):
     return {"id": "w", "props": {"kind": "wall_switch", **props}, "bindings": bindings or {}}
 
 
+def valve(bindings=None, **props):
+    return {"id": "v", "props": {"kind": "valve", **props}, "bindings": bindings or {}}
+
+
 def sb(bindings=None, **props):
     return {"id": "b", "props": {"kind": "smart_button", **props}, "bindings": bindings or {}}
 
@@ -336,3 +340,57 @@ def test_kind_is_named():
     w = World()
     assert build(ws(), w).kind == "wall_switch"
     assert build(sb(), w).kind == "smart_button"
+
+
+# --- valve -------------------------------------------------------------------
+
+
+def test_valve_open_and_close_are_set_on_and_off():
+    w = World(valve__v="closed")
+    c = build(valve({"state": "valve.v"}), w)
+    assert w.set(c, "valve.v", "open") == SET_ON
+    assert w.set(c, "valve.v", "closed") == SET_OFF
+
+
+def test_valve_transitional_states_keep_the_settled_value():
+    w = World(valve__v="closed")
+    c = build(valve({"state": "valve.v"}), w)
+    assert w.set(c, "valve.v", "opening") == []
+    assert w.set(c, "valve.v", "open") == SET_ON
+    assert w.set(c, "valve.v", "closing") == []
+    assert w.set(c, "valve.v", "closed") == SET_OFF
+
+
+def test_valve_change_after_unavailable_or_unknown_is_not_a_press():
+    w = World(valve__v="open")
+    c = build(valve({"state": "valve.v"}), w)
+    assert w.set(c, "valve.v", "unavailable") == []
+    assert w.set(c, "valve.v", "closed") == []
+    assert w.set(c, "valve.v", "open") == SET_ON  # the next settled change counts
+    assert w.set(c, "valve.v", "unknown") == []
+    assert w.set(c, "valve.v", "closed") == []
+
+
+def test_valve_switch_domain_works_unmapped():
+    w = World(switch__v="off")
+    c = build(valve({"state": "switch.v"}), w)
+    assert w.set(c, "switch.v", "on") == SET_ON
+
+
+def test_valve_double_toggle_gives_auto():
+    w = World(valve__v="open")
+    c = build(valve({"state": "valve.v"}, autoByDoubleToggle=True, windowSec=3), w)
+    assert w.set(c, "valve.v", "closed", now=0.0) == SET_OFF
+    assert w.set(c, "valve.v", "open", now=2.0) == AUTO
+
+
+def test_valve_own_change_is_not_a_press_but_updates_the_settled_value():
+    w = World(valve__v="open")
+    c = build(valve({"state": "valve.v"}), w)
+    assert w.set(c, "valve.v", "closed", own=True) == []
+    assert w.set(c, "valve.v", "open") == SET_ON
+
+
+def test_valve_status():
+    assert build(valve(), World()).status() == NOT_CONFIGURED
+    assert build(valve({"state": "valve.v"}), World()).status() == unavailable("valve.v")

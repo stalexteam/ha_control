@@ -34,6 +34,8 @@ export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
     { role: 'humidity', domains: ['sensor'], deviceClasses: ['humidity'], units: ['%'], primary: true },
   ],
   wall_switch: [{ role: 'state', domains: ['switch', 'light', 'binary_sensor'], primary: true }],
+  valve: [{ role: 'state', domains: ['valve', 'switch'], primary: true }],
+  leak_sensor: [{ role: 'leak', domains: ['binary_sensor'], deviceClasses: ['moisture'], primary: true }],
   // Active roles depend on the flags: see activeRoleSpecs.
   smart_button: [trigger('on'), trigger('off'), trigger('auto')],
   socket: [{ role: 'control', domains: ['switch'], primary: true }, POWER],

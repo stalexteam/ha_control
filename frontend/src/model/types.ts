@@ -70,10 +70,12 @@ export interface Zone { id: Id; name: string; automation?: false; shape: ZoneSha
 /** A smart button trigger: slot 0..9 (0 = a one-button device) and a non-empty event (`single`, `double`, `hold` or free text). */
 export interface Trigger { slot: number; event: string }
 /** Input containers: kinds with a live output. */
-export type ContainerKind = 'wall_switch' | 'smart_button';
+export type ContainerKind = 'wall_switch' | 'smart_button' | 'valve';
+/** The container kinds that convert into one another (a valve does not). */
+export type SwitchKind = 'wall_switch' | 'smart_button';
 /** True for the input-container kinds. */
-export const isContainerKind = (kind: DeviceKind): kind is ContainerKind => kind === 'wall_switch' || kind === 'smart_button';
-export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | ContainerKind | 'socket' | 'equipment' | 'climate_sensor' | 'exhaust_fan';
+export const isContainerKind = (kind: DeviceKind): kind is ContainerKind => kind === 'wall_switch' || kind === 'smart_button' || kind === 'valve';
+export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | ContainerKind | 'socket' | 'equipment' | 'climate_sensor' | 'exhaust_fan' | 'leak_sensor';
 export type DevicePlacement =
   | { mode: 'wall'; wallId: Id; side: Side; offset: number; aim?: number } // offset: along axis from node A to device centre; aim: degrees off the face normal, counter-clockwise on screen, integer -90..90 (default 0)
   | { mode: 'free'; x: number; y: number; rotation: number } // rotation in degrees
@@ -88,13 +90,13 @@ export type DeviceProps =
   | { kind: 'motion_sensor'; zoneAngle: number; zoneRange: number }
   | { kind: 'exhaust_fan'; diameter: FanDiameter }
   // A climate sensor's reading applies to the zones containing it (its stage-2a `zoneIds` is retired).
-  | { kind: 'illuminance_sensor' } | { kind: 'socket' } | { kind: 'climate_sensor' }
+  | { kind: 'illuminance_sensor' } | { kind: 'socket' } | { kind: 'climate_sensor' } | { kind: 'leak_sensor' }
   // inverter: Power is replaced by Input / Output power; controllable: Plan Studio may switch its control.
   // A missing flag means false. Shape, size, icon and label matter only while the device is on the plan.
   | { kind: 'equipment'; shape: 'rect' | 'circle'; width: number; depth: number; diameter: number;
       icon: string; label: string; inverter?: true; controllable?: true }
   // windowSec: whole seconds 1..10, used only with autoByDoubleToggle.
-  | { kind: 'wall_switch'; autoByDoubleToggle: boolean; windowSec: number }
+  | { kind: 'wall_switch' | 'valve'; autoByDoubleToggle: boolean; windowSec: number }
   // off is used only with separateOff (otherwise the on trigger toggles); auto only with autoEnabled.
   | { kind: 'smart_button'; separateOff: boolean; autoEnabled: boolean; on: Trigger; off: Trigger; auto: Trigger };
 
@@ -105,7 +107,7 @@ export const DEFAULT_EQUIPMENT_ICON = 'mdi:cube-outline';
 export const TRIGGER_EVENTS = ['single', 'double', 'hold'] as const;
 
 export type BindingRole = 'control' | 'motion' | 'illuminance' | 'temperature' | 'humidity' | 'state' | 'power'
-  | 'on' | 'off' | 'auto' | 'voltage' | 'power_in' | 'power_out';
+  | 'leak' | 'on' | 'off' | 'auto' | 'voltage' | 'power_in' | 'power_out';
 
 /** zoneBlacklist: zones the device opts out of (missing = []; the field is removed when it becomes empty). */
 export interface Device {
@@ -176,6 +178,8 @@ export const DEVICE_PLACEMENTS: Record<DeviceKind, ('wall' | 'free')[]> = {
   motion_sensor: ['free', 'wall'],
   illuminance_sensor: ['free', 'wall'],
   wall_switch: ['wall'],
+  valve: ['wall', 'free'],
+  leak_sensor: ['free', 'wall'],
   smart_button: ['wall', 'free'],
   socket: ['wall'],
   equipment: ['free', 'wall'],
@@ -201,6 +205,7 @@ export function deviceDefaults(kind: DeviceKind, mode: 'wall' | 'free'): DeviceP
     case 'equipment':
       return { kind, shape: 'rect', width: 600, depth: 600, diameter: 600, icon: DEFAULT_EQUIPMENT_ICON, label: '' };
     case 'wall_switch':
+    case 'valve':
       return { kind, autoByDoubleToggle: false, windowSec: 3 };
     case 'smart_button':
       return {

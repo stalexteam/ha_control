@@ -1,4 +1,4 @@
-"""Input containers (wall switch, smart button) as stateless intent sources. Must not import homeassistant."""
+"""Input containers (wall switch, smart button, valve) as stateless intent sources. Must not import homeassistant."""
 
 from __future__ import annotations
 
@@ -110,6 +110,42 @@ class WallSwitch(Container):
         return [_set(new[0])]
 
 
+class Valve(WallSwitch):
+    """A wall switch over a valve or switch entity: open/on is "on", closed/off is "off". Transitional states
+    (opening, closing) keep the last settled value; any other state clears it, so the change after it is no press."""
+
+    kind = "valve"
+    _SETTLED = {"open": "on", "on": "on", "closed": "off", "off": "off"}
+    _TRANSITIONAL = ("opening", "closing")
+
+    def __init__(self, device, lookup):
+        self._settled: str | None = None
+        self._edge: "tuple[str | None, str | None]" = (None, None)
+        super().__init__(device, lookup)
+        bound = self._bound("state")
+        self._settled = self._settle(bound and lookup(bound), None)
+
+    def _settle(self, st, keep):
+        if st is None:
+            return None
+        if st[0] in self._TRANSITIONAL:
+            return keep
+        return self._SETTLED.get(st[0])
+
+    def handle(self, entity_id, old, new, now, own=False):
+        if entity_id not in self.entity_ids():
+            return []
+        prev, self._settled = self._settled, self._settle(new, self._settled)
+        self._edge = (prev, self._settled)
+        return super().handle(entity_id, old, new, now, own)
+
+    def _intents(self, entity_id, old, new, now, own):
+        prev, cur = self._edge
+        if prev is None or cur is None or prev == cur:
+            return []
+        return super()._intents(entity_id, (prev, {}), (cur, {}), now, own)
+
+
 class SmartButton(Container):
     kind = "smart_button"
 
@@ -150,6 +186,8 @@ def build(device: dict, lookup: Lookup) -> "Container | None":
     kind = props.get("kind") if isinstance(props, dict) else None
     if kind == "wall_switch":
         return WallSwitch(device, lookup)
+    if kind == "valve":
+        return Valve(device, lookup)
     if kind == "smart_button":
         return SmartButton(device, lookup)
     return None

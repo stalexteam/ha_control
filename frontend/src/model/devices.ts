@@ -1,7 +1,7 @@
 import { newId } from './ids';
 import {
-  AIM_MAX, DEVICE_PLACEMENTS, defaultsMode, deviceDefaults, isContainerKind,
-  type BindingRole, type ContainerKind, type Device, type DevicePlacement, type DeviceProps, type Id, type Level,
+  AIM_MAX, DEVICE_PLACEMENTS, defaultsMode, deviceDefaults,
+  type BindingRole, type Device, type DevicePlacement, type DeviceProps, type Id, type Level, type SwitchKind,
 } from './types';
 import { sanitizeBindings } from './bindings';
 import { wallLen } from '../geometry/walls';
@@ -138,9 +138,9 @@ export function setDeviceProps(level: Level, id: Id, patch: Partial<DeviceProps>
  * new kind's defaults, and bindings the new kind does not have are dropped. Same level when refused: unknown
  * id, not a container, the same kind, or a placement the new kind does not allow (a free smart button).
  */
-export function changeDeviceKind(level: Level, id: Id, kind: ContainerKind): Level {
+export function changeDeviceKind(level: Level, id: Id, kind: SwitchKind): Level {
   const d = level.devices.find(x => x.id === id);
-  if (!d || !isContainerKind(d.props.kind) || d.props.kind === kind) return level;
+  if (!d || (d.props.kind !== 'wall_switch' && d.props.kind !== 'smart_button') || d.props.kind === kind) return level;
   const props = deviceDefaults(kind, defaultsMode(d.placement.mode));
   if (!allowed(props, d.placement)) return level;
   const next = sanitizeBindings({ ...d, props });

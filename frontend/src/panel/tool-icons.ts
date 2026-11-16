@@ -2,8 +2,8 @@ import { html, svg, type TemplateResult } from 'lit';
 import {
   mdiBatteryHigh, mdiBrightness5, mdiCeilingLight, mdiChartPie, mdiCubeOutline, mdiCursorDefaultOutline, mdiDoor,
   mdiDoorOpen, mdiFan, mdiGestureTapButton, mdiLightSwitch, mdiMotionSensor, mdiPowerSocketEu, mdiRayStartEnd,
-  mdiSolarPowerVariant, mdiSourceBranch, mdiTextureBox, mdiThermometerWater, mdiVectorSquare, mdiWall,
-  mdiWallSconceRound, mdiWindowClosedVariant,
+  mdiSolarPowerVariant, mdiSourceBranch, mdiTextureBox, mdiThermometerWater, mdiValve, mdiVectorSquare, mdiWall,
+  mdiWallSconceRound, mdiWaterAlert, mdiWindowClosedVariant,
 } from '@mdi/js';
 import type { ToolId } from './tool-factory';
 
@@ -24,6 +24,8 @@ export const TOOL_ICONS: Record<ToolId, string> = {
   climate_sensor: mdiThermometerWater,
   wall_switch: mdiLightSwitch,
   smart_button: mdiGestureTapButton,
+  valve: mdiValve,
+  leak_sensor: mdiWaterAlert,
   socket: mdiPowerSocketEu,
   exhaust_fan: mdiFan,
   equipment: mdiCubeOutline,
