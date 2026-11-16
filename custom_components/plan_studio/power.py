@@ -217,6 +217,7 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
     pos: dict[str, str] = {}
     for bid, b in blocks.items():
         kind = kinds[bid]
+        unset = False
         src, keys = b, _READINGS.get(kind, ())
         if kind in _READINGS:
             roles[bid] = kind
@@ -226,6 +227,8 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
             control = _str(src.get("control"))
             if control:
                 switches[bid] = _switch(lookup, control)
+                raw = lookup(control)
+                unset = raw is not None and raw[0] == "unknown"  # never toggled since a restart
             if _is_inverter(bindings[bid]):
                 inverters.append(bid)
                 roles[bid], keys = "inverter", _INVERTER_READINGS
@@ -238,6 +241,10 @@ def evaluate(schema: dict, devices: dict, lookup: Lookup, positions: dict[str, s
             if form in _COMMON:
                 forms[bid] = form
         readings[bid] = {k: _read(lookup, _str(src.get(k)), k) for k in keys if _str(src.get(k))}
+        if kind == "device" and unset:
+            own = ("power_in", "power_out") if bid in inverters else ("power",)
+            if any((readings[bid].get(k) or 0) > 0 for k in own):
+                switches[bid] = "on"  # an unknown switch that draws power is on
         # alert codes: a bound entity without a usable value (a switch included), a missing device
         bad = [_str(src.get(k)) for k, v in readings[bid].items() if v is None]
         if switches.get(bid) == "unknown":

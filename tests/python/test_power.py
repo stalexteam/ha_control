@@ -694,7 +694,7 @@ def test_alert_on_device_fields_and_its_switch():
     c = owner_chain(pc="unavailable")
     c.devices["rcbo"]["control"] = "switch.rcbo"
     c.devices["rcbo"]["voltage"] = "sensor.rcbo_v"
-    c.states["switch.rcbo"] = ("unknown", {})
+    c.states["switch.rcbo"] = ("unavailable", {})
     c.states["sensor.rcbo_v"] = ("230", {"unit_of_measurement": "VA"})
     c.devices["inv"] = inverter(power_in="sensor.inv_in")
     f = c.run()
@@ -864,3 +864,45 @@ def test_hub_drops_failing_subscriber(caplog):
     assert len(bad_calls) == 2
     assert len(good) == 3
     assert "dropping it" in caplog.text
+
+
+def _pc_switch(state, power="120"):
+    c = owner_chain(pc=power)
+    c.devices["pc"]["control"] = "switch.pc"
+    c.states["switch.pc"] = (state, {})
+    if power is None:
+        del c.devices["pc"]["power"]
+    return c.run()
+
+
+def test_unknown_switch_with_consumption_counts_as_on():
+    f = _pc_switch("unknown")
+    assert f["blocks"]["pc"] == {"power": 120.0, "switch": "on"}
+    assert f["wires"]["apt_pc"] == live(120.0)
+
+
+def test_unknown_switch_without_consumption_stays_unknown():
+    f = _pc_switch("unknown", power="0")
+    assert f["blocks"]["pc"]["switch"] == "unknown"
+    assert f["blocks"]["pc"]["alert"] == ["unavailable:switch.pc"]
+
+
+def test_unavailable_switch_with_consumption_stays_unknown():
+    f = _pc_switch("unavailable")
+    assert f["blocks"]["pc"]["switch"] == "unknown"
+    assert f["blocks"]["pc"]["alert"] == ["unavailable:switch.pc"]
+
+
+def test_unknown_switch_without_power_binding_stays_unknown():
+    f = _pc_switch("unknown", power=None)
+    assert f["blocks"]["pc"]["switch"] == "unknown"
+    assert f["blocks"]["pc"]["alert"] == ["unavailable:switch.pc"]
+
+
+def test_unknown_switch_on_inverter_with_output_counts_as_on():
+    c = owner_chain(inv_out=300)
+    c.devices["inv"] = inverter(control="switch.inv", power_out="sensor.inv_out")
+    c.states["switch.inv"] = ("unknown", {})
+    f = c.run()
+    assert f["blocks"]["inv"]["switch"] == "on"
+    assert "alert" not in f["blocks"]["inv"]
