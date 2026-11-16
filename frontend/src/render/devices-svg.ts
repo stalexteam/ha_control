@@ -289,7 +289,9 @@ function renderBubbles(level: Level, d: Device, pose: DevicePose, b: { shown: Li
   const step = (BUBBLE_H_PX + 2) * k;
   const stack = { w: Math.max(...widths), h: h + step * (all.length - 1) };
   const gap = e + 4 * k;
-  const side = bubbleSide(level, d, pose, stack, gap);
+  // The side is chosen for the shown bubbles only, so it does not flip when a fading one is removed.
+  const nShown = Math.max(1, b.shown.length);
+  const side = bubbleSide(level, d, pose, { w: Math.max(...widths.slice(0, nShown)), h: h + step * (nShown - 1) }, gap);
   const origin = stackOrigin(side, stack, gap);
   return svg`${all.map(([x, cls], i) => {
     const w = widths[i];

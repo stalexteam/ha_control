@@ -601,6 +601,24 @@ describe('live looks and bubbles', () => {
     expect(down.y).toBeCloseTo(gap);
   });
 
+  it('on the up side the first bubble is nearest the symbol and the stack grows upward', () => {
+    const wl: Device = { ...wallLight(), placement: { mode: 'wall', wallId: 'w2', side: 'right', offset: 3000 } };
+    const level: Level = { ...lv(), zones: [boxZone(0, 0, 6000, 5000)], devices: [wl] };
+    const root = drawDevs(level, { bubbles: () => ({ shown: [{ text: 'a', tone: 'device' }, { text: 'b', tone: 'event' }], leaving: [] }) });
+    const ys = [...root.querySelectorAll('g.bubble rect')].map(r => Number(r.getAttribute('y')));
+    expect(ys[0]).toBeGreaterThan(ys[1]);
+    expect(ys[0]).toBeLessThan(0);
+  });
+
+  it('a fading bubble does not change the side chosen for the shown ones', () => {
+    const level: Level = { ...lv(), zones: [boxZone(100, 100, 5900, 4900)], devices: [wallLight()] };
+    const x = (leaving: { text: string; tone: 'motion' }[]) => {
+      const root = drawDevs(level, { bubbles: () => ({ shown: [{ text: 'a', tone: 'device' }], leaving }) });
+      return Number(root.querySelector('g.bubble rect')!.getAttribute('y'));
+    };
+    expect(x([{ text: 'x'.repeat(200), tone: 'motion' }])).toBe(x([]));
+  });
+
   it('several bubbles stack outward from the device', () => {
     const level: Level = { ...lv(), zones: [boxZone(100, 100, 5900, 4900)], devices: [wallLight()] };
     const root = drawDevs(level, { bubbles: () => ({ shown: [{ text: 'a', tone: 'device' }, { text: 'b', tone: 'event' }], leaving: [] }) });

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { bubbleSide, stackOrigin } from '../../src/render/bubble-side';
 import { deviceDefaults, type Device, type Level, type Zone } from '../../src/model/types';
+import { devicePose } from '../../src/geometry/devices';
 import { rectRoomLevel } from '../fixtures';
 
 const zone = (id: string, x0: number, y0: number, x1: number, y1: number): Zone => ({
@@ -85,5 +86,32 @@ describe('bubbleSide wall device that cannot go into the room', () => {
     // Top-wall device, zone only 150 tall below it: down (300 gap + 200) does not fit; along the wall: right, tie -> right.
     const l = lv(zone('z', 0, 0, 6000, 250));
     expect(bubbleSide(l, wallDev(), pose(3000, 100, 0, 1), { w: 600, h: 100 }, 300)).toBe('right');
+  });
+});
+
+describe('bubbleSide uses the face normal of a wall device', () => {
+  const big = lv(zone('z', 0, 0, 6000, 5000));
+  it('wall-mounted equipment on the top wall goes down (its dir runs along the wall)', () => {
+    const d: Device = { id: 'e', name: 'e', invalid: false, props: deviceDefaults('equipment', 'wall'),
+      placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 3000 } };
+    const p = devicePose(big, d)!;
+    expect(p.normal).toBeTruthy();
+    expect(bubbleSide(big, d, { ...p, pt: { x: p.pt.x, y: 100 } }, stack, 300)).toBe('down');
+  });
+  it('a motion sensor aimed 60 degrees on the left wall still goes into the room (right)', () => {
+    const d: Device = { id: 'm', name: 'm', invalid: false, props: deviceDefaults('motion_sensor', 'wall'),
+      placement: { mode: 'wall', wallId: 'w3', side: 'right', offset: 2500, aim: 60 } };
+    const p = devicePose(big, d)!;
+    const narrow = lv(zone('z', 100, 0, 5900, 5000));
+    expect(bubbleSide(narrow, d, p, stack, 300)).toBe(p.normal!.x > 0 ? 'right' : 'left');
+    expect(p.normal!.x).toBeGreaterThan(0);
+  });
+  it('a tie between the two sides along the wall goes right (horizontal) / down (vertical)', () => {
+    // Top-wall device centred in a short zone: down does not fit, right and left are mirror images -> right.
+    const l = lv(zone('z', 0, 0, 6000, 250));
+    expect(bubbleSide(l, wallDev(), pose(3000, 100, 0, 1), { w: 600, h: 100 }, 300)).toBe('right');
+    // Left-wall device centred in a narrow zone: right does not fit, down and up are mirror images -> down.
+    const n = lv(zone('z', 0, 0, 250, 6000));
+    expect(bubbleSide(n, wallDev(), pose(100, 3000, 1, 0), { w: 100, h: 600 }, 300)).toBe('down');
   });
 });

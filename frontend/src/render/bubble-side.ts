@@ -58,7 +58,7 @@ function clearance(outline: Pt[], x: number, y: number, w: number, h: number): n
  */
 export function bubbleSide(level: Level, d: Device, pose: DevicePose, stack: { w: number; h: number }, gap: number): BubbleSide {
   const wall = d.placement.mode === 'wall';
-  const fallback: BubbleSide = wall ? snap(pose.dir) : 'right';
+  const fallback: BubbleSide = wall ? snap(pose.normal ?? pose.dir) : 'right';
   let outline: Pt[] | null = null;
   let area = Infinity;
   for (const z of level.zones) {
@@ -87,8 +87,7 @@ export function bubbleSide(level: Level, d: Device, pose: DevicePose, stack: { w
     const vertical = fallback === 'up' || fallback === 'down';
     const opposite: BubbleSide = { up: 'down', down: 'up', left: 'right', right: 'left' }[fallback as 'up' | 'down' | 'left' | 'right'] as BubbleSide;
     if (room(fallback) !== null) return fallback;
-    const roomSide = DIAGONALS.filter(x => (vertical ? x.startsWith(fallback) : x.endsWith(fallback)))
-      .sort((a, b) => (a.endsWith('right') || a.startsWith('down') ? 0 : 1) - (b.endsWith('right') || b.startsWith('down') ? 0 : 1));
+    const roomSide = DIAGONALS.filter(x => (vertical ? x.startsWith(fallback) : x.endsWith(fallback)));
     return farther(roomSide) ?? farther(vertical ? ['right', 'left'] : ['down', 'up'])
       ?? (room(opposite) !== null ? opposite : fallback);
   }
