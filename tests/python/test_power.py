@@ -300,6 +300,8 @@ def test_remainder_absorbs_a_load_without_data(sock, binding):
     assert f["blocks"]["rem"]["absorbed"] == ["sock"]
     assert f["wires"]["apt_rem"] == live(112.0)
     assert f["wires"]["apt_sock"] == live(None)  # the absorbed load stays unknown
+    if not binding:
+        assert "alert" not in f["blocks"]["sock"]  # an unbound load raises no alert
 
 
 def test_remainder_absorbs_two_loads_without_data():
