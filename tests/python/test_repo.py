@@ -8,7 +8,7 @@ LEVEL = {"id": "l1", "name": "Level 1", "kind": "floor", "order": 0,
 
 
 def plan(pid, name="P"):
-    return {"id": pid, "name": name, "schemaVersion": 1, "levels": [dict(LEVEL)]}
+    return {"id": pid, "name": name, "schemaVersion": 2, "levels": [dict(LEVEL)]}
 
 
 def test_new_plan_gets_revision_1():
@@ -37,7 +37,8 @@ def test_roundtrip_to_dict():
     assert PlanRepo(r.to_dict()).get("p1")["revision"] == 1
 @pytest.mark.parametrize("bad", [
     {**plan("p"), "id": ""}, {**plan("p"), "name": 1},
-    {**plan("p"), "schemaVersion": 2}, {**plan("p"), "schemaVersion": True},
+    {**plan("p"), "schemaVersion": 1}, {**plan("p"), "schemaVersion": 3},
+    {**plan("p"), "schemaVersion": True},
     {**plan("p"), "levels": {}}, {**plan("p"), "levels": []},
     {**plan("p"), "blob": "x" * (5 * 1024 * 1024)},
 ])

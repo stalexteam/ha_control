@@ -56,8 +56,13 @@ def validate_revision(value: object) -> int | None:
 class PlanRepo:
     def __init__(self, data: dict | None) -> None:
         self._plans: dict[str, dict] = {}
+        # Ids of the plans that migrate_plan converted: the store writes them back once, at load.
+        self.migrated: list[str] = []
         for pid, plan in ((data or {}).get("plans") or {}).items():
-            self._plans[pid] = migrate_plan(plan)
+            converted = migrate_plan(plan)
+            self._plans[pid] = converted
+            if converted is not plan:
+                self.migrated.append(pid)
 
     def list(self) -> list[dict]:
         return [

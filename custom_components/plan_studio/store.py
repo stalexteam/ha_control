@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import STORAGE_KEY, STORAGE_VERSION
 from .repo import PlanRepo
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class PlanStore:
@@ -16,6 +20,13 @@ class PlanStore:
 
     async def async_load(self) -> None:
         self._repo = PlanRepo(await self._store.async_load())
+        if self._repo.migrated:
+            # Converted plans are written back at once (revisions unchanged). A failed write keeps them in memory:
+            # the panel works, and the next load converts the old data again.
+            try:
+                await self._store.async_save(self._repo.to_dict())
+            except Exception:  # noqa: BLE001 - the panel must load even when the write-back fails
+                _LOGGER.warning("could not save migrated plans %s", self._repo.migrated, exc_info=True)
 
     def list(self) -> list[dict]:
         return self._repo.list()

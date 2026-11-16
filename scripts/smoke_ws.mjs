@@ -84,7 +84,7 @@ const same = (a, b, what) => {
 async function run() {
   const id = `smoke-${Date.now()}`;
   const level = { id: `${id}-l1`, name: "Level 1", kind: "floor", order: 0, nodes: [], walls: [], openings: [], zones: [] };
-  const plan = { id, name: "Smoke", schemaVersion: 1, levels: [level] };
+  const plan = { id, name: "Smoke", schemaVersion: 2, levels: [level] };
   const save = (expected_revision, force) =>
     call({ type: "plan_studio/plans/save", plan, expected_revision, ...(force ? { force: true } : {}) });
   eq(expectOk(await save(null), "save new").revision, 1, "new revision");
