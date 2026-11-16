@@ -737,4 +737,66 @@ describe('fitWallMount', () => {
     const ok = at(3000);
     expect(fitWallMount(L, rect, ok, 80)).toBe(ok);
   });
+  it('pushed into the L from wall B: stops flush at the real corner on its lo side', () => {
+    // B runs down from n1; its room face is 'right' (x < 4000), the inner corner at offset 50.
+    const r = fitWallMount(L, rect, { mode: 'wall', wallId: 'B', side: 'right', offset: 100 }, 80) as { offset: number };
+    expect(r.offset).toBeCloseTo(350);
+  });
+
+  const wall = (id: string, a: string, b: string): Wall => ({ id, a, b, thickness: 100, type: 'partition', baseline: 'center' });
+  const lv = (nodes: Level['nodes'], walls: Wall[]): Level => ({ ...L, nodes, walls });
+  const on = (level: Level, wallId: string, side: 'left' | 'right', offset: number, tol = 80) =>
+    (fitWallMount(level, rect, { mode: 'wall', wallId, side, offset }, tol) as { offset: number }).offset;
+
+  describe('collinear joints', () => {
+    // A straight wall split at n1: A (0,0)-(2000,0), B (2000,0)-(4000,0).
+    const split = lv([{ id: 'n0', x: 0, y: 0 }, { id: 'n1', x: 2000, y: 0 }, { id: 'n2', x: 4000, y: 0 }],
+      [wall('A', 'n0', 'n1'), wall('B', 'n1', 'n2')]);
+    it('a face that continues past the node does not stop the body', () => {
+      expect(on(split, 'A', 'right', 1900)).toBeCloseTo(1900);
+      expect(on(split, 'A', 'left', 1900)).toBeCloseTo(1900);
+      expect(on(split, 'B', 'right', 100)).toBeCloseTo(100);
+    });
+    it('the continued end falls back to the wall clamp', () => {
+      expect(on(split, 'A', 'right', 2100)).toBeCloseTo(2000);
+    });
+    // The same with a partition C going down (the right side of A and B) from n1.
+    const three = lv([...split.nodes, { id: 'n3', x: 2000, y: 3000 }], [...split.walls, wall('C', 'n1', 'n3')]);
+    it('at a 3-wall node the flat face opposite the partition does not stop the body', () => {
+      expect(on(three, 'A', 'left', 1900)).toBeCloseTo(1900);
+      expect(on(three, 'B', 'left', 100)).toBeCloseTo(100);
+    });
+    it('at a 3-wall node the partition side still stops it flush', () => {
+      expect(on(three, 'A', 'right', 1900)).toBeCloseTo(1650);
+      expect(on(three, 'B', 'right', 100)).toBeCloseTo(350);
+    });
+  });
+
+  describe('T joints', () => {
+    // Host H (0,0)-(4000,0); stem S from n2 on H's axis at 2000 (hosted) down to n3: on H's right face, 1950..2050.
+    const T = lv([{ id: 'n0', x: 0, y: 0 }, { id: 'n1', x: 4000, y: 0 },
+      { id: 'n2', x: 2000, y: 0, host: { wallId: 'H', offset: 2000 } }, { id: 'n3', x: 2000, y: 3000 }],
+    [wall('H', 'n0', 'n1'), wall('S', 'n2', 'n3')]);
+    it('a body pushed into the stem from either side stops flush against its face', () => {
+      expect(on(T, 'H', 'right', 1900)).toBeCloseTo(1650);
+      expect(on(T, 'H', 'right', 2100)).toBeCloseTo(2350);
+      expect(on(T, 'H', 'right', 1600)).toBeCloseTo(1650); // within the tolerance of the limit
+    });
+    it('a body centred inside the stem goes to the nearest side, never overlapping it', () => {
+      expect(on(T, 'H', 'right', 1990)).toBeCloseTo(1650);
+      expect(on(T, 'H', 'right', 2010)).toBeCloseTo(2350);
+      for (const o of [1700, 1800, 1950, 2000, 2050, 2200, 2300]) {
+        const c = on(T, 'H', 'right', o, 0);
+        expect(c + 300 <= 1950 + 1e-6 || c - 300 >= 2050 - 1e-6, String(o)).toBe(true);
+      }
+    });
+    it('away from the stem nothing changes', () => {
+      expect(on(T, 'H', 'right', 1000)).toBe(1000);
+      expect(on(T, 'H', 'right', 3000)).toBe(3000);
+    });
+    it('a body on the opposite host face is unaffected', () => {
+      expect(on(T, 'H', 'left', 1900)).toBe(1900);
+      expect(on(T, 'H', 'left', 2000)).toBe(2000);
+    });
+  });
 });

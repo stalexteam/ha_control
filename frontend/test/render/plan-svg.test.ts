@@ -117,6 +117,7 @@ describe('renderLevel', () => {
   it('draws a corner snap like the node marker', () => {
     const root = draw(sample(), null, snapOf('corner'));
     expect(root.querySelector('g.snap-corner rect')).not.toBeNull();
+    expect(root.querySelector('.snap-label')?.textContent?.trim()).toBe('wall corner');
   });
 
   it('sizes snap markers in screen pixels', () => {

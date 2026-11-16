@@ -6,7 +6,7 @@ import { wallLen } from './walls';
 /** A point within this distance of a zone edge is inside the zone (mm). */
 const EDGE_TOL = 1;
 /** A wall vertex whose offset lies further than this outside [0, wall length] makes its zone invalid (mm). */
-const WALL_TOL = 1;
+export const WALL_TOL = 1;
 /** Consecutive ring points closer than this are one point (mm). */
 const SAME_PT = 1e-6;
 /** Three points turning by less than this sine are collinear. */

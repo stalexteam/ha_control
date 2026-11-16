@@ -284,6 +284,20 @@ describe('zone draw tool', () => {
       expect(v.x).toBeCloseTo(4050); expect(v.y).toBeCloseTo(-50);
       expect(ctx.level().zones[0].invalid).toBeFalsy();
     });
+    it('a free-end corner (axis offset ~0 by float noise) adds a wall vertex at offset 0', () => {
+      // A (0,0)-(500,100): its left corner at the free end projects to an offset of about -1.8e-15.
+      const lv: Level = { ...lShape(), nodes: [{ id: 'n0', x: 0, y: 0 }, { id: 'n1', x: 500, y: 100 }],
+        walls: [{ id: 'A', a: 'n0', b: 'n1', thickness: 100, type: 'partition', baseline: 'center' }] };
+      const corner = facePoint(lv, 'A', 'left', 0)!;
+      const { ctx, t } = setup(lv);
+      click(t, corner.x + 2, corner.y - 2);
+      click(t, 2000, 1000); click(t, 3000, 1500); key(t, 'Enter');
+      const v = verts(ctx.level())[0];
+      expect(v.kind).toBe('wall');
+      if (v.kind !== 'wall') return;
+      expect(v.wallId).toBe('A'); expect(v.side).toBe('left');
+      expect(v.offset).toBe(0);
+    });
     it('Alt-click at a corner adds a free vertex at the pointer', () => {
       const { ctx, t } = setup(lShape());
       t.down(ev(3960, 60, { alt: true })); t.up(ev(3960, 60, { alt: true }));

@@ -108,7 +108,11 @@ describe('snap corners', () => {
     expect(snap(lv, { x: 55, y: 60 }, { ...opts, corners: undefined }).kind).not.toBe('corner');
   });
   it('under ortho a corner off the constraining line is ignored', () => {
-    const r = snap(lv, { x: 3000, y: 52 }, { ...opts, ortho: true, from: { x: 1000, y: 0 }, tolMm: 80 });
+    // The inner corner (3950,50) is within the tolerance of the constrained point (3940,0) and nearer than node n1
+    // (4000,0), so it would win without the lock; it lies 50 mm off the line y = 0.
+    const cursor = { x: 3940, y: 10 };
+    expect(snap(lv, cursor, opts).kind).toBe('corner');
+    const r = snap(lv, cursor, { ...opts, ortho: true, from: { x: 1000, y: 0 } });
     expect(r.kind).not.toBe('corner');
     const on = snap(lv, { x: 3900, y: 55 }, { ...opts, ortho: true, from: { x: 1000, y: 50 } });
     expect(on.kind).toBe('corner');

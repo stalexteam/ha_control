@@ -1,6 +1,6 @@
 import type { Id, Level, Pt, ZoneVertex } from '../../model/types';
 import { insertZoneVertex, moveZoneVertex, removeZoneVertex } from '../../model/zones';
-import { zoneContains, zoneOutline } from '../../geometry/zones';
+import { WALL_TOL, zoneContains, zoneOutline } from '../../geometry/zones';
 import { orthoConstrain, snap, type SnapResult } from '../../geometry/snap';
 import { wallCorners, wallFrame, wallLen, wallLocal } from '../../geometry/walls';
 import { facePoint } from '../../geometry/devices';
@@ -15,9 +15,11 @@ const zoneRings = (level: Level, exclude?: Id): Pt[][] =>
 /**
  * The zone vertex placed at the pointer, and the snap result for the marker (null with Alt). Alt: a free vertex at
  * the pointer (ortho from `from` with Shift), no snapping. Otherwise snap (Shift: ortho from `from`): a node gives a
- * node vertex; a wall face corner gives a wall vertex on that face (an inner corner) or a free vertex (an outer one); a wall midpoint, axis or face gives a wall vertex on the face of the pointer's side; a vertex or an edge
- * of another zone (every zone but `exclude`), the grid or nothing gives a free vertex. A wall vertex's x,y and the
- * marker's point are the resolved face point (facePoint), not the axis point a midpoint or axis snap returns.
+ * node vertex; a wall face corner gives a wall vertex on that face (an inner corner: its axis offset within
+ * WALL_TOL of [0, length], stored clamped to it) or a free vertex (an outer one); a wall midpoint, axis or face gives
+ * a wall vertex on the face of the pointer's side; a vertex or an edge of another zone (every zone but `exclude`),
+ * the grid or nothing gives a free vertex. A wall vertex's x,y and the marker's point are the resolved face point
+ * (facePoint), not the axis point a midpoint or axis snap returns.
  */
 export function zoneVertexAt(ctx: ToolContext, level: Level, e: ToolEvent, from: Pt | undefined, exclude?: Id):
 { vertex: ZoneVertex; snap: SnapResult | null } {
@@ -34,8 +36,10 @@ export function zoneVertexAt(ctx: ToolContext, level: Level, e: ToolEvent, from:
     // An inner corner (on the axis span) stays on its face and follows the wall; an outer one is a free vertex.
     const c = s.corner;
     const len = wallLen(level, c.wallId);
-    const p = len !== null && c.offset >= 0 && c.offset <= len ? facePoint(level, c.wallId, c.side, c.offset) : null;
-    if (p) return { vertex: { kind: 'wall', wallId: c.wallId, offset: c.offset, side: c.side, x: p.x, y: p.y }, snap: s };
+    const inner = len !== null && c.offset >= -WALL_TOL && c.offset <= len + WALL_TOL;
+    const offset = inner ? Math.max(0, Math.min(len, c.offset)) : c.offset;
+    const p = inner ? facePoint(level, c.wallId, c.side, offset) : null;
+    if (p) return { vertex: { kind: 'wall', wallId: c.wallId, offset, side: c.side, x: p.x, y: p.y }, snap: s };
   }
   if ((s.kind === 'mid' || s.kind === 'wall') && ep.kind === 'wall') {
     const w = level.walls.find(x => x.id === ep.wallId);

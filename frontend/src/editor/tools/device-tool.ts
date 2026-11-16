@@ -51,8 +51,8 @@ export function deviceCandidate(
       for (const w of level.walls) {
         if (w.a !== ep.nodeId && w.b !== ep.nodeId) continue;
         const f = wallFrame(level, w);
-        const s = wallLocal(f, cursor).side;
-        const d = Math.abs(Math.abs(s) - (s > 0 ? f.leftOff : f.rightOff));
+        const side = wallLocal(f, cursor).side;
+        const d = Math.abs(Math.abs(side) - (side > 0 ? f.leftOff : f.rightOff));
         if (!best || d < best.d) best = { id: w.id, offset: w.a === ep.nodeId ? 0 : f.len, d };
       }
       if (best) return { mode: 'wall', wallId: best.id, side: sideOf(level, best.id, cursor), offset: best.offset };

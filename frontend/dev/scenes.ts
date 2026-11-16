@@ -1,4 +1,5 @@
-import type { Device, Plan, Zone } from '../src/model/types';
+import type { Device, DeviceProps, Plan, Zone } from '../src/model/types';
+import { fitWallMount } from '../src/geometry/devices';
 import type { PowerFrame, PowerSchema } from '../src/model/power';
 import { rectRoomLevel } from '../test/fixtures';
 
@@ -7,6 +8,10 @@ export interface Scene { plans: Plan[]; powerFrame?: PowerFrame }
 
 function room(): Plan {
   const level = rectRoomLevel(4000, 3000, 100);
+  // A short partition meeting the top wall mid-length (a T joint): n4 sits on w0's axis at 2000.
+  level.nodes.push({ id: 'n4', x: 2000, y: 0, host: { wallId: 'w0', offset: 2000 } }, { id: 'n5', x: 2000, y: 600 });
+  level.walls.push({ id: 'w4', a: 'n4', b: 'n5', thickness: 100, type: 'partition', baseline: 'center' });
+  const box: DeviceProps = { kind: 'equipment', shape: 'rect', width: 600, depth: 400, diameter: 600, icon: 'mdi:flash', label: '' };
   const poly = (id: string, name: string, pts: [number, number][]): Zone => ({
     id, name, invalid: false, shape: { kind: 'polygon', vertices: pts.map(([x, y]) => ({ kind: 'free', x, y })) },
   });
@@ -48,6 +53,11 @@ function room(): Plan {
       id: 'd-corner', name: 'Corner box', invalid: false, bindings: {},
       placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 3650 },
       props: { kind: 'equipment', shape: 'rect', width: 600, depth: 400, diameter: 600, icon: 'mdi:flash', label: '' },
+    },
+    {
+      // Wall-mounted body pushed into the partition (offset 1900): fitWallMount stops it flush at its face (1650).
+      id: 'd-tee', name: 'Tee box', invalid: false, bindings: {}, props: box,
+      placement: fitWallMount(level, box, { mode: 'wall', wallId: 'w0', side: 'right', offset: 1900 }, 0),
     },
   ];
   return { id: 'room', name: 'Room', schemaVersion: 2, revision: 1, levels: [level] };

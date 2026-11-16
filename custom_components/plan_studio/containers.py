@@ -135,12 +135,14 @@ class Valve(WallSwitch):
     def handle(self, entity_id, old, new, now, own=False):
         if entity_id not in self.entity_ids():
             return []
+        # Track the settled value before the base status gate, so a change seen while in error still updates it;
+        # _edge is a side channel to _intents, which super().handle() calls synchronously right after.
         prev, self._settled = self._settled, self._settle(new, self._settled)
         self._edge = (prev, self._settled)
         return super().handle(entity_id, old, new, now, own)
 
     def _intents(self, entity_id, old, new, now, own):
-        prev, cur = self._edge
+        prev, cur = self._edge  # set by handle() just before this call
         if prev is None or cur is None or prev == cur:
             return []
         return super()._intents(entity_id, (prev, {}), (cur, {}), now, own)

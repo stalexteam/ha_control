@@ -1,7 +1,7 @@
 import polygonClipping from 'polygon-clipping';
 import {
   AIM_KINDS, AIM_MAX, type Device, type DeviceKind, type DevicePlacement, type DeviceProps, type Id, type Level, type Pt,
-  type Side,
+  type Side, type Wall,
 } from '../model/types';
 import { add, cross, dist, dot, perpLeft, scale, sub } from './vec';
 import { fromRing, toPoly, wallCorners, wallFrame } from './walls';
@@ -82,26 +82,81 @@ export function devicePose(level: Level, d: Device): DevicePose | null {
 }
 
 /**
- * Wall-mounted equipment moved to fit its face between the corners at the ends of its wall side: the centre offset
- * within [spanA + half, spanB - half] (a span shorter than the body: its midpoint), exactly a limit when within tolMm
- * of it, then clamped to the wall. The same object for any other kind, a non-wall placement or an unchanged offset.
+ * The face on `side` (outward normal n, `off` from the axis) of a wall runs on past its end at node `nodeId` (u: the
+ * wall's direction away from it): a node that is not a T joint, where another wall continues the wall collinearly and
+ * is no wider on that side, and no wall leaves the node on that side.
+ */
+function faceContinues(level: Level, wall: Wall, nodeId: Id, u: Pt, n: Pt, off: number): boolean {
+  const node = level.nodes.find(x => x.id === nodeId);
+  if (!node || node.host) return false;
+  let continues = false;
+  for (const w of level.walls) {
+    if (w === wall || (w.a !== nodeId && w.b !== nodeId)) continue;
+    let fo;
+    try { fo = wallFrame(level, w); } catch { continue; } // a node is missing
+    const ou = w.a === nodeId ? fo.dir : scale(fo.dir, -1);
+    if (Math.abs(cross(u, ou)) < 1e-9 && dot(u, ou) < 0) {
+      if ((dot(perpLeft(fo.dir), n) > 0 ? fo.leftOff : fo.rightOff) > off + 1e-6) return false; // its face steps out
+      continues = true;
+    } else if (dot(ou, n) > 1e-9) return false; // a wall leaves on this side
+  }
+  return continues;
+}
+
+/**
+ * Wall-mounted equipment moved to fit its face. The face is split into spans: from the corner at end A to the
+ * corner at end B (an end where the face continues past the node along a collinear wall has no limit), minus the
+ * stretches where walls meet this face at T joints (each stem's end corners at its hosted node, as axis offsets).
+ * In the span containing the offset (else the nearest one), the centre offset goes within [start + half, end - half]
+ * (a span shorter than the body: its midpoint), exactly a limit when within tolMm of it; then it is clamped to the
+ * wall. The same object for any other kind, a non-wall placement or an unchanged offset.
  */
 export function fitWallMount(level: Level, props: DeviceProps, pl: DevicePlacement, tolMm: number): DevicePlacement {
   if (props.kind !== 'equipment' || pl.mode !== 'wall') return pl;
   const wall = level.walls.find(w => w.id === pl.wallId);
   if (!wall) return pl;
-  let len: number;
-  try { len = wallFrame(level, wall).len; } catch { return pl; } // a node is missing
-  const ends = wallCorners(level).filter(c => c.wallId === pl.wallId && c.side === pl.side);
+  let f;
+  try { f = wallFrame(level, wall); } catch { return pl; } // a node is missing
+  const corners = wallCorners(level);
+  const ends = corners.filter(c => c.wallId === pl.wallId && c.side === pl.side);
   const ca = ends.find(c => c.end === 'a'), cb = ends.find(c => c.end === 'b');
   if (!ca || !cb) return pl;
+  const L = perpLeft(f.dir);
+  const n = pl.side === 'left' ? L : scale(L, -1), off = pl.side === 'left' ? f.leftOff : f.rightOff;
+  const lo0 = faceContinues(level, wall, wall.a, f.dir, n, off) ? -Infinity : ca.offset;
+  const hi0 = faceContinues(level, wall, wall.b, scale(f.dir, -1), n, off) ? Infinity : cb.offset;
+  // T joints on this face: the stems hosted on this wall whose far end lies on this side (as trimAtHost decides).
+  const along = (p: Pt) => dot(sub(p, f.a), f.dir);
+  const cuts: [number, number][] = [];
+  for (const node of level.nodes) {
+    if (node.host?.wallId !== wall.id) continue;
+    for (const w of level.walls) {
+      const end = w.a === node.id ? 'a' : w.b === node.id ? 'b' : null;
+      const far = end && level.nodes.find(x => x.id === (end === 'a' ? w.b : w.a));
+      if (!far || (dot(sub(far, f.a), L) >= 0 ? 'left' : 'right') !== pl.side) continue;
+      const ts = corners.filter(c => c.wallId === w.id && c.end === end).map(c => along(c.pt));
+      if (ts.length) cuts.push([Math.min(...ts), Math.max(...ts)]);
+    }
+  }
+  cuts.sort((x, y) => x[0] - y[0]);
+  const spans: [number, number][] = [];
+  let from = lo0;
+  for (const [s, e] of cuts) {
+    const to = Math.min(s, hi0);
+    if (to > from) spans.push([from, to]);
+    from = Math.max(from, e);
+  }
+  if (hi0 > from) spans.push([from, hi0]);
+  if (spans.length === 0) spans.push([lo0, hi0]);
+  const gap = ([a, b]: [number, number]) => Math.max(0, a - pl.offset, pl.offset - b);
+  const [a, b] = spans.reduce((best, sp) => (gap(sp) < gap(best) ? sp : best));
   const half = (props.shape === 'circle' ? props.diameter : props.width) / 2;
-  const lo = ca.offset + half, hi = cb.offset - half;
+  const lo = a + half, hi = b - half;
   let o = pl.offset;
-  if (lo > hi) o = (ca.offset + cb.offset) / 2;
+  if (lo > hi) o = (a + b) / 2;
   else if (o <= lo + tolMm) o = lo;
   else if (o >= hi - tolMm) o = hi;
-  o = Math.max(0, Math.min(len, o));
+  o = Math.max(0, Math.min(f.len, o));
   return Math.abs(o - pl.offset) < 1e-9 ? pl : { ...pl, offset: o };
 }
 
