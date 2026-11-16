@@ -1,7 +1,7 @@
 import { t } from '../i18n';
 import { newId } from './ids';
 import { deleteDevice, isInverter, setDeviceInverter } from './devices';
-import type { Device, Id, Level, Pt } from './types';
+import type { Device, Id, Level, Pt, Rule } from './types';
 import type { GeoCtx } from '../geometry/power';
 
 export type PortSide = 'top' | 'right' | 'bottom' | 'left';
@@ -32,7 +32,7 @@ export type PowerKind = PowerBlock['kind'];
 export type WireEnd = { block: Id; port: PortName } | { bus: Id; at: number };
 export interface PowerWire { id: Id; from: WireEnd; to: WireEnd }
 export interface PowerSchema { blocks: PowerBlock[]; wires: PowerWire[] }
-export interface PlanDoc { level: Level; power?: PowerSchema }
+export interface PlanDoc { level: Level; power?: PowerSchema; rules?: Rule[] }
 export type Position = 'A' | '0' | 'B';
 
 export interface WireLive { power: number | null; state: 'live' | 'dead' }

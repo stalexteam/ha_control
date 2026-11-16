@@ -142,6 +142,17 @@ export interface Plan {
   levels: Level[];
   /** Power-flow schematic; absent until the schematic is edited. */
   power?: PowerSchema;
+  /** Condition rules of the Automation step; absent = none. */
+  rules?: Rule[];
+}
+
+export type RuleDo = 'on' | 'off' | 'open' | 'close';
+export interface RuleInput { source: { device: Id } | { rule: Id }; not?: true }
+export interface RuleAction { device: Id; do: RuleDo }
+/** zoneId only says where the rule is listed; enabled missing = enabled; delays are whole seconds 0..3600. */
+export interface Rule {
+  id: Id; name: string; zoneId: Id | null; enabled?: false; combine: 'all' | 'any';
+  inputs: RuleInput[]; onDelay: number; offDelay: number; onTrue: RuleAction[]; onFalse: RuleAction[];
 }
 
 export const WALL_PRESETS: Record<WallType, number> = {

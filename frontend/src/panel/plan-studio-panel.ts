@@ -1,6 +1,6 @@
 import { LitElement, html, nothing, type PropertyValues, type TemplateResult } from 'lit';
 import { property, state } from 'lit/decorators.js';
-import type { BindingRole, Device, Id, Level, Plan, Pt, WallType } from '../model/types';
+import type { BindingRole, Device, Id, Level, Plan, Pt, Rule, WallType } from '../model/types';
 import { WALL_PRESETS } from '../model/types';
 import { deleteWall } from '../model/ops';
 import { deleteOpening } from '../model/openings';
@@ -283,6 +283,17 @@ export class PlanStudioPanel extends LitElement {
     this.dropStaleSelection();
     this.requestUpdate();
   }
+
+  /** Pushes a rules edit into the same undo history; an empty list drops the key. */
+  commitRules(next: Rule[]): void {
+    if (!this.history) return;
+    const { rules: _old, ...rest } = this.history.current;
+    this.history.push({ ...rest, ...(next.length > 0 ? { rules: next } : {}) });
+    this.save.markDirty();
+    this.requestUpdate();
+  }
+
+  get rules(): Rule[] { return this.history?.current.rules ?? []; }
 
   private dropStaleSelection(): void {
     if (this.history && this.selection && !selectionExists(this.history.current.level, this.selection, this.power)) {

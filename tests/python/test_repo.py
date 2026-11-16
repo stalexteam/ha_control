@@ -64,3 +64,45 @@ def test_validate_plan_power():
     for bad in ({"blocks": {}}, {"blocks": [], "wires": {}}, {"wires": []}, [], None):
         with pytest.raises(vol.Invalid, match="power must have blocks and wires lists"):
             validate_plan({**plan("p"), "power": bad})
+
+
+def rule(rid="r1", **kw):
+    r = {"id": rid, "name": "R", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+         "inputs": [{"source": {"device": "d1"}}], "onTrue": [{"device": "d2", "do": "close"}], "onFalse": []}
+    r.update(kw)
+    return r
+
+
+def ref(rid):
+    return [{"source": {"rule": rid}}]
+
+
+def test_validate_plan_rules():
+    validate_plan(plan("p"))  # no rules
+    validate_plan({**plan("p"), "rules": []})
+    validate_plan({**plan("p"), "rules": [rule(enabled=False, zoneId="z", inputs=[{"source": {"rule": "r2"}, "not": True}]),
+                                          rule("r2")]})
+    bad = [
+        ("rules must be a list", "x"),
+        ("a rule must be an object", [1]),
+        ("string id and name", [rule(id=1)]),
+        ("string id and name", [rule(name=None)]),
+        ("combine", [rule(combine="some")]),
+        ("onDelay", [rule(onDelay=-1)]),
+        ("offDelay", [rule(offDelay=3601)]),
+        ("onDelay", [rule(onDelay=1.5)]),
+        ("onDelay", [rule(onDelay=True)]),
+        ("inputs must be a list", [rule(inputs="x")]),
+        ("rule input", [rule(inputs=[{"source": {}}])]),
+        ("rule input", [rule(inputs=[{"source": {"device": ""}}])]),
+        ("rule input", [rule(inputs=[{"source": {"device": "a"}, "not": False}])]),
+        ("onTrue must be a list", [rule(onTrue=None)]),
+        ("rule action", [rule(onFalse=[{"device": "d", "do": "toggle"}])]),
+        ("rule action", [rule(onTrue=[{"do": "on"}])]),
+        ("duplicate", [rule("a"), rule("a")]),
+        ("cycle", [rule("a", inputs=ref("b")), rule("b", inputs=ref("a"))]),
+        ("cycle", [rule("a", inputs=ref("a"))]),
+    ]
+    for match, rules in bad:
+        with pytest.raises(vol.Invalid, match=match):
+            validate_plan({**plan("p"), "rules": rules})

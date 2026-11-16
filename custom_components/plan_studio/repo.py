@@ -19,6 +19,68 @@ class RevisionConflict(Exception):
     """Raised when expected revision does not match stored revision."""
 
 
+def _is_id(v: object) -> bool:
+    return isinstance(v, str) and bool(v)
+
+
+def _validate_rules(rules: object) -> None:
+    if not isinstance(rules, list):
+        raise vol.Invalid("rules must be a list")
+    graph: dict[str, list[str]] = {}
+    for r in rules:
+        if not isinstance(r, dict):
+            raise vol.Invalid("a rule must be an object")
+        if not _is_id(r.get("id")) or not isinstance(r.get("name"), str):
+            raise vol.Invalid("a rule needs a string id and name")
+        if r["id"] in graph:
+            raise vol.Invalid("duplicate rule id")
+        if r.get("combine") not in ("all", "any"):
+            raise vol.Invalid("rule combine must be all or any")
+        for key in ("onDelay", "offDelay"):
+            v = r.get(key)
+            if type(v) is not int or not 0 <= v <= 3600:
+                raise vol.Invalid(f"rule {key} must be a whole number of seconds 0..3600")
+        zone = r.get("zoneId")
+        if zone is not None and not isinstance(zone, str):
+            raise vol.Invalid("rule zoneId must be a string or null")
+        if "enabled" in r and r["enabled"] is not False:
+            raise vol.Invalid("rule enabled may only be false")
+        inputs = r.get("inputs")
+        if not isinstance(inputs, list):
+            raise vol.Invalid("rule inputs must be a list")
+        refs: list[str] = []
+        for i in inputs:
+            src = i.get("source") if isinstance(i, dict) else None
+            if not isinstance(src, dict) or len(src) != 1 or not _is_id(src.get("device", src.get("rule"))):
+                raise vol.Invalid("rule input needs a source with a device or rule id")
+            if "not" in i and i["not"] is not True:
+                raise vol.Invalid("rule input not may only be true")
+            if "rule" in src:
+                refs.append(src["rule"])
+        for key in ("onTrue", "onFalse"):
+            actions = r.get(key)
+            if not isinstance(actions, list):
+                raise vol.Invalid(f"rule {key} must be a list")
+            for a in actions:
+                if not isinstance(a, dict) or not _is_id(a.get("device")) or a.get("do") not in ("on", "off", "open", "close"):
+                    raise vol.Invalid("rule action needs a device and do on/off/open/close")
+        graph[r["id"]] = refs
+    state: dict[str, int] = {}
+
+    def visit(node: str) -> None:
+        state[node] = 1
+        for nxt in graph.get(node, []):
+            if state.get(nxt) == 1:
+                raise vol.Invalid("rules reference each other in a cycle")
+            if nxt in graph and nxt not in state:
+                visit(nxt)
+        state[node] = 2
+
+    for rid in graph:
+        if rid not in state:
+            visit(rid)
+
+
 def validate_plan(plan: dict) -> None:
     if not isinstance(plan, dict):
         raise vol.Invalid("plan must be an object")
@@ -38,6 +100,8 @@ def validate_plan(plan: dict) -> None:
         power = plan["power"]
         if not isinstance(power, dict) or not all(isinstance(power.get(k), list) for k in ("blocks", "wires")):
             raise vol.Invalid("power must have blocks and wires lists")
+    if "rules" in plan:
+        _validate_rules(plan["rules"])
     try:
         size = len(json.dumps(plan).encode("utf-8"))
     except (TypeError, ValueError) as err:

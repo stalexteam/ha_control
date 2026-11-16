@@ -177,7 +177,8 @@ export class PlanSession {
     this.h.plan = { ...input, levels: input.levels.map(normalizeLevel) };
     const doc = migrateDevices({ level: this.h.plan.levels[0], power: this.h.plan.power });
     const power = normalizePower(doc.power, { device: id => doc.level.devices.find(d => d.id === id) });
-    this.h.history = new History<PlanDoc>({ level: doc.level, ...(power ? { power } : {}) });
+    const rules = input.rules && input.rules.length > 0 ? input.rules : undefined;
+    this.h.history = new History<PlanDoc>({ level: doc.level, ...(power ? { power } : {}), ...(rules ? { rules } : {}) });
     this.h.lazyPower = defaultPower();
     this.h.activeTool.cancel();
     this.h.activeTool = createTool(this.h.toolId, this.h.ctx);
@@ -227,10 +228,10 @@ export class PlanSession {
   /** The open plan as it is saved or drafted; an equipment switch on the edited level marks it (markSwitchesMigrated). */
   currentPlan(): Plan {
     const plan = this.h.plan!;
-    const { level, power } = this.h.history!.current;
+    const { level, power, rules } = this.h.history!.current;
     const levels = plan.levels.map((l, i) => (i === 0 ? markSwitchesMigrated(level) : l));
-    const { power: _drop, ...rest } = plan;
-    return { ...rest, levels, ...(power ? { power } : {}), revision: this.h.save.baseRevision ?? 0 };
+    const { power: _drop, rules: _dropRules, ...rest } = plan;
+    return { ...rest, levels, ...(power ? { power } : {}), ...(rules ? { rules } : {}), revision: this.h.save.baseRevision ?? 0 };
   }
 
   async doSave(): Promise<void> {
