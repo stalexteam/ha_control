@@ -109,7 +109,7 @@ export function triggerFields(o: BindingPropsOpts, d: Device, role: TriggerRole)
 /**
  * The container checkboxes that follow a role section, so each sits under the section above it and before the
  * section it reveals (ticking one never moves it from under the pointer):
- * - wall switch, after State: "Auto by double toggle", then "Window, s" while it is checked;
+ * - wall switch and valve, after State: "Auto by double toggle", then "Window, s" while it is checked;
  * - smart button, after On / Off (On): "Separate Off", then "Auto" unless the Off section comes between them;
  * - smart button, after Off: "Auto".
  * Turning "Separate Off" or "Auto" on while its entity is empty starts that entity as the On entity, in the same commit.
@@ -117,7 +117,7 @@ export function triggerFields(o: BindingPropsOpts, d: Device, role: TriggerRole)
  */
 export function containerFlags(o: BindingPropsOpts, d: Device, role: BindingRole): TemplateResult {
   const p = d.props;
-  if (p.kind === 'wall_switch' && role === 'state') {
+  if ((p.kind === 'wall_switch' || p.kind === 'valve') && role === 'state') {
     return html`
       ${check('autoByDoubleToggle', t('binding.autoByDoubleToggle'), p.autoByDoubleToggle,
         v => setProps(o, d, { autoByDoubleToggle: v }))}

@@ -33,6 +33,16 @@ function room(): Plan {
       placement: { mode: 'wall', wallId: 'w2', side: 'left', offset: 1000 },
       props: { kind: 'socket' },
     },
+    {
+      id: 'd-leak', name: 'Leak sensor', invalid: false,
+      placement: { mode: 'free', x: 800, y: 700, rotation: 0 },
+      props: { kind: 'leak_sensor' },
+    },
+    {
+      id: 'd-valve', name: 'Water valve', invalid: false,
+      placement: { mode: 'free', x: 1200, y: 700, rotation: 0 },
+      props: { kind: 'valve', autoByDoubleToggle: false, windowSec: 3 },
+    },
   ];
   return { id: 'room', name: 'Room', schemaVersion: 2, revision: 1, levels: [level] };
 }

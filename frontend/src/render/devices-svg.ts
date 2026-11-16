@@ -1,6 +1,6 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
-import { mdiAlert, mdiPower, mdiPowerOff, mdiRefreshAuto, mdiToggleSwitch } from '@mdi/js';
-import { isContainerKind, type Device, type Level, type Pt } from '../model/types';
+import { mdiAlert, mdiPower, mdiPowerOff, mdiRefreshAuto, mdiToggleSwitch, mdiValveClosed, mdiValveOpen } from '@mdi/js';
+import { isContainerKind, type Device, type DeviceKind, type Level, type Pt } from '../model/types';
 import type { BindStatus } from '../model/bindings';
 import type { ContainerFlash, ContainerState } from '../live/container-feed';
 import type { Preview, Selection } from '../editor/tools/types';
@@ -179,6 +179,12 @@ function iconShape(d: Device, R: number, color: string, fill: string, dash?: str
     case 'wall_switch':
       return svg`<rect class="icon" x=${-R * 0.6} y=${-R * 0.6} width=${R * 1.2} height=${R * 1.2} fill=${common.fill}
         stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${dash ?? nothing} vector-effect=${NS}></rect>`;
+    case 'valve':
+      return svg`<path class="icon" d=${`M${-R} ${-R * 0.6}L${R} ${R * 0.6}L${R} ${-R * 0.6}L${-R} ${R * 0.6}Z`} fill=${common.fill}
+        stroke=${common.stroke} stroke-width="1.5" stroke-linejoin="round" stroke-dasharray=${dash ?? nothing} vector-effect=${NS}></path>`;
+    case 'leak_sensor':
+      return svg`<circle class="icon" r=${R * 0.7} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
+        <path class="drop" d=${`M0 ${-R * 0.4}Q${R * 0.3} ${R * 0.05} 0 ${R * 0.3}Q${-R * 0.3} ${R * 0.05} 0 ${-R * 0.4}Z`} fill=${color} stroke=${color} stroke-width="1" vector-effect=${NS}></path>`;
     case 'smart_button':
       return svg`<rect class="icon" x=${-R * 0.6} y=${-R * 0.6} width=${R * 1.2} height=${R * 1.2} rx=${R * 0.35}
         fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${dash ?? nothing}
@@ -231,9 +237,10 @@ function bindRing(st: BindStatus, scale: number, body = 0): SVGTemplateResult | 
 }
 
 /** Badge name (`data-badge`) and MDI path of an intent. */
-function intentIcon(f: ContainerFlash): [string, string] {
+function intentIcon(f: ContainerFlash, kind: DeviceKind): [string, string] {
   if (f.action === 'toggle') return ['toggle', mdiToggleSwitch];
   if (f.action === 'auto') return ['auto', mdiRefreshAuto];
+  if (kind === 'valve') return f.value === 'off' ? ['valve-closed', mdiValveClosed] : ['valve-open', mdiValveOpen];
   return f.value === 'off' ? ['set-off', mdiPowerOff] : ['set-on', mdiPower];
 }
 
@@ -242,8 +249,8 @@ function intentIcon(f: ContainerFlash): [string, string] {
  * background colour, ringed in the icon colour, around a BADGE_ICON_PX MDI icon. An intent being shown wins (in the
  * selection colour); otherwise an `error` status shows the alert; otherwise there is none.
  */
-function badge(live: ContainerState, flash: ContainerFlash | null, R: number, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
-  const icon = flash ? intentIcon(flash) : live.status === 'error' ? ['alert', mdiAlert] : null;
+function badge(live: ContainerState, flash: ContainerFlash | null, kind: DeviceKind, R: number, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
+  const icon = flash ? intentIcon(flash, kind) : live.status === 'error' ? ['alert', mdiAlert] : null;
   if (!icon) return nothing;
   const [name, d] = icon;
   const ink = flash ? o.palette.selection : ALERT;
@@ -282,7 +289,7 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
         : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, p.deviceFill,
           noData ? NO_DATA_DASH : undefined)}</g>`}
       ${o.bindingStatus && !preview ? bindRing(o.bindingStatus(d), o.scale, roundLightR(d, R)) : nothing}
-      ${live ? badge(live, o.containerFlash?.(d) ?? null, R, o) : nothing}
+      ${live ? badge(live, o.containerFlash?.(d) ?? null, d.props.kind, R, o) : nothing}
     </g>`;
 }
 

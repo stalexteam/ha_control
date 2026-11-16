@@ -53,9 +53,9 @@ describe('Equipment tab', () => {
     expect(el.selection).toBeNull();
     expect(el.toolId).toBe('device-select');
     const tools = [...el.shadowRoot!.querySelectorAll<HTMLButtonElement>('.tools button.tool')];
-    expect(tools).toHaveLength(11);
+    expect(tools).toHaveLength(13);
     expect(tools.map(b => b.dataset.tool)).toEqual(['device-select', 'ceiling_light', 'wall_light', 'motion_sensor',
-      'illuminance_sensor', 'climate_sensor', 'wall_switch', 'smart_button', 'socket', 'exhaust_fan', 'equipment']);
+      'illuminance_sensor', 'climate_sensor', 'leak_sensor', 'wall_switch', 'smart_button', 'valve', 'socket', 'exhaust_fan', 'equipment']);
     expect(tools[1].textContent!.trim()).toBe('Ceiling light');
     await tab(el, 'plan');
     expect(el.toolId).toBe('select');
@@ -489,5 +489,28 @@ describe('Equipment tab: typing survives re-renders', () => {
       expect(boxes(el).map(b => b.dataset.zone)).toEqual(zoneIds);
       expect(el.shadowRoot!.querySelector('.props fieldset[data-field="room"]')).toBeNull();
     });
+  });
+});
+
+describe('Equipment tab: Type select lists switch kinds only', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+  });
+
+  it('a wall switch offers Wall switch and Smart button; a valve has no Type row', async () => {
+    const el = await mount();
+    await drawBox(el);
+    await tab(el, 'equipment');
+    await tool(el, 'wall_switch');
+    click(el, 100, -100);
+    await el.updateComplete;
+    const sel = $<HTMLSelectElement>(el, '.props select[data-field="kind"]');
+    expect([...sel.options].map(o => o.textContent!.trim())).toEqual(['Wall switch', 'Smart button']);
+    await tool(el, 'valve');
+    click(el, 1500, -100);
+    await el.updateComplete;
+    expect(el.history!.current.level.devices.some(d => d.props.kind === 'valve')).toBe(true);
+    expect(el.shadowRoot!.querySelector('.props select[data-field="kind"]')).toBeNull();
   });
 });

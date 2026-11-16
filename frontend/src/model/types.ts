@@ -73,6 +73,8 @@ export interface Trigger { slot: number; event: string }
 export type ContainerKind = 'wall_switch' | 'smart_button' | 'valve';
 /** The container kinds that convert into one another (a valve does not). */
 export type SwitchKind = 'wall_switch' | 'smart_button';
+/** True for the container kinds that convert into one another. */
+export const isSwitchKind = (kind: DeviceKind): kind is SwitchKind => kind === 'wall_switch' || kind === 'smart_button';
 /** True for the input-container kinds. */
 export const isContainerKind = (kind: DeviceKind): kind is ContainerKind => kind === 'wall_switch' || kind === 'smart_button' || kind === 'valve';
 export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | ContainerKind | 'socket' | 'equipment' | 'climate_sensor' | 'exhaust_fan' | 'leak_sensor';

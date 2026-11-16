@@ -5,7 +5,7 @@ import { renderLevel } from '../../src/render/plan-svg';
 import { paletteFor } from '../../src/render/theme';
 import { renderDevices, ICON_PX, equipmentLabelLayout } from '../../src/render/devices-svg';
 import { deviceDefaults, type ContainerKind, type Device, type DeviceKind, type Level } from '../../src/model/types';
-import { mdiAlert, mdiPower, mdiPowerOff, mdiRefreshAuto, mdiToggleSwitch } from '@mdi/js';
+import { mdiAlert, mdiPower, mdiValveClosed, mdiValveOpen, mdiPowerOff, mdiRefreshAuto, mdiToggleSwitch } from '@mdi/js';
 import type { HassLike } from '../../src/api';
 import {
   ContainerFeed, FLASH_MS, type ContainerFlash, type ContainerIntent, type ContainerState,
@@ -567,5 +567,39 @@ describe('equipmentLabelLayout', () => {
     ] };
     const eq = drawDevs(level, {}, 1).querySelector('g.device-equipment')!;
     expect(eq.querySelector('.equipment-label')!.getAttribute('text-anchor')).toBe('start');
+  });
+});
+
+describe('leak sensor and valve symbols', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+  const lv = (): Level => ({ ...rectRoomLevel(6000, 5000, 200), devices: [
+    free('lk', 'leak_sensor', 1000, 1000), free('vl', 'valve', 2000, 1000), free('sw', 'wall_switch', 3000, 1000)] });
+  const okState = (kind: ContainerKind): ContainerState => ({ kind, status: 'ok' });
+
+  it('a leak sensor is a circle with a drop', () => {
+    const g = drawDevs(lv()).querySelector('g.device-leak_sensor')!;
+    expect(g.querySelector('circle.icon')).toBeTruthy();
+    expect(g.querySelector('path.drop')).toBeTruthy();
+  });
+
+  it('a valve is a bow-tie path; dashed without state, solid when live', () => {
+    const R = ICON_PX / 0.1;
+    const path = (o: Partial<DevOpts> = {}) => drawDevs(lv(), o).querySelector('g.device-valve path.icon')!;
+    expect(path().getAttribute('d')).toBe(`M${-R} ${-0.6 * R}L${R} ${0.6 * R}L${R} ${-0.6 * R}L${-R} ${0.6 * R}Z`);
+    expect(path().getAttribute('stroke-dasharray')).toBe('3 2');
+    const live = path({ containerState: (d: Device) => (d.id === 'vl' ? okState('valve') : undefined) });
+    expect(live.getAttribute('stroke-dasharray')).toBeNull();
+  });
+
+  it('a valve flash shows open / closed icons; a wall switch keeps set-on / set-off', () => {
+    const badge = (flash: ContainerFlash, id: string) => {
+      const root = drawDevs(lv(), { containerState: (d: Device) => okState(d.props.kind as ContainerKind), containerFlash: () => flash });
+      const b = root.querySelector(`g[data-id="${id}"] g.badge`)!;
+      return [b.getAttribute('data-badge'), b.querySelector('path')!.getAttribute('d')];
+    };
+    expect(badge({ action: 'set', value: 'on' }, 'vl')).toEqual(['valve-open', mdiValveOpen]);
+    expect(badge({ action: 'set', value: 'off' }, 'vl')).toEqual(['valve-closed', mdiValveClosed]);
+    expect(badge({ action: 'set', value: 'on' }, 'sw')).toEqual(['set-on', mdiPower]);
+    expect(badge({ action: 'set', value: 'off' }, 'sw')).toEqual(['set-off', mdiPowerOff]);
   });
 });

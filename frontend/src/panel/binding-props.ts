@@ -60,7 +60,12 @@ function clock(iso: string): string {
 }
 
 /** An intent as the output line names it: `toggle`, `auto`, `set on` or `set off`. */
-const intentName = (i: ContainerIntent): string => (i.action === 'set' ? `set ${i.value ?? ''}`.trim() : i.action);
+const intentName = (i: ContainerIntent, kind: string): string => {
+  if (i.action !== 'set') return i.action;
+  // A valve's on / off are open / closed.
+  const value = kind === 'valve' ? (i.value === 'on' ? 'open' : i.value === 'off' ? 'closed' : i.value) : i.value;
+  return `set ${value ?? ''}`.trim();
+};
 
 /** A live container's line: its error status, else its last event, else "No events yet". */
 function stateLine(s: ContainerState): string {
@@ -70,7 +75,7 @@ function stateLine(s: ContainerState): string {
       : t('output.errorNotConfigured');
   }
   if (!s.last) return t('output.none');
-  return t('output.last').replace('{event}', intentName(s.last)).replace('{time}', clock(s.last.at));
+  return t('output.last').replace('{event}', intentName(s.last, s.kind)).replace('{time}', clock(s.last.at));
 }
 
 /**

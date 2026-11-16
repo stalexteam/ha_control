@@ -1,7 +1,7 @@
 import { newId } from './ids';
 import {
   AIM_MAX, DEVICE_PLACEMENTS, defaultsMode, deviceDefaults,
-  type BindingRole, type Device, type DevicePlacement, type DeviceProps, type Id, type Level, type SwitchKind,
+  type BindingRole, type Device, type DevicePlacement, type DeviceProps, type Id, type Level, type SwitchKind, isSwitchKind,
 } from './types';
 import { sanitizeBindings } from './bindings';
 import { wallLen } from '../geometry/walls';
@@ -140,7 +140,7 @@ export function setDeviceProps(level: Level, id: Id, patch: Partial<DeviceProps>
  */
 export function changeDeviceKind(level: Level, id: Id, kind: SwitchKind): Level {
   const d = level.devices.find(x => x.id === id);
-  if (!d || (d.props.kind !== 'wall_switch' && d.props.kind !== 'smart_button') || d.props.kind === kind) return level;
+  if (!d || !isSwitchKind(d.props.kind) || d.props.kind === kind) return level;
   const props = deviceDefaults(kind, defaultsMode(d.placement.mode));
   if (!allowed(props, d.placement)) return level;
   const next = sanitizeBindings({ ...d, props });

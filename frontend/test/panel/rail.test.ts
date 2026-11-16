@@ -153,4 +153,12 @@ describe('tool rail and status chip', () => {
       expect(e.defaultPrevented, mode).toBe(false);
     }
   });
+
+  it('the Equipment rail lists Leak sensor and Valve', async () => {
+    const el = await mount();
+    el.setMode('equipment');
+    await el.updateComplete;
+    expect($(el, '.tools button[data-tool="leak_sensor"] .tlabel').textContent!.trim()).toBe('Leak sensor');
+    expect($(el, '.tools button[data-tool="valve"] .tlabel').textContent!.trim()).toBe('Valve');
+  });
 });

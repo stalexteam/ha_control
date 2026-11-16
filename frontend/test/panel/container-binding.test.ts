@@ -714,4 +714,40 @@ describe('binding step: output line', () => {
     await expect(createMockHass().connection.subscribeMessage!(() => undefined, { type: 'other/subscribe' }))
       .rejects.toMatchObject({ code: 'unknown_command' });
   });
+
+  const withValve = (): Level => ({ ...level(), devices: [...level().devices, dev('v', 'Water valve', 'valve', 4500)] });
+
+  it('Last event reads set open / set closed; a wall switch reads set on', async () => {
+    const live = liveHass();
+    const el = await open(live.hass, withValve());
+    const at = new Date(2026, 10, 15, 9, 5, 7).toISOString();
+    const ev = (value: string) => ({ full: true, containers: {
+      v: { kind: 'valve', status: 'ok', last: { action: 'set', value, at } },
+      w: { kind: 'wall_switch', status: 'ok', last: { action: 'set', value, at } } } });
+    await push(el, live.subs[0], ev('on'));
+    await pick(el, 'v');
+    expect(line(el)).toBe('Last event: set open, 09:05:07');
+    await push(el, live.subs[0], ev('off'));
+    expect(line(el)).toBe('Last event: set closed, 09:05:07');
+    await pick(el, 'w');
+    expect(line(el)).toBe('Last event: set off, 09:05:07');
+  });
+});
+
+describe('binding step: valve', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    localStorage.clear();
+  });
+  const withValve = (): Level => ({ ...level(), devices: [...level().devices, dev('v', 'Water valve', 'valve', 4500)] });
+
+  it('shows the auto flag and the window like a wall switch', async () => {
+    const el = await open(registryHass(STATES, REGISTRY).hass, withValve());
+    await pick(el, 'v');
+    expect(roles(el)).toEqual(['state']);
+    expect(input(el, 'autoByDoubleToggle').closest('label')!.textContent).toContain('Auto by double toggle');
+    expect(q(el, '.props input[data-field="windowSec"]')).toBeNull();
+    await toggle(el, 'autoByDoubleToggle');
+    expect(input(el, 'windowSec').closest('label')!.textContent).toContain('Window, s');
+  });
 });

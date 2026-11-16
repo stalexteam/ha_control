@@ -30,7 +30,7 @@ function notConfiguredStates(plan: Plan | undefined): Record<string, ContainerSt
   const out: Record<string, ContainerState> = {};
   for (const d of plan?.levels.flatMap(l => l.devices ?? []) ?? []) { // stage-1 plans have no devices
     const p = d.props;
-    if (p.kind === 'wall_switch' || p.kind === 'smart_button') {
+    if (p.kind === 'wall_switch' || p.kind === 'smart_button' || p.kind === 'valve') {
       out[d.id] = { kind: p.kind, status: 'error', reason: 'not_configured' };
     }
   }
