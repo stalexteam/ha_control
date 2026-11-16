@@ -164,6 +164,7 @@ class _Rule:
         self.verdict: bool | None = None  # the debounced verdict; None until first known
         self.pending: _Pending | None = None
         self.last: dict | None = None
+        self.seq = 0  # firing counter: a late failure counts only for the firing that sent it
         self.failed = False  # a service call of the last firing raised
         # derived on every evaluation
         self.raw: bool | None = None
@@ -171,6 +172,7 @@ class _Rule:
 
     def adopt(self, old: "_Rule") -> None:
         self.verdict, self.pending, self.last, self.failed = old.verdict, old.pending, old.last, old.failed
+        self.seq = old.seq
 
     def cancel(self) -> None:
         if self.pending is not None:
@@ -359,6 +361,8 @@ class RuleEngine:
         ]
         reason = f"{why}: {', '.join(because)}" if because else why
         at = int(self._now() * 1000)
+        rule.seq += 1
+        seq = rule.seq
         last = first_error = None
         failed = False
         for a in actions:
@@ -367,7 +371,7 @@ class RuleEngine:
                 entry["error"] = "target missing"
             else:
                 try:
-                    self._call(*a.call, on_error=lambda err, entry=entry: self._failed(rule, entry, err))
+                    self._call(*a.call, on_error=lambda err, entry=entry: self._failed(rule, seq, entry, err))
                 except Exception as err:  # noqa: BLE001 - one failing target must not stop the others
                     _LOGGER.warning("rule %s: %s.%s %s failed: %s", rule.name, *a.call, err)
                     entry["error"] = str(err) or type(err).__name__
@@ -378,9 +382,9 @@ class RuleEngine:
         rule.last = first_error or last
         rule.failed = failed
 
-    def _failed(self, rule: _Rule, entry: dict, error: str) -> None:
+    def _failed(self, rule: _Rule, seq: int, entry: dict, error: str) -> None:
         """A call that failed after it was sent (async service): record it unless the rule was replaced or removed."""
-        if self._rules.get(rule.key) is not rule:
+        if self._rules.get(rule.key) is not rule or rule.seq != seq:
             return
         entry["error"] = error
         rule.failed = True

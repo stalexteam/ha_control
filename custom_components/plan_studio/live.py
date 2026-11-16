@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from homeassistant.core import Event, EventStateChangedData, State
 
 _LOGGER = logging.getLogger(__name__)
+CALL_TIMEOUT = 30  # seconds
 
 
 def _pair(st: State | None) -> tuple[str, dict] | None:
@@ -114,8 +115,9 @@ class LiveRuntime:
             raise RuntimeError(f"service {domain}.{service} not found")
         ctx = Context()
         self.runtime.ignore_context(ctx.id)  # its state change is not a press for a wall switch
-        task = self._hass.async_create_task(
-            self._hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=True, context=ctx)
+        # A background task that starts on the next loop turn: the call cannot re-enter the engine from inside a firing.
+        task = self._hass.async_create_background_task(
+            self._send(domain, service, entity_id, ctx), f"plan_studio rule {domain}.{service}", eager_start=False
         )
 
         def done(t: asyncio.Future) -> None:
@@ -126,5 +128,15 @@ class LiveRuntime:
 
         task.add_done_callback(done)
 
+    async def _send(self, domain: str, service: str, entity_id: str, ctx: Context) -> None:
+        await asyncio.wait_for(  # a hung blocking call ends as a recorded failure
+            self._hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=True, context=ctx),
+            CALL_TIMEOUT,
+        )
+
     def _schedule(self, delay: float, cb: Callable[[], None]) -> CALLBACK_TYPE:
-        return async_call_later(self._hass, delay, lambda _now: cb())
+        @callback
+        def fire(_now) -> None:  # must be a @callback: otherwise HA runs it in an executor thread
+            cb()
+
+        return async_call_later(self._hass, delay, fire)

@@ -20,6 +20,11 @@ def _module(name, **attrs):
     return mod
 
 
+def _mark(f):
+    f._hass_callback = True
+    return f
+
+
 class Context:
     n = 0
 
@@ -43,14 +48,15 @@ class FakeServices:
         self.known = {("switch", "turn_off")}
         self.calls = []
         self.fail = None
+        self.fail_first = False
 
     def has_service(self, domain, service):
         return (domain, service) in self.known
 
     async def async_call(self, domain, service, data, blocking=False, context=None):
         self.calls.append((domain, service, data, blocking, context))
-        if self.fail:
-            raise RuntimeError(self.fail)
+        if self.fail or (self.fail_first and len(self.calls) == 1):
+            raise RuntimeError(self.fail or "boom")
 
 
 class FakeHass:
@@ -58,9 +64,11 @@ class FakeHass:
         self.states = FakeStates()
         self.services = FakeServices()
         self.tasks = []
+        self.task_args = []
         self.data = {"plan_studio": {}}
 
-    def async_create_task(self, coro):
+    def async_create_background_task(self, coro, name, eager_start=True):
+        self.task_args.append((name, eager_start))
         task = asyncio.ensure_future(coro)
         self.tasks.append(task)
         return task
@@ -98,6 +106,7 @@ def env(monkeypatch):
         return lambda: entry.__setitem__("on", False)
 
     def call_later(hass, delay, action):
+        assert getattr(action, "_hass_callback", False), "timer action must be a @callback"
         entry = {"delay": delay, "action": action, "on": True}
         later.append(entry)
         return lambda: entry.__setitem__("on", False)
@@ -122,7 +131,7 @@ def env(monkeypatch):
         "homeassistant.components": _module("homeassistant.components", websocket_api=ws),
         "homeassistant.components.websocket_api": ws,
         "homeassistant.core": _module(
-            "homeassistant.core", CALLBACK_TYPE=object, HomeAssistant=object, callback=lambda f: f, Context=Context
+            "homeassistant.core", CALLBACK_TYPE=object, HomeAssistant=object, callback=_mark, Context=Context
         ),
         "homeassistant.helpers": _module("homeassistant.helpers"),
         "homeassistant.helpers.event": _module(
@@ -197,6 +206,7 @@ def test_state_change_reaches_engine_and_call_uses_own_context(env):
         ((domain, service, data, blocking, ctx),) = hass.services.calls
         assert (domain, service, data, blocking) == ("switch", "turn_off", {"entity_id": "switch.sock"}, True)
         assert ignored == [ctx.id]
+        assert [eager for _name, eager in hass.task_args] == [False]
 
     asyncio.run(go())
 
@@ -287,5 +297,22 @@ def test_rules_subscribe_sends_result_then_full_then_changes(env):
         env.ws.ws_rules_subscribe(hass, conn, {"id": 8, "plan_id": "p1"})
         assert sent[-1] == ("error", "not_loaded")
         assert "plan_studio/rules/subscribe" in env.cmds
+
+    asyncio.run(go())
+
+
+def test_late_failure_of_an_older_firing_is_ignored(env):
+    async def go():
+        hass = FakeHass()
+        live = await _start(env, hass)
+        hass.services.fail_first = True
+        hass.states.d["binary_sensor.leak"] = "on"
+        live.engine.handle_state("binary_sensor.leak")  # firing 1, fails later
+        hass.states.d["binary_sensor.leak"] = "off"
+        live.engine.handle_state("binary_sensor.leak")
+        hass.states.d["binary_sensor.leak"] = "on"
+        live.engine.handle_state("binary_sensor.leak")  # firing 2, succeeds
+        await asyncio.gather(*hass.tasks, return_exceptions=True)
+        assert live.engine.snapshot("p1")["r1"]["status"] == "ok"
 
     asyncio.run(go())
