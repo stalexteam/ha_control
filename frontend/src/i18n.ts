@@ -211,6 +211,7 @@ const en: Dict = {
   'plan.copySuffix': '(copy)',
   'load.loading': 'Loading…',
   'load.error': 'Failed to load the plan',
+  'load.oldServer': 'Plan Studio on the server is older than this page: restart Home Assistant, then reload.',
 
   'walltype.label': 'Wall type',
   'walltype.bearing': 'Load-bearing',

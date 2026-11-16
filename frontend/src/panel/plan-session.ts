@@ -38,9 +38,13 @@ export class PlanSession {
     }
   }
 
-  /** Loads a stored plan from the server and makes it the open one. */
+  /**
+   * Loads a stored plan from the server and makes it the open one. A plan of another schema version (an older server
+   * still running after an update) is refused before anything changes: the panel reads and saves v2 plans only.
+   */
   async openPlan(id: Id): Promise<void> {
     const plan = await getPlan(this.h.hass!, id);
+    if (plan.schemaVersion !== 2) throw new Error(t('load.oldServer'));
     this.h.drafts.cancel();
     this.h.save.reset(plan.revision);
     this.adopt(plan);

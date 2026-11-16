@@ -138,6 +138,16 @@ def test_malformed_v1_does_not_raise():
         (["x"], "walls"), (None, "walls"), ("z1", "polygon"), ("z2", "polygon")]
 
 
+def test_v1_tagged_plan_with_v2_zones_keeps_them():
+    # A new panel saved v2 zones to an old server, which kept schemaVersion 1 (deploy-restart window).
+    poly = {"id": "z2", "name": "Yard", "shape": {"kind": "polygon", "vertices": copy.deepcopy(POLY)},
+            "invalid": False, "automation": False}
+    wz = walls("z1", "Hall", broken=True)
+    out = migrate_plan(v1([copy.deepcopy(wz), room("r1", "Kitchen"), copy.deepcopy(poly)]))
+    assert out["schemaVersion"] == 2
+    assert level_of(out)["zones"] == [wz, walls("r1", "Kitchen"), poly]
+
+
 def test_repo_marks_migrated():
     v2 = {"id": "p2", "name": "B", "schemaVersion": 2, "revision": 3, "levels": [{"id": "l1", "zones": []}]}
     repo = PlanRepo({"plans": {"p1": v1([room()]), "p2": v2}})

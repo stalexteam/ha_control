@@ -9,7 +9,7 @@ import { addDevice } from '../../src/model/devices';
 import { deviceZones, zoneArea, zoneInvalidReason, zoneOutline } from '../../src/geometry/zones';
 import { History } from '../../src/editor/history';
 import { deviceDefaults, emptyLevel, type Id, type Level, type Zone, type ZoneVertex } from '../../src/model/types';
-import { createMockHass } from '../../dev/mock-hass';
+import { createMockHass, STORAGE_KEY } from '../../dev/mock-hass';
 import { DRAFT_PREFIX } from '../../src/editor/draft';
 import { mount } from '../panel/helpers';
 
@@ -154,5 +154,34 @@ describe('zones v2 drafts', () => {
     expect(el.dialog).toBeNull();
     expect(localStorage.getItem(DRAFT_PREFIX + 'old')).toBeNull();
     expect(el.plan!.schemaVersion).toBe(2);
+  });
+
+  it('v1 draft of a stored plan discarded with notice', async () => {
+    const plan = { id: 'P1', name: 'Home', schemaVersion: 2, revision: 3, levels: [emptyLevel('l0')] };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
+    const level = { ...emptyLevel('l0'), automationZones: [] };
+    const draft = { planId: 'P1', baseRevision: 3, savedAt: 1, plan: { id: 'P1', name: 'Home', schemaVersion: 1, revision: 3, levels: [level] } };
+    localStorage.setItem(DRAFT_PREFIX + 'P1', JSON.stringify(draft));
+    const el = await mount(createMockHass());
+    await vi.waitFor(() => expect(el.notice).toBe('A draft from an older version was discarded.'));
+    expect(el.plan!.id).toBe('P1');
+    expect(el.pendingDraft).toBeNull();
+    expect(el.dialog).toBeNull();
+    expect(localStorage.getItem(DRAFT_PREFIX + 'P1')).toBeNull();
+  });
+
+  it('v1 plan from an older server is not adopted', async () => {
+    const rooms = [{ id: 'r1', name: 'Kitchen', seed: { x: 1, y: 1 }, outline: [], broken: false }];
+    const plan = { id: 'P1', name: 'Home', schemaVersion: 1, revision: 3, levels: [{ ...emptyLevel('l0'), zones: rooms, automationZones: [] }] };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { P1: plan } }));
+    const el = document.createElement('plan-studio-panel');
+    el.hass = createMockHass();
+    document.body.appendChild(el);
+    const msg = 'Plan Studio on the server is older than this page: restart Home Assistant, then reload.';
+    await vi.waitFor(() => expect(el.loadError).toBe(msg));
+    await el.updateComplete;
+    expect(el.plan).toBeNull();
+    expect(el.history).toBeNull();
+    expect(el.shadowRoot!.textContent).toContain(msg);
   });
 });

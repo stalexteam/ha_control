@@ -63,8 +63,14 @@ def _polygon_zone(zone: dict, vertices: list, invalid: bool) -> dict:
     }
 
 
+def _is_v2_zone(entry: dict) -> bool:
+    """A zone that already has a v2 `shape` (a new panel saved it to an old server, which kept schemaVersion 1)."""
+    return isinstance(entry.get("shape"), dict)
+
+
 def _level_v1_to_v2(level: dict) -> dict:
-    rooms = _dicts(level.get("zones"))
+    entries = _dicts(level.get("zones"))
+    rooms = [r for r in entries if not _is_v2_zone(r)]
     room_ids = {_rid(r) for r in rooms} - {None}
     on_room: dict[object, list[dict]] = {}  # room id -> its automation zones of kind room, in order
     others: list[dict] = []  # polygon zones and zones whose room is missing (or whose shape is junk)
@@ -76,7 +82,10 @@ def _level_v1_to_v2(level: dict) -> dict:
             others.append(az)
 
     zones: list[dict] = []
-    for room in rooms:
+    for room in entries:
+        if _is_v2_zone(room):
+            zones.append(room)  # passes through unchanged
+            continue
         linked = on_room.pop(_rid(room), [])
         if not linked:
             zones.append(_walls_zone(room.get("id"), room.get("name"), room))
