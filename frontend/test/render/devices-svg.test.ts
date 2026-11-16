@@ -157,20 +157,20 @@ describe('renderDevices', () => {
 describe('renderLevel modes', () => {
   beforeEach(() => { document.body.innerHTML = ''; });
 
-  it('equipment mode dims walls, plan mode dims devices', () => {
+  it('equipment mode dims walls, plan mode draws no devices', () => {
     const lv = levelWithAll();
     const eq = drawLevel(lv, { mode: 'equipment' });
     expect(Number(eq.querySelector('path.walls')!.getAttribute('opacity'))).toBeLessThan(1);
     expect(eq.querySelector('g.device')!.getAttribute('opacity')).toBeNull();
     const plan = drawLevel(lv, { mode: 'plan' });
     expect(plan.querySelector('path.walls')!.getAttribute('opacity')).toBeNull();
-    expect(Number(plan.querySelector('g.device')!.getAttribute('opacity'))).toBeLessThan(1);
-    expect(drawLevel(lv).querySelector('g.device')!.getAttribute('opacity')).not.toBeNull();
+    // The Plan step draws no devices at all (see the step rules in plan-svg.test.ts).
+    expect(plan.querySelector('g.device')).toBeNull();
   });
 
   it('showCones false hides cones in renderLevel', () => {
-    expect(drawLevel(levelWithAll(), { showCones: false }).querySelectorAll('.cone').length).toBe(0);
-    expect(drawLevel(levelWithAll()).querySelectorAll('.cone').length).toBe(2);
+    expect(drawLevel(levelWithAll(), { mode: 'equipment', showCones: false }).querySelectorAll('.cone').length).toBe(0);
+    expect(drawLevel(levelWithAll(), { mode: 'equipment' }).querySelectorAll('.cone').length).toBe(2);
   });
 });
 
@@ -398,11 +398,11 @@ describe('container badges on the plan', () => {
     expect(fault.querySelector('rect.icon[stroke-dasharray]')).toBeNull();
   });
 
-  it('renderLevel passes the state through in every mode', () => {
+  it('renderLevel passes the state through in the Binding step only', () => {
     for (const mode of ['plan', 'equipment', 'binding'] as const) {
       const root = drawLevel(containers(), { mode, containerState: (d: Device) => bad(kindOf(d), 'not_configured') });
-      expect(badgeKind(root, 'sb')).toBe('alert');
-      expect(badgeKind(root, 'ws')).toBe('alert');
+      expect(badgeKind(root, 'sb')).toBe(mode === 'binding' ? 'alert' : null);
+      expect(badgeKind(root, 'ws')).toBe(mode === 'binding' ? 'alert' : null);
     }
   });
 });
@@ -493,7 +493,7 @@ describe('leak sensor and valve symbols', () => {
     const R = ICON_PX / 0.1;
     const path = (o: Partial<DevOpts> = {}) => drawDevs(lv(), o).querySelector('g.device-valve path.icon')!;
     expect(path().getAttribute('d')).toBe(`M${-R} ${-0.6 * R}L${R} ${0.6 * R}L${R} ${-0.6 * R}L${-R} ${0.6 * R}Z`);
-    expect(path().getAttribute('stroke-dasharray')).toBe('3 2');
+    expect(path({ containerState: () => undefined }).getAttribute('stroke-dasharray')).toBe('3 2');
     const live = path({ containerState: (d: Device) => (d.id === 'vl' ? okState('valve') : undefined) });
     expect(live.getAttribute('stroke-dasharray')).toBeNull();
   });

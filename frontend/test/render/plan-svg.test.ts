@@ -5,7 +5,8 @@ import { renderLevel } from '../../src/render/plan-svg';
 import { paletteFor } from '../../src/render/theme';
 import { addOpening } from '../../src/model/openings';
 import { addPolygonZone, addWallsZone } from '../../src/model/zones';
-import type { Level } from '../../src/model/types';
+import { deviceDefaults, type Device, type Level } from '../../src/model/types';
+import { deviceLive, liveBubbles } from '../../src/live/device-live';
 import type { Preview, Selection } from '../../src/editor/tools/types';
 import { rectRoomLevel } from '../fixtures';
 
@@ -157,5 +158,61 @@ describe('renderLevel', () => {
     expect(svg.querySelector('g.wall-breaks')!.getAttribute('opacity')).toBe(String(pal.dimOpacity));
     expect(svg.querySelector('path.walls')!.getAttribute('opacity')).toBe(String(pal.dimOpacity));
     expect(draw(sample()).querySelector('g.wall-breaks')!.getAttribute('opacity')).toBeNull();
+  });
+});
+
+describe('renderLevel step rules for devices', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+  const NOW = Date.parse('2026-11-16T10:01:00Z');
+  const level = (): Level => ({
+    ...sample(),
+    devices: [
+      { id: 'cl', name: 'cl', invalid: false, bindings: { control: 'light.a' }, placement: { mode: 'free', x: 1000, y: 1000, rotation: 0 },
+        props: { ...deviceDefaults('ceiling_light', 'free'), poolRadius: 800 } as Device['props'] },
+      { id: 'ms', name: 'ms', invalid: false, placement: { mode: 'free', x: 2500, y: 1500, rotation: 0 },
+        props: deviceDefaults('motion_sensor', 'free') as Device['props'] },
+      { id: 'sb', name: 'sb', invalid: false, placement: { mode: 'free', x: 3000, y: 2000, rotation: 0 },
+        props: deviceDefaults('smart_button', 'free') as Device['props'] },
+    ],
+  });
+  const states = { 'light.a': { state: 'on', last_changed: '2026-11-16T10:00:18Z' } };
+  const draw2 = (mode: 'plan' | 'equipment' | 'binding') => {
+    const lv = level();
+    const content = renderLevel(lv, {
+      palette: paletteFor(true), selection: null, preview: {}, scale: 0.1, mode,
+      containerState: () => ({ kind: 'smart_button', status: 'error', reason: 'not_configured' }),
+      live: d => deviceLive(d, states),
+      bubbles: d => ({ shown: liveBubbles(deviceLive(d, states), d, NOW), leaving: [] }),
+    });
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    render(html`<svg xmlns="http://www.w3.org/2000/svg">${content}</svg>`, host);
+    return host.querySelector('svg')!;
+  };
+
+  it('Plan draws no devices and no cones; walls, openings and zones stay', () => {
+    const root = draw2('plan');
+    expect(root.querySelector('g.device')).toBeNull();
+    expect(root.querySelector('g.cones')?.children.length ?? 0).toBe(0);
+    expect(root.querySelectorAll('path.walls').length).toBe(1);
+    expect(root.querySelectorAll('.door').length).toBe(1);
+    expect(root.querySelectorAll('g.zones path.zone').length).toBeGreaterThan(0);
+  });
+
+  it('Equipment: symbols and cones, but no badge, no dashed outline, no live look', () => {
+    const root = draw2('equipment');
+    expect(root.querySelectorAll('g.device').length).toBe(3);
+    expect(root.querySelector('.badge')).toBeNull();
+    expect(root.querySelector('g.device.no-data')).toBeNull();
+    expect(root.querySelector('g.device[data-id="cl"] .icon')!.getAttribute('fill')).toBe(paletteFor(true).deviceFill);
+    expect(root.querySelector('.bubble')).toBeNull();
+    expect(root.querySelector('.live-glow')).toBeNull();
+  });
+
+  it('Binding: alert badge, lit light and a timer bubble', () => {
+    const root = draw2('binding');
+    expect(root.querySelector('g.device[data-id="sb"] .badge')).toBeTruthy();
+    expect(root.querySelector('g.device[data-id="cl"] .icon')!.getAttribute('fill')).toBe(paletteFor(true).device);
+    expect(root.querySelector('g.device[data-id="cl"] .bubble')!.textContent).toContain('42');
   });
 });

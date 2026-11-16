@@ -8,7 +8,7 @@ import { segmentFrame, wallFrame, wallOutlines, wallPieces, wallsUnion, type Wal
 import { add, cross, dist, perpLeft, scale as mul, sub } from '../geometry/vec';
 import { t } from '../i18n';
 import type { PlanPalette } from './theme';
-import { renderDevices } from './devices-svg';
+import { renderDevices, type DeviceRenderOpts } from './devices-svg';
 import { renderZoneAreas, renderZoneOverlay } from './zones-svg';
 import { cached, ringD } from './shared';
 
@@ -25,8 +25,11 @@ export interface RenderOpts {
   mode?: 'plan' | 'equipment' | 'binding';
   /** Binding status per device; drawn as rings in the binding mode only. */
   bindingStatus?: (d: Device) => BindStatus;
-  /** Live state of an input container; drawn in every mode. */
+  /** Live state of an input container; drawn in the binding mode only. */
   containerState?: (d: Device) => ContainerState | undefined;
+  /** Live look and bubbles of a device; drawn in the binding mode only. */
+  live?: DeviceRenderOpts['live'];
+  bubbles?: DeviceRenderOpts['bubbles'];
   /** Default true. */
   showCones?: boolean;
 }
@@ -313,10 +316,9 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
       palette: p, scale: o.scale, selectedId: zoneId, draft: o.preview.zoneDraft,
       vertex: o.preview.zoneVertex?.zoneId === zoneId ? o.preview.zoneVertex.index : null,
     }) : nothing}
-    <g class="devices-layer">${renderDevices(lv, {
-      palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: plan, preview: o.preview.device,
-      bindingStatus: o.mode === 'binding' ? o.bindingStatus : undefined,
-      containerState: o.containerState,
+    <g class="devices-layer">${plan ? nothing : renderDevices(lv, {
+      palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: false, preview: o.preview.device,
+      ...(mode === 'binding' ? { bindingStatus: o.bindingStatus, containerState: o.containerState, live: o.live, bubbles: o.bubbles } : {}),
     })}</g>
     <g class="selection">${renderSelection(lv, o)}</g>
     <g class="preview">${renderPreview(lv, o)}</g>`;

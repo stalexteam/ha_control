@@ -29,19 +29,24 @@ function room(): Plan {
   ];
   level.devices = [
     {
-      id: 'd-light', name: 'Ceiling light', invalid: false,
+      id: 'd-light', name: 'Ceiling light', invalid: false, bindings: { control: 'light.kitchen_ceiling' },
       placement: { mode: 'free', x: 2000, y: 1500, rotation: 0 },
       props: { kind: 'ceiling_light', shape: 'round', diameter: 300, length: 600, width: 100, poolRadius: null },
     },
     {
-      id: 'd-socket', name: 'Socket', invalid: false,
+      id: 'd-socket', name: 'Socket', invalid: false, bindings: { control: 'switch.kitchen_socket', power: 'sensor.kitchen_socket_power' },
       placement: { mode: 'wall', wallId: 'w2', side: 'left', offset: 1000 },
       props: { kind: 'socket' },
     },
     {
-      id: 'd-leak', name: 'Leak sensor', invalid: false,
+      id: 'd-leak', name: 'Leak sensor', invalid: false, bindings: { leak: 'binary_sensor.bath_leak' },
       placement: { mode: 'free', x: 800, y: 700, rotation: 0 },
       props: { kind: 'leak_sensor' },
+    },
+    {
+      id: 'd-motion', name: 'Motion sensor', invalid: false, bindings: { motion: 'binary_sensor.hall_motion' },
+      placement: { mode: 'free', x: 3000, y: 2400, rotation: 225 },
+      props: { kind: 'motion_sensor', zoneAngle: 110, zoneRange: 3000 },
     },
     {
       id: 'd-valve', name: 'Water valve', invalid: false,

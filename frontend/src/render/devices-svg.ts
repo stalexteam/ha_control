@@ -307,7 +307,7 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
   const live = container ? o.containerState?.(d) : undefined;
   const dl = !preview ? o.live?.(d) : undefined;
   const lit = dl?.look === 'on' || dl?.look === 'active';
-  const noData = (container && !live) || dl?.look === 'no-data';
+  const noData = (container && !!o.containerState && !live) || dl?.look === 'no-data';
   const kind = d.props.kind;
   const tint = !lit || d.invalid ? color : kind === 'leak_sensor' ? ALERT : kind === 'motion_sensor' ? p.motionCone : color;
   const cls = `device device-${d.props.kind}${selected ? ' selected' : ''}${d.invalid ? ' invalid' : ''}${preview ? ' device-preview' : ''}`

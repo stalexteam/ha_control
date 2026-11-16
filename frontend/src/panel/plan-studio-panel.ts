@@ -42,6 +42,8 @@ import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { PowerFeed, powerPayload } from '../live/power-feed';
+import { deviceLive, liveBubbles } from '../live/device-live';
+import { DeviceEventTracker } from '../live/device-events';
 
 export class PlanStudioPanel extends LitElement {
   static styles = panelStyles;
@@ -116,6 +118,13 @@ export class PlanStudioPanel extends LitElement {
   /** Live values of the schematic draft (subscribed only in the Power step of an attached panel). */
   readonly powerFeed = new PowerFeed(this, () => this.hass?.connection);
 
+  /** Action events and ended bubbles of the open level's devices, from hass.states. */
+  private readonly events = new DeviceEventTracker();
+  private trackedLevel: Level | null = null;
+  private ticker: ReturnType<typeof setInterval> | null = null;
+  /** True while the 1 s ticker runs (Binding step with a timer, event or fading bubble). */
+  get tickerOn(): boolean { return this.ticker !== null; }
+
   /** Binding status of a device, from live states. Until the registries are loaded no entity is Missing (its presence is unknown). */
   readonly bindStatus = (d: Device): BindStatus => bindingStatus(d, eid => presence(this.haMeta.get(), eid, this.hass?.states));
 
@@ -174,10 +183,15 @@ export class PlanStudioPanel extends LitElement {
     this.resizeObs = null;
     this.feed.stop();
     this.powerFeed.stop();
+    this.stopTicker();
   }
 
   protected willUpdate(changed: PropertyValues): void {
     if (changed.has('hass') && this.hass && !this.plan && !this.loading && !this.loadError) void this.session.load();
+    // New states, or a new level whose devices have no baseline yet.
+    const cur = this.history?.current.level ?? null;
+    if (cur && this.hass && (changed.has('hass') || cur !== this.trackedLevel)) this.events.update(cur, this.hass.states, Date.now());
+    this.trackedLevel = cur;
     const sized = this.size.w > 0 && this.size.h > 0;
     if (this.needFit && sized) { this.needFit = false; this.fit(); }
     if (this.needPowerFit && sized && this.mode === 'power') { this.needPowerFit = false; this.fitPower(); }
@@ -192,7 +206,24 @@ export class PlanStudioPanel extends LitElement {
     this.powerFeed.watch(level && this.plan ? this.plan.id : null, level ? powerPayload(this.power, level) : null);
   }
 
+  /** The 1 s ticker runs only while a shown Binding bubble changes by itself (timer, event, fade-out). */
+  private syncTicker(): void {
+    const level = this.history?.current.level;
+    const now = Date.now();
+    const need = this.isConnected && this.mode === 'binding' && !!level && !!this.hass && level.devices.some(d =>
+      deviceLive(d, this.hass!.states).timerSince !== undefined || this.events.event(d.id, now) !== null
+      || this.events.leaving(d.id, now).length > 0);
+    if (need && !this.ticker) this.ticker = setInterval(() => this.requestUpdate(), 1000);
+    else if (!need) this.stopTicker();
+  }
+
+  private stopTicker(): void {
+    if (this.ticker !== null) clearInterval(this.ticker);
+    this.ticker = null;
+  }
+
   protected updated(): void {
+    this.syncTicker();
     const canvas = this.renderRoot.querySelector('.canvas');
     if (canvas && !this.resizeObs && typeof ResizeObserver !== 'undefined') {
       this.resizeObs = new ResizeObserver(entries => {
@@ -418,6 +449,8 @@ export class PlanStudioPanel extends LitElement {
     const w = Math.max(1, this.size.w) / scale, h = Math.max(1, this.size.h) / scale;
     const s = this.save;
     const power = this.mode === 'power';
+    const now = Date.now();
+    const states = this.hass?.states;
     return html`
       <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : power ? ' power' : ''}"
         style=${paletteVars(pal)}
@@ -451,6 +484,15 @@ export class PlanStudioPanel extends LitElement {
               palette: pal, selection: this.selection, preview, scale, mode: this.mode, showCones: this.cones,
               bindingStatus: this.bindStatus,
               containerState: d => this.feed.stateOf(d),
+              live: d => deviceLive(d, states),
+              bubbles: d => {
+                const live = deviceLive(d, states);
+                const ev = this.events.event(d.id, now);
+                return {
+                  shown: [...liveBubbles(live, d, now), ...(ev ? [{ text: ev.text, tone: 'event' as const }] : [])],
+                  leaving: this.events.leaving(d.id, now),
+                };
+              },
             })}
             ${preview.tracker ? renderTracker(preview.tracker, {
               palette: pal, scale, mode: this.toolId === 'box' ? 'box' : 'wall',

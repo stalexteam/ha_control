@@ -25,7 +25,7 @@ const DEVICES = [
 const ENTITIES: DemoEntity[] = [
   { id: 'light.kitchen_ceiling', name: 'Kitchen ceiling', state: 'on', device: 'kitchen_ceiling' },
   { id: 'light.hall_sconce', name: 'Hall sconce', state: 'off', device: 'hall_sconce' },
-  { id: 'binary_sensor.hall_motion', name: 'Hall motion', state: 'off', device: 'hall_motion', cls: 'motion' },
+  { id: 'binary_sensor.hall_motion', name: 'Hall motion', state: 'on', device: 'hall_motion', cls: 'motion' },
   { id: 'sensor.hall_lux', name: 'Hall illuminance', state: '120', device: 'hall_motion', cls: 'illuminance', unit: 'lx' },
   { id: 'sensor.bath_temp', name: 'Bath temperature', state: '23.4', device: 'bath_climate', cls: 'temperature', unit: '°C' },
   { id: 'sensor.bath_hum', name: 'Bath humidity', state: '61', device: 'bath_climate', cls: 'humidity', unit: '%' },
@@ -33,17 +33,23 @@ const ENTITIES: DemoEntity[] = [
   { id: 'event.hall_switch_button', name: 'Hall switch button', state: '2026-11-15T08:00:00+00:00', device: 'hall_switch' },
   { id: 'switch.hall_switch_relay', name: 'Hall switch relay', state: 'off', device: 'hall_switch' },
   { id: 'switch.kitchen_socket', name: 'Kitchen socket', state: 'on', device: 'kitchen_socket' },
-  { id: 'sensor.kitchen_socket_power', name: 'Kitchen socket power', state: '412', device: 'kitchen_socket', cls: 'power', unit: 'W' },
+  { id: 'sensor.kitchen_socket_power', name: 'Kitchen socket power', state: '309', device: 'kitchen_socket', cls: 'power', unit: 'W' },
   { id: 'fan.bath_fan', name: 'Bath fan', state: 'unavailable', device: 'bath_fan' },
   { id: 'switch.boiler', name: 'Boiler', state: 'on', device: 'boiler' },
   { id: 'sensor.boiler_power', name: 'Boiler power', state: '1.8', device: 'boiler', cls: 'power', unit: 'kW' },
-  { id: 'binary_sensor.bath_leak', name: 'Bath leak', state: 'off', device: 'bath_leak', cls: 'moisture' },
+  { id: 'binary_sensor.bath_leak', name: 'Bath leak', state: 'on', device: 'bath_leak', cls: 'moisture' },
   { id: 'valve.water_valve', name: 'Water valve', state: 'open', device: 'water_valve' },
   { id: 'sensor.boiler_voltage', name: 'Boiler voltage', state: '229', device: 'boiler', cls: 'voltage', unit: 'V' },
 ];
 
+/** Fixed offsets from module load, so the Binding screenshot shows timers however late it is taken. */
+const AGO: Record<string, number> = {
+  'light.kitchen_ceiling': 42_000, 'binary_sensor.hall_motion': 7_000, 'binary_sensor.bath_leak': 192_000,
+};
+
 export const DEMO_STATES: Record<string, unknown> = Object.fromEntries(ENTITIES.map(e => [e.id, {
   state: e.state,
+  last_changed: new Date(Date.now() - (AGO[e.id] ?? 3_600_000)).toISOString(),
   attributes: {
     friendly_name: e.name,
     ...(e.cls ? { device_class: e.cls } : {}),
