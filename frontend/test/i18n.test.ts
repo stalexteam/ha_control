@@ -6,7 +6,7 @@ import { DEVICE_PLACEMENTS, WALL_PRESETS, OPENING_DEFAULT_WIDTH } from '../src/m
 import { LIGHT_SHAPES, EQUIPMENT_SHAPES } from '../src/panel/device-props';
 import { LIST_FILTERS } from '../src/panel/binding-list';
 import { ROLE_SPECS } from '../src/model/bindings';
-import { EQUIPMENT_TOOL_IDS, PLAN_TOOL_IDS, POWER_TOOL_IDS, ZONES_TOOL_IDS } from '../src/panel/tool-factory';
+import { EQUIPMENT_TOOL_IDS, PLAN_TOOL_IDS, POWER_TOOL_IDS } from '../src/panel/tool-factory';
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap(n => {
@@ -81,15 +81,18 @@ describe('i18n', () => {
       side: ['left', 'right'],
       hinge: ['start', 'end'],
       baseline: ['center', 'left', 'right'],
-      mode: ['plan', 'equipment', 'binding', 'zones', 'power', 'automation'],
+      mode: ['plan', 'equipment', 'binding', 'power', 'automation'],
       // The tools with a rail button (the Binding step's only tool has none).
-      tool: [...PLAN_TOOL_IDS, ...EQUIPMENT_TOOL_IDS, ...ZONES_TOOL_IDS, ...POWER_TOOL_IDS],
+      tool: [...PLAN_TOOL_IDS, ...EQUIPMENT_TOOL_IDS, ...POWER_TOOL_IDS],
       'power.err': ['missing', 'same-block', 'direction', 'port-taken', 'dc-mismatch', 'second-remainder', 'loop'],
       'power.help': ['select', 'place', 'device'],
       'power.title': ['grid', 'device', 'bus', 'battery', 'pv', 'transfer', 'remainder'],
       'power.form': ['2in1out', '1in2out'],
       'zones.kind': ['walls', 'polygon'],
       'zones.invalid': ['broken', 'lost', 'beyond', 'crossing'],
+      'zones.hint': ['walls', 'polygon'],
+      snap: ['node', 'mid', 'wall', 'zoneVertex', 'zoneEdge', 'grid'],
+      snapmark: ['node', 'mid', 'wall', 'zoneVertex', 'zoneEdge', 'grid'],
       'binding.filter': LIST_FILTERS,
       bindstatus: ['bound', 'partial', 'unbound', 'missing'],
       role: [...new Set(Object.values(ROLE_SPECS).flat().map(s => s.role))],
@@ -99,33 +102,42 @@ describe('i18n', () => {
     expect(missing).toEqual([]);
   });
 
-  it('the Zones step copy is exact', () => {
+  it('the zones copy is exact', () => {
     const copy: Record<string, string> = {
-      'mode.zones': 'Zones',
-      'tool.zone': 'Room',
-      'tool.zones-select': 'Select',
-      'tool.zone-room': 'Zone from room',
-      'tool.zone-draw': 'Custom zone',
+      'tool.zone': 'Zone',
       'steps.zone': '{n} zone',
       'steps.zones': '{n} zones',
+      'steps.invalid': '{n} invalid',
       'zones.default': 'Zone',
       'zones.kind.walls': 'By walls',
       'zones.kind.polygon': 'Polygon',
-      'zones.members': 'Members',
+      'zones.method': 'Method',
+      'zones.hint.walls': 'Click inside closed walls: the zone follows them.',
+      'zones.hint.polygon': 'Click to add a vertex. Close with Enter or a click on the first vertex. Vertices snap to wall corners and faces, other zones and the grid.',
+      'zones.noLoop': 'Click inside closed walls, or use Polygon',
+      'zones.automation': 'Takes part in automation',
+      'zones.outline': 'Outline',
+      'zones.list': 'Zones ({n})',
+      'zones.inside': 'Devices inside ({n})',
       'zones.participates': 'Participates',
       'zones.noMembers': 'No devices inside.',
+      'zones.keepOutline': 'Keep outline as a polygon',
+      'zones.minVertices': 'A zone needs at least 3 vertices.',
       'zones.delete': 'Delete zone',
       'zones.filter': 'Filter zones',
-      'zones.hint': 'Pick a zone on the plan or in the list, or add one with Zone from room or Custom zone.',
       'zones.invalid.broken': 'The walls no longer close this zone.',
       'zones.invalid.lost': 'A vertex lost its wall or corner: drag it to place it again.',
       'zones.invalid.beyond': 'A vertex lies beyond the end of its wall.',
       'zones.invalid.crossing': 'The outline crosses itself: move a vertex.',
+      'props.nextZone': 'New zone',
       'drafts.oldDiscarded': 'A draft from an older version was discarded.',
       'steps.walls': '{n} walls',
       'props.zoneList': 'Zones',
       'props.noZones': 'Not in any zone.',
     };
     expect(Object.fromEntries(Object.keys(copy).map(k => [k, t(k)]))).toEqual(copy);
+    for (const gone of ['mode.zones', 'zone.default', 'tool.zones-select', 'tool.zone-room', 'tool.zone-draw', 'zones.hint', 'zones.members']) {
+      expect(keys.has(gone), gone).toBe(false);
+    }
   });
 });

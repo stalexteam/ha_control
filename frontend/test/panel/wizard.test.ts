@@ -37,7 +37,7 @@ describe('wizard steps in the panel', () => {
     localStorage.clear();
   });
 
-  it('Next cycles plan -> equipment -> binding -> zones -> power, Back returns; each step activates its first tool', async () => {
+  it('Next cycles plan -> equipment -> binding -> power, Back returns; each step activates its first tool', async () => {
     const el = await mount();
     expect(el.mode).toBe('plan');
     await press(el, '.steps [data-nav="next"]');
@@ -47,14 +47,9 @@ describe('wizard steps in the panel', () => {
     expect(el.mode).toBe('binding');
     expect(el.toolId).toBe('binding-select');
     await press(el, '.steps [data-nav="next"]');
-    expect(el.mode).toBe('zones');
-    expect(el.toolId).toBe('zones-select');
-    await press(el, '.steps [data-nav="next"]');
     expect(el.mode).toBe('power');
     expect(el.toolId).toBe('power-select');
     expect(el.shadowRoot!.querySelector('.steps [data-nav="next"]')).toBeNull();
-    await press(el, '.steps [data-nav="back"]');
-    expect(el.mode).toBe('zones');
     await press(el, '.steps [data-nav="back"]');
     expect(el.mode).toBe('binding');
     await press(el, '.steps [data-nav="back"]');
@@ -64,12 +59,13 @@ describe('wizard steps in the panel', () => {
     expect(el.toolId).toBe('select');
   });
 
-  it('the header has six step cells: five steps and the Automation placeholder', async () => {
+  it('the header has five step cells: four steps and the Automation placeholder; no Zones step', async () => {
     const el = await mount();
     const cells = [...el.shadowRoot!.querySelectorAll('.steps .step')];
     expect(cells.map(c => c.querySelector('.name')!.textContent)).toEqual(
-      ['Plan', 'Equipment', 'Binding', 'Zones', 'Power', 'Automation']);
-    expect(cells.map(c => c.querySelector('.n')!.textContent)).toEqual(['1', '2', '3', '4', '5', '6']);
+      ['Plan', 'Equipment', 'Binding', 'Power', 'Automation']);
+    expect(cells.map(c => c.querySelector('.n')!.textContent)).toEqual(['1', '2', '3', '4', '5']);
+    expect(el.shadowRoot!.querySelector('.steps [data-mode="zones"]')).toBeNull();
   });
 
   it('step cells switch the mode directly', async () => {
@@ -84,19 +80,15 @@ describe('wizard steps in the panel', () => {
 
   it('layout order is rail | props | canvas in every step, with the device list as the rail in binding', async () => {
     const el = await mount();
-    const order = (cols: string[]) => ['tools', 'blist', 'zlist', 'props', 'canvas'].map(c => cols.indexOf(c));
-    expect(order(columns(el))).toEqual([1, -1, -1, 2, 3]);
+    const order = (cols: string[]) => ['tools', 'blist', 'props', 'canvas'].map(c => cols.indexOf(c));
+    expect(order(columns(el))).toEqual([1, -1, 2, 3]);
     await press(el, '[data-mode="binding"]');
-    expect(order(columns(el))).toEqual([-1, 1, -1, 2, 3]);
+    expect(order(columns(el))).toEqual([-1, 1, 2, 3]);
     expect($(el, '.ed').classList.contains('binding')).toBe(true);
     expect(el.shadowRoot!.querySelector('.tools')).toBeNull();
-    await press(el, '[data-mode="zones"]');
-    expect(order(columns(el))).toEqual([-1, -1, 1, 2, 3]);
-    expect($(el, '.ed').classList.contains('zones')).toBe(true);
-    expect($(el, '.ed').classList.contains('binding')).toBe(false);
     await press(el, '[data-mode="power"]');
-    expect(order(columns(el))).toEqual([1, -1, -1, 2, 3]);
-    expect($(el, '.ed').classList.contains('zones')).toBe(false);
+    expect(order(columns(el))).toEqual([1, -1, 2, 3]);
+    expect($(el, '.ed').classList.contains('binding')).toBe(false);
   });
 
   it('binding props panel shows a placeholder; the selected device shows its name and kind', async () => {

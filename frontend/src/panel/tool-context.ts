@@ -49,9 +49,11 @@ export function createToolContext(h: ToolHost): ToolContext {
     deviceDefaults: k => h.nextProps[k],
     wallMount: () => h.nextObj.wallMount,
     openingDefaults: (k: OpeningKind) => openingDefaults(h.nextObj, k),
-    zoneName: () => h.nextObj.zoneName ?? defaultZoneName(h.history?.current.level ?? EMPTY_LEVEL),
-    /** A typed zone name is single-use: the next default is "Room N" again. */
-    zonePlaced: () => { h.nextObj = { ...h.nextObj, zoneName: null }; },
+    zoneName: () => h.nextObj.zone.name ?? defaultZoneName(h.history?.current.level ?? EMPTY_LEVEL),
+    zoneMethod: () => h.nextObj.zone.method,
+    zoneAutomation: () => h.nextObj.zone.automation,
+    /** A typed zone name is single-use: the next default is "Zone N" again. */
+    zonePlaced: () => { h.nextObj = { ...h.nextObj, zone: { ...h.nextObj.zone, name: null } }; },
     geo: () => {
       const devices = (h.history?.current.level ?? EMPTY_LEVEL).devices;
       return { device: id => devices.find(d => d.id === id) };

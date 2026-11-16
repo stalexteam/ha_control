@@ -1,4 +1,5 @@
 import type { Pt } from '../model/types';
+import { t } from '../i18n';
 
 /** Closed SVG path data of a ring; '' for an empty ring. */
 export const ringD = (r: Pt[]): string => (r.length === 0 ? '' : `M${r.map(p => `${p.x} ${p.y}`).join('L')}Z`);
@@ -11,4 +12,9 @@ export function cached<K extends object, V>(map: WeakMap<K, V>, key: K, make: (k
   let v = map.get(key);
   if (v === undefined) { v = make(key); map.set(key, v); }
   return v;
+}
+
+/** An area in m2 with 1 decimal: 12 -> "12.0 m²". */
+export function formatArea(m2: number): string {
+  return `${m2.toFixed(1)} ${t('unit.m2')}`;
 }

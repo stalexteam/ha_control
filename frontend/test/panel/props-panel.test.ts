@@ -17,6 +17,7 @@ describe('opening kind field', () => {
       boxMeasure: 'inner', wallType: 'bearing', thickness: 400, notice: null,
       commit: n => commits.push(n), setBoxMeasure: () => {}, setWallType: () => {}, setThickness: () => {},
       next: initialNext(), setNext: () => {}, setNotice: () => {},
+      zoneQuery: '', onZoneQuery: () => {}, onPickZone: () => {}, onZoneMethod: () => {},
     }), host);
     const kind = host.querySelector('select') as HTMLSelectElement;
     kind.value = 'window';
@@ -41,6 +42,7 @@ describe('opening width field', () => {
       boxMeasure: 'inner' as const, wallType: 'bearing' as const, thickness: 400, notice: null,
       commit: (n: unknown) => commits.push(n), setBoxMeasure: () => {}, setWallType: () => {}, setThickness: () => {}, next: initialNext(), setNext: () => {},
       setNotice: (m: string | null) => { notice = m; },
+      zoneQuery: '', onZoneQuery: () => {}, onPickZone: () => {}, onZoneMethod: () => {},
     };
     render(renderProps(opts), host);
     const width = host.querySelectorAll('input')[0] as HTMLInputElement;

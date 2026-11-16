@@ -34,11 +34,10 @@ export const panelStyles = css`
   }
   .ed.binding { grid-template-columns: 250px 300px 1fr; }
   .ed.binding.rail-off { grid-template-columns: 36px 300px 1fr; }
-  .ed.zones { grid-template-columns: 230px 280px 1fr; }
   .ed.power { grid-template-columns: 64px 300px 1fr; }
   @media (max-width: 700px) {
     .ed { grid-template-columns: 54px 170px 1fr; }
-    .ed.binding, .ed.zones { grid-template-columns: 170px 200px 1fr; }
+    .ed.binding { grid-template-columns: 170px 200px 1fr; }
     .ed.power { grid-template-columns: 54px 200px 1fr; }
     .ed.binding.rail-off { grid-template-columns: 36px 200px 1fr; }
     .props .row { flex-wrap: wrap; }
@@ -108,10 +107,27 @@ export const panelStyles = css`
   .tool:hover { background: var(--ch-hover); color: var(--ch-text); }
   .tool.on { background: var(--ch-tint); color: var(--ch-primary); font-weight: 500; }
   .tool-sep { height: 1px; width: 36px; background: var(--ch-divider); margin: 4px 0; }
-  .blist, .zlist { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ch-card);
+  .blist { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ch-card);
     border-right: 1px solid var(--ch-divider); }
-  .ztools { display: flex; gap: 4px; padding: 8px 8px 0; }
-  .ztools .tool { flex: 1; width: auto; }
+  /* Plan step zones: the list in the properties, the Zone tool's method switch, the zone properties. */
+  .zlist { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--ch-divider); }
+  .zlist .list-search { margin: 6px 0; width: 100%; box-sizing: border-box; }
+  .zlist .zrow { grid-template-columns: 12px minmax(0, 1fr) auto auto; padding: 5px 6px; border-radius: 6px; }
+  .zkind, .zarea { color: var(--ch-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .micon { width: 16px; height: 16px; fill: currentColor; display: block; flex: none; }
+  .mseg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--ch-divider); border-radius: 8px;
+    overflow: hidden; margin: 6px 0 4px; }
+  .mseg button { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 6px; border: 0;
+    background: none; color: var(--ch-muted); font-size: 12.5px; }
+  .mseg button + button { border-left: 1px solid var(--ch-divider); }
+  .mseg button .micon { width: 22px; height: 22px; }
+  .mseg button.on { background: var(--ch-tint); color: var(--ch-primary); font-weight: 500; }
+  .hint { font-size: 12.5px; margin: 8px 0 10px; }
+  .zcheck { display: flex; align-items: center; gap: 8px; margin: 8px 0; cursor: pointer; }
+  .zcheck input { margin: 0; }
+  .zkindval { display: inline-flex; align-items: center; gap: 6px; }
+  .warnbox { border: 1px solid var(--ch-error); border-radius: 8px; padding: 8px 10px; margin: 8px 0; }
+  .warnbox .warn { margin: 0 0 6px; }
   .bhead { display: flex; align-items: center; gap: 4px; margin: 10px 6px 0 10px; }
   .filter-seg { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(3, 1fr);
     border: 1px solid var(--ch-divider); border-radius: 8px; overflow: hidden; }

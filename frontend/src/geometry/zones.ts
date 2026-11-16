@@ -170,3 +170,45 @@ export function zoneLabelPoint(outline: Pt[]): Pt {
     y: outline.reduce((s, p) => s + p.y, 0) / n,
   };
 }
+
+/** Sample steps per side of a zone's bounding box when its label looks for a free spot. */
+const LABEL_SAMPLES = 32;
+
+/** The smallest distance from p to the edges of the rings. */
+function edgeDistance(p: Pt, rings: Pt[][]): number {
+  let d = Infinity;
+  for (const r of rings) for (let i = 0; i < r.length; i++) d = Math.min(d, distToSegment(p, r[i], r[(i + 1) % r.length]));
+  return d;
+}
+
+/**
+ * The label point of every zone (by id). A zone with no smaller zone nested inside it (every outline point within it)
+ * uses zoneLabelPoint. Otherwise its label takes the largest free spot: of a grid of sample points inside its outline
+ * and outside the nested zones, the one farthest from its own edges and the nested outlines (zoneLabelPoint when no
+ * sample is free), so it keeps clear of the nested zones' labels.
+ */
+export function zoneLabelPoints(level: Level): Map<Id, Pt> {
+  const rings = level.zones.map(z => zoneOutline(level, z));
+  const areas = rings.map(r => Math.abs(polygonArea(r)));
+  const out = new Map<Id, Pt>();
+  level.zones.forEach((z, i) => {
+    const ring = rings[i];
+    const nested = rings.filter((r, j) => j !== i && r.length >= 3 && areas[j] < areas[i] && r.every(p => zoneContains(ring, p)));
+    const plain = zoneLabelPoint(ring);
+    if (nested.length === 0 || ring.length < 3) { out.set(z.id, plain); return; }
+    const xs = ring.map(p => p.x), ys = ring.map(p => p.y);
+    const x0 = Math.min(...xs), y0 = Math.min(...ys);
+    const step = Math.max(Math.max(...xs) - x0, Math.max(...ys) - y0) / LABEL_SAMPLES;
+    let best: { p: Pt; d: number } | null = null;
+    for (let x = x0 + step / 2; x < x0 + step * LABEL_SAMPLES; x += step) {
+      for (let y = y0 + step / 2; y < y0 + step * LABEL_SAMPLES; y += step) {
+        const p = { x, y };
+        if (!pointInPolygon(p, ring) || nested.some(r => pointInPolygon(p, r))) continue;
+        const d = Math.min(edgeDistance(p, [ring]), edgeDistance(p, nested));
+        if (!best || d > best.d) best = { p, d };
+      }
+    }
+    out.set(z.id, best?.p ?? plain);
+  });
+  return out;
+}

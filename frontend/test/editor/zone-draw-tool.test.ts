@@ -28,7 +28,7 @@ const triangle = (t: Tool) => { click(t, 0, 0); click(t, 1000, 0); click(t, 1000
 describe('zone draw tool', () => {
   it('three clicks and Enter create "Zone 1" and select it', () => {
     const { ctx, selected, t } = setup();
-    expect(t.id).toBe('zone-draw');
+    expect(t.id).toBe('zone');
     triangle(t);
     expect(ctx.commits).toHaveLength(0);
     expect(key(t, 'Enter')).toBe(true);
@@ -202,7 +202,58 @@ describe('zone draw tool', () => {
     expect(ctx.level().zones.map(z => z.name)).toEqual(['Zone 1', 'Zone 2']);
   });
 
-  it('the factory builds it', () => {
-    expect(createTool('zone-draw', fakeContext()).id).toBe('zone-draw');
+  it('the factory builds it for the Zone tool with the Polygon method', () => {
+    const ctx = fakeContext();
+    ctx.zoneMethod = () => 'polygon';
+    const t = createTool('zone', ctx);
+    click(t, 0, 0);
+    expect(t.preview().zoneDraft?.points).toEqual([{ x: 0, y: 0 }]);
+  });
+
+  it('the zone takes the name and Automation from the context; zonePlaced runs after the commit', () => {
+    const { ctx, t } = setup();
+    let placed = 0;
+    ctx.zoneName = () => 'Yard';
+    ctx.zoneAutomation = () => false;
+    ctx.zonePlaced = () => { placed++; };
+    triangle(t); key(t, 'Enter');
+    expect(ctx.level().zones[0]).toMatchObject({ name: 'Yard', automation: false });
+    expect(ctx.commits).toHaveLength(1);
+    expect(placed).toBe(1);
+    ctx.zoneAutomation = () => true;
+    click(t, 3000, 0); click(t, 4000, 0); click(t, 4000, 1000); key(t, 'Enter');
+    expect('automation' in ctx.level().zones[1]).toBe(false);
+  });
+
+  it('Undo (Ctrl+Z) removes the last vertex and is consumed; with no draft it is not consumed', () => {
+    const { ctx, t } = setup();
+    expect(key(t, 'Undo')).toBe(false);
+    triangle(t);
+    expect(key(t, 'Undo')).toBe(true);
+    expect(t.preview().zoneDraft?.points).toEqual([{ x: 0, y: 0 }, { x: 1000, y: 0 }]);
+    expect(key(t, 'Undo')).toBe(true);
+    expect(key(t, 'Undo')).toBe(true);
+    expect(t.preview().zoneDraft).toBeUndefined();
+    expect(key(t, 'Undo')).toBe(false);
+    expect(ctx.commits).toHaveLength(0);
+  });
+
+  it('vertices snap to other zones: their vertices first, then their edges, before the grid; walls come first', () => {
+    const other = { ...rectRoomLevel(3000, 4000, 400), zones: [
+      { id: 'o', name: 'o', invalid: false, shape: { kind: 'polygon' as const, vertices: [
+        { kind: 'free' as const, x: 1010, y: 1010 }, { kind: 'free' as const, x: 2010, y: 1010 },
+        { kind: 'free' as const, x: 2010, y: 2010 }, { kind: 'free' as const, x: 1010, y: 2010 }] } },
+    ] };
+    const { t } = setup(other);
+    t.move(ev(1020, 1025));
+    expect(t.preview().snap).toMatchObject({ kind: 'zoneVertex', pt: { x: 1010, y: 1010 } });
+    t.move(ev(1500, 1022)); // 12 mm from the top edge
+    expect(t.preview().snap).toMatchObject({ kind: 'zoneEdge', pt: { x: 1500, y: 1010 } });
+    t.move(ev(1500, 1100)); // off the edges: the grid
+    expect(t.preview().snap).toMatchObject({ kind: 'grid', pt: { x: 1500, y: 1100 } });
+    t.move(ev(1500, 190)); // the inner face of w0 wins
+    expect(t.preview().snap?.kind).toBe('wall');
+    click(t, 1500, 1022);
+    expect(t.preview().zoneDraft?.points).toEqual([{ x: 1500, y: 1010 }]);
   });
 });

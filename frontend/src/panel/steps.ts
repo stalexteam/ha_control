@@ -6,8 +6,8 @@ import { t } from '../i18n';
 import { fieldValue } from './field-value';
 import type { EditorMode } from './tool-factory';
 
-/** Wizard steps in order; a sixth one (Automation) is shown after them but not available yet. */
-const MODES: readonly EditorMode[] = ['plan', 'equipment', 'binding', 'zones', 'power'];
+/** Wizard steps in order; a fifth one (Automation) is shown after them but not available yet. */
+const MODES: readonly EditorMode[] = ['plan', 'equipment', 'binding', 'power'];
 
 export interface StepsOpts {
   mode: EditorMode;
@@ -29,9 +29,12 @@ export function stepState(mode: EditorMode, level: Level, status: (d: Device) =>
 { text: string; done: boolean } {
   const { walls, zones, devices } = level;
   switch (mode) {
-    case 'plan':
-      return { text: `${countText(walls.length, 'steps.wall', 'steps.walls')}, ${countText(zones.length, 'steps.zone', 'steps.zones')}`,
+    case 'plan': {
+      const invalid = zones.filter(z => z.invalid).length;
+      const bad = invalid ? `, ${t('steps.invalid').replace('{n}', String(invalid))}` : '';
+      return { text: `${countText(walls.length, 'steps.wall', 'steps.walls')}, ${countText(zones.length, 'steps.zone', 'steps.zones')}${bad}`,
         done: walls.length > 0 && zones.length > 0 };
+    }
     case 'equipment':
       return { text: countText(devices.length, 'steps.device', 'steps.devices'), done: devices.length > 0 };
     case 'binding': {
@@ -39,8 +42,6 @@ export function stepState(mode: EditorMode, level: Level, status: (d: Device) =>
       return { text: t('steps.bound').replace('{b}', String(bound)).replace('{n}', String(devices.length)),
         done: devices.length > 0 && bound === devices.length };
     }
-    case 'zones':
-      return { text: countText(zones.length, 'steps.zone', 'steps.zones'), done: zones.length > 0 };
     case 'power':
       return { text: countText(power.blocks.length, 'steps.block', 'steps.blocks'), done: stepDone(power) };
   }

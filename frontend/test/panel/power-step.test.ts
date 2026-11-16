@@ -56,11 +56,11 @@ describe('Power step', () => {
     localStorage.clear();
   });
 
-  it('is the fifth step; its rail has the select tool and the six place tools; Esc from a place tool returns to Select', async () => {
+  it('is the fourth step; its rail has the select tool and the six place tools; Esc from a place tool returns to Select', async () => {
     const el = await mountPower();
     expect(el.mode).toBe('power');
     expect(el.toolId).toBe('power-select');
-    expect($(el, '.steps [data-mode="power"] .n').textContent).toBe('5');
+    expect($(el, '.steps [data-mode="power"] .n').textContent).toBe('4');
     expect($(el, '.steps [data-mode="power"] .name').textContent).toBe('Power');
     expect([...el.shadowRoot!.querySelectorAll('.tools .tool')].map(b => b.textContent!.trim())).toEqual([
       'Select', 'Device', 'Bus', 'Battery', 'PV field', 'Transfer switch', 'Remainder',
@@ -345,18 +345,18 @@ describe('Power step', () => {
     expect(el.planView).toEqual(planView);
     const mine = { x: 7, y: 8, scale: 0.9 };
     el.view = mine;
-    el.setMode('zones');
+    el.setMode('binding');
     await el.updateComplete;
     el.setMode('power');
     await el.updateComplete;
     expect(el.view).toEqual(mine);
   });
 
-  it('switching Zones -> Power -> Zones keeps the plan view; the Power view is kept too', async () => {
+  it('switching Binding -> Power -> Binding keeps the plan view; the Power view is kept too', async () => {
     const el = await mountPower();
     const powerView = { x: 5, y: 6, scale: 1.2 };
     el.view = powerView;
-    el.setMode('zones');
+    el.setMode('binding');
     await el.updateComplete;
     const planView = { x: 1234, y: 567, scale: 0.05 };
     el.view = planView;
@@ -364,7 +364,7 @@ describe('Power step', () => {
     await el.updateComplete;
     expect(el.view).toEqual(powerView);
     expect(el.planView).toEqual(planView);
-    el.setMode('zones');
+    el.setMode('binding');
     await el.updateComplete;
     expect(el.view).toEqual(planView);
     expect(el.powerView).toEqual(powerView);

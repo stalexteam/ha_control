@@ -37,29 +37,34 @@ describe('renderLevel', () => {
     expect(texts.some(s => s.includes('Kitchen') && s.includes('9.4 m²'))).toBe(true);
   });
 
-  it('draws every zone with its label outside the zones mode; the zones mode keeps walls zone fills only', () => {
+  it('the Plan step draws zone fills and labels; Equipment and Binding thin outlines only', () => {
     const level = addPolygonZone(sample(), [
       { kind: 'free', x: 500, y: 500 }, { kind: 'free', x: 1500, y: 500 }, { kind: 'free', x: 1500, y: 1500 },
     ], 'Corner').level;
-    const count = (mode: 'plan' | 'equipment' | 'zones', sel: string) => {
+    const rendered = (mode: 'plan' | 'equipment' | 'binding') => {
       const content = renderLevel(level, { palette: paletteFor(true), selection: null, preview: {}, scale: 0.1, mode });
       const host = document.createElement('div');
       render(html`<svg xmlns="http://www.w3.org/2000/svg">${content}</svg>`, host);
-      return host.querySelectorAll(sel).length;
+      return host;
     };
-    expect(count('plan', '.zone-label')).toBe(2);
-    expect(count('equipment', '.zone-label')).toBe(2);
-    expect(count('zones', '.zone-label')).toBe(0);
-    expect(count('plan', 'g.zones path.zone')).toBe(2);
-    expect(count('zones', 'g.zones path.zone')).toBe(1);
+    const plan = rendered('plan');
+    expect(plan.querySelectorAll('.zone-label').length).toBe(2);
+    expect([...plan.querySelectorAll('g.zones path.zone')].map(p => p.getAttribute('fill') === 'none')).toEqual([false, false]);
+    for (const mode of ['equipment', 'binding'] as const) {
+      const h = rendered(mode);
+      expect(h.querySelectorAll('.zone-label').length, mode).toBe(0);
+      const paths = [...h.querySelectorAll('g.zones path.zone')];
+      expect(paths.map(p => p.getAttribute('fill')), mode).toEqual(['none', 'none']);
+      expect(paths.map(p => p.getAttribute('stroke-width')), mode).toEqual(['1', '1']);
+    }
   });
 
   it('hatches an invalid zone', () => {
     const level = sample();
     const broken: Level = { ...level, zones: level.zones.map(z => ({ ...z, invalid: true })) };
     const root = draw(broken);
-    const zone = root.querySelector('.zone')!;
-    expect(zone.getAttribute('fill')).toBe('url(#hatch)');
+    const zone = root.querySelector('path.zone')!;
+    expect(zone.getAttribute('fill')).toBe('url(#zone-hatch)');
   });
 
   it('marks an invalid opening', () => {

@@ -1,21 +1,17 @@
-import { html, type TemplateResult } from 'lit';
+import { html, svg, type TemplateResult } from 'lit';
+import { mdiFloorPlan, mdiVectorPolygon } from '@mdi/js';
 import type { Id, Level, Zone } from '../model/types';
 import type { Selection } from '../editor/tools/types';
-import { zoneInvalidReason, zoneMembers } from '../geometry/zones';
-import { ZONE_HUES } from '../render/zones-svg';
-import { cached } from '../render/shared';
+import { zoneArea, zoneInvalidReason } from '../geometry/zones';
+import { zoneHue } from '../render/zones-svg';
 import { t } from '../i18n';
 import { fieldValue } from './field-value';
-import { toolButtons } from './toolbar';
-import type { ToolId } from './tool-factory';
 
 export interface ZonesListOpts {
   level: Level;
   selection: Selection | null;
-  toolId: ToolId;
-  /** Text filter on the zone name and kind. */
+  /** Text filter on the zone name and method. */
   query: string;
-  onTool(id: ToolId): void;
   onQuery(q: string): void;
   onPick(id: Id): void;
 }
@@ -23,33 +19,28 @@ export interface ZonesListOpts {
 /** "By walls" or "Polygon". */
 export const zoneKindLabel = (z: Zone): string => t(`zones.kind.${z.shape.kind}`);
 
+/** The method icon of a zone (or of a method): By walls or Polygon. */
+export const methodIcon = (kind: Zone['shape']['kind']): TemplateResult => html`<svg class="micon" viewBox="0 0 24 24"
+  aria-hidden="true">${svg`<path d=${kind === 'walls' ? mdiFloorPlan : mdiVectorPolygon}></path>`}</svg>`;
+
 /** Why the zone is invalid, as text; null for a valid zone. */
 export function zoneInvalidText(level: Level, z: Zone): string | null {
   const r = zoneInvalidReason(level, z);
   return r ? t(`zones.invalid.${r}`) : null;
 }
 
-const countCache = new WeakMap<Level, Map<Id, number>>();
-
-/** Participating members per zone id: the devices inside that did not opt out. */
-function memberCounts(level: Level): Map<Id, number> {
-  return cached(countCache, level, l =>
-    new Map(l.zones.map(z => [z.id, zoneMembers(l, z.id).filter(m => m.participates).length])));
-}
-
 /**
- * The Zones step rail: the three tools, a text filter and one row per zone in level order (its plan hue, name, kind
- * and participating member count; an invalid zone's swatch is the warning marker).
+ * The zone list of the Plan step's properties: a text filter, then one row per zone in level order (its plan hue,
+ * name, method icon and area in m²; an invalid zone's swatch is the warning marker). A row click picks the zone.
  */
 export function renderZonesList(o: ZonesListOpts): TemplateResult {
-  const counts = memberCounts(o.level);
   const q = o.query.trim().toLowerCase();
   const sel = o.selection?.kind === 'zone' ? o.selection.id : null;
-  const rows = o.level.zones.map((z, i) => ({ z, hue: ZONE_HUES[i % ZONE_HUES.length] }))
+  const rows = o.level.zones.map((z, i) => ({ z, hue: zoneHue(i) }))
     .filter(({ z }) => !q || z.name.toLowerCase().includes(q) || zoneKindLabel(z).toLowerCase().includes(q));
   return html`
     <div class="zlist">
-      <div class="ztools">${toolButtons('zones', o.toolId, o.onTool)}</div>
+      <div class="zhead"><span>${t('zones.list').replace('{n}', String(o.level.zones.length))}</span><span>${t('unit.m2')}</span></div>
       <input class="list-search" type="search" data-field="zone-filter" placeholder=${t('zones.filter')}
         aria-label=${t('zones.filter')} .value=${fieldValue(o.query)}
         @input=${(e: Event) => o.onQuery((e.target as HTMLInputElement).value)} />
@@ -60,8 +51,9 @@ export function renderZonesList(o: ZonesListOpts): TemplateResult {
             ${invalid === null
               ? html`<span class="zswatch" style=${`background:${hue}`}></span>`
               : html`<span class="zswatch zinvalid" role="img" aria-label=${invalid} title=${invalid}></span>`}
-            <span class="nm"><span class="name">${z.name}</span><small class="kind">${zoneKindLabel(z)}</small></span>
-            <span class="zcount" title=${t('zones.members')}>${counts.get(z.id) ?? 0}</span>
+            <span class="name">${z.name}</span>
+            <span class="zkind" data-kind=${z.shape.kind} title=${zoneKindLabel(z)}>${methodIcon(z.shape.kind)}</span>
+            <span class="zarea">${zoneArea(o.level, z).toFixed(1)}</span>
           </button>`;
         })}
       </div>

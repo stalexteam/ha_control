@@ -53,30 +53,29 @@ describe('renderSteps', () => {
     expect(s.onRename).toHaveBeenCalledWith('Flat');
   });
 
-  it('cell statuses read "15 walls, 6 zones", "3 devices", "1 of 3 bound", "6 zones", "1 block", "Comes later"', () => {
+  it('cell statuses read "15 walls, 6 zones", "3 devices", "1 of 3 bound", "1 block", "Comes later"; no Zones step', () => {
     const s = draw('plan', level(15, 6, 3), ['d1']);
     expect(s.text('[data-mode="plan"] .state')).toBe('15 walls, 6 zones');
     expect(s.text('[data-mode="equipment"] .state')).toBe('3 devices');
     expect(s.text('[data-mode="binding"] .state')).toBe('1 of 3 bound');
-    expect(s.text('[data-mode="zones"] .state')).toBe('6 zones');
+    expect(s.q('[data-mode="zones"]')).toBeNull();
     expect(s.text('[data-mode="power"] .state')).toBe('1 block');
     expect(s.text('[data-step="automation"] .state')).toBe('Comes later');
     expect(s.text('[data-mode="binding"] .name')).toBe('Binding');
     expect(s.text('[data-mode="binding"] .n')).toBe('3');
-    expect(s.text('[data-mode="zones"] .name')).toBe('Zones');
-    expect(s.text('[data-mode="zones"] .n')).toBe('4');
     expect(s.text('[data-mode="power"] .name')).toBe('Power');
-    expect(s.text('[data-mode="power"] .n')).toBe('5');
-    expect(s.text('[data-step="automation"] .n')).toBe('6');
+    expect(s.text('[data-mode="power"] .n')).toBe('4');
+    expect(s.text('[data-step="automation"] .n')).toBe('5');
   });
 
-  it('the Zones cell counts every zone (invalid ones too) and is done with one or more', () => {
-    const done = (s: ReturnType<typeof draw>) => s.q('[data-mode="zones"]')!.classList.contains('done');
-    expect(done(draw('plan', level(0, 0, 0)))).toBe(false);
-    const one = draw('plan', level(0, 0, 0, 1));
-    expect(one.text('[data-mode="zones"] .state')).toBe('1 zone');
+  it('the Plan cell counts every zone and adds the invalid ones; it is done with a wall and a zone', () => {
+    const done = (s: ReturnType<typeof draw>) => s.q('[data-mode="plan"]')!.classList.contains('done');
+    expect(done(draw('plan', level(1, 0, 0)))).toBe(false);
+    const one = draw('plan', level(1, 0, 0, 1));
+    expect(one.text('[data-mode="plan"] .state')).toBe('1 wall, 1 zone, 1 invalid');
     expect(done(one)).toBe(true);
-    expect(draw('plan', level(0, 0, 0, 2)).text('[data-mode="zones"] .state')).toBe('2 zones');
+    expect(draw('plan', level(2, 1, 0, 2)).text('[data-mode="plan"] .state')).toBe('2 walls, 3 zones, 2 invalid');
+    expect(done(draw('plan', level(0, 1, 0)))).toBe(false);
   });
 
   it('the Power cell counts blocks and is done once the grid has a power entity and a wire exists', () => {
@@ -142,28 +141,17 @@ describe('renderSteps', () => {
     expect(eq.onMode).toHaveBeenCalledWith('binding');
   });
 
-  it('in Binding, Back is "Back: Equipment" and Next is "Next: Zones"', () => {
+  it('in Binding, Back is "Back: Equipment" and Next is "Next: Power"; Power, the last step, has "Back: Binding" and no Next', () => {
     const s = draw('binding', level(4, 1, 2));
     expect(s.text('[data-nav="back"]')).toBe('Back: Equipment');
-    expect(s.text('[data-nav="next"]')).toBe('Next: Zones');
-    s.q<HTMLButtonElement>('[data-nav="next"]')!.click();
-    expect(s.onMode).toHaveBeenCalledWith('zones');
-    s.q<HTMLButtonElement>('[data-nav="back"]')!.click();
-    expect(s.onMode).toHaveBeenCalledWith('equipment');
-  });
-
-  it('Zones has "Back: Binding" and "Next: Power"; Power, the last step, has "Back: Zones" and no Next', () => {
-    const s = draw('zones', level(4, 1, 2));
-    expect(s.q('[data-mode="zones"]')!.getAttribute('aria-current')).toBe('step');
-    expect(s.text('[data-nav="back"]')).toBe('Back: Binding');
     expect(s.text('[data-nav="next"]')).toBe('Next: Power');
-    s.q<HTMLButtonElement>('[data-nav="back"]')!.click();
-    expect(s.onMode).toHaveBeenCalledWith('binding');
     s.q<HTMLButtonElement>('[data-nav="next"]')!.click();
     expect(s.onMode).toHaveBeenCalledWith('power');
+    s.q<HTMLButtonElement>('[data-nav="back"]')!.click();
+    expect(s.onMode).toHaveBeenCalledWith('equipment');
     const p = draw('power', level(4, 1, 2));
     expect(p.q('[data-mode="power"]')!.getAttribute('aria-current')).toBe('step');
-    expect(p.text('[data-nav="back"]')).toBe('Back: Zones');
+    expect(p.text('[data-nav="back"]')).toBe('Back: Binding');
     expect(p.q('[data-nav="next"]')).toBeNull();
   });
 

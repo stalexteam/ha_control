@@ -5,7 +5,7 @@ import { WALL_PRESETS } from '../model/types';
 import { deleteWall } from '../model/ops';
 import { deleteOpening } from '../model/openings';
 import { deleteZone } from '../model/zones';
-import { zoneLabelPoint, zoneOutline } from '../geometry/zones';
+import { zoneLabelPoints } from '../geometry/zones';
 import { bindingStatus, type BindStatus } from '../model/bindings';
 import { presence } from '../binding/ha-meta';
 import { devicePose } from '../geometry/devices';
@@ -58,7 +58,7 @@ export class PlanStudioPanel extends LitElement {
   @state() thickness = WALL_PRESETS.bearing;
   @state() boxMeasure: BoxMeasure = 'inner';
   @state() grid = true;
-  /** Wizard step: Plan / Equipment / Binding / Zones / Power (per session, not saved); cones: device cones and zones are drawn. */
+  /** Wizard step: Plan / Equipment / Binding / Power (per session, not saved); cones: device cones and zones are drawn. */
   @state() mode: EditorMode = 'plan';
   /** Binding step device list: Not bound / Bound / All and the text filter. */
   @state() bindFilter: ListFilter = 'unbound';
@@ -66,7 +66,7 @@ export class PlanStudioPanel extends LitElement {
   /** Binding step: the device list rail is folded to a strip; "Show all" per role (both per session). */
   @state() railCollapsed = false;
   @state() showAll: Partial<Record<BindingRole, boolean>> = {};
-  /** Zones step zone list text filter (per session). */
+  /** Plan step zone list text filter (per session). */
   @state() zoneQuery = '';
   @state() private cones = true;
   /** "Next device" props per kind; they drive ctx.deviceDefaults. */
@@ -242,7 +242,7 @@ export class PlanStudioPanel extends LitElement {
 
   /**
    * Delete/Backspace: remove the selected element (commit() drops the tool state and the selection). Not in the
-   * Binding step; the Zones step deletes a zone only; the Power step deletes power blocks and wires only.
+   * Binding step; the Power step deletes power blocks and wires only.
    */
   deleteSelection(): boolean {
     const s = this.selection;
@@ -250,7 +250,6 @@ export class PlanStudioPanel extends LitElement {
     if (this.mode === 'binding' || !s || !level || s.kind === 'node' || !selectionExists(level, s, this.power)) return false;
     if (this.mode === 'power') return this.deletePower(s);
     if (s.kind === 'powerBlock' || s.kind === 'powerWire') return false;
-    if (this.mode === 'zones' && s.kind !== 'zone') return false;
     if (s.kind === 'device') {
       const edit = deleteDeviceDoc(level, this.power, s.id);
       this.commit(edit.level, edit.power);
@@ -343,7 +342,8 @@ export class PlanStudioPanel extends LitElement {
     const z = level?.zones.find(x => x.id === id);
     if (!level || !z) return;
     this.ctx.select({ kind: 'zone', id });
-    this.view = revealPt(this.view, zoneLabelPoint(zoneOutline(level, z)), this.size.w, this.size.h);
+    const at = zoneLabelPoints(level).get(id);
+    if (at) this.view = revealPt(this.view, at, this.size.w, this.size.h);
   }
 
   nextUnboundDevice(): void {
@@ -419,7 +419,7 @@ export class PlanStudioPanel extends LitElement {
     const s = this.save;
     const power = this.mode === 'power';
     return html`
-      <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : this.mode === 'zones' || power ? ` ${this.mode}` : ''}"
+      <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : power ? ' power' : ''}"
         style=${paletteVars(pal)}
         @click=${this.refocus} @change=${this.refocusAfterChange}>
         ${renderTopBar({
@@ -443,7 +443,7 @@ export class PlanStudioPanel extends LitElement {
             preserveAspectRatio="xMinYMin meet" style=${`background:${pal.background}`}
             @pointerdown=${this.input.pointerDown} @pointermove=${this.input.pointerMove}
             @pointerup=${this.input.pointerUp} @pointercancel=${this.input.pointerAbort}
-            @lostpointercapture=${this.input.pointerAbort} @wheel=${this.input.wheel} @contextmenu=${(e: Event) => e.preventDefault()}>
+            @lostpointercapture=${this.input.pointerAbort} @dblclick=${this.input.dblClick} @wheel=${this.input.wheel} @contextmenu=${(e: Event) => e.preventDefault()}>
             ${this.grid ? renderGrid(this.view, w, h, pal, power ? 0.1 : 1) : nothing}
             ${this.mode === 'power' ? renderPower(this.power, {
               palette: pal, selection: this.selection, preview, scale, frame: this.powerFeed.frame, geo: this.ctx.geo(),

@@ -1,16 +1,15 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
-import type { Device, Id, Level, Opening, Pt, Wall, Zone } from '../model/types';
+import type { Device, Id, Level, Opening, Pt, Wall } from '../model/types';
 import type { BindStatus } from '../model/bindings';
 import type { ContainerFlash, ContainerState } from '../live/container-feed';
 import type { WallProps } from '../model/ops';
 import type { Preview, Selection } from '../editor/tools/types';
 import { segmentFrame, wallFrame, wallOutlines, wallPieces, wallsUnion, type WallFrame } from '../geometry/walls';
-import { zoneArea, zoneLabelPoint, zoneOutline } from '../geometry/zones';
-import { add, cross, dist, perpLeft, pointInPolygon, scale as mul, sub } from '../geometry/vec';
+import { add, cross, dist, perpLeft, scale as mul, sub } from '../geometry/vec';
 import { t } from '../i18n';
 import type { PlanPalette } from './theme';
 import { renderDevices } from './devices-svg';
-import { renderZones } from './zones-svg';
+import { renderZoneAreas, renderZoneOverlay } from './zones-svg';
 import { cached, ringD } from './shared';
 
 export interface RenderOpts {
@@ -19,8 +18,11 @@ export interface RenderOpts {
   preview: Preview;
   /** Screen pixels per millimetre; used to keep strokes, text and handles a constant on-screen size. */
   scale: number;
-  /** plan: devices dimmed; equipment, binding and zones: walls, openings and zones dimmed. Default plan. */
-  mode?: 'plan' | 'equipment' | 'binding' | 'zones';
+  /**
+   * plan: devices dimmed, zones filled and labelled with their handles and draft; equipment and binding: walls,
+   * openings and zone outlines dimmed. Default plan.
+   */
+  mode?: 'plan' | 'equipment' | 'binding';
   /** Binding status per device; drawn as rings in the binding mode only. */
   bindingStatus?: (d: Device) => BindStatus;
   /** Live state of an input container; drawn in every mode. */
@@ -38,11 +40,7 @@ export function formatMm(v: number): string {
   return n < 0 ? `-${s}` : s;
 }
 
-/** An area in m2 with 1 decimal: 12 -> "12.0 m²". */
-export function formatArea(m2: number): string {
-  const s = m2.toFixed(1);
-  return `${s} ${t('unit.m2')}`;
-}
+export { formatArea } from './shared';
 
 // Geometry is cached per level object: levels are immutable snapshots.
 const unionCache = new WeakMap<Level, Pt[][][]>();
@@ -66,18 +64,6 @@ function frameOf(level: Level, wallId: Id): WallFrame | null {
   } catch {
     return null;
   }
-}
-
-function centroid(ring: Pt[], fallback: Pt): Pt {
-  let a = 0, cx = 0, cy = 0;
-  for (let i = 0; i < ring.length; i++) {
-    const p = ring[i], q = ring[(i + 1) % ring.length];
-    const c = p.x * q.y - q.x * p.y;
-    a += c; cx += (p.x + q.x) * c; cy += (p.y + q.y) * c;
-  }
-  if (Math.abs(a) < 1e-9) return fallback;
-  const c = { x: cx / (3 * a), y: cy / (3 * a) };
-  return pointInPolygon(c, ring) ? c : fallback;
 }
 
 const NS = 'non-scaling-stroke';
@@ -110,27 +96,6 @@ function renderWallBreaks(level: Level, o: RenderOpts): SVGTemplateResult | type
     }
   }
   return marks.length ? svg`${marks}` : nothing;
-}
-
-/**
- * A zone's fill and its name and area label (an invalid zone is hatched). The zones mode draws walls zones only, with
- * no label: the Zones step layer (renderZones) draws every zone with its label over them.
- */
-function renderZone(level: Level, z: Zone, o: RenderOpts, selected: boolean): SVGTemplateResult | typeof nothing {
-  if (o.mode === 'zones' && z.shape.kind !== 'walls') return nothing;
-  const p = o.palette;
-  const outline = zoneOutline(level, z);
-  const at = centroid(outline, z.shape.kind === 'walls' ? z.shape.seed : zoneLabelPoint(outline));
-  const fs = 12 / o.scale;
-  return svg`
-    <path class="zone${z.invalid ? ' broken' : ''}" d=${ringD(outline)}
-      fill=${z.invalid ? 'url(#hatch)' : p.zone}
-      stroke=${selected ? p.selection : 'none'} stroke-width="2" vector-effect=${NS}></path>
-    ${o.mode === 'zones' ? nothing : svg`<text class="zone-label" x=${at.x} y=${at.y} text-anchor="middle" font-size=${fs}
-      fill=${z.invalid ? p.invalid : p.zoneLabel} font-family="system-ui, sans-serif">
-      <tspan x=${at.x} dy=${-0.2 * fs}>${z.name}</tspan>
-      <tspan x=${at.x} dy=${1.2 * fs} font-size=${fs * 0.9}>${formatArea(zoneArea(level, z))}</tspan>
-    </text>`}`;
 }
 
 /** Door / gate / wicket: a leaf at the hinge on the swing side plus a quarter arc. */
@@ -294,7 +259,12 @@ function renderSnap(level: Level, o: RenderOpts): SVGTemplateResult | typeof not
     const d = `M${x} ${y - r}L${x + r * 0.866} ${y + r / 2}L${x - r * 0.866} ${y + r / 2}Z`;
     marker = svg`<g class="snap-mid"><path d=${d} fill=${p.snap} stroke=${halo.stroke} stroke-width=${halo.width}
       paint-order="stroke" stroke-linejoin="round" vector-effect=${NS}></path></g>`;
-  } else if (s.kind === 'wall') {
+  } else if (s.kind === 'zoneVertex') {
+    const r = px(7);
+    const d = `M${x} ${y - r}L${x + r} ${y}L${x} ${y + r}L${x - r} ${y}Z`;
+    marker = svg`<g class="snap-zone-vertex"><path d=${d} fill="none" stroke=${halo.stroke} stroke-width="5"
+      vector-effect=${NS}></path><path d=${d} fill="none" stroke=${p.snap} stroke-width="2" vector-effect=${NS}></path></g>`;
+  } else if (s.kind === 'wall' || s.kind === 'zoneEdge') {
     const h = px(5);
     const d = `M${x - h} ${y - h}L${x + h} ${y + h}M${x - h} ${y + h}L${x + h} ${y - h}`;
     marker = svg`<g class="snap-wall">
@@ -329,26 +299,21 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
   const union = cached(unionCache, lv, l => wallsUnion(l, true));
   const lightWalls = lv.walls.filter((w: Wall) => w.type === 'railing' || w.type === 'fence');
   const pieces = lightWalls.length ? cached(piecesCache, lv, wallPieces) : null;
-  const hs = 8 / o.scale;
   const sel = o.selection;
   const plan = (o.mode ?? 'plan') === 'plan';
   const dimOp = plan ? nothing : String(p.dimOpacity);
+  const zoneId = sel?.kind === 'zone' ? sel.id : null;
+  const mode = o.mode ?? 'plan';
   return svg`
-    <defs>
-      <pattern id="hatch" patternUnits="userSpaceOnUse" width=${hs} height=${hs} patternTransform="rotate(45)">
-        <rect width=${hs} height=${hs} fill=${p.zone}></rect>
-        <line x1="0" y1="0" x2="0" y2=${hs} stroke=${p.hatch} stroke-width=${1.5 / o.scale}></line>
-      </pattern>
-    </defs>
-    <g class="zones" opacity=${dimOp}>${lv.zones.map(z =>
-      renderZone(lv, z, o, o.mode !== 'zones' && sel?.kind === 'zone' && sel.id === z.id))}</g>
+    ${renderZoneAreas(lv, { palette: p, scale: o.scale, selectedId: zoneId, mode })}
     <path class="walls" d=${union.map(poly => poly.map(ringD).join('')).join('')} fill=${p.wall} fill-rule="evenodd" opacity=${dimOp}></path>
     ${pieces ? svg`<g class="railings" opacity=${dimOp}>${lightWalls.flatMap(w => (pieces.get(w.id) ?? []).map(r =>
       svg`<path d=${ringD(r)} fill=${p.railing}></path>`))}</g>` : nothing}
     <g class="openings" opacity=${dimOp}>${lv.openings.map(op => renderOpening(lv, op, o))}</g>
     <g class="wall-breaks" opacity=${dimOp}>${renderWallBreaks(lv, o)}</g>
-    ${o.mode === 'zones' ? renderZones(lv, {
-      palette: p, scale: o.scale, selectedId: sel?.kind === 'zone' ? sel.id : null, draft: o.preview.zoneDraft,
+    ${plan ? renderZoneOverlay(lv, {
+      palette: p, scale: o.scale, selectedId: zoneId, draft: o.preview.zoneDraft,
+      vertex: o.preview.zoneVertex?.zoneId === zoneId ? o.preview.zoneVertex.index : null,
     }) : nothing}
     <g class="devices-layer">${renderDevices(lv, {
       palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: plan, preview: o.preview.device,

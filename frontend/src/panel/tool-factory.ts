@@ -6,9 +6,6 @@ import { createZoneTool } from '../editor/tools/zone-tool';
 import { createDeviceTool } from '../editor/tools/device-tool';
 import { createDeviceSelectTool } from '../editor/tools/device-select-tool';
 import { createBindingSelectTool } from '../editor/tools/binding-select-tool';
-import { createZoneRoomTool } from '../editor/tools/zone-room-tool';
-import { createZoneDrawTool } from '../editor/tools/zone-draw-tool';
-import { createZonesSelectTool } from '../editor/tools/zones-select-tool';
 import { createPowerSelectTool } from '../editor/tools/power-select-tool';
 import { createPowerPlaceTool } from '../editor/tools/power-place-tool';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
@@ -16,22 +13,19 @@ import type { PowerSchema } from '../model/power';
 import type { Level } from '../model/types';
 
 export type ToolId = Tool['id'];
-export type EditorMode = 'plan' | 'equipment' | 'binding' | 'zones' | 'power';
+export type EditorMode = 'plan' | 'equipment' | 'binding' | 'power';
 
 export const PLAN_TOOL_IDS: ToolId[] = ['select', 'box', 'wall', 'door', 'window', 'opening', 'zone'];
 export const EQUIPMENT_TOOL_IDS: ToolId[] = ['device-select', 'ceiling_light', 'wall_light', 'motion_sensor',
   'illuminance_sensor', 'climate_sensor', 'wall_switch', 'smart_button', 'socket', 'exhaust_fan', 'equipment'];
 /** The Binding step has a single selection-only tool; its rail is the device list. */
 export const BINDING_TOOL_IDS: ToolId[] = ['binding-select'];
-/** The Zones step tools; its rail adds the zone list under them. */
-export const ZONES_TOOL_IDS: ToolId[] = ['zones-select', 'zone-room', 'zone-draw'];
 /** The Power step: select, then the Device tool and the service blocks (no grid tool: the grid always exists). */
 export const POWER_TOOL_IDS: ToolId[] = ['power-select', 'power-device', 'power-bus', 'power-battery', 'power-pv',
   'power-transfer', 'power-remainder'];
 
 const TOOL_IDS: Record<EditorMode, ToolId[]> = {
-  plan: PLAN_TOOL_IDS, equipment: EQUIPMENT_TOOL_IDS, binding: BINDING_TOOL_IDS, zones: ZONES_TOOL_IDS,
-  power: POWER_TOOL_IDS,
+  plan: PLAN_TOOL_IDS, equipment: EQUIPMENT_TOOL_IDS, binding: BINDING_TOOL_IDS, power: POWER_TOOL_IDS,
 };
 
 export function toolIdsFor(mode: EditorMode): ToolId[] {
@@ -47,9 +41,6 @@ export function createTool(id: ToolId, ctx: ToolContext): Tool {
     case 'zone': return createZoneTool(ctx);
     case 'device-select': return createDeviceSelectTool(ctx);
     case 'binding-select': return createBindingSelectTool(ctx);
-    case 'zones-select': return createZonesSelectTool(ctx);
-    case 'zone-room': return createZoneRoomTool(ctx);
-    case 'zone-draw': return createZoneDrawTool(ctx);
     case 'power-select': return createPowerSelectTool(ctx);
     case 'power-device': case 'power-bus': case 'power-battery': case 'power-pv':
     case 'power-transfer': case 'power-remainder':

@@ -248,13 +248,17 @@ describe('select tool', () => {
     expect(ctx.commits).toHaveLength(0);
   });
 
-  it('cancel also clears the editor selection', () => {
+  it('cancel drops the gesture and keeps the editor selection (the panel clears it where it should)', () => {
     const ctx = fakeContext(box());
     const sel: unknown[] = [];
     ctx.select = x => { sel.push(x); };
     const t = createSelectTool(ctx);
-    click(t, 500, 0);
+    t.down(ev(500, 0)); t.move(ev(500, 300));
     t.cancel();
-    expect(sel[sel.length - 1]).toBeNull();
+    expect(t.preview()).toEqual({});
+    expect(sel).toHaveLength(1);
+    expect(sel[0]).toMatchObject({ kind: 'wall' });
+    t.up(ev(500, 300));
+    expect(ctx.commits).toHaveLength(0);
   });
 });

@@ -5,10 +5,11 @@ import { add, dist, dot, lineIntersect, norm, perpLeft, scale, sub } from './vec
 
 /**
  * excludeNodeIds: nodes being dragged. They are not snap targets, and neither are the walls
- * attached to them (those walls move with the drag).
+ * attached to them (those walls move with the drag). zones: zone outlines whose vertices, then edges, are snap
+ * targets after the walls and before the grid (zone vertices are placed with them).
  */
-export interface SnapOpts { tolMm: number; grid: number | null; from?: Pt; ortho: boolean; excludeNodeIds?: Id[] }
-export interface SnapResult { pt: Pt; kind: 'node' | 'mid' | 'wall' | 'grid' | 'none'; endpoint: Endpoint }
+export interface SnapOpts { tolMm: number; grid: number | null; from?: Pt; ortho: boolean; excludeNodeIds?: Id[]; zones?: Pt[][] }
+export interface SnapResult { pt: Pt; kind: 'node' | 'mid' | 'wall' | 'zoneVertex' | 'zoneEdge' | 'grid' | 'none'; endpoint: Endpoint }
 
 /** Lock p onto the nearest global axis (0/90/180/270 deg) through from. */
 export function orthoConstrain(from: Pt, p: Pt): Pt {
@@ -21,7 +22,7 @@ export function pointAlong(from: Pt, towards: Pt, length: number): Pt {
   return add(from, scale(norm(sub(towards, from)), length));
 }
 
-function free(pt: Pt, kind: 'grid' | 'none'): SnapResult {
+function free(pt: Pt, kind: 'zoneVertex' | 'zoneEdge' | 'grid' | 'none'): SnapResult {
   return { pt, kind, endpoint: { kind: 'free', pt } };
 }
 
@@ -89,7 +90,34 @@ export function snap(level: Level, p: Pt, opts: SnapOpts): SnapResult {
   const face = hitLines(true);
   if (face) return face;
 
-  // 5. grid, 6. none
+  // 5. zone vertices, 6. zone edges (under a lock: where the constraining line crosses the edge)
+  const rings = opts.zones ?? [];
+  let bestV: { pt: Pt; d: number } | null = null;
+  for (const ring of rings) {
+    for (const pt of ring) {
+      const d = dist(pt, q);
+      if (d <= tolMm && onLine(pt) && (!bestV || d < bestV.d)) bestV = { pt, d };
+    }
+  }
+  if (bestV) return free(bestV.pt, 'zoneVertex');
+  let bestE: { pt: Pt; d: number } | null = null;
+  for (const ring of rings) {
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i], b = ring[(i + 1) % ring.length];
+      const l = dist(a, b);
+      if (l < 1e-9) continue;
+      const dir = scale(sub(b, a), 1 / l);
+      const hit = from ? lineIntersect(from, sub(q, from), a, dir) : add(a, scale(dir, dot(sub(q, a), dir)));
+      if (!hit) continue;
+      const t = dot(sub(hit, a), dir);
+      if (t < 0 || t > l) continue;
+      const d = dist(hit, q);
+      if (d <= tolMm && (!bestE || d < bestE.d)) bestE = { pt: hit, d };
+    }
+  }
+  if (bestE) return free(bestE.pt, 'zoneEdge');
+
+  // 7. grid, 8. none
   if (grid && grid > 0) {
     const r = (v: number) => Math.round(v / grid) * grid;
     const pt = !from ? { x: r(q.x), y: r(q.y) } : horizontal ? { x: r(q.x), y: from.y } : { x: from.x, y: r(q.y) };

@@ -1,4 +1,4 @@
-import type { Device, Plan } from '../src/model/types';
+import type { Device, Plan, Zone } from '../src/model/types';
 import type { PowerFrame, PowerSchema } from '../src/model/power';
 import { rectRoomLevel } from '../test/fixtures';
 
@@ -7,13 +7,21 @@ export interface Scene { plans: Plan[]; powerFrame?: PowerFrame }
 
 function room(): Plan {
   const level = rectRoomLevel(4000, 3000, 100);
+  const poly = (id: string, name: string, pts: [number, number][]): Zone => ({
+    id, name, invalid: false, shape: { kind: 'polygon', vertices: pts.map(([x, y]) => ({ kind: 'free', x, y })) },
+  });
+  // Overlapping zones: "Door" and "Middle" lie inside the room's walls zone, "Yard" is outdoors.
   level.zones = [{
-    id: 'r0', name: 'Room 1', invalid: false,
+    id: 'r0', name: 'Main', invalid: false,
     shape: {
       kind: 'walls', seed: { x: 2000, y: 1500 }, broken: false,
       outline: [{ x: 50, y: 50 }, { x: 3950, y: 50 }, { x: 3950, y: 2950 }, { x: 50, y: 2950 }],
     },
-  }];
+  },
+  poly('z-door', 'Door', [[50, 1900], [1300, 1900], [1300, 2950], [50, 2950]]),
+  poly('z-mid', 'Middle', [[1700, 700], [3300, 700], [3300, 2300], [1700, 2300]]),
+  poly('z-yard', 'Yard', [[-500, 3400], [4500, 3400], [4500, 5000], [-500, 5000]]),
+  ];
   level.devices = [
     {
       id: 'd-light', name: 'Ceiling light', invalid: false,

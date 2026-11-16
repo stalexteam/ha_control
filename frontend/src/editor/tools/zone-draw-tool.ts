@@ -1,11 +1,9 @@
 import type { Level, Pt, ZoneVertex } from '../../model/types';
-import { addPolygonZone } from '../../model/zones';
-import { nextFreeName } from '../../model/ids';
+import { addPolygonZone, setZoneAutomation } from '../../model/zones';
 import { segmentsMeet, selfIntersects } from '../../geometry/zones';
 import { cross, dist, dot, sub } from '../../geometry/vec';
-import { t } from '../../i18n';
 import type { SnapResult } from '../../geometry/snap';
-import { zoneVertexAt } from './zones-select-tool';
+import { zoneVertexAt } from './zone-edit';
 import type { Preview, Tool, ToolContext, ToolEvent } from './types';
 
 const MIN_VERTICES = 3;
@@ -14,13 +12,14 @@ const SAME_MM = 1;
 const pt = (v: ZoneVertex): Pt => ({ x: v.x, y: v.y });
 
 /**
- * Polygon zone drawing tool. Each click adds a vertex placed by the same snap rules as the zone vertex drag (node ->
- * node vertex; wall midpoint, axis or face -> wall vertex on the face of the pointer's side; grid or nothing -> free;
- * Alt: free; Shift: ortho from the last vertex). The snap marker shows where the vertex lands, before the first click
- * too. A vertex is rejected within 1 mm of the previous one or when its edge would cross an earlier, non-adjacent
- * edge. With 3 or more vertices a click on the first or the last vertex, or Enter, closes the zone (rejected while
- * the closing edge crosses the outline); hovering either vertex previews the closing. Backspace or Delete removes
- * the last vertex; Escape drops the draft.
+ * The Zone tool's Polygon method. Each click adds a vertex placed by the same snap rules as the zone vertex drag (node
+ * -> node vertex; wall midpoint, axis or face -> wall vertex on the face of the pointer's side; another zone's vertex,
+ * then its edge, the grid or nothing -> free; Alt: free; Shift: ortho from the last vertex). The snap marker shows
+ * where the vertex lands, before the first click too. A vertex is rejected within 1 mm of the previous one or when
+ * its edge would cross an earlier, non-adjacent edge. With 3 or more vertices a click on the first or the last
+ * vertex, or Enter, closes the zone (rejected while the closing edge crosses the outline) with the context's name and
+ * Automation; hovering either vertex previews the closing. Backspace, Delete or Ctrl+Z ("Undo") removes the last
+ * vertex; Escape drops the draft.
  */
 export function createZoneDrawTool(ctx: ToolContext): Tool {
   let draft: ZoneVertex[] = [];
@@ -56,11 +55,11 @@ export function createZoneDrawTool(ctx: ToolContext): Tool {
   function close(): boolean {
     if (draft.length < MIN_VERTICES || selfIntersects(draft.map(pt))) return false;
     const level: Level = ctx.level();
-    const name = nextFreeName(t('zones.default'), level.zones.map(z => z.name));
-    const res = addPolygonZone(level, draft, name);
+    const res = addPolygonZone(level, draft, ctx.zoneName());
     if (res.zoneId === null) return false;
     draft = []; cursor = null; invalid = false;
-    ctx.commit(res.level);
+    ctx.commit(ctx.zoneAutomation() ? res.level : setZoneAutomation(res.level, res.zoneId, false));
+    ctx.zonePlaced?.();
     ctx.select({ kind: 'zone', id: res.zoneId });
     return true;
   }
@@ -68,7 +67,7 @@ export function createZoneDrawTool(ctx: ToolContext): Tool {
   const place = (e: ToolEvent) => zoneVertexAt(ctx, ctx.level(), e, last());
 
   return {
-    id: 'zone-draw',
+    id: 'zone',
     down(e: ToolEvent) {
       if (closingVertex(e.pt)) {
         close();
@@ -98,7 +97,7 @@ export function createZoneDrawTool(ctx: ToolContext): Tool {
     up() {},
     key(key: string) {
       if (key === 'Enter') return close();
-      if (key === 'Backspace' || key === 'Delete') {
+      if (key === 'Backspace' || key === 'Delete' || key === 'Undo') {
         if (draft.length === 0) return false;
         draft = draft.slice(0, -1);
         invalid = false;

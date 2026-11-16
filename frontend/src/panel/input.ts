@@ -11,7 +11,7 @@ const MODIFIER_KEYS = ['Shift', 'Control', 'Alt', 'Meta'];
 
 /** The select tool an unconsumed Esc returns to, per step; the Binding step has no other tool. */
 const HOME_TOOL: Partial<Record<EditorMode, ToolId>> = {
-  plan: 'select', equipment: 'device-select', zones: 'zones-select', power: 'power-select',
+  plan: 'select', equipment: 'device-select', power: 'power-select',
 };
 
 function inField(e: KeyboardEvent): boolean {
@@ -30,7 +30,7 @@ export class EditorInput {
 
   constructor(private readonly h: InputHost) {}
 
-  private toolEvent(e: PointerEvent): ToolEvent {
+  private toolEvent(e: MouseEvent): ToolEvent {
     return { pt: this.h.toMm(e), shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey };
   }
 
@@ -79,6 +79,12 @@ export class EditorInput {
     this.h.requestUpdate();
   };
 
+  readonly dblClick = (e: MouseEvent) => {
+    if (e.button !== 0) return;
+    this.h.activeTool.dblclick?.(this.toolEvent(e));
+    this.h.requestUpdate();
+  };
+
   readonly wheel = (e: WheelEvent) => {
     e.preventDefault();
     this.h.view = zoomAt(this.h.view, this.h.toMm(e), e.deltaY);
@@ -96,6 +102,8 @@ export class EditorInput {
     const k = e.code === 'KeyZ' ? 'z' : e.code === 'KeyY' ? 'y' : e.code === 'KeyS' ? 's' : e.key.toLowerCase();
     if (ctrl && (k === 'z' || k === 'y')) {
       e.preventDefault();
+      // A tool may take Ctrl+Z for itself (a draft vertex goes) before it reaches the plan's undo.
+      if (k === 'z' && !e.shiftKey && this.h.activeTool.key('Undo', { shift: false })) { this.h.requestUpdate(); return; }
       if (k === 'z' && !e.shiftKey) this.h.undo(); else this.h.redo();
       return;
     }

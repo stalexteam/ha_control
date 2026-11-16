@@ -1,9 +1,8 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import { fieldValue } from './field-value';
 import type { Level, OpeningKind, Side } from '../model/types';
 import { OPENING_DEFAULT_WIDTH } from '../model/types';
 import { nextFreeName } from '../model/ids';
-import type { OpeningDefaults } from '../editor/tools/types';
+import type { OpeningDefaults, ZoneMethod } from '../editor/tools/types';
 import { t } from '../i18n';
 import { numField, row, select } from './fields';
 
@@ -14,8 +13,11 @@ export interface NextObjects {
   door: { width: number; hinge: 'start' | 'end'; swing: Side };
   window: { width: number; outside: Side };
   opening: { width: number };
-  /** Name typed for the next zone; null means the automatic "Room N". */
-  zoneName: string | null;
+  /**
+   * The Zone tool: its method, the name typed for the next zone (null: the automatic "Zone N"; single-use) and
+   * whether the next zone takes part in automation (kept for the session).
+   */
+  zone: { method: ZoneMethod; name: string | null; automation: boolean };
   /** The Device tool places the next equipment device on a wall (Wall mount), like a socket. */
   wallMount: boolean;
 }
@@ -25,7 +27,7 @@ export function initialNext(): NextObjects {
     door: { width: OPENING_DEFAULT_WIDTH.door, hinge: 'start', swing: 'left' },
     window: { width: OPENING_DEFAULT_WIDTH.window, outside: 'left' },
     opening: { width: OPENING_DEFAULT_WIDTH.opening },
-    zoneName: null,
+    zone: { method: 'walls', name: null, automation: true },
     wallMount: false,
   };
 }
@@ -36,9 +38,9 @@ export function openingDefaults(n: NextObjects, kind: OpeningKind): OpeningDefau
   return { width: n.opening.width };
 }
 
-/** "Room N" with the smallest N not used by a zone name on the level. */
+/** "Zone N" with the smallest N not used by a zone name on the level. */
 export function defaultZoneName(level: Level): string {
-  return nextFreeName(t('zone.default'), level.zones.map(z => z.name));
+  return nextFreeName(t('zones.default'), level.zones.map(z => z.name));
 }
 
 export interface NextObjectOpts {
@@ -49,24 +51,11 @@ export interface NextObjectOpts {
   setNotice(msg: string | null): void;
 }
 
-export const isNextObjectTool = (tool: string): boolean =>
-  tool === 'door' || tool === 'window' || tool === 'opening' || tool === 'zone';
+export const isNextObjectTool = (tool: string): boolean => tool === 'door' || tool === 'window' || tool === 'opening';
 
-/** Panel section for the object the active door / window / opening / zone tool will create. */
+/** Panel section for the object the active door / window / opening tool will create (the Zone tool: zones-props). */
 export function renderNextObject(o: NextObjectOpts): TemplateResult | typeof nothing {
   const n = o.next;
-  if (o.tool === 'zone') {
-    const shown = n.zoneName ?? defaultZoneName(o.level);
-    return html`
-      <h4>${t('props.nextZone')}</h4>
-      ${row(t('props.name'), html`<input class="val wide" type="text" data-field="next-zone-name" .value=${fieldValue(shown)}
-        @change=${(e: Event) => {
-          const el = e.target as HTMLInputElement;
-          const name = el.value.trim();
-          if (!name) { el.value = shown; return; }
-          if (name !== shown) o.setNext({ ...n, zoneName: name });
-        }} />`)}`;
-  }
   if (o.tool !== 'door' && o.tool !== 'window' && o.tool !== 'opening') return nothing;
   const kind: NextOpeningKind = o.tool;
   const width = n[kind].width;

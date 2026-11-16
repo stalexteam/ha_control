@@ -81,7 +81,7 @@ describe('createToolContext', () => {
   });
 
   it('select clears the field notice in every mode; in Binding the session notice stays', () => {
-    for (const mode of ['plan', 'equipment', 'binding', 'zones']) {
+    for (const mode of ['plan', 'equipment', 'binding', 'power']) {
       const h = { ...host(), mode };
       createToolContext(h).select({ kind: 'device', id: 'd' });
       expect(h.fieldNotice, mode).toBeNull();

@@ -5,19 +5,11 @@ import { renderProps } from './props-panel';
 import { renderToolRail } from './toolbar';
 import { renderBindingList } from './binding-list';
 import { renderBindingProps } from './binding-props';
-import { renderZonesList } from './zones-list';
-import { renderZonesProps } from './zones-props';
 import { renderPowerProps } from './power-props';
 import type { PlanStudioPanel } from './plan-studio-panel';
 
-/** The left rail: the step's tool buttons, the tools and the zone list in the Zones step, or the device list in the Binding step. */
+/** The left rail: the step's tool buttons, or the device list in the Binding step. */
 export function renderRail(h: PlanStudioPanel, level: Level): TemplateResult {
-  if (h.mode === 'zones') {
-    return renderZonesList({
-      level, selection: h.selection, toolId: h.toolId, query: h.zoneQuery,
-      onTool: id => h.pickTool(id), onQuery: q => { h.zoneQuery = q; }, onPick: id => h.pickZone(id),
-    });
-  }
   if (h.mode !== 'binding') return renderToolRail(h.mode, h.toolId, id => h.pickTool(id));
   return renderBindingList({
     level, selection: h.selection, status: h.bindStatus, filter: h.bindFilter, query: h.bindQuery,
@@ -51,7 +43,6 @@ export function renderSide(h: PlanStudioPanel, level: Level): TemplateResult {
       setPosition: (id, p) => h.setPowerPosition(id, p),
     });
   }
-  if (h.mode === 'zones') return renderZonesProps({ level, selection: h.selection, notice: h.notice, commit: next => h.commit(next) });
   const common = {
     level, selection: h.selection, notice: h.notice,
     commit: (next: Level) => h.commit(next),
@@ -70,5 +61,7 @@ export function renderSide(h: PlanStudioPanel, level: Level): TemplateResult {
     next: h.nextObj, setNext: n => { h.nextObj = n; },
     setWallType: wt => h.setWallType(wt), setThickness: mm => { h.thickness = mm; },
     setBoxMeasure: m => { h.boxMeasure = m; },
+    zoneQuery: h.zoneQuery, onZoneQuery: q => { h.zoneQuery = q; }, onPickZone: id => h.pickZone(id),
+    onZoneMethod: m => { h.nextObj = { ...h.nextObj, zone: { ...h.nextObj.zone, method: m } }; h.pickTool('zone'); },
   });
 }

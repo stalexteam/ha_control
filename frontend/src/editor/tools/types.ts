@@ -13,6 +13,9 @@ export interface ToolEvent {
   ctrl: boolean;
 }
 
+/** How the Zone tool makes the next zone: from the closed walls around a click, or as a drawn polygon. */
+export type ZoneMethod = "walls" | "polygon";
+
 /** Pointer travel (screen px) below which a press-move-release is a click, not a drag. */
 export const DRAG_PX = 3;
 
@@ -42,9 +45,13 @@ export interface ToolContext {
   wallMount(): boolean;
   /** The panel's "next opening" values for the door / window / opening tool. */
   openingDefaults(kind: OpeningKind): OpeningDefaults;
-  /** Name the zone tool gives the next zone. */
+  /** Name the Zone tool gives the next zone. */
   zoneName(): string;
-  /** Called after the zone tool placed a zone (the automatic name advances). */
+  /** How the Zone tool makes the next zone (read when the tool is created). */
+  zoneMethod(): ZoneMethod;
+  /** The next zone takes part in automation. */
+  zoneAutomation(): boolean;
+  /** Called after the Zone tool placed a zone (a typed name is single-use). */
   zonePlaced?(): void;
   /** Plan devices for the power schematic geometry (device block names and lines). */
   geo(): GeoCtx;
@@ -83,6 +90,8 @@ export interface Preview {
   level?: Level;
   /** The polygon zone being drawn: fixed points, the cursor (null while off the plan) and whether closing now is invalid. */
   zoneDraft?: { points: Pt[]; cursor: Pt | null; invalid: boolean };
+  /** The vertex of the selected polygon zone picked by a click on its handle (Delete removes it). */
+  zoneVertex?: { zoneId: Id; index: number };
   device?: { placement: DevicePlacement; props: DeviceProps; invalid: boolean };
   /** Working copy of the power schematic during a drag; the renderer draws it instead of the committed one. */
   power?: PowerSchema;
@@ -95,11 +104,16 @@ export type PowerPlaceToolId = `power-${Exclude<PowerKind, "grid">}`;
 
 export interface Tool {
   readonly id: "select" | "box" | "wall" | "door" | "window" | "opening" | "zone" | "device-select" | "binding-select"
-    | "zones-select" | "zone-room" | "zone-draw" | DeviceKind | "power-select" | PowerPlaceToolId;
+    | DeviceKind | "power-select" | PowerPlaceToolId;
   down(e: ToolEvent): void;
   move(e: ToolEvent): void;
   up(e: ToolEvent): void;
-  /** Returns true when the tool consumed the key. */
+  /** A double-click on the canvas (after the down / up pairs of its two clicks). */
+  dblclick?(e: ToolEvent): void;
+  /**
+   * Returns true when the tool consumed the key. Ctrl+Z (Cmd+Z) comes as "Undo" first: a tool that consumes it
+   * (a draft vertex removed) keeps it from the plan's undo.
+   */
   key(key: string, e: { shift: boolean }): boolean;
   preview(): Preview;
   cancel(): void;

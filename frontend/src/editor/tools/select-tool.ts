@@ -6,6 +6,7 @@ import { snap, type SnapResult } from '../../geometry/snap';
 import { nodePos, wallFrame, wallLocal } from '../../geometry/walls';
 import { sub } from '../../geometry/vec';
 import { hitTest, wallAt } from '../hit';
+import { createZoneEditor } from './zone-edit';
 import type { Preview, Selection, Tool, ToolContext, ToolEvent } from './types';
 
 type Drag =
@@ -15,7 +16,10 @@ type Drag =
 
 /**
  * Select tool: pick, drag nodes/walls/openings (one commit per drag, on `up`), delete. Ctrl+press on a wall trims
- * it (one commit, no drag) and clears the selection.
+ * it (one commit, no drag) and clears the selection. Zones (createZoneEditor): the vertex handles of the selected
+ * polygon zone come first, then openings, nodes and walls, then the zones under the point (cycling where they
+ * overlap); a double-click on an edge of the selected polygon zone inserts a vertex. `cancel` drops the gesture and
+ * keeps the selection (the panel clears it where it should).
  */
 export function createSelectTool(ctx: ToolContext): Tool {
   let sel: Selection | null = null;
@@ -28,6 +32,7 @@ export function createSelectTool(ctx: ToolContext): Tool {
 
   const setSel = (s: Selection | null) => { sel = s; ctx.select(s); };
   const reset = () => { drag = null; start = null; working = null; original = null; moved = false; };
+  const zones = createZoneEditor(ctx, setSel);
 
   /** Free (unsnapped) points are kept on whole millimetres. */
   const whole = (s: SnapResult): Pt => (s.kind === 'none' ? { x: Math.round(s.pt.x), y: Math.round(s.pt.y) } : s.pt);
@@ -89,6 +94,7 @@ export function createSelectTool(ctx: ToolContext): Tool {
     down(e: ToolEvent) {
       reset();
       downPt = e.pt;
+      zones.note();
       const level = ctx.level();
       const trimmed = e.ctrl ? wallAt(level, e.pt, ctx.tolMm()) : null;
       if (trimmed) {
@@ -96,10 +102,12 @@ export function createSelectTool(ctx: ToolContext): Tool {
         ctx.commit(trimWall(level, trimmed, e.pt));
         return;
       }
+      if (zones.press(e)) return;
       const prev = sel;
       const hit = hitTest(level, e.pt, ctx.tolMm(), prev);
+      if (!hit) { zones.pick(e.pt); return; }
+      zones.forget();
       setSel(hit);
-      if (!hit) return;
       original = start = working = level;
       if (hit.kind === 'node') {
         let nodeId = hit.id;
@@ -119,8 +127,9 @@ export function createSelectTool(ctx: ToolContext): Tool {
         drag = { kind: 'opening', openingId: o.id, grab: along(level, o.wallId, e.pt) - o.offset };
       }
     },
-    move(e: ToolEvent) { update(e); },
+    move(e: ToolEvent) { if (zones.active()) zones.move(e); else update(e); },
     up(e: ToolEvent) {
+      if (zones.active()) { zones.up(e); return; }
       if (drag) update(e);
       const wasMoved = moved;
       const next = working;
@@ -128,14 +137,15 @@ export function createSelectTool(ctx: ToolContext): Tool {
       reset();
       if (wasMoved && next && orig && next !== orig) ctx.commit(next);
     },
+    dblclick(e: ToolEvent) { zones.dblclick(e); },
     key(key) {
       if (key === 'Escape' && drag) { reset(); return true; }
-      return false;
+      return zones.key(key);
     },
     preview(): Preview {
-      if (!drag || !working) return {};
+      if (!drag || !working) return zones.preview();
       return { level: working, orthoFrom: drag.kind === 'node' ? drag.origin : undefined };
     },
-    cancel() { reset(); setSel(null); },
+    cancel() { reset(); zones.cancel(); },
   };
 }

@@ -1,21 +1,20 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import { fieldValue } from './field-value';
-import type { Baseline, Level, Opening, OpeningKind, Side, Wall, WallType, Zone } from '../model/types';
+import type { Baseline, Id, Level, Opening, OpeningKind, Side, Wall, WallType } from '../model/types';
 import { deleteWall, setWallProps } from '../model/ops';
 import {
   DOOR_KINDS, deleteOpening, kindPatch, moveOpening, passesLight, passesLightByDefault, passesPir, passesPirByDefault, resizeOpening, setOpeningProps,
   type OpeningPatch,
 } from '../model/openings';
-import { deleteZone, renameZone } from '../model/zones';
 import { wallFrame } from '../geometry/walls';
-import { zoneArea } from '../geometry/zones';
-import type { Selection } from '../editor/tools/types';
-import { formatArea, formatMm } from '../render/plan-svg';
+import type { Selection, ZoneMethod } from '../editor/tools/types';
+import { formatMm } from '../render/plan-svg';
 import { t } from '../i18n';
 import { numField, row, select } from './fields';
 import type { ToolId } from './tool-factory';
 import { isNextObjectTool, renderNextObject, type NextObjects } from './next-object';
-import { zoneInvalidText } from './zones-list';
+import { renderZonesList } from './zones-list';
+import { renderNextZone, renderZoneProps } from './zones-props';
 
 export type BoxMeasure = 'inner' | 'axis' | 'outer';
 
@@ -38,6 +37,13 @@ export interface PropsOpts {
   setWallType(type: WallType): void;
   setThickness(mm: number): void;
   setNotice(msg: string | null): void;
+  /** The zone list's text filter. */
+  zoneQuery: string;
+  onZoneQuery(q: string): void;
+  /** A zone list row click: selects the zone and pans to it. */
+  onPickZone(id: Id): void;
+  /** The Zone tool's method switch. */
+  onZoneMethod(m: ZoneMethod): void;
 }
 
 /** Width/thickness field: a malformed value reverts with the width message. */
@@ -101,23 +107,6 @@ function openingProps(op: Opening, o: PropsOpts): TemplateResult {
       ${t('action.delete')}</button>`;
 }
 
-function zoneProps(z: Zone, o: PropsOpts): TemplateResult {
-  const invalid = zoneInvalidText(o.level, z);
-  return html`
-    <h4>${t('props.zone')}</h4>
-    ${row(t('props.name'), html`<input class="val wide" type="text" .value=${fieldValue(z.name)}
-      @change=${(e: Event) => {
-        const el = e.target as HTMLInputElement;
-        const name = el.value.trim();
-        if (!name) { el.value = z.name; return; }
-        if (name !== z.name) o.commit(renameZone(o.level, z.id, name));
-      }} />`)}
-    ${row(t('props.area'), html`<span class="val ro">${formatArea(zoneArea(o.level, z))}</span>`)}
-    ${invalid ? html`<p class="warn">${invalid}</p>` : nothing}
-    <button class="btn danger" data-action="delete-zone" @click=${() => o.commit(deleteZone(o.level, z.id))}>
-      ${t('action.delete')}</button>`;
-}
-
 /** Settings of the next wall drawn by the Wall / Box tool (the same panel state as the top bar). */
 function newWallProps(o: PropsOpts): TemplateResult {
   const types: WallType[] = ['bearing', 'partition', 'railing'];
@@ -141,8 +130,23 @@ function newWallProps(o: PropsOpts): TemplateResult {
       </div>` : nothing}`;
 }
 
+const zoneList = (o: PropsOpts): TemplateResult => renderZonesList({
+  level: o.level, selection: o.selection, query: o.zoneQuery, onQuery: o.onZoneQuery, onPick: o.onPickZone,
+});
+
+/**
+ * The Plan step properties. The Zone tool: its settings and the zone list. Otherwise the selected wall, opening,
+ * zone or node; with nothing selected the active tool's next-object settings, or (Select) the zone list.
+ */
 export function renderProps(o: PropsOpts): TemplateResult {
   const { level, selection: s } = o;
+  if (o.tool === 'zone') {
+    return html`<div class="props">
+      ${renderNextZone({ level, next: o.next, setNext: o.setNext, onMethod: o.onZoneMethod })}
+      ${o.notice ? html`<p class="warn">${o.notice}</p>` : nothing}
+      ${zoneList(o)}
+    </div>`;
+  }
   let body: TemplateResult | typeof nothing = nothing;
   if (s?.kind === 'wall') {
     const w = level.walls.find(x => x.id === s.id);
@@ -152,7 +156,7 @@ export function renderProps(o: PropsOpts): TemplateResult {
     if (op) body = openingProps(op, o);
   } else if (s?.kind === 'zone') {
     const z = level.zones.find(x => x.id === s.id);
-    if (z) body = zoneProps(z, o);
+    if (z) body = renderZoneProps(level, z, o.commit);
   } else if (s?.kind === 'node') {
     const n = level.nodes.find(x => x.id === s.id);
     if (n) body = html`<h4>${t('props.node')}</h4>
@@ -162,6 +166,7 @@ export function renderProps(o: PropsOpts): TemplateResult {
     <div class="props">
       ${body === nothing && (o.tool === 'wall' || o.tool === 'box') ? newWallProps(o)
         : body === nothing && isNextObjectTool(o.tool) ? renderNextObject({ tool: o.tool, level, next: o.next, setNext: o.setNext, setNotice: o.setNotice })
+        : body === nothing && o.tool === 'select' ? zoneList(o)
         : body === nothing ? html`<p class="muted">${t('props.none')}</p>` : body}
       ${o.notice ? html`<p class="warn">${o.notice}</p>` : nothing}
     </div>`;

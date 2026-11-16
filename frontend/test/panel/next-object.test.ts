@@ -76,7 +76,7 @@ describe('zone names', () => {
   beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
   const nameField = (el: PlanStudioPanel) => $<HTMLInputElement>(el, '.props [data-field="next-zone-name"]').value;
 
-  it('two default zones are Room 1, Room 2; deleting Room 1 frees the name', async () => {
+  it('two default zones are Zone 1, Zone 2; deleting Zone 1 frees the name', async () => {
     const el = await mount();
     const l = addBox(el.history!.current.level, { x: 0, y: 0 }, { x: 4000, y: 3000 }, { type: 'partition', thickness: 100, baseline: 'center' }, 'axis');
     el.commit(addBox(l, { x: 5000, y: 0 }, { x: 8000, y: 3000 }, { type: 'partition', thickness: 100, baseline: 'center' }, 'axis'));
@@ -89,29 +89,29 @@ describe('zone names', () => {
     await el.updateComplete;
     el.selection = null;
     await el.updateComplete;
-    expect(el.history!.current.level.zones.map(z => z.name)).toEqual(['Room 1', 'Room 2']);
-    expect(nameField(el)).toBe('Room 3');
+    expect(el.history!.current.level.zones.map(z => z.name)).toEqual(['Zone 1', 'Zone 2']);
+    expect(nameField(el)).toBe('Zone 3');
     const first = el.history!.current.level.zones[0];
     el.commit(deleteZone(el.history!.current.level, first.id));
     el.requestUpdate();
     await el.updateComplete;
-    expect(nameField(el)).toBe('Room 1');
+    expect(nameField(el)).toBe('Zone 1');
   });
 
-  it('renaming a zone to Room 3 makes the default skip 3', () => {
-    const lvl = { ...emptyLevel(), zones: [{ id: 'a', name: 'Room 3' }, { id: 'b', name: 'Room 1' }] } as unknown as Level;
-    expect(defaultZoneName(lvl)).toBe('Room 2');
+  it('renaming a zone to Zone 3 makes the default skip 3', () => {
+    const lvl = { ...emptyLevel(), zones: [{ id: 'a', name: 'Zone 3' }, { id: 'b', name: 'Zone 1' }] } as unknown as Level;
+    expect(defaultZoneName(lvl)).toBe('Zone 2');
   });
 });
 
 describe('defaultZoneName', () => {
   const lv = (...names: string[]) => ({ ...emptyLevel(), zones: names.map((name, i) => ({ id: String(i), name })) }) as unknown as Level;
   it('smallest unused N', () => {
-    expect(defaultZoneName(lv())).toBe('Room 1');
-    expect(defaultZoneName(lv('Room 1', 'Room 2'))).toBe('Room 3');
-    expect(defaultZoneName(lv('Room 2'))).toBe('Room 1');
-    expect(defaultZoneName(lv('Room 1', 'Room 3'))).toBe('Room 2');
-    expect(defaultZoneName(lv('Kitchen'))).toBe('Room 1');
+    expect(defaultZoneName(lv())).toBe('Zone 1');
+    expect(defaultZoneName(lv('Zone 1', 'Zone 2'))).toBe('Zone 3');
+    expect(defaultZoneName(lv('Zone 2'))).toBe('Zone 1');
+    expect(defaultZoneName(lv('Zone 1', 'Zone 3'))).toBe('Zone 2');
+    expect(defaultZoneName(lv('Kitchen'))).toBe('Zone 1');
   });
 });
 
@@ -169,18 +169,18 @@ describe('next object panel', () => {
     }
   });
 
-  it('zone: name Room 1, custom name used, default advances', async () => {
+  it('zone: name Zone 1, custom name used, default advances', async () => {
     const el = await mount();
     await withBox(el);
     await tool(el, 'zone');
-    expect($<HTMLInputElement>(el, '.props [data-field="next-zone-name"]').value).toBe('Room 1');
+    expect($<HTMLInputElement>(el, '.props [data-field="next-zone-name"]').value).toBe('Zone 1');
     await setField(el, 'next-zone-name', 'Kitchen');
     click(el, 2000, 1500);
     await el.updateComplete;
     expect(el.history!.current.level.zones.map(z => z.name)).toEqual(['Kitchen']);
     el.selection = null;
     await el.updateComplete;
-    expect($<HTMLInputElement>(el, '.props [data-field="next-zone-name"]').value).toBe('Room 1');
+    expect($<HTMLInputElement>(el, '.props [data-field="next-zone-name"]').value).toBe('Zone 1');
   });
 });
 

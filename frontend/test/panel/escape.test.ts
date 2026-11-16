@@ -38,27 +38,24 @@ describe('Esc returns to Select', () => {
     expect(el.toolId).toBe('device-select');
   });
 
-  it('Esc in Zones: draft, then Select', async () => {
+  it('Esc in the Zone tool (Polygon): draft, then Select', async () => {
     const el = await mount();
-    el.setMode('zones');
-    await el.updateComplete;
-    await press(el, 'button[data-tool="zone-draw"]');
+    await press(el, 'button[data-tool="zone"]');
+    await press(el, '.props button[data-method="polygon"]');
     click(el, 1000, 1000);
     expect(el.activeTool.preview().zoneDraft).toBeDefined();
     key(el, 'keydown', 'Escape');
     expect(el.activeTool.preview().zoneDraft).toBeUndefined();
-    expect(el.toolId).toBe('zone-draw');
+    expect(el.toolId).toBe('zone');
     key(el, 'keydown', 'Escape');
-    expect(el.toolId).toBe('zones-select');
+    expect(el.toolId).toBe('select');
   });
 
-  it('Esc with an idle Zone from room tool switches to Select', async () => {
+  it('Esc with an idle Zone tool (By walls) switches to Select', async () => {
     const el = await mount();
-    el.setMode('zones');
-    await el.updateComplete;
-    await press(el, 'button[data-tool="zone-room"]');
+    await press(el, 'button[data-tool="zone"]');
     key(el, 'keydown', 'Escape');
-    expect(el.toolId).toBe('zones-select');
+    expect(el.toolId).toBe('select');
   });
 
   it('Esc in Select clears the selection and keeps Select', async () => {

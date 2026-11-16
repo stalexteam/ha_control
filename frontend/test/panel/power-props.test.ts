@@ -407,7 +407,7 @@ describe('Power properties in the panel', () => {
     const el = await mountPower();
     await press(el, 'button[data-tool="power-device"]');
     await press(el, '.props [data-place-device="s"]');
-    el.setMode('zones');
+    el.setMode('binding');
     await el.updateComplete;
     expect(el.placeDeviceId).toBeNull();
   });
