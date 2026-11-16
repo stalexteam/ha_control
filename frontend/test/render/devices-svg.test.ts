@@ -511,15 +511,42 @@ describe('live looks and bubbles', () => {
     free('sb', 'smart_button', 4500, 4000),
   ] });
   const look = (look: DeviceLive['look']) => () => ({ look });
+  const wallLight = (): Device => ({ id: 'wl', name: 'wl', invalid: false, props: deviceDefaults('wall_light', 'wall'),
+    placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 3000 } });
+  const boxZone = (x0: number, y0: number, x1: number, y1: number): Level['zones'][number] => ({ id: 'z', name: 'z', invalid: false,
+    shape: { kind: 'polygon', vertices: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => ({ kind: 'free' as const, x, y })) } });
   const dev = (root: SVGSVGElement, id: string) => root.querySelector(`g.device[data-id="${id}"]`)!;
 
-  it('a lit light is filled with the device colour and has a glow in the cone group; an off light is not', () => {
+  it('a lit light is filled with the device colour; an off light is not', () => {
     const on = drawDevs(lv(), { live: d => ({ look: d.id === 'cl' ? 'on' : 'none' }) });
     expect(dev(on, 'cl').querySelector('.icon')!.getAttribute('fill')).toBe(pal.device);
-    expect(on.querySelectorAll('g.cones .live-glow')).toHaveLength(1);
     const off = drawDevs(lv(), { live: d => ({ look: d.id === 'cl' ? 'off' : 'none' }) });
     expect(dev(off, 'cl').querySelector('.icon')!.getAttribute('fill')).toBe(pal.deviceFill);
-    expect(off.querySelector('.live-glow')).toBeNull();
+  });
+
+  it('Binding: a lit light fills its shape with a radial gradient and draws no outline; off draws nothing', () => {
+    const on = drawDevs(lv(), { live: d => ({ look: d.id === 'cl' ? 'on' : 'none' }) });
+    const fill = on.querySelector('g.cones path.light-fill')!;
+    expect(fill.getAttribute('fill')).toBe('url(#lg-cl)');
+    expect(fill.getAttribute('stroke')).toBe('none');
+    const grad = on.querySelector('radialGradient#lg-cl')!;
+    expect(grad.getAttribute('gradientUnits')).toBe('userSpaceOnUse');
+    expect(Number(grad.getAttribute('cx'))).toBe(1000);
+    expect(Number(grad.getAttribute('cy'))).toBe(1000);
+    expect(Number(grad.getAttribute('r'))).toBeGreaterThan(700);
+    expect(grad.querySelector('stop')!.getAttribute('stop-color')).toBe(pal.device);
+    expect(on.querySelector('.pool, .cone, .live-glow')).toBeNull();
+    const off = drawDevs(lv(), { live: d => ({ look: d.id === 'cl' ? 'off' : 'none' }) });
+    expect(off.querySelector('.pool, .cone, .light-fill, radialGradient')).toBeNull();
+    const hidden = drawDevs(lv(), { showCones: false, live: d => ({ look: d.id === 'cl' ? 'on' : 'none' }) });
+    expect(hidden.querySelector('.pool, .cone, .light-fill, radialGradient')).toBeNull();
+  });
+
+  it('Binding: a wall light that is on gets a gradient too', () => {
+    const level: Level = { ...rectRoomLevel(6000, 5000, 200), devices: [wallLight()] };
+    const root = drawDevs(level, { live: look('on') });
+    expect(root.querySelector('path.light-fill')!.getAttribute('fill')).toBe('url(#lg-wl)');
+    expect(root.querySelector('.cone, .pool')).toBeNull();
   });
 
   it('no-data draws the symbol dashed and no bubble', () => {
@@ -527,16 +554,58 @@ describe('live looks and bubbles', () => {
     expect(dev(root, 'cl').querySelector('.icon')!.getAttribute('stroke-dasharray')).toBe('3 2');
     expect(dev(root, 'so').querySelector('.icon')!.getAttribute('stroke-dasharray')).toBe('3 2');
     expect(root.querySelector('.bubble')).toBeNull();
-    expect(root.querySelector('.live-glow')).toBeNull();
+    expect(root.querySelector('.light-fill, .cone, .pool')).toBeNull();
   });
 
-  it('active motion brightens its cone; active leak is alert red; idle motion keeps the idle cone', () => {
+  it('Binding: an active motion zone is drawn in the idle style; idle draws none; active leak is alert red', () => {
     const root = drawDevs(lv(), { live: d => ({ look: d.id === 'ms' || d.id === 'lk' ? 'active' : 'none' }) });
-    expect(root.querySelector('path.cone.live-active')).toBeTruthy();
+    const cone = root.querySelector('path.cone')!;
+    expect(cone.getAttribute('fill-opacity')).toBe('0.18');
+    expect(cone.getAttribute('stroke-opacity')).toBe('0.5');
+    expect(cone.getAttribute('class')).toBe('cone');
+    expect(root.querySelector('.live-active')).toBeNull();
     expect(dev(root, 'lk').querySelector('.icon')!.getAttribute('fill')).toBe(ALERT);
-    const idle = drawDevs(lv(), { live: look('off') });
-    expect(idle.querySelector('path.cone')).toBeTruthy();
-    expect(idle.querySelector('.live-active')).toBeNull();
+    for (const l of ['off', 'none'] as const) expect(drawDevs(lv(), { live: look(l) }).querySelector('path.cone')).toBeNull();
+    expect(drawDevs(lv(), { showCones: false, live: look('active') }).querySelector('path.cone')).toBeNull();
+  });
+
+  it('Equipment (no live): cone, pool and motion zone keep their idle look', () => {
+    const root = drawDevs(lv());
+    expect(root.querySelectorAll('path.cone')).toHaveLength(1);
+    const pool = root.querySelector('path.pool')!;
+    expect(pool.getAttribute('stroke-dasharray')).toBe('6 4');
+    expect(pool.getAttribute('fill')).toBe('none');
+    expect(root.querySelector('path.cone')!.getAttribute('fill-opacity')).toBe('0.18');
+    expect(root.querySelector('.light-fill, radialGradient')).toBeNull();
+  });
+
+  it('bubbles stack on the chosen side of the symbol, centred, inside the zone when there is room', () => {
+    const scale = 0.1, k = 1 / scale;
+    const gap = (12 + 4) * k;
+    const bub = (level: Level, id: string) => {
+      const root = drawDevs(level, { scale, bubbles: d => ({ shown: d.id === id ? [{ text: '1', tone: 'device' }] : [], leaving: [] }) } as Partial<DevOpts>);
+      const r = root.querySelector(`g.device-bubbles[data-id="${id}"] g.bubble rect`)!;
+      const n = (a: string) => Number(r.getAttribute(a));
+      return { x: n('x'), y: n('y'), w: n('width'), h: n('height') };
+    };
+    const right = bub(lv(), 'so');
+    expect(right.x).toBeCloseTo(gap);
+    expect(right.y + right.h / 2).toBeCloseTo(0);
+    const left = bub({ ...lv(), zones: [boxZone(0, 0, 2200, 5000)] }, 'so');
+    expect(left.x + left.w).toBeCloseTo(-gap);
+    expect(left.y + left.h / 2).toBeCloseTo(0);
+    // A wall device on the top wall sits on the zone edge: right / left cross it, so the stack goes below, centred.
+    const wall: Level = { ...lv(), zones: [boxZone(100, 100, 5900, 4900)], devices: [wallLight()] };
+    const down = bub(wall, 'wl');
+    expect(down.x + down.w / 2).toBeCloseTo(0);
+    expect(down.y).toBeCloseTo(gap);
+  });
+
+  it('several bubbles stack outward from the device', () => {
+    const level: Level = { ...lv(), zones: [boxZone(100, 100, 5900, 4900)], devices: [wallLight()] };
+    const root = drawDevs(level, { bubbles: () => ({ shown: [{ text: 'a', tone: 'device' }, { text: 'b', tone: 'event' }], leaving: [] }) });
+    const ys = [...root.querySelectorAll('g.bubble rect')].map(r => Number(r.getAttribute('y')));
+    expect(ys[1]).toBeGreaterThan(ys[0]);
   });
 
   it('bubbles: shown pop in, leaving fade out, tones recolour the ring, text keeps its size at any zoom', () => {
@@ -596,7 +665,7 @@ describe('live looks and bubbles', () => {
 
   it('without live and bubbles the output has no live parts and no intent badges', () => {
     const root = drawDevs(lv(), { containerState: d => ({ kind: d.props.kind as ContainerKind, status: 'ok', last: { action: 'toggle', at: 'x' } }) });
-    expect(root.querySelector('.live-glow, .bubble, .live-active, .no-data')).toBeNull();
+    expect(root.querySelector('.light-fill, .bubble, .no-data')).toBeNull();
     expect(root.querySelector('g.badge')).toBeNull();
     expect(dev(root, 'cl').querySelector('.icon')!.getAttribute('fill')).toBe(pal.deviceFill);
   });
@@ -606,6 +675,6 @@ describe('live looks and bubbles', () => {
       live: look('on'), bubbles: () => ({ shown: [{ text: '1', tone: 'device' }], leaving: [] }),
       preview: { placement: { mode: 'free', x: 1000, y: 1000, rotation: 0 }, props: deviceDefaults('ceiling_light', 'free'), invalid: false },
     });
-    expect(root.querySelector('.bubble, .live-glow')).toBeNull();
+    expect(root.querySelector('.bubble, .light-fill')).toBeNull();
   });
 });

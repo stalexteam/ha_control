@@ -206,7 +206,8 @@ describe('renderLevel step rules for devices', () => {
     expect(root.querySelector('g.device.no-data')).toBeNull();
     expect(root.querySelector('g.device[data-id="cl"] .icon')!.getAttribute('fill')).toBe(paletteFor(true).deviceFill);
     expect(root.querySelector('.bubble')).toBeNull();
-    expect(root.querySelector('.live-glow')).toBeNull();
+    expect(root.querySelector('.light-fill')).toBeNull();
+    expect(root.querySelector('path.pool')).toBeTruthy();
   });
 
   it('Binding: alert badge, lit light and a timer bubble', () => {
@@ -214,5 +215,8 @@ describe('renderLevel step rules for devices', () => {
     expect(root.querySelector('g.device[data-id="sb"] .badge')).toBeTruthy();
     expect(root.querySelector('g.device[data-id="cl"] .icon')!.getAttribute('fill')).toBe(paletteFor(true).device);
     expect(root.querySelector('g.bubbles g.device-bubbles[data-id="cl"] .bubble')!.textContent).toContain('42');
+    expect(root.querySelector('path.light-fill')!.getAttribute('fill')).toBe('url(#lg-cl)');
+    expect(root.querySelector('path.pool')).toBeNull();
+    expect(root.querySelector('path.cone')).toBeNull(); // the motion sensor is idle
   });
 });

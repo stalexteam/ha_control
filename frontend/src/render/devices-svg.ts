@@ -9,6 +9,7 @@ import type { Preview, Selection } from '../editor/tools/types';
 import { clippedCone, coneMedium, devicePose, directionHandle, type DevicePose } from '../geometry/devices';
 import { lineOfSightObstacles, type Medium, type Segment } from '../geometry/visibility';
 import type { PlanPalette } from './theme';
+import { bubbleSide, stackOrigin } from './bubble-side';
 import { cached, ringD } from './shared';
 
 /** Device icon radius in screen pixels. */
@@ -275,24 +276,31 @@ function toneColor(tone: BubbleTone, p: PlanPalette): string {
 }
 
 /**
- * Pill bubbles at the top-right of the symbol on screen (unrotated), right of the alert badge and stacked upwards;
- * `leaving` ones fade out above the shown ones. Constant screen size. `e` is the symbol's half-extent.
+ * Pill bubbles in one stack on a side of the symbol (above, below, left or right; chosen by bubbleSide, inside the
+ * zone when there is room), centred on that side; `leaving` ones fade out after the shown ones, and the stack grows
+ * outward from the device. Constant screen size. `e` is the symbol's half-extent.
  */
-function renderBubbles(b: { shown: LiveBubble[]; leaving: LiveBubble[] }, e: number, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
+function renderBubbles(level: Level, d: Device, pose: DevicePose, b: { shown: LiveBubble[]; leaving: LiveBubble[] }, e: number, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
   const all = [...b.shown.map(x => [x, 'bubble-in'] as const), ...b.leaving.map(x => [x, 'bubble-out'] as const)];
   if (all.length === 0) return nothing;
   const k = 1 / o.scale;
-  const x0 = e * 0.9 + (BADGE_R_PX + 3) * k;
+  const widths = all.map(([x]) => (x.text.length * BUBBLE_FONT_PX * BUBBLE_CHAR_W + 2 * BUBBLE_PAD_PX) * k);
+  const h = BUBBLE_H_PX * k;
+  const step = (BUBBLE_H_PX + 2) * k;
+  const stack = { w: Math.max(...widths), h: h + step * (all.length - 1) };
+  const gap = e + 4 * k;
+  const side = bubbleSide(level, d, pose, stack, gap);
+  const origin = stackOrigin(side, stack, gap);
   return svg`${all.map(([x, cls], i) => {
-    const w = (x.text.length * BUBBLE_FONT_PX * BUBBLE_CHAR_W + 2 * BUBBLE_PAD_PX) * k;
-    const h = BUBBLE_H_PX * k;
-    const y = -e * 0.9 - (4 + BUBBLE_H_PX * (i + 1) + 2 * i) * k;
+    const w = widths[i];
+    const bx = origin.x + (stack.w - w) / 2;
+    const by = origin.y + (side === 'up' ? all.length - 1 - i : i) * step;
     const c = toneColor(x.tone, o.palette);
     // A keyed (action) bubble that is replaced is a new element, so its pop-in plays again.
     return keyed(`${cls}:${x.key ?? ''}`, svg`<g class=${`bubble ${cls}`} data-tone=${x.tone}>
-      <rect x=${x0} y=${y} width=${w} height=${h} rx=${h / 2} fill=${o.palette.background} stroke=${c} stroke-width="1.5"
+      <rect x=${bx} y=${by} width=${w} height=${h} rx=${h / 2} fill=${o.palette.background} stroke=${c} stroke-width="1.5"
         vector-effect=${NS}></rect>
-      <text x=${x0 + w / 2} y=${y + h / 2} text-anchor="middle" dominant-baseline="central" fill=${c} font-weight="700"
+      <text x=${bx + w / 2} y=${by + h / 2} text-anchor="middle" dominant-baseline="central" fill=${c} font-weight="700"
         font-size=${BUBBLE_FONT_PX * k} font-family="system-ui, sans-serif">${x.text}</text>
     </g>`);
   })}`;
@@ -306,9 +314,9 @@ function bubbleExtent(d: Device, o: DeviceRenderOpts): number {
 }
 
 /** The bubbles of one device, at its position (unrotated), dimmed with it. */
-function renderDeviceBubbles(d: Device, pose: DevicePose, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
+function renderDeviceBubbles(level: Level, d: Device, pose: DevicePose, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
   const b = o.bubbles?.(d);
-  const inner = b ? renderBubbles(b, bubbleExtent(d, o), o) : nothing;
+  const inner = b ? renderBubbles(level, d, pose, b, bubbleExtent(d, o), o) : nothing;
   if (inner === nothing) return nothing;
   return svg`<g class="device-bubbles" data-id=${d.id} transform=${`translate(${pose.pt.x} ${pose.pt.y})`}
     opacity=${o.dim ? String(o.palette.dimOpacity) : nothing}>${inner}</g>`;
@@ -347,7 +355,7 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
     </g>`;
 }
 
-function renderCone(level: Level, d: Device, o: DeviceRenderOpts, preview: boolean, active: boolean): SVGTemplateResult | typeof nothing {
+function renderCone(level: Level, d: Device, o: DeviceRenderOpts, preview: boolean): SVGTemplateResult | typeof nothing {
   const rings = coneRings(level, d); // [] for kinds without a cone
   if (rings.length === 0) return nothing;
   const p = o.palette;
@@ -359,27 +367,27 @@ function renderCone(level: Level, d: Device, o: DeviceRenderOpts, preview: boole
     return svg`<path class="pool" d=${path} fill="none" stroke=${color} stroke-width="1.5" stroke-dasharray="6 4"
       fill-rule="evenodd" opacity=${opacity} vector-effect=${NS}></path>`;
   }
-  return svg`<path class=${active ? 'cone live-active' : 'cone'} d=${path} fill=${color} fill-opacity=${active ? '0.32' : '0.18'}
-    fill-rule="evenodd" stroke=${color} stroke-opacity=${active ? '0.85' : '0.5'} stroke-width="1" opacity=${opacity}
+  return svg`<path class="cone" d=${path} fill=${color} fill-opacity="0.18"
+    fill-rule="evenodd" stroke=${color} stroke-opacity="0.5" stroke-width="1" opacity=${opacity}
     vector-effect=${NS}></path>`;
 }
 
-/** Soft glow of a lit light: its clipped light area (or a disc without one) filled with a fading radial gradient. */
-function renderGlow(level: Level, d: Device, pose: DevicePose, o: DeviceRenderOpts): SVGTemplateResult {
+/** Binding, light on: its clipped light area (or a disc without one) filled with a fading radial gradient, no outline. */
+function renderLightFill(level: Level, d: Device, pose: DevicePose, o: DeviceRenderOpts): SVGTemplateResult {
   const rings = coneRings(level, d);
   let r = 0;
   for (const ring of rings) for (const q of ring) r = Math.max(r, Math.hypot(q.x - pose.pt.x, q.y - pose.pt.y));
   if (r === 0) r = (ICON_PX * 3) / o.scale;
-  const id = `live-glow-${d.id}`;
+  const id = `lg-${d.id}`;
   const c = o.palette.device;
   const opacity = o.dim ? String(o.palette.dimOpacity) : nothing;
-  return svg`<g class="live-glow" opacity=${opacity}>
+  return svg`<g class="light-live" opacity=${opacity}>
     <defs><radialGradient id=${id} gradientUnits="userSpaceOnUse" cx=${pose.pt.x} cy=${pose.pt.y} r=${r}>
       <stop offset="0" stop-color=${c} stop-opacity="0.35"></stop><stop offset="1" stop-color=${c} stop-opacity="0"></stop>
     </radialGradient></defs>
     ${rings.length
-      ? svg`<path d=${rings.map(ringD).join('')} fill=${`url(#${id})`} fill-rule="evenodd" stroke="none"></path>`
-      : svg`<circle cx=${pose.pt.x} cy=${pose.pt.y} r=${r} fill=${`url(#${id})`} stroke="none"></circle>`}
+      ? svg`<path class="light-fill" d=${rings.map(ringD).join('')} fill=${`url(#${id})`} fill-rule="evenodd" stroke="none"></path>`
+      : svg`<circle class="light-fill" cx=${pose.pt.x} cy=${pose.pt.y} r=${r} fill=${`url(#${id})`} stroke="none"></circle>`}
   </g>`;
 }
 
@@ -412,12 +420,18 @@ export function renderDevices(level: Level, o: DeviceRenderOpts): SVGTemplateRes
   }
   return svg`
     <g class="cones">${items.map(i => {
-      const dl = !i.preview ? o.live?.(i.d) : undefined;
-      const k = i.d.props.kind;
-      const glow = dl?.look === 'on' && (k === 'ceiling_light' || k === 'wall_light') ? renderGlow(level, i.d, i.pose, o) : nothing;
-      return svg`${glow}${o.showCones ? renderCone(level, i.d, o, i.preview, dl?.look === 'active') : nothing}`;
+      if (!o.showCones) return nothing;
+      // Binding (live looks): lights only as a gradient while on, motion zones only while detecting. Else the idle look.
+      if (o.live && !i.preview) {
+        const look = o.live(i.d).look;
+        const k = i.d.props.kind;
+        if (k === 'ceiling_light' || k === 'wall_light') return look === 'on' ? renderLightFill(level, i.d, i.pose, o) : nothing;
+        if (k === 'motion_sensor') return look === 'active' ? renderCone(level, i.d, o, false) : nothing;
+        return nothing;
+      }
+      return renderCone(level, i.d, o, i.preview);
     })}</g>
     <g class="devices">${items.map(i => renderDevice(i.d, i.pose, o, i.preview))}</g>
     ${renderHandle(level, o)}
-    ${o.bubbles ? svg`<g class="bubbles">${items.map(i => (i.preview ? nothing : renderDeviceBubbles(i.d, i.pose, o)))}</g>` : nothing}`;
+    ${o.bubbles ? svg`<g class="bubbles">${items.map(i => (i.preview ? nothing : renderDeviceBubbles(level, i.d, i.pose, o)))}</g>` : nothing}`;
 }
