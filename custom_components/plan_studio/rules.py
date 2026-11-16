@@ -99,9 +99,10 @@ def combine(mode: str, values: "list[bool | None]") -> "bool | None":
         if False in values:
             return False
         return None if None in values else True
+    # ANY ignores unknown inputs while any input is known: one dead sensor must not block a leak
     if True in values:
         return True
-    return None if None in values else False
+    return False if False in values else None
 
 
 class _Input:
@@ -404,6 +405,7 @@ class RuleEngine:
         if rule.pending is not None:
             out["pending"] = {"to": rule.pending.to, "at": rule.pending.at}
         out["inputs"] = [dict(t) for t in rule.trace_inputs]
+        out["unknownInputs"] = sum(1 for t in rule.trace_inputs if t["value"] is None)
         if rule.last is not None:
             out["last"] = dict(rule.last)
         return out

@@ -114,7 +114,7 @@ T, F, U = "on", "off", "unavailable"
 
 
 @pytest.mark.parametrize("combine,a,b,expected", [
-    ("any", T, F, True), ("any", F, F, False), ("any", U, F, None), ("any", U, T, True), ("any", U, U, None),
+    ("any", T, F, True), ("any", F, F, False), ("any", U, F, False), ("any", U, T, True), ("any", U, U, None),
     ("all", T, T, True), ("all", T, F, False), ("all", U, F, False), ("all", U, T, None), ("all", U, U, None),
 ])
 def test_truth_table(combine, a, b, expected):
@@ -363,9 +363,11 @@ def test_reference_cycle_is_unknown_with_status_cycle():
     devs = [dev("m", "motion_sensor", motion="binary_sensor.m")]
     rules = [rule("a", ["m", ref("b")]), rule("b", [ref("a")])]
     w.engine.load_plans([plan(devs, rules)])
-    snap = w.engine.snapshot("p")
-    assert any(r["status"] == "error" and r["reason"] == "cycle" for r in snap.values())
+    assert trace(w, "b")["status"] == "error" and trace(w, "b")["reason"] == "cycle"
+    assert trace(w, "a")["verdict"] is True
     w.set("binary_sensor.m", "off")  # no endless re-evaluation
+    assert trace(w, "a")["verdict"] is False and trace(w, "a")["status"] == "ok"
+    assert trace(w, "b")["verdict"] is None and trace(w, "b")["reason"] == "cycle"
 
 
 # --- errors -------------------------------------------------------------------
@@ -374,7 +376,7 @@ def test_missing_device_is_an_error_but_other_inputs_evaluate():
     w = leak_world()
     w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1", "gone"], on_true=CLOSE)])])
     assert trace(w)["status"] == "error" and trace(w)["reason"] == "device missing"
-    assert trace(w)["verdict"] is None
+    assert trace(w)["verdict"] is False
     w.set("binary_sensor.s1", "on")
     assert trace(w)["verdict"] is True
     assert w.calls == [("valve", "close_valve", "valve.v")]
@@ -447,3 +449,64 @@ def test_rename_keeps_a_pending_timer():
     assert len(w.pending()) == 1 and trace(w)["pending"] == {"to": True, "at": 1005000}
     w.advance(1005)
     assert w.calls == [("valve", "close_valve", "valve.v")]
+
+
+# --- ANY ignores unknown inputs while any input is known (ruling A3) ------------
+
+@pytest.mark.parametrize("states,missing", [({"binary_sensor__s2": "unavailable"}, False), ({}, True)])
+def test_any_closes_again_on_a_second_leak_with_a_dead_sensor(states, missing):
+    w = leak_world(**states)
+    inputs = ["s1", "gone"] if missing else ["s1", "s2"]
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", inputs, on_true=CLOSE)])])
+    assert trace(w)["verdict"] is False and trace(w)["unknownInputs"] == 1
+    assert trace(w)["status"] == ("error" if missing else "ok")
+    if missing:
+        assert trace(w)["reason"] == "device missing"
+    w.set("binary_sensor.s1", "on")
+    w.set("binary_sensor.s1", "off")
+    assert trace(w)["verdict"] is False
+    w.set("binary_sensor.s1", "on")
+    assert w.calls == [("valve", "close_valve", "valve.v")] * 2
+
+
+def test_any_with_every_input_unknown_waits():
+    w = leak_world(binary_sensor__s1="unavailable", binary_sensor__s2="unknown")
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1", "s2"], on_true=CLOSE)])])
+    assert trace(w)["verdict"] is None and trace(w)["status"] == "waiting" and trace(w)["unknownInputs"] == 2
+
+
+def test_all_stays_strict_with_an_unknown_input():
+    w = leak_world(binary_sensor__s1="on", binary_sensor__s2="unavailable")
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1", "s2"], "all", on_true=CLOSE)])])
+    assert trace(w)["verdict"] is None and trace(w)["status"] == "waiting" and trace(w)["unknownInputs"] == 1
+    assert w.calls == []
+
+
+def test_unknown_inputs_count_is_zero_with_all_data():
+    w = leak_world()
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1", "s2"])])])
+    assert trace(w)["unknownInputs"] == 0
+
+
+def test_service_failed_clears_on_the_next_good_firing():
+    w = leak_world()
+    w.fail.add("valve.v")
+    w.engine.load_plans([plan(LEAKS + [VALVE], [rule("r", ["s1"], on_true=CLOSE)])])
+    w.set("binary_sensor.s1", "on")
+    assert trace(w)["reason"] == "service failed"
+    w.fail.clear()
+    w.set("binary_sensor.s1", "off")
+    w.set("binary_sensor.s1", "on")
+    t = trace(w)
+    assert t["status"] == "ok" and "reason" not in t and "error" not in t["last"]
+
+
+def test_consumer_follows_a_reference_without_delay():
+    w = World(binary_sensor__m="off", light__l="off")
+    devs = [dev("m", "motion_sensor", motion="binary_sensor.m"), dev("l", "ceiling_light", control="light.l")]
+    rules = [rule("b", [ref("a", negate=True)], on_true=(("l", "on"),), on_false=(("l", "off"),)), rule("a", ["m"])]
+    w.engine.load_plans([plan(devs, rules)])
+    assert w.calls == [("light", "turn_on", "light.l")]  # start: not a = true
+    w.set("binary_sensor.m", "on")
+    assert trace(w, "a")["verdict"] is True and trace(w, "b")["verdict"] is False
+    assert w.calls[-1] == ("light", "turn_off", "light.l")
