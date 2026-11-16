@@ -130,6 +130,11 @@ async function run() {
       [`${id}-w`]: { kind: "wall_switch", status: "ok" },
     },
   }, "first containers event");
+  // Rules: the smoke plan has none, so the snapshot is a full frame with no rules.
+  const rulesSub = await call({ type: "plan_studio/rules/subscribe", plan_id: id });
+  expectOk(rulesSub, "rules subscribe");
+  same(await nextEvent(rulesSub.id, "first rules event"), { full: true, rules: {} }, "first rules event");
+  expectOk(await call({ type: "unsubscribe_events", subscription: rulesSub.id }), "rules unsubscribe");
   await setEntity(ENTITY, "on");
   // The manual change is a "set on" intent; its time comes from the server, so only its type is checked.
   const turnedOn = await nextEvent(sub.id, "containers event after the entity turned on");

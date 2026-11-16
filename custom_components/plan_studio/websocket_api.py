@@ -34,6 +34,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_save)
     websocket_api.async_register_command(hass, ws_delete)
     websocket_api.async_register_command(hass, ws_containers_subscribe)
+    websocket_api.async_register_command(hass, ws_rules_subscribe)
     websocket_api.async_register_command(hass, ws_power_subscribe)
     websocket_api.async_register_command(hass, ws_power_set_position)
 
@@ -118,6 +119,32 @@ def ws_containers_subscribe(hass, connection, msg):
     connection.subscriptions[msg["id"]] = runtime.subscribe(plan_id, forward)
     connection.send_result(msg["id"])
     forward(True, runtime.snapshot(plan_id))
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "plan_studio/rules/subscribe", vol.Required("plan_id"): str}
+)
+@websocket_api.require_admin
+@callback
+def ws_rules_subscribe(hass, connection, msg):
+    """Stream the live trace of one plan's rules: a full snapshot first, then changed rules.
+
+    Ends with HA's standard `unsubscribe_events` or when the connection closes.
+    """
+    live = _live(hass)
+    if live is None:
+        connection.send_error(msg["id"], "not_loaded", "Plan Studio is not loaded")
+        return
+    engine = live.engine
+    plan_id = msg["plan_id"]
+
+    @callback
+    def forward(full: bool, rules: dict) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], {"full": full, "rules": rules}))
+
+    connection.subscriptions[msg["id"]] = engine.subscribe(plan_id, forward)
+    connection.send_result(msg["id"])
+    forward(True, engine.snapshot(plan_id))
 
 
 @websocket_api.websocket_command(

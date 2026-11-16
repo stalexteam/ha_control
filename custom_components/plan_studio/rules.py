@@ -198,7 +198,7 @@ class RuleEngine:
         self,
         lookup: Lookup,
         now: Callable[[], float],
-        call: Callable[[str, str, str], None],
+        call: Callable[..., None],  # call(domain, service, entity_id, on_error=cb(str))
         schedule: Callable[[float, Callable[[], None]], Callable[[], None]],
     ) -> None:
         self._lookup = lookup
@@ -367,7 +367,7 @@ class RuleEngine:
                 entry["error"] = "target missing"
             else:
                 try:
-                    self._call(*a.call)
+                    self._call(*a.call, on_error=lambda err, entry=entry: self._failed(rule, entry, err))
                 except Exception as err:  # noqa: BLE001 - one failing target must not stop the others
                     _LOGGER.warning("rule %s: %s.%s %s failed: %s", rule.name, *a.call, err)
                     entry["error"] = str(err) or type(err).__name__
@@ -377,6 +377,16 @@ class RuleEngine:
             last = entry
         rule.last = first_error or last
         rule.failed = failed
+
+    def _failed(self, rule: _Rule, entry: dict, error: str) -> None:
+        """A call that failed after it was sent (async service): record it unless the rule was replaced or removed."""
+        if self._rules.get(rule.key) is not rule:
+            return
+        entry["error"] = error
+        rule.failed = True
+        if rule.last is None or "error" not in rule.last:
+            rule.last = entry
+        self._flush()
 
     # --- state changes -------------------------------------------------------
 

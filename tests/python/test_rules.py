@@ -22,7 +22,8 @@ class World:
     def lookup(self, eid):
         return self.states.get(eid)
 
-    def call(self, domain, service, eid):
+    def call(self, domain, service, eid, on_error=None):
+        self.on_error = on_error
         self.calls.append((domain, service, eid))
         if eid in self.fail:
             raise RuntimeError("boom")

@@ -4,17 +4,20 @@ Only the transfer positions are persisted."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.core import CALLBACK_TYPE, Context, HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from .const import POWER_STORAGE_KEY, RUNTIME_STORAGE_KEY
 from .power import PowerHub
+from .rules import RuleEngine
 from .runtime import Runtime
 from .store import PlanStore
 
@@ -36,6 +39,7 @@ def _clock() -> str:
 class LiveRuntime:
     runtime: Runtime  # set by async_start
     power: PowerHub  # set by async_start
+    engine: RuleEngine  # set by async_start
 
     def __init__(self, hass: HomeAssistant, plans: PlanStore) -> None:
         self._hass = hass
@@ -54,27 +58,31 @@ class LiveRuntime:
         positions = data.get("positions") if isinstance(data, dict) else None
         self.power = PowerHub(self._lookup, positions if isinstance(positions, dict) else None, self._save_positions)
         self.runtime = Runtime(self._lookup, time.monotonic, _clock)
+        self.engine = RuleEngine(self._lookup, time.time, self._call, self._schedule)
         self.reload()
 
     @callback
     def reload(self) -> None:
-        self.runtime.load_plans(self._plans.plans())
+        plans = self._plans.plans()
+        self.runtime.load_plans(plans)
+        self.engine.load_plans(plans)
         self.retrack()
 
     @callback
     def retrack(self) -> None:
-        """Track the entities the containers and the power subscriptions read; a stopped runtime tracks nothing."""
+        """Track the entities the containers, the rules and the power subscriptions read; a stopped runtime tracks nothing."""
         self._untrack_all()
         if self._stopped:
             return
         self._untrack = async_track_state_change_event(
-            self._hass, sorted(self.runtime.entity_ids() | self.power.entity_ids()), self._on_state
+            self._hass, sorted(self.runtime.entity_ids() | self.power.entity_ids() | self.engine.entity_ids()), self._on_state
         )
 
     async def async_stop(self) -> None:
         # A power subscription that ends later (its connection closes) retracks; it must not track again.
         self._stopped = True
         self._untrack_all()
+        self.engine.load_plans([])  # cancels every rule timer
 
     @callback
     def _save_positions(self) -> None:
@@ -98,3 +106,25 @@ class LiveRuntime:
             (event.context.id, event.context.parent_id),
         )
         self.power.handle_state(data["entity_id"])
+        self.engine.handle_state(data["entity_id"])
+
+    def _call(self, domain: str, service: str, entity_id: str, on_error: Callable[[str], None]) -> None:
+        """Send a rule action as a task; a missing service fails now, a failing call is reported later."""
+        if not self._hass.services.has_service(domain, service):
+            raise RuntimeError(f"service {domain}.{service} not found")
+        ctx = Context()
+        self.runtime.ignore_context(ctx.id)  # its state change is not a press for a wall switch
+        task = self._hass.async_create_task(
+            self._hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=True, context=ctx)
+        )
+
+        def done(t: asyncio.Future) -> None:
+            if not t.cancelled() and t.exception() is not None:
+                err = t.exception()
+                _LOGGER.warning("rule action %s.%s %s failed: %s", domain, service, entity_id, err)
+                on_error(str(err) or type(err).__name__)
+
+        task.add_done_callback(done)
+
+    def _schedule(self, delay: float, cb: Callable[[], None]) -> CALLBACK_TYPE:
+        return async_call_later(self._hass, delay, lambda _now: cb())
