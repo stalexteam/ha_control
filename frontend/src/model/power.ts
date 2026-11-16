@@ -20,7 +20,7 @@ interface BlockBase {
 /** Entity fields hold entity id strings. A device block reads its entities and flags from its device. */
 export type PowerBlock = BlockBase & (
   | { kind: 'grid'; power?: string; voltage?: string }
-  | { kind: 'device'; deviceId: Id }
+  | { kind: 'device'; deviceId: Id; /** false hides OUT (a load); an inverter always has it. */ output?: false }
   | { kind: 'bus'; w: number; h: number }
   | { kind: 'battery'; power?: string; soc?: string }
   | { kind: 'pv'; power?: string }
@@ -56,14 +56,14 @@ export type WireError =
 const KINDS: PowerKind[] = ['grid', 'device', 'bus', 'battery', 'pv', 'transfer', 'remainder'];
 const LOOP_TRANSFER_CAP = 10;
 
-/** A block's ports; a device block has PV and BAT while its device is an inverter (see isInverter). */
+/** A block's ports; a device block has PV and BAT while its device is an inverter (see isInverter), and no OUT when output is false. */
 export function blockPorts(b: PowerBlock, g: GeoCtx): { name: PortName; dir: PortDir }[] {
   const p = (name: PortName, dir: PortDir) => ({ name, dir });
   switch (b.kind) {
     case 'grid': return [p('OUT', 'out')];
-    case 'device': return isInverter(g.device(b.deviceId))
-      ? [p('IN', 'in'), p('OUT', 'out'), p('PV', 'in'), p('BAT', 'out')]
-      : [p('IN', 'in'), p('OUT', 'out')];
+    case 'device':
+      if (isInverter(g.device(b.deviceId))) return [p('IN', 'in'), p('OUT', 'out'), p('PV', 'in'), p('BAT', 'out')];
+      return b.output === false ? [p('IN', 'in')] : [p('IN', 'in'), p('OUT', 'out')];
     case 'battery': return [p('BAT', 'in')];
     case 'pv': return [p('OUT', 'out')];
     case 'remainder': return [p('IN', 'in')];
@@ -83,7 +83,7 @@ export function newBlock(kind: Exclude<PowerKind, 'grid'>, at: Pt, s: PowerSchem
   const base = { id: newId(), x: at.x, y: at.y };
   const named = { ...base, name: `${t(`power.kind.${kind}`)} ${1 + s.blocks.filter((b) => b.kind === kind).length}` };
   switch (kind) {
-    case 'device': return { ...base, kind, deviceId: deviceId ?? '' };
+    case 'device': return { ...base, kind, deviceId: deviceId ?? '', output: false };
     case 'bus': return { ...named, kind, w: 240, h: 12 };
     case 'transfer': return { ...named, kind, form: '2in1out' };
     default: return { ...named, kind };

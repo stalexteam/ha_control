@@ -284,4 +284,40 @@ describe('Power step devices in the panel', () => {
     expect(el.power.wires.map(w => w.id)).toEqual(['w-pv']);
     expect(el.level!.devices[0].props).toMatchObject({ inverter: true });
   });
+
+  it('the Enable output checkbox hides the OUT port and drops its wire; Ctrl+Z restores the wire', async () => {
+    const el = await mountPower({
+      blocks: [grid, blockOf('a', 's'), blockOf('b', 's', 300)],
+      wires: [{ id: 'w-ab', from: { block: 'a', port: 'OUT' }, to: { block: 'b', port: 'IN' } }],
+    });
+    el.selection = { kind: 'powerBlock', id: 'a' };
+    await el.updateComplete;
+    const box = $<HTMLInputElement>(el, '.props input[data-field="output"]');
+    expect(box.checked).toBe(true);
+    box.checked = false;
+    box.dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+    await el.updateComplete;
+    expect(el.power.wires).toEqual([]);
+    expect(el.power.blocks.find(b => b.id === 'a')).toMatchObject({ output: false });
+    expect($<HTMLInputElement>(el, '.props input[data-field="output"]').checked).toBe(false);
+    await undo(el);
+    expect(el.power.wires.map(w => w.id)).toEqual(['w-ab']);
+    expect(el.power.blocks.find(b => b.id === 'a')).not.toHaveProperty('output');
+  });
+
+  it('an inverter block has no Enable output checkbox', async () => {
+    const el = await mountPower({ blocks: [grid, blockOf('ib', 'i')], wires: [] }, [dev('i', 'Inverter', { flags: { inverter: true } })]);
+    el.selection = { kind: 'powerBlock', id: 'ib' };
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.props input[data-field="output"]')).toBeNull();
+  });
+
+  it('a device block placed by the Device tool has output:false', async () => {
+    const el = await mountPower();
+    await press(el, 'button[data-tool="power-device"]');
+    await press(el, '.props [data-place-device="s"]');
+    click(el, 400, 300);
+    await el.updateComplete;
+    expect(el.power.blocks.find(x => x.kind === 'device')).toMatchObject({ deviceId: 's', output: false });
+  });
 });

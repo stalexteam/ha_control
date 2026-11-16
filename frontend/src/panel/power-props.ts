@@ -1,11 +1,11 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import type { BindingRole, Device, Id, Level } from '../model/types';
 import {
-  clearPins, deleteBlock, deleteWire, placeableDevices, setDeviceInverterDoc, updateBlock,
+  clearPins, deleteBlock, deleteWire, placeableDevices, pruneDeviceBlocks, setDeviceInverterDoc, updateBlock,
   type Position, type PowerBlock, type PowerFrame, type PowerSchema, type PowerWire, type WireEnd,
 } from '../model/power';
 import { POWER, activeRoleSpecs, setBinding } from '../model/bindings';
-import { setDeviceControllable, setDeviceProps } from '../model/devices';
+import { isInverter, setDeviceControllable, setDeviceProps } from '../model/devices';
 import { candidates, entityLabel, type MatchSpec } from '../binding/candidates';
 import type { HaMeta, States } from '../binding/ha-meta';
 import '../binding/entity-combo';
@@ -151,10 +151,21 @@ function equipmentFields(o: PowerPropsOpts, d: Device): TemplateResult {
 function deviceFields(o: PowerPropsOpts, b: Block<'device'>): TemplateResult {
   const d = o.level.devices.find(x => x.id === b.deviceId);
   if (!d) return html`<p class="warn" data-note="device-missing">${t('power.missing')}</p>`;
-  if (d.props.kind === 'equipment') return equipmentFields(o, d);
+  // The block's OUT port; an inverter always has one. Unchecking drops the OUT wire and pin in the same commit.
+  const outputRow = isInverter(d) ? nothing : checkRow('output', t('power.enableOutput'), b.output !== false, on => {
+    const g = geoOf(o);
+    if (on) {
+      const { output: _drop, ...rest } = b;
+      o.commitPower({ ...o.power, blocks: o.power.blocks.map(x => (x.id === b.id ? rest as PowerBlock : x)) });
+    } else {
+      o.commitPower(pruneDeviceBlocks(updateBlock(o.power, b.id, { output: false }, g), b.deviceId, g));
+    }
+    return true;
+  });
+  if (d.props.kind === 'equipment') return html`${equipmentFields(o, d)}${outputRow}`;
   return html`
     ${row(t('props.name'), html`<span class="val ro" data-field="device-name">${d.name}</span>`)}
-    ${row(t('props.kind'), html`<span class="val ro">${t(`device.${d.props.kind}`)}</span>`)}${boundRows(o, d)}`;
+    ${row(t('props.kind'), html`<span class="val ro">${t(`device.${d.props.kind}`)}</span>`)}${boundRows(o, d)}${outputRow}`;
 }
 
 /** Form, and the live position buttons (the live position is marked; none without a frame). */

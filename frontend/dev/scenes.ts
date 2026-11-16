@@ -74,7 +74,7 @@ function powerPlan(): Plan {
         portPins: { B: { side: 'right', at: 0.5 } },
       },
       { id: 'apt', kind: 'bus', x: 380, y: 630, w: 600, h: 20, name: 'Apartment bus' },
-      { id: 'pc', kind: 'device', x: 440, y: 700, deviceId: 'd-pc' },
+      { id: 'pc', kind: 'device', x: 440, y: 700, deviceId: 'd-pc', output: false },
       { id: 'boiler', kind: 'device', x: 620, y: 700, deviceId: 'd-boiler' },
       { id: 'rem', kind: 'remainder', x: 800, y: 700, name: 'Other' },
     ],

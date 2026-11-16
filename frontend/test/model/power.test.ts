@@ -49,6 +49,14 @@ describe('blockPorts', () => {
     // A stale block-level flag (migrateDevices removes it) no longer counts.
     expect(names({ ...b, inverter: true }, geo(device('d')))).toEqual(['IN:in', 'OUT:out']);
   });
+
+  it('output:false hides OUT of a device block, but an inverter keeps it; a missing field keeps OUT', () => {
+    const b = { kind: 'device', deviceId: 'd', output: false };
+    expect(names(b, geo(device('d')))).toEqual(['IN:in']);
+    expect(names(b, geo(device('d', 'socket')))).toEqual(['IN:in']);
+    expect(names(b, geo(device('d', 'equipment', { inverter: true })))).toEqual(['IN:in', 'OUT:out', 'PV:in', 'BAT:out']);
+    expect(names({ kind: 'device', deviceId: 'd' }, geo(device('d')))).toEqual(['IN:in', 'OUT:out']);
+  });
 });
 
 describe('block ops', () => {
@@ -70,6 +78,7 @@ describe('block ops', () => {
     const d = newBlock('device', { x: 0, y: 0 }, s, 'dev1');
     expect(d).toMatchObject({ kind: 'device', deviceId: 'dev1' });
     expect(d.name).toBeUndefined();
+    expect(d).toMatchObject({ output: false });
   });
 
   it('move, update, pins and delete are pure', () => {

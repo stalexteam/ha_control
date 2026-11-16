@@ -140,6 +140,7 @@ const en: Dict = {
   'power.pickDevice': 'Pick a device in the list first',
   'power.help.select': 'Drag from a port to a port or a bus to add a wire. Drag a block to move it.',
   'power.help.place': 'Click on the canvas to place the block.',
+  'power.enableOutput': 'Enable output',
   'power.help.device': 'Pick a device in the list, then click on the canvas.',
   'power.err.missing': 'This port or bus no longer exists',
   'power.err.same-block': 'A wire cannot join two ports of one block',
