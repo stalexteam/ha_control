@@ -43,6 +43,12 @@ function room(): Plan {
       placement: { mode: 'free', x: 1200, y: 700, rotation: 0 },
       props: { kind: 'valve', autoByDoubleToggle: false, windowSec: 3 },
     },
+    {
+      // Wall-mounted body pushed into the top-right corner: fitWallMount keeps it flush between the faces (offset 3650).
+      id: 'd-corner', name: 'Corner box', invalid: false, bindings: {},
+      placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 3650 },
+      props: { kind: 'equipment', shape: 'rect', width: 600, depth: 400, diameter: 600, icon: 'mdi:flash', label: '' },
+    },
   ];
   return { id: 'room', name: 'Room', schemaVersion: 2, revision: 1, levels: [level] };
 }

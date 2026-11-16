@@ -4,7 +4,7 @@ import {
   type Side,
 } from '../model/types';
 import { add, cross, dist, dot, perpLeft, scale, sub } from './vec';
-import { fromRing, toPoly, wallFrame } from './walls';
+import { fromRing, toPoly, wallCorners, wallFrame } from './walls';
 import {
   FAN_STEP_DEG, lineOfSightObstacles, obstaclesWithin, visibilityPolygon, type Medium, type Segment,
 } from './visibility';
@@ -79,6 +79,30 @@ export function devicePose(level: Level, d: Device): DevicePose | null {
     return { pt: add(face.pt, scale(n, half)), dir: perpLeft(n), normal: n };
   }
   return { pt: face.pt, dir: p.aim ? dirAt(angleOf(n) + p.aim) : n, normal: n };
+}
+
+/**
+ * Wall-mounted equipment moved to fit its face between the corners at the ends of its wall side: the centre offset
+ * within [spanA + half, spanB - half] (a span shorter than the body: its midpoint), exactly a limit when within tolMm
+ * of it, then clamped to the wall. The same object for any other kind, a non-wall placement or an unchanged offset.
+ */
+export function fitWallMount(level: Level, props: DeviceProps, pl: DevicePlacement, tolMm: number): DevicePlacement {
+  if (props.kind !== 'equipment' || pl.mode !== 'wall') return pl;
+  const wall = level.walls.find(w => w.id === pl.wallId);
+  if (!wall) return pl;
+  let len: number;
+  try { len = wallFrame(level, wall).len; } catch { return pl; } // a node is missing
+  const ends = wallCorners(level).filter(c => c.wallId === pl.wallId && c.side === pl.side);
+  const ca = ends.find(c => c.end === 'a'), cb = ends.find(c => c.end === 'b');
+  if (!ca || !cb) return pl;
+  const half = (props.shape === 'circle' ? props.diameter : props.width) / 2;
+  const lo = ca.offset + half, hi = cb.offset - half;
+  let o = pl.offset;
+  if (lo > hi) o = (ca.offset + cb.offset) / 2;
+  else if (o <= lo + tolMm) o = lo;
+  else if (o >= hi - tolMm) o = hi;
+  o = Math.max(0, Math.min(len, o));
+  return Math.abs(o - pl.offset) < 1e-9 ? pl : { ...pl, offset: o };
 }
 
 function circle(c: Pt, r: number): Pt[] {

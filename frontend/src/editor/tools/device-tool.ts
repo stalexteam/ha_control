@@ -3,7 +3,7 @@ import { DEVICE_PLACEMENTS } from '../../model/types';
 import { addDevice, retargetZoneAngle } from '../../model/devices';
 import { nextFreeName } from '../../model/ids';
 import { snap } from '../../geometry/snap';
-import { angleOf, devicePose, facePoint, wrap360 } from '../../geometry/devices';
+import { angleOf, devicePose, facePoint, fitWallMount, wrap360 } from '../../geometry/devices';
 import { dist } from '../../geometry/vec';
 import { wallFrame, wallLocal } from '../../geometry/walls';
 import { t } from '../../i18n';
@@ -87,7 +87,7 @@ export function wallMountPlacement(level: Level, d: Device, on: boolean): Device
     const gap = face ? dist(face, pose.pt) : Infinity;
     if (!best || gap < best.d) best = { placement: { mode: 'wall', wallId: w.id, side, offset }, d: gap };
   }
-  return best && best.d < Infinity ? best.placement : null;
+  return best && best.d < Infinity ? fitWallMount(level, d.props, best.placement, 0) : null;
 }
 
 /**
@@ -114,8 +114,9 @@ export function createDeviceTool(ctx: ToolContext, kind: DeviceKind): Tool {
       return { placement: { mode: 'free', ...fp, rotation: 0 }, props: ctx.deviceDefaults(kind), invalid: true };
     }
     const props = propsFor(ctx, kind, placement);
-    const ok = addDevice(level, props, placement, '').deviceId !== null;
-    return { placement, props, invalid: !ok };
+    const fitted = fitWallMount(level, props, placement, ctx.tolMm());
+    const ok = addDevice(level, props, fitted, '').deviceId !== null;
+    return { placement: fitted, props, invalid: !ok };
   }
 
   return {

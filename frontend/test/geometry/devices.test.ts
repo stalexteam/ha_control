@@ -6,7 +6,7 @@ import {
 } from '../../src/model/types';
 import {
   CONE_MEDIUM, coneMedium, angleFromHandle, clippedCone, coneShape, deviceAt, devicePose, directionHandle,
-  sightOrigin, wrap180, wrap360,
+  fitWallMount, sightOrigin, wrap180, wrap360,
 } from '../../src/geometry/devices';
 import { lineOfSightObstacles, type Medium, type Segment } from '../../src/geometry/visibility';
 import { dist, pointInPolygon, polygonArea } from '../../src/geometry/vec';
@@ -694,3 +694,47 @@ describe('clippedCone: robust clipping and corner devices', () => {
   });
 });
 
+
+describe('fitWallMount', () => {
+  // An L of 100 mm walls: A (0,0)-(4000,0), B (4000,0)-(4000,3000); wall A's room side is 'right', its inner corner offset 3950.
+  const L: Level = {
+    id: 'l0', name: 'L', kind: 'floor', order: 0, zones: [], openings: [], devices: [],
+    nodes: [{ id: 'n0', x: 0, y: 0 }, { id: 'n1', x: 4000, y: 0 }, { id: 'n2', x: 4000, y: 3000 }],
+    walls: [
+      { id: 'A', a: 'n0', b: 'n1', thickness: 100, type: 'partition', baseline: 'center' },
+      { id: 'B', a: 'n1', b: 'n2', thickness: 100, type: 'partition', baseline: 'center' },
+    ],
+  };
+  const rect = { ...deviceDefaults('equipment', 'free'), shape: 'rect', width: 600, depth: 400 } as DeviceProps;
+  const round = { ...deviceDefaults('equipment', 'free'), shape: 'circle', diameter: 500 } as DeviceProps;
+  const at = (offset: number): DevicePlacement => ({ mode: 'wall', wallId: 'A', side: 'right', offset });
+  const off = (pr: DeviceProps, offset: number, tol = 80) => (fitWallMount(L, pr, at(offset), tol) as { offset: number }).offset;
+
+  it('a body that would enter the adjoining wall stops flush: 3900 -> 3650', () => expect(off(rect, 3900)).toBeCloseTo(3650));
+  it('snaps flush within the tolerance, else unchanged', () => {
+    expect(off(rect, 3600)).toBeCloseTo(3650);
+    expect(off(rect, 3000)).toBe(3000);
+  });
+  it('near the free end: 100 -> 300', () => expect(off(rect, 100)).toBeCloseTo(300));
+  it('a circle uses its radius: 3900 -> 3700', () => expect(off(round, 3900)).toBeCloseTo(3700));
+  it('a span shorter than the body gives its midpoint', () => {
+    // Between the corners of two walls 400 mm apart on the room side: B' meets A at 3950 on A; shrink A to 400.
+    const S: Level = { ...L, nodes: [{ id: 'n0', x: 0, y: 0 }, { id: 'n1', x: 400, y: 0 }, { id: 'n2', x: 400, y: 3000 }, { id: 'n3', x: 0, y: 3000 }],
+      walls: [
+        { id: 'A', a: 'n0', b: 'n1', thickness: 100, type: 'partition', baseline: 'center' },
+        { id: 'B', a: 'n1', b: 'n2', thickness: 100, type: 'partition', baseline: 'center' },
+        { id: 'C', a: 'n3', b: 'n0', thickness: 100, type: 'partition', baseline: 'center' },
+      ] };
+    const r = fitWallMount(S, rect, at(100), 80) as { offset: number };
+    expect(r.offset).toBeCloseTo(200); // between inner corners 50 and 350
+  });
+  it('other kinds, non-wall placements and an unchanged offset return the same object', () => {
+    const sock = deviceDefaults('socket', 'wall');
+    const pl = at(3900);
+    expect(fitWallMount(L, sock, pl, 80)).toBe(pl);
+    const free: DevicePlacement = { mode: 'free', x: 1, y: 2, rotation: 0 };
+    expect(fitWallMount(L, rect, free, 80)).toBe(free);
+    const ok = at(3000);
+    expect(fitWallMount(L, rect, ok, 80)).toBe(ok);
+  });
+});

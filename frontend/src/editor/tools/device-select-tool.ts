@@ -1,6 +1,6 @@
 import type { Device, DevicePlacement, Id, Level, Pt } from '../../model/types';
 import { moveDevice } from '../../model/devices';
-import { angleOf, deviceAt, devicePose, facePoint, wrap360 } from '../../geometry/devices';
+import { angleOf, deviceAt, devicePose, facePoint, fitWallMount, wrap360 } from '../../geometry/devices';
 import { orthoConstrain } from '../../geometry/snap';
 import { wallFrame, wallLocal } from '../../geometry/walls';
 import { add, dist, dot, sub } from '../../geometry/vec';
@@ -55,7 +55,7 @@ export function createDeviceSelectTool(ctx: ToolContext): Tool {
     const cand = deviceCandidate(ctx, original, d.props.kind, cursor, rot, candidateModes(d.props.kind, pl.mode));
     // A wall candidate keeps the aim of a wall device; a free device landing on a wall starts at aim 0.
     const keep = cand && cand.mode === 'wall' && pl.mode === 'wall' && pl.aim !== undefined ? { ...cand, aim: pl.aim } : cand;
-    working = keep ? moveDevice(original, d.id, wallStable(original, d.placement, keep, p, cursor)) : original;
+    working = keep ? moveDevice(original, d.id, fitWallMount(original, d.props, wallStable(original, d.placement, keep, p, cursor), ctx.tolMm())) : original;
   }
 
   /**

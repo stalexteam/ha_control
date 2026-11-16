@@ -261,4 +261,13 @@ describe('device select tool', () => {
       expect(ctx.level().devices[0].placement).toMatchObject({ mode: 'free', rotation: 270 });
     });
   });
+
+  it('dragging wall-mounted equipment past the corner stops flush and stays on its wall', () => {
+    const { lv, id } = withDevice('equipment', onTop(2000));
+    const ctx = fakeContext(lv);
+    const t = createDeviceSelectTool(ctx);
+    t.down(ev(2000, 300)); t.move(ev(2500, 300)); t.move(ev(2900, 300)); t.up(ev(2900, 300));
+    expect(ctx.commits).toHaveLength(1);
+    expect(ctx.level().devices.find(d => d.id === id)!.placement).toMatchObject({ mode: 'wall', wallId: lv.walls[0].id, side: 'right', offset: 2650 });
+  });
 });

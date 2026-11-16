@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDeviceTool } from '../../src/editor/tools/device-tool';
+import { createDeviceTool, wallMountPlacement } from '../../src/editor/tools/device-tool';
 import { addBox } from '../../src/model/ops';
 import { deviceDefaults, type DeviceProps, type Level } from '../../src/model/types';
 import { fakeContext } from './fake-context';
@@ -176,5 +176,27 @@ describe('climate sensor and fan tools', () => {
     t.move(ev(1500, 2000)); t.down(ev(1500, 2000)); t.up(ev(1500, 2000));
     expect(ctx.level().devices[0].placement.mode).toBe('free');
     expect(ctx.level().devices[0].name).toBe('Climate sensor 1');
+  });
+});
+
+describe('wall-mounted equipment at a corner', () => {
+  // Box 3000 x 4000 of 100 mm walls: the top wall's room face is y = 50 and its inner corner lies at offset 2950; a 600 wide body stops at 2650.
+  it('the Device tool with Wall mount near the corner places the body flush, not invalid', () => {
+    const ctx = fakeContext(box());
+    ctx.wallMount = () => true;
+    const t = createDeviceTool(ctx, 'equipment');
+    t.move(ev(2900, 10));
+    const pv = t.preview().device!;
+    expect(pv.invalid).toBe(false);
+    expect(pv.placement).toMatchObject({ mode: 'wall', side: 'right', offset: 2650 });
+    t.down(ev(2900, 10)); t.up(ev(2900, 10));
+    expect(ctx.level().devices[0].placement).toMatchObject({ mode: 'wall', offset: 2650 });
+  });
+
+  it('ticking Wall mount on a free body near the corner gives the flush offset', () => {
+    const lv = box();
+    const d = { id: 'd', name: 'D', props: deviceDefaults('equipment', 'free'), placement: { mode: 'free' as const, x: 2700, y: 200, rotation: 0 }, invalid: false };
+    const pl = wallMountPlacement({ ...lv, devices: [d] }, d, true);
+    expect(pl).toMatchObject({ mode: 'wall', wallId: lv.walls[0].id, side: 'right', offset: 2650 });
   });
 });
