@@ -65,6 +65,29 @@ describe('deviceLive', () => {
   });
 });
 
+describe('deviceLive review follow-ups', () => {
+  const w = (v: string) => ({ 'sensor.p': st(v, { attributes: { unit_of_measurement: 'W' } }) });
+  it('valve bound to a switch entity: on = open, off = closed', () => {
+    const v = dev({ kind: 'valve', autoByDoubleToggle: false, windowSec: 3 }, { state: 'switch.v' });
+    expect(deviceLive(v, { 'switch.v': st('on') })).toEqual({ look: 'on' });
+    expect(deviceLive(v, { 'switch.v': st('off') })).toEqual({ look: 'off' });
+    expect(deviceLive(v, { 'switch.v': st('unavailable') })).toEqual({ look: 'no-data' });
+  });
+  it('power bubble only from 1 W after rounding', () => {
+    const s = dev({ kind: 'socket' }, { power: 'sensor.p' });
+    expect(deviceLive(s, w('0.3'))).toEqual({ look: 'none' });
+    expect(deviceLive(s, w('0.49'))).toEqual({ look: 'none' });
+    expect(deviceLive(s, w('0.5'))).toEqual({ look: 'none', power: 0.5 });
+    expect(deviceLive(s, w('1'))).toEqual({ look: 'none', power: 1 });
+  });
+  it('an inverter does not read the plain power role', () => {
+    const props = { kind: 'equipment', shape: 'rect', width: 1, depth: 1, diameter: 1, icon: '', label: '' } as DeviceProps;
+    const inv = dev({ ...props, inverter: true } as DeviceProps, { power: 'sensor.p' });
+    expect(deviceLive(inv, w('80'))).toEqual({ look: 'none' });
+    expect(deviceLive(dev(props, { power: 'sensor.p' }), w('80'))).toEqual({ look: 'none', power: 80 });
+  });
+});
+
 describe('liveBubbles', () => {
   const now = Date.parse(T);
   it('bubbles', () => {

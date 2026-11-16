@@ -1,4 +1,5 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
+import { keyed } from 'lit/directives/keyed.js';
 import { mdiAlert } from '@mdi/js';
 import { isContainerKind, type Device, type Level, type Pt } from '../model/types';
 import type { BindStatus } from '../model/bindings';
@@ -287,13 +288,30 @@ function renderBubbles(b: { shown: LiveBubble[]; leaving: LiveBubble[] }, e: num
     const h = BUBBLE_H_PX * k;
     const y = -e * 0.9 - (4 + BUBBLE_H_PX * (i + 1) + 2 * i) * k;
     const c = toneColor(x.tone, o.palette);
-    return svg`<g class=${`bubble ${cls}`} data-tone=${x.tone}>
+    // A keyed (action) bubble that is replaced is a new element, so its pop-in plays again.
+    return keyed(`${cls}:${x.key ?? ''}`, svg`<g class=${`bubble ${cls}`} data-tone=${x.tone}>
       <rect x=${x0} y=${y} width=${w} height=${h} rx=${h / 2} fill=${o.palette.background} stroke=${c} stroke-width="1.5"
         vector-effect=${NS}></rect>
       <text x=${x0 + w / 2} y=${y + h / 2} text-anchor="middle" dominant-baseline="central" fill=${c} font-weight="700"
         font-size=${BUBBLE_FONT_PX * k} font-family="system-ui, sans-serif">${x.text}</text>
-    </g>`;
+    </g>`);
   })}`;
+}
+
+/** Half-extent of a device symbol, where its bubbles start. */
+function bubbleExtent(d: Device, o: DeviceRenderOpts): number {
+  const p = d.props;
+  if (p.kind === 'equipment') return (p.shape === 'circle' ? p.diameter / 2 : Math.hypot(p.width, p.depth) / 2) * Math.SQRT1_2;
+  return roundLightR(d, ICON_PX / o.scale);
+}
+
+/** The bubbles of one device, at its position (unrotated), dimmed with it. */
+function renderDeviceBubbles(d: Device, pose: DevicePose, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
+  const b = o.bubbles?.(d);
+  const inner = b ? renderBubbles(b, bubbleExtent(d, o), o) : nothing;
+  if (inner === nothing) return nothing;
+  return svg`<g class="device-bubbles" data-id=${d.id} transform=${`translate(${pose.pt.x} ${pose.pt.y})`}
+    opacity=${o.dim ? String(o.palette.dimOpacity) : nothing}>${inner}</g>`;
 }
 
 function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview: boolean): SVGTemplateResult {
@@ -326,7 +344,6 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
           noData ? NO_DATA_DASH : undefined, lit ? p.deviceFill : tint, dl?.look === 'off')}</g>`}
       ${o.bindingStatus && !preview ? bindRing(o.bindingStatus(d), o.scale, roundLightR(d, R)) : nothing}
       ${live ? badge(live, R, o) : nothing}
-      ${!preview && o.bubbles ? renderBubbles(o.bubbles(d), kind === 'equipment' ? reach * Math.SQRT1_2 : roundLightR(d, R), o) : nothing}
     </g>`;
 }
 
@@ -401,5 +418,6 @@ export function renderDevices(level: Level, o: DeviceRenderOpts): SVGTemplateRes
       return svg`${glow}${o.showCones ? renderCone(level, i.d, o, i.preview, dl?.look === 'active') : nothing}`;
     })}</g>
     <g class="devices">${items.map(i => renderDevice(i.d, i.pose, o, i.preview))}</g>
-    ${renderHandle(level, o)}`;
+    ${renderHandle(level, o)}
+    ${o.bubbles ? svg`<g class="bubbles">${items.map(i => (i.preview ? nothing : renderDeviceBubbles(i.d, i.pose, o)))}</g>` : nothing}`;
 }

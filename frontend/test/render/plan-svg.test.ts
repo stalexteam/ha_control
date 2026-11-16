@@ -213,6 +213,6 @@ describe('renderLevel step rules for devices', () => {
     const root = draw2('binding');
     expect(root.querySelector('g.device[data-id="sb"] .badge')).toBeTruthy();
     expect(root.querySelector('g.device[data-id="cl"] .icon')!.getAttribute('fill')).toBe(paletteFor(true).device);
-    expect(root.querySelector('g.device[data-id="cl"] .bubble')!.textContent).toContain('42');
+    expect(root.querySelector('g.bubbles g.device-bubbles[data-id="cl"] .bubble')!.textContent).toContain('42');
   });
 });

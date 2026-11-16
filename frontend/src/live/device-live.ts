@@ -1,4 +1,5 @@
 import type { Device } from '../model/types';
+import { activeRoleSpecs } from '../model/bindings';
 import { formatWatts } from '../render/power-svg';
 
 /** `hass.states` (entity id -> state object). */
@@ -6,7 +7,8 @@ export type HassStates = Record<string, unknown> | undefined;
 /** 'none': the kind has no live look or its driving role is unbound; 'active': motion detected / leak wet. */
 export type LiveLook = 'none' | 'on' | 'off' | 'no-data' | 'active';
 export type BubbleTone = 'device' | 'motion' | 'leak' | 'event';
-export interface LiveBubble { text: string; tone: BubbleTone }
+/** key: set on an action bubble (its time), so a replaced one is drawn anew and pops again. */
+export interface LiveBubble { text: string; tone: BubbleTone; key?: number }
 /** timerSince: epoch ms of last_changed when a timer applies; power: W > 0 when a power bubble applies. */
 export interface DeviceLive { look: LiveLook; timerSince?: number; power?: number }
 
@@ -49,26 +51,29 @@ export function deviceLive(d: Device, states: HassStates): DeviceLive {
   let timer = false;
   let hasControl = false;
   let st = undefined as HassState | undefined;
-  const read = (id: string | undefined, on: string, off: string) => {
+  const read = (id: string | undefined, on: string[], off: string[]) => {
     if (!id) return;
     st = getState(states, id);
-    look = st?.state === on ? 'on' : st?.state === off ? 'off' : 'no-data';
+    const v = st?.state ?? '';
+    look = on.includes(v) ? 'on' : off.includes(v) ? 'off' : 'no-data';
   };
+  const ON = ['on'], OFF = ['off'];
   switch (kind) {
     case 'ceiling_light': case 'wall_light': case 'exhaust_fan': timer = true; // falls through
     case 'socket': case 'equipment': {
       hasControl = !!b.control;
-      read(b.control, 'on', 'off');
+      read(b.control, ON, OFF);
       break;
     }
     case 'motion_sensor': case 'leak_sensor': {
       timer = true;
-      read(b[kind === 'motion_sensor' ? 'motion' : 'leak'], 'on', 'off');
+      read(b[kind === 'motion_sensor' ? 'motion' : 'leak'], ON, OFF);
       if (look === 'on') look = 'active';
       break;
     }
-    case 'wall_switch': read(b.state, 'on', 'off'); break;
-    case 'valve': read(b.state, 'open', 'closed'); break;
+    case 'wall_switch': read(b.state, ON, OFF); break;
+    // A valve may be a `switch` entity: the server maps open = on, closed = off.
+    case 'valve': read(b.state, ['open', 'on'], ['closed', 'off']); break;
     default: break;
   }
   const out: DeviceLive = { look };
@@ -76,8 +81,9 @@ export function deviceLive(d: Device, states: HassStates): DeviceLive {
     const t = since(st);
     if (t !== undefined) out.timerSince = t;
   }
-  const p = watts(states, b.power);
-  if (p !== undefined && p > 0 && (look === 'on' || !hasControl)) out.power = p;
+  // Only an active power role (an inverter has Input / Output power instead); under 1 W after rounding is no bubble.
+  const p = activeRoleSpecs(d).some(r => r.role === 'power') ? watts(states, b.power) : undefined;
+  if (p !== undefined && Math.round(p) >= 1 && (look === 'on' || !hasControl)) out.power = p;
   return out;
 }
 

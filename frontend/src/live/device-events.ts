@@ -1,9 +1,12 @@
 import type { Device, Id, Level } from '../model/types';
-import { deviceLive, liveBubbles, type HassStates, type LiveBubble } from './device-live';
+import { activeRoleSpecs } from '../model/bindings';
+import { deviceLive, liveBubbles, type DeviceLive, type HassStates, type LiveBubble } from './device-live';
 
 /** How long an action bubble shows, and how long an ended bubble fades. */
 export const EVENT_MS = 10_000;
 export const FADE_MS = 400;
+/** An ended action bubble stays in `leaving` this long, so the 1 s ticker catches it and lets it fade. */
+export const EVENT_FADE_WINDOW_MS = 1000;
 
 interface St { state: string; last_changed?: string; attributes?: { event_type?: unknown } }
 interface Watch { entity: string; settled: boolean; valve: boolean }
@@ -27,7 +30,10 @@ function watches(d: Device): Watch[] {
   const add = (entity: string | undefined, settled: boolean, valve = false) => {
     if (entity && !out.some((w) => w.entity === entity)) out.push({ entity, settled, valve });
   };
-  if (kind === 'smart_button') { add(b.on, false); add(b.off, false); add(b.auto, false); }
+  if (kind === 'smart_button') {
+    // Only active roles: `off` needs separateOff, `auto` needs autoEnabled.
+    for (const { role } of activeRoleSpecs(d)) if (role === 'on' || role === 'off' || role === 'auto') add(b[role], false);
+  }
   else if (kind === 'wall_switch') add(b.state, true);
   else if (kind === 'valve') add(b.state, true, true);
   return out;
@@ -48,19 +54,34 @@ function read(w: Watch, s: St, prev: Seen | undefined): { value?: string; text?:
     return { value: v, text: prev && prev.last !== v ? v : undefined };
   }
   if (w.entity.startsWith('event.')) {
-    const value = `${s.state}|${s.last_changed ?? ''}`;
+    // The state is the time of the last event. Unknown / unavailable (HA restart, reconnect) keep the baseline.
+    if (NO_VALUE.has(s.state)) return {};
     const et = s.attributes?.event_type;
-    const ok = prev && prev.last !== value && !NO_VALUE.has(s.state) && typeof et === 'string' && et !== '';
-    return { value, text: ok ? (et as string) : undefined };
+    const ok = prev && prev.last !== s.state && typeof et === 'string' && et !== '';
+    return { value: s.state, text: ok ? (et as string) : undefined };
   }
   return { value: s.state, text: prev && prev.last !== s.state && !NO_VALUE.has(s.state) ? s.state : undefined };
+}
+
+/** The timer or power bubble of a live state at `now`, if it has one. */
+function bubble(live: DeviceLive, slot: Slot, d: Device, now: number): LiveBubble | undefined {
+  const only: DeviceLive = slot === 'timer' ? { look: live.look, timerSince: live.timerSince } : { look: live.look, power: live.power };
+  return liveBubbles(only, d, now)[0];
+}
+
+/** The distinct event source entities of the level's devices, sorted. */
+export function eventSources(level: Level): string[] {
+  const ids = new Set<string>();
+  for (const d of level.devices) for (const w of watches(d)) ids.add(w.entity);
+  return [...ids].sort();
 }
 
 /** Tracks action events (10 s bubble) and ended bubbles (fading) per device, from hass.states only. */
 export class DeviceEventTracker {
   private seen = new Map<string, Seen>();
   private events = new Map<Id, { text: string; at: number }>();
-  private bubbles = new Map<Id, Partial<Record<Slot, LiveBubble>>>();
+  /** The live state behind the device's timer and power bubbles at the last update. */
+  private bubbles = new Map<Id, DeviceLive>();
   private leave = new Map<Id, Leave[]>();
 
   /** Compare states with the last seen ones for every event source of the level's devices; record new events and bubble exits. */
@@ -77,9 +98,16 @@ export class DeviceEventTracker {
     return e && now - e.at < EVENT_MS ? e : null;
   }
 
-  /** Bubbles that ended under FADE_MS ago (shown fading with their last text), else []. */
+  /**
+   * Bubbles that ended under FADE_MS ago (shown fading with their text at the exit time), and the action bubble
+   * for EVENT_FADE_WINDOW_MS after its EVENT_MS ran out; else [].
+   */
   leaving(deviceId: Id, now: number): LiveBubble[] {
-    return (this.leave.get(deviceId) ?? []).filter((l) => now - l.at < FADE_MS).map((l) => l.bubble);
+    const out = (this.leave.get(deviceId) ?? []).filter((l) => now - l.at < FADE_MS).map((l) => l.bubble);
+    const e = this.events.get(deviceId);
+    const age = e ? now - e.at : -1;
+    if (e && age >= EVENT_MS && age < EVENT_MS + EVENT_FADE_WINDOW_MS) out.push({ text: e.text, tone: 'event', key: e.at });
+    return out;
   }
 
   private updateEvents(d: Device, states: HassStates, now: number): void {
@@ -100,19 +128,16 @@ export class DeviceEventTracker {
 
   private updateBubbles(d: Device, states: HassStates, now: number): void {
     const live = deviceLive(d, states);
-    const cur: Partial<Record<Slot, LiveBubble>> = {
-      timer: liveBubbles({ look: live.look, timerSince: live.timerSince }, d, now)[0],
-      power: liveBubbles({ look: live.look, power: live.power }, d, now)[0],
-    };
     const prev = this.bubbles.get(d.id);
     if (prev) {
       const list = (this.leave.get(d.id) ?? []).filter((l) => now - l.at < FADE_MS);
       for (const slot of SLOTS) {
-        const gone = prev[slot];
-        if (gone && !cur[slot]) list.push({ bubble: gone, at: now });
+        // The ended bubble is formatted now, so a timer fades with its value at the exit time.
+        const gone = bubble(prev, slot, d, now);
+        if (gone && !bubble(live, slot, d, now)) list.push({ bubble: gone, at: now });
       }
       if (list.length) this.leave.set(d.id, list); else this.leave.delete(d.id);
     }
-    this.bubbles.set(d.id, cur);
+    this.bubbles.set(d.id, live);
   }
 }

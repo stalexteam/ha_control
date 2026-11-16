@@ -43,7 +43,8 @@ import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { PowerFeed, powerPayload } from '../live/power-feed';
 import { deviceLive, liveBubbles } from '../live/device-live';
-import { DeviceEventTracker } from '../live/device-events';
+import { DeviceEventTracker, eventSources } from '../live/device-events';
+import { EntityFeed } from '../live/entity-feed';
 
 export class PlanStudioPanel extends LitElement {
   static styles = panelStyles;
@@ -118,8 +119,10 @@ export class PlanStudioPanel extends LitElement {
   /** Live values of the schematic draft (subscribed only in the Power step of an attached panel). */
   readonly powerFeed = new PowerFeed(this, () => this.hass?.connection);
 
-  /** Action events and ended bubbles of the open level's devices, from hass.states. */
+  /** Action events and ended bubbles of the open level's devices, from hass.states and the entity feed. */
   private readonly events = new DeviceEventTracker();
+  /** Per-message states of the event sources (Binding step of an attached panel), so no press is coalesced away. */
+  readonly entityFeed = new EntityFeed(() => this.hass?.connection, () => this.onEntities());
   private trackedLevel: Level | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
   /** True while the 1 s ticker runs (Binding step with a timer, event or fading bubble). */
@@ -167,6 +170,7 @@ export class PlanStudioPanel extends LitElement {
     window.addEventListener('pagehide', this.onPageHide);
     this.feed.watch(this.plan?.id ?? null); // re-attached: subscribe again (no-op before the first load)
     this.watchPower();
+    this.watchEntities();
   }
 
   disconnectedCallback(): void {
@@ -183,6 +187,7 @@ export class PlanStudioPanel extends LitElement {
     this.resizeObs = null;
     this.feed.stop();
     this.powerFeed.stop();
+    this.entityFeed.stop();
     this.stopTicker();
   }
 
@@ -190,7 +195,10 @@ export class PlanStudioPanel extends LitElement {
     if (changed.has('hass') && this.hass && !this.plan && !this.loading && !this.loadError) void this.session.load();
     // New states, or a new level whose devices have no baseline yet.
     const cur = this.history?.current.level ?? null;
-    if (cur && this.hass && (changed.has('hass') || cur !== this.trackedLevel)) this.events.update(cur, this.hass.states, Date.now());
+    this.watchEntities();
+    if (cur && this.hass && (changed.has('hass') || cur !== this.trackedLevel)) {
+      this.events.update(cur, this.entityFeed.overlay(this.hass.states), Date.now());
+    }
     this.trackedLevel = cur;
     const sized = this.size.w > 0 && this.size.h > 0;
     if (this.needFit && sized) { this.needFit = false; this.fit(); }
@@ -198,6 +206,19 @@ export class PlanStudioPanel extends LitElement {
     // A detached panel still updates when handed a new hass: it keeps no subscription until it is attached again.
     this.feed.watch(this.isConnected ? this.plan?.id ?? null : null);
     this.watchPower();
+  }
+
+  /** The entity feed watches the open level's event sources in the Binding step of an attached panel. */
+  private watchEntities(): void {
+    const level = this.isConnected && this.mode === 'binding' ? this.history?.current.level : undefined;
+    this.entityFeed.watch(level ? eventSources(level) : null);
+  }
+
+  /** Every entity feed message: the tracker sees each value, even one the next message replaces at once. */
+  private onEntities(): void {
+    const level = this.history?.current.level;
+    if (level && this.hass) this.events.update(level, this.entityFeed.overlay(this.hass.states), Date.now());
+    this.requestUpdate();
   }
 
   /** The power feed carries the draft schematic; it is idle outside the Power step and while detached. */
@@ -489,7 +510,7 @@ export class PlanStudioPanel extends LitElement {
                 const live = deviceLive(d, states);
                 const ev = this.events.event(d.id, now);
                 return {
-                  shown: [...liveBubbles(live, d, now), ...(ev ? [{ text: ev.text, tone: 'event' as const }] : [])],
+                  shown: [...liveBubbles(live, d, now), ...(ev ? [{ text: ev.text, tone: 'event' as const, key: ev.at }] : [])],
                   leaving: this.events.leaving(d.id, now),
                 };
               },

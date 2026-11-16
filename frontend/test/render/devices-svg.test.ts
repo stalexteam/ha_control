@@ -564,6 +564,36 @@ describe('live looks and bubbles', () => {
     expect(leak.querySelector('g.bubble rect')!.getAttribute('stroke')).toBe(ALERT);
   });
 
+  it('bubbles sit in their own group after the devices, at the device position, and dim with it', () => {
+    const root = drawDevs(lv(), {
+      bubbles: d => ({ shown: d.id === 'so' || d.id === 'sb' ? [{ text: '1', tone: 'device' }] : [], leaving: [] }),
+    });
+    const layer = root.querySelector('g.bubbles')!;
+    expect(layer).toBeTruthy();
+    expect(root.querySelector('g.devices .bubble')).toBeNull();
+    // After the devices group: later symbols, rings and badges never cover a bubble.
+    expect(root.querySelector('g.devices')!.compareDocumentPosition(layer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const so = layer.querySelector('g.device-bubbles[data-id="so"]')!;
+    expect(so.getAttribute('transform')).toBe('translate(2000 4000)');
+    expect(so.querySelectorAll('g.bubble')).toHaveLength(1);
+    expect(layer.querySelectorAll('g.device-bubbles')).toHaveLength(2);
+    const dim = drawDevs(lv(), { dim: true, bubbles: () => ({ shown: [{ text: '1', tone: 'device' }], leaving: [] }) });
+    expect(dim.querySelector('g.device-bubbles')!.getAttribute('opacity')).toBe(String(pal.dimOpacity));
+  });
+
+  it('a replaced action bubble (new key) is a new element, so it pops again', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const draw = (key: number) => render(html`<svg xmlns="http://www.w3.org/2000/svg">${renderDevices(lv(), { ...base, scale: 0.1,
+      bubbles: d => ({ shown: d.id === 'sb' ? [{ text: 'single', tone: 'event', key }] : [], leaving: [] }) } as DevOpts)}</svg>`, host);
+    draw(1000);
+    const first = host.querySelector('g.bubble[data-tone="event"]');
+    draw(1000);
+    expect(host.querySelector('g.bubble[data-tone="event"]')).toBe(first);
+    draw(3000);
+    expect(host.querySelector('g.bubble[data-tone="event"]')).not.toBe(first);
+  });
+
   it('without live and bubbles the output has no live parts and no intent badges', () => {
     const root = drawDevs(lv(), { containerState: d => ({ kind: d.props.kind as ContainerKind, status: 'ok', last: { action: 'toggle', at: 'x' } }) });
     expect(root.querySelector('.live-glow, .bubble, .live-active, .no-data')).toBeNull();

@@ -476,6 +476,8 @@ function liveHass(reject?: unknown): { hass: HassLike; subs: Sub[]; fire(type: '
   const connection: HassLike['connection'] = {
     ...hass.connection,
     subscribeMessage<T>(cb: (msg: T) => void, msg: Record<string, unknown>) {
+      // The entity feed of the Binding step is not what these tests drive.
+      if (msg.type === 'subscribe_entities') return Promise.resolve(() => Promise.resolve());
       const unsub = vi.fn(() => Promise.resolve());
       subs.push({ msg, push: ev => cb(ev as T), unsub });
       return reject === undefined ? Promise.resolve(unsub) : Promise.reject(reject);
