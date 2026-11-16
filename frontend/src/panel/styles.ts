@@ -15,6 +15,12 @@ export function paletteVars(p: PlanPalette): string {
  */
 export const panelStyles = css`
   :host { display: block; height: 100%; outline: none; }
+  .bubble { pointer-events: none; transform-box: fill-box; transform-origin: center; }
+  .bubble-in { animation: bubble-pop 180ms ease-out; }
+  .bubble-out { animation: bubble-fade 400ms forwards; }
+  @keyframes bubble-pop { 0% { transform: scale(0.6); opacity: 0; } 70% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+  @keyframes bubble-fade { from { opacity: 1; } to { opacity: 0; transform: scale(0.9); } }
+  @media (prefers-reduced-motion: reduce) { .bubble-in, .bubble-out { animation: none; } .bubble-out { opacity: 0; } }
   .ed {
     --ch-bg: var(--primary-background-color, var(--ps-background));
     --ch-card: var(--card-background-color, var(--ps-panel));

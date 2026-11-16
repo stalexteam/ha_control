@@ -1,7 +1,7 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
 import type { Device, Id, Level, Opening, Pt, Wall } from '../model/types';
 import type { BindStatus } from '../model/bindings';
-import type { ContainerFlash, ContainerState } from '../live/container-feed';
+import type { ContainerState } from '../live/container-feed';
 import type { WallProps } from '../model/ops';
 import type { Preview, Selection } from '../editor/tools/types';
 import { segmentFrame, wallFrame, wallOutlines, wallPieces, wallsUnion, type WallFrame } from '../geometry/walls';
@@ -27,8 +27,6 @@ export interface RenderOpts {
   bindingStatus?: (d: Device) => BindStatus;
   /** Live state of an input container; drawn in every mode. */
   containerState?: (d: Device) => ContainerState | undefined;
-  /** The intent an input container's badge shows now, or null; drawn in every mode. */
-  containerFlash?: (d: Device) => ContainerFlash | null;
   /** Default true. */
   showCones?: boolean;
 }
@@ -318,7 +316,7 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
     <g class="devices-layer">${renderDevices(lv, {
       palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: plan, preview: o.preview.device,
       bindingStatus: o.mode === 'binding' ? o.bindingStatus : undefined,
-      containerState: o.containerState, containerFlash: o.containerFlash,
+      containerState: o.containerState,
     })}</g>
     <g class="selection">${renderSelection(lv, o)}</g>
     <g class="preview">${renderPreview(lv, o)}</g>`;

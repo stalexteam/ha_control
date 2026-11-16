@@ -1,8 +1,9 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
-import { mdiAlert, mdiPower, mdiPowerOff, mdiRefreshAuto, mdiToggleSwitch, mdiValveClosed, mdiValveOpen } from '@mdi/js';
-import { isContainerKind, type Device, type DeviceKind, type Level, type Pt } from '../model/types';
+import { mdiAlert } from '@mdi/js';
+import { isContainerKind, type Device, type Level, type Pt } from '../model/types';
 import type { BindStatus } from '../model/bindings';
-import type { ContainerFlash, ContainerState } from '../live/container-feed';
+import type { ContainerState } from '../live/container-feed';
+import type { BubbleTone, DeviceLive, LiveBubble } from '../live/device-live';
 import type { Preview, Selection } from '../editor/tools/types';
 import { clippedCone, coneMedium, devicePose, directionHandle, type DevicePose } from '../geometry/devices';
 import { lineOfSightObstacles, type Medium, type Segment } from '../geometry/visibility';
@@ -29,8 +30,10 @@ export interface DeviceRenderOpts {
    * Live state of an input container, or undefined (no data: dashed outline). An `error` status shows the alert badge.
    */
   containerState?: (d: Device) => ContainerState | undefined;
-  /** The intent a live container's badge shows now (it wins over the alert while it lasts), or null. */
-  containerFlash?: (d: Device) => ContainerFlash | null;
+  /** Live look of a device (filled symbol, glow, lit zone, dashed no-data). Absent: no live looks. */
+  live?: (d: Device) => DeviceLive;
+  /** Bubbles of a device: `shown` (timer, power, event last) pop in, `leaving` fade out. Absent: none. */
+  bubbles?: (d: Device) => { shown: LiveBubble[]; leaving: LiveBubble[] };
 }
 
 const NS = 'non-scaling-stroke';
@@ -41,6 +44,11 @@ const BADGE_ICON_PX = 10;
 const ALERT = '#f43f5e';
 /** Outline dash of a container with no live state (screen pixels). */
 const NO_DATA_DASH = '3 2';
+/** Live bubble pill, in screen pixels. */
+const BUBBLE_H_PX = 18;
+const BUBBLE_PAD_PX = 6;
+const BUBBLE_FONT_PX = 11;
+const BUBBLE_CHAR_W = 0.6;
 /** MDI `cube-outline` (24x24), the bundled fallback when `ha-icon` is not registered. */
 const CUBE_OUTLINE = 'M21,16.5C21,16.88 20.79,17.21 20.47,17.38L12.57,21.82C12.41,21.94 12.21,22 12,22C11.79,22 11.59,21.94 11.43,21.82L3.53,17.38C3.21,17.21 3,16.88 3,16.5V7.5C3,7.12 3.21,6.79 3.53,6.62L11.43,2.18C11.59,2.06 11.79,2 12,2C12.21,2 12.41,2.06 12.57,2.18L20.47,6.62C20.79,6.79 21,7.12 21,7.5V16.5M12,4.15L6.04,7.5L12,10.85L17.96,7.5L12,4.15M5,15.91L11,19.29V12.58L5,9.21V15.91M19,15.91V9.21L13,12.58V19.29L19,15.91Z';
 /** Equipment icon size in screen pixels. */
@@ -145,26 +153,30 @@ function roundLightR(d: Device, R: number): number {
   return d.props.kind === 'ceiling_light' && d.props.shape === 'round' ? Math.max(d.props.diameter / 2, R) : R;
 }
 
-/** `dash`: the outline dash of an input container with no live state. */
-function iconShape(d: Device, R: number, color: string, fill: string, dash?: string): SVGTemplateResult {
+/**
+ * `dash`: the outline dash of a symbol with no live state. `ink`: the colour of the details drawn over the symbol
+ * (the background colour when the symbol is filled). `hollow`: a spot light drawn as an outline (it is solid otherwise).
+ */
+function iconShape(d: Device, R: number, color: string, fill: string, dash?: string, ink = color, hollow = false): SVGTemplateResult {
   const pr = d.props;
   const common = { stroke: color, fill };
+  const da = dash ?? nothing;
   switch (pr.kind) {
     case 'ceiling_light':
       if (pr.shape === 'linear') {
         return svg`<rect class="icon" x=${-pr.length / 2} y=${-pr.width / 2} width=${pr.length} height=${pr.width}
-          fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></rect>`;
+          fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></rect>`;
       }
       if (pr.shape === 'spot') {
-        return svg`<circle class="icon" r=${R / 3} fill=${color} stroke=${color} stroke-width="1" vector-effect=${NS}></circle>`;
+        return svg`<circle class="icon" r=${R / 3} fill=${hollow ? fill : color} stroke=${color} stroke-width="1" stroke-dasharray=${da} vector-effect=${NS}></circle>`;
       }
-      return svg`<circle class="icon" r=${roundLightR(d, R)} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>`;
+      return svg`<circle class="icon" r=${roundLightR(d, R)} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></circle>`;
     case 'wall_light':
       return svg`<path class="icon" d=${`M0 ${-R}A${R} ${R} 0 0 0 0 ${R}Z`} fill=${common.fill} stroke=${common.stroke}
-        stroke-width="1.5" vector-effect=${NS}></path>`;
+        stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></path>`;
     case 'motion_sensor': {
       const arc = (k: number) => `M${R * k} ${-R * k * 0.8}A${R * k} ${R * k * 0.8} 0 0 1 ${R * k} ${R * k * 0.8}`;
-      return svg`<circle class="icon" r=${R * 0.6} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
+      return svg`<circle class="icon" r=${R * 0.6} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></circle>
         <path class="arcs" d=${arc(1) + arc(1.5)} fill="none" stroke=${color} stroke-width="1.5" vector-effect=${NS}></path>`;
     }
     case 'illuminance_sensor': {
@@ -173,29 +185,29 @@ function iconShape(d: Device, R: number, color: string, fill: string, dash?: str
         const a = (i * Math.PI) / 4;
         rays += `M${Math.cos(a) * R * 1.15} ${Math.sin(a) * R * 1.15}L${Math.cos(a) * R * 1.6} ${Math.sin(a) * R * 1.6}`;
       }
-      return svg`<circle class="icon" r=${R * 0.7} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
+      return svg`<circle class="icon" r=${R * 0.7} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></circle>
         <path class="rays" d=${rays} fill="none" stroke=${color} stroke-width="1.5" vector-effect=${NS}></path>`;
     }
     case 'wall_switch':
       return svg`<rect class="icon" x=${-R * 0.6} y=${-R * 0.6} width=${R * 1.2} height=${R * 1.2} fill=${common.fill}
-        stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${dash ?? nothing} vector-effect=${NS}></rect>`;
+        stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></rect>`;
     case 'valve':
       return svg`<path class="icon" d=${`M${-R} ${-R * 0.6}L${R} ${R * 0.6}L${R} ${-R * 0.6}L${-R} ${R * 0.6}Z`} fill=${common.fill}
-        stroke=${common.stroke} stroke-width="1.5" stroke-linejoin="round" stroke-dasharray=${dash ?? nothing} vector-effect=${NS}></path>`;
+        stroke=${common.stroke} stroke-width="1.5" stroke-linejoin="round" stroke-dasharray=${da} vector-effect=${NS}></path>`;
     case 'leak_sensor':
-      return svg`<circle class="icon" r=${R * 0.7} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
-        <path class="drop" d=${`M0 ${-R * 0.4}Q${R * 0.3} ${R * 0.05} 0 ${R * 0.3}Q${-R * 0.3} ${R * 0.05} 0 ${-R * 0.4}Z`} fill=${color} stroke=${color} stroke-width="1" vector-effect=${NS}></path>`;
+      return svg`<circle class="icon" r=${R * 0.7} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></circle>
+        <path class="drop" d=${`M0 ${-R * 0.4}Q${R * 0.3} ${R * 0.05} 0 ${R * 0.3}Q${-R * 0.3} ${R * 0.05} 0 ${-R * 0.4}Z`} fill=${ink} stroke=${ink} stroke-width="1" vector-effect=${NS}></path>`;
     case 'smart_button':
       return svg`<rect class="icon" x=${-R * 0.6} y=${-R * 0.6} width=${R * 1.2} height=${R * 1.2} rx=${R * 0.35}
-        fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${dash ?? nothing}
+        fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da}
         vector-effect=${NS}></rect>
         <circle class="dot" r=${R * 0.18} fill=${color}></circle>`;
     case 'socket':
-      return svg`<circle class="icon" r=${R} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
-        <circle class="dot" cx=${-R * 0.4} r=${R * 0.15} fill=${color}></circle>
-        <circle class="dot" cx=${R * 0.4} r=${R * 0.15} fill=${color}></circle>`;
+      return svg`<circle class="icon" r=${R} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></circle>
+        <circle class="dot" cx=${-R * 0.4} r=${R * 0.15} fill=${ink}></circle>
+        <circle class="dot" cx=${R * 0.4} r=${R * 0.15} fill=${ink}></circle>`;
     case 'climate_sensor':
-      return svg`<circle class="icon" cx=${-R * 0.3} r=${R * 0.45} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
+      return svg`<circle class="icon" cx=${-R * 0.3} r=${R * 0.45} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></circle>
         <path class="thermo" d=${`M${-R * 0.3} ${-R * 0.45}V${-R * 1.1}M${-R * 0.3} ${-R * 0.45}H${-R * 1.1}`} fill="none" stroke=${color} stroke-width="1.5" vector-effect=${NS}></path>
         <path class="drop" d=${`M${R * 0.7} ${-R * 0.7}Q${R * 1.1} ${-R * 0.1} ${R * 0.7} ${R * 0.3}Q${R * 0.3} ${-R * 0.1} ${R * 0.7} ${-R * 0.7}Z`} fill=${color} stroke=${color} stroke-width="1" vector-effect=${NS}></path>`;
     case 'exhaust_fan': {
@@ -204,23 +216,27 @@ function iconShape(d: Device, R: number, color: string, fill: string, dash?: str
         const a = (i * Math.PI) / 2 + Math.PI / 4;
         blades += `M0 0L${Math.cos(a) * R * 0.85} ${Math.sin(a) * R * 0.85}`;
       }
-      return svg`<circle class="icon" r=${R} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" vector-effect=${NS}></circle>
-        <path class="blades" d=${blades} fill="none" stroke=${color} stroke-width="1.5" vector-effect=${NS}></path>`;
+      return svg`<circle class="icon" r=${R} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></circle>
+        <path class="blades" d=${blades} fill="none" stroke=${ink} stroke-width="1.5" vector-effect=${NS}></path>`;
     }
     default:
       return svg`${nothing}`;
   }
 }
 
-function equipmentBlock(d: Device, o: DeviceRenderOpts, color: string, deg: number): SVGTemplateResult {
+function equipmentBlock(d: Device, o: DeviceRenderOpts, color: string, deg: number, lit: boolean, dash?: string): SVGTemplateResult {
   const pr = d.props;
   if (pr.kind !== 'equipment') return svg`${nothing}`;
   const lay = equipmentLabelLayout(pr, pr.label, deg, o.scale);
+  const da = dash ?? nothing;
   const body = pr.shape === 'circle'
     ? svg`<circle class="equipment-body" r=${pr.diameter / 2} fill=${o.palette.deviceFill} stroke=${color}
-        stroke-width="1.5" vector-effect=${NS}></circle>`
+        stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></circle>
+      ${lit ? svg`<circle class="equipment-lit" r=${pr.diameter / 2} fill=${color} fill-opacity="0.3"></circle>` : nothing}`
     : svg`<rect class="equipment-body" x=${-pr.width / 2} y=${-pr.depth / 2} width=${pr.width} height=${pr.depth}
-        fill=${o.palette.deviceFill} stroke=${color} stroke-width="1.5" vector-effect=${NS}></rect>`;
+        fill=${o.palette.deviceFill} stroke=${color} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></rect>
+      ${lit ? svg`<rect class="equipment-lit" x=${-pr.width / 2} y=${-pr.depth / 2} width=${pr.width} height=${pr.depth}
+        fill=${color} fill-opacity="0.3"></rect>` : nothing}`;
   return svg`
     <g transform=${`rotate(${deg})`}>${body}</g>
     ${equipmentIcon(pr.icon, o.scale, color, lay.iconX, lay.iconY)}
@@ -236,32 +252,48 @@ function bindRing(st: BindStatus, scale: number, body = 0): SVGTemplateResult | 
     stroke-width="2" stroke-dasharray=${st === 'unbound' ? '4 3' : nothing} vector-effect=${NS}></circle>`;
 }
 
-/** Badge name (`data-badge`) and MDI path of an intent. */
-function intentIcon(f: ContainerFlash, kind: DeviceKind): [string, string] {
-  if (f.action === 'toggle') return ['toggle', mdiToggleSwitch];
-  if (f.action === 'auto') return ['auto', mdiRefreshAuto];
-  if (kind === 'valve') return f.value === 'off' ? ['valve-closed', mdiValveClosed] : ['valve-open', mdiValveOpen];
-  return f.value === 'off' ? ['set-off', mdiPowerOff] : ['set-on', mdiPower];
-}
-
 /**
- * The badge of a live input container, at the top-right of its symbol (unrotated): a circle of BADGE_R_PX in the
- * background colour, ringed in the icon colour, around a BADGE_ICON_PX MDI icon. An intent being shown wins (in the
- * selection colour); otherwise an `error` status shows the alert; otherwise there is none.
+ * The alert badge of an input container whose status is `error`, at the top-right of its symbol (unrotated): a circle
+ * of BADGE_R_PX in the background colour, ringed in the alert colour, around a BADGE_ICON_PX MDI icon.
  */
-function badge(live: ContainerState, flash: ContainerFlash | null, kind: DeviceKind, R: number, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
-  const icon = flash ? intentIcon(flash, kind) : live.status === 'error' ? ['alert', mdiAlert] : null;
-  if (!icon) return nothing;
-  const [name, d] = icon;
-  const ink = flash ? o.palette.selection : ALERT;
+function badge(live: ContainerState, R: number, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
+  if (live.status !== 'error') return nothing;
   const cx = R * 0.9;
   const cy = -R * 0.9;
   const size = BADGE_ICON_PX / o.scale;
-  return svg`<g class="badge" data-badge=${name}>
-    <circle cx=${cx} cy=${cy} r=${BADGE_R_PX / o.scale} fill=${o.palette.background} stroke=${ink} stroke-width="1.5"
+  return svg`<g class="badge" data-badge="alert">
+    <circle cx=${cx} cy=${cy} r=${BADGE_R_PX / o.scale} fill=${o.palette.background} stroke=${ALERT} stroke-width="1.5"
       vector-effect=${NS}></circle>
-    <path d=${d} fill=${ink} transform=${`translate(${cx - size / 2} ${cy - size / 2}) scale(${size / 24})`}></path>
+    <path d=${mdiAlert} fill=${ALERT} transform=${`translate(${cx - size / 2} ${cy - size / 2}) scale(${size / 24})`}></path>
   </g>`;
+}
+
+/** Bubble ring and text colour by tone. */
+function toneColor(tone: BubbleTone, p: PlanPalette): string {
+  return tone === 'motion' ? p.motionCone : tone === 'leak' ? ALERT : tone === 'event' ? p.selection : p.device;
+}
+
+/**
+ * Pill bubbles at the top-right of the symbol on screen (unrotated), right of the alert badge and stacked upwards;
+ * `leaving` ones fade out above the shown ones. Constant screen size. `e` is the symbol's half-extent.
+ */
+function renderBubbles(b: { shown: LiveBubble[]; leaving: LiveBubble[] }, e: number, o: DeviceRenderOpts): SVGTemplateResult | typeof nothing {
+  const all = [...b.shown.map(x => [x, 'bubble-in'] as const), ...b.leaving.map(x => [x, 'bubble-out'] as const)];
+  if (all.length === 0) return nothing;
+  const k = 1 / o.scale;
+  const x0 = e * 0.9 + (BADGE_R_PX + 3) * k;
+  return svg`${all.map(([x, cls], i) => {
+    const w = (x.text.length * BUBBLE_FONT_PX * BUBBLE_CHAR_W + 2 * BUBBLE_PAD_PX) * k;
+    const h = BUBBLE_H_PX * k;
+    const y = -e * 0.9 - (4 + BUBBLE_H_PX * (i + 1) + 2 * i) * k;
+    const c = toneColor(x.tone, o.palette);
+    return svg`<g class=${`bubble ${cls}`} data-tone=${x.tone}>
+      <rect x=${x0} y=${y} width=${w} height=${h} rx=${h / 2} fill=${o.palette.background} stroke=${c} stroke-width="1.5"
+        vector-effect=${NS}></rect>
+      <text x=${x0 + w / 2} y=${y + h / 2} text-anchor="middle" dominant-baseline="central" fill=${c} font-weight="700"
+        font-size=${BUBBLE_FONT_PX * k} font-family="system-ui, sans-serif">${x.text}</text>
+    </g>`;
+  })}`;
 }
 
 function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview: boolean): SVGTemplateResult {
@@ -273,7 +305,11 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
   // An input container on the plan (not the placement preview) is either live or has no data (dashed outline).
   const container = !preview && isContainerKind(d.props.kind);
   const live = container ? o.containerState?.(d) : undefined;
-  const noData = container && !live;
+  const dl = !preview ? o.live?.(d) : undefined;
+  const lit = dl?.look === 'on' || dl?.look === 'active';
+  const noData = (container && !live) || dl?.look === 'no-data';
+  const kind = d.props.kind;
+  const tint = !lit || d.invalid ? color : kind === 'leak_sensor' ? ALERT : kind === 'motion_sensor' ? p.motionCone : color;
   const cls = `device device-${d.props.kind}${selected ? ' selected' : ''}${d.invalid ? ' invalid' : ''}${preview ? ' device-preview' : ''}`
     + (noData ? ' no-data' : '');
   const opacity = preview ? '0.5' : o.dim ? String(p.dimOpacity) : nothing;
@@ -285,15 +321,16 @@ function renderDevice(d: Device, pose: DevicePose, o: DeviceRenderOpts, preview:
       ${selected ? svg`<circle class="selection-ring" r=${reach + 4 / o.scale} fill="none" stroke=${p.selection}
         stroke-width="2" stroke-dasharray="4 3" vector-effect=${NS}></circle>` : nothing}
       ${d.props.kind === 'equipment'
-        ? equipmentBlock(d, o, color, deg)
-        : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, color, p.deviceFill,
-          noData ? NO_DATA_DASH : undefined)}</g>`}
+        ? equipmentBlock(d, o, color, deg, lit, noData ? NO_DATA_DASH : undefined)
+        : svg`<g transform=${`rotate(${deg})`}>${iconShape(d, R, tint, lit ? tint : p.deviceFill,
+          noData ? NO_DATA_DASH : undefined, lit ? p.deviceFill : tint, dl?.look === 'off')}</g>`}
       ${o.bindingStatus && !preview ? bindRing(o.bindingStatus(d), o.scale, roundLightR(d, R)) : nothing}
-      ${live ? badge(live, o.containerFlash?.(d) ?? null, d.props.kind, R, o) : nothing}
+      ${live ? badge(live, R, o) : nothing}
+      ${!preview && o.bubbles ? renderBubbles(o.bubbles(d), kind === 'equipment' ? reach * Math.SQRT1_2 : roundLightR(d, R), o) : nothing}
     </g>`;
 }
 
-function renderCone(level: Level, d: Device, o: DeviceRenderOpts, preview: boolean): SVGTemplateResult | typeof nothing {
+function renderCone(level: Level, d: Device, o: DeviceRenderOpts, preview: boolean, active: boolean): SVGTemplateResult | typeof nothing {
   const rings = coneRings(level, d); // [] for kinds without a cone
   if (rings.length === 0) return nothing;
   const p = o.palette;
@@ -305,8 +342,28 @@ function renderCone(level: Level, d: Device, o: DeviceRenderOpts, preview: boole
     return svg`<path class="pool" d=${path} fill="none" stroke=${color} stroke-width="1.5" stroke-dasharray="6 4"
       fill-rule="evenodd" opacity=${opacity} vector-effect=${NS}></path>`;
   }
-  return svg`<path class="cone" d=${path} fill=${color} fill-opacity="0.18" fill-rule="evenodd" stroke=${color}
-    stroke-opacity="0.5" stroke-width="1" opacity=${opacity} vector-effect=${NS}></path>`;
+  return svg`<path class=${active ? 'cone live-active' : 'cone'} d=${path} fill=${color} fill-opacity=${active ? '0.32' : '0.18'}
+    fill-rule="evenodd" stroke=${color} stroke-opacity=${active ? '0.85' : '0.5'} stroke-width="1" opacity=${opacity}
+    vector-effect=${NS}></path>`;
+}
+
+/** Soft glow of a lit light: its clipped light area (or a disc without one) filled with a fading radial gradient. */
+function renderGlow(level: Level, d: Device, pose: DevicePose, o: DeviceRenderOpts): SVGTemplateResult {
+  const rings = coneRings(level, d);
+  let r = 0;
+  for (const ring of rings) for (const q of ring) r = Math.max(r, Math.hypot(q.x - pose.pt.x, q.y - pose.pt.y));
+  if (r === 0) r = (ICON_PX * 3) / o.scale;
+  const id = `live-glow-${d.id}`;
+  const c = o.palette.device;
+  const opacity = o.dim ? String(o.palette.dimOpacity) : nothing;
+  return svg`<g class="live-glow" opacity=${opacity}>
+    <defs><radialGradient id=${id} gradientUnits="userSpaceOnUse" cx=${pose.pt.x} cy=${pose.pt.y} r=${r}>
+      <stop offset="0" stop-color=${c} stop-opacity="0.35"></stop><stop offset="1" stop-color=${c} stop-opacity="0"></stop>
+    </radialGradient></defs>
+    ${rings.length
+      ? svg`<path d=${rings.map(ringD).join('')} fill=${`url(#${id})`} fill-rule="evenodd" stroke="none"></path>`
+      : svg`<circle cx=${pose.pt.x} cy=${pose.pt.y} r=${r} fill=${`url(#${id})`} stroke="none"></circle>`}
+  </g>`;
 }
 
 /** Direction handle of the selected wall light / sensor: a segment and a round grab knob. */
@@ -337,7 +394,12 @@ export function renderDevices(level: Level, o: DeviceRenderOpts): SVGTemplateRes
     if (pose) items.push({ d, pose, preview: true });
   }
   return svg`
-    <g class="cones">${o.showCones ? items.map(i => renderCone(level, i.d, o, i.preview)) : nothing}</g>
+    <g class="cones">${items.map(i => {
+      const dl = !i.preview ? o.live?.(i.d) : undefined;
+      const k = i.d.props.kind;
+      const glow = dl?.look === 'on' && (k === 'ceiling_light' || k === 'wall_light') ? renderGlow(level, i.d, i.pose, o) : nothing;
+      return svg`${glow}${o.showCones ? renderCone(level, i.d, o, i.preview, dl?.look === 'active') : nothing}`;
+    })}</g>
     <g class="devices">${items.map(i => renderDevice(i.d, i.pose, o, i.preview))}</g>
     ${renderHandle(level, o)}`;
 }

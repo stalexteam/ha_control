@@ -450,7 +450,7 @@ export class PlanStudioPanel extends LitElement {
             }) : renderLevel(level, {
               palette: pal, selection: this.selection, preview, scale, mode: this.mode, showCones: this.cones,
               bindingStatus: this.bindStatus,
-              containerState: d => this.feed.stateOf(d), containerFlash: d => this.feed.flash(d.id),
+              containerState: d => this.feed.stateOf(d),
             })}
             ${preview.tracker ? renderTracker(preview.tracker, {
               palette: pal, scale, mode: this.toolId === 'box' ? 'box' : 'wall',

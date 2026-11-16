@@ -583,28 +583,14 @@ describe('binding step: output line', () => {
     expect(line(el)).toBe('Last event: toggle, 12:03:15');
   });
 
-  it('the plan badge flashes a partial-frame intent for 3 s; the snapshot does not flash', async () => {
+  it('a partial-frame intent shows no badge on the plan (the 3 s flash is gone)', async () => {
     const live = liveHass();
     const el = await open(live.hass);
-    await push(el, live.subs[0], { full: true, containers: {
-      b: { kind: 'smart_button', status: 'ok', last: { action: 'toggle', at: '2026-11-15T10:00:00+00:00' } },
+    await push(el, live.subs[0], { full: true, containers: { b: { kind: 'smart_button', status: 'ok' } } });
+    await push(el, live.subs[0], { full: false, containers: {
+      b: { kind: 'smart_button', status: 'ok', last: { action: 'set', value: 'on', at: '2026-11-15T10:00:01+00:00' } },
     } });
     expect(badges(el)).toEqual({});
-    vi.useFakeTimers();
-    try {
-      await push(el, live.subs[0], { full: false, containers: {
-        b: { kind: 'smart_button', status: 'ok', last: { action: 'set', value: 'on', at: '2026-11-15T10:00:01+00:00' } },
-      } });
-      expect(badges(el)).toEqual({ b: 'set-on' });
-      await vi.advanceTimersByTimeAsync(2999);
-      await el.updateComplete;
-      expect(badges(el)).toEqual({ b: 'set-on' });
-      await vi.advanceTimersByTimeAsync(1);
-      await el.updateComplete;
-      expect(badges(el)).toEqual({});
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it('HA restart: the outputs go neutral at the disconnect and come back after the reconnect', async () => {
