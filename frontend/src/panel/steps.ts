@@ -6,8 +6,8 @@ import { t } from '../i18n';
 import { fieldValue } from './field-value';
 import type { EditorMode } from './tool-factory';
 
-/** Wizard steps in order; a fifth one (Automation) is shown after them but not available yet. */
-const MODES: readonly EditorMode[] = ['plan', 'equipment', 'binding', 'power'];
+/** Wizard steps in order. */
+const MODES: readonly EditorMode[] = ['plan', 'equipment', 'binding', 'power', 'automation'];
 
 export interface StepsOpts {
   mode: EditorMode;
@@ -15,6 +15,8 @@ export interface StepsOpts {
   status: (d: Device) => BindStatus;
   /** The power schematic (a default one while the plan has none). */
   power: PowerSchema;
+  /** How many rules the plan has (Automation step cell). */
+  rules: number;
   /** The title cell holds the plan name (editable) above "Plan Studio". */
   planName: string;
   onRename(name: string): void;
@@ -25,7 +27,7 @@ export interface StepsOpts {
 export const countText = (n: number, one: string, other: string): string => t(n === 1 ? one : other).replace('{n}', String(n));
 
 /** Live status line of a step and whether the step is finished. */
-export function stepState(mode: EditorMode, level: Level, status: (d: Device) => BindStatus, power: PowerSchema):
+export function stepState(mode: EditorMode, level: Level, status: (d: Device) => BindStatus, power: PowerSchema, rules = 0):
 { text: string; done: boolean } {
   const { walls, zones, devices } = level;
   switch (mode) {
@@ -44,6 +46,8 @@ export function stepState(mode: EditorMode, level: Level, status: (d: Device) =>
     }
     case 'power':
       return { text: countText(power.blocks.length, 'steps.block', 'steps.blocks'), done: stepDone(power) };
+    case 'automation':
+      return { text: countText(rules, 'steps.rule', 'steps.rules'), done: rules > 0 };
   }
 }
 
@@ -65,17 +69,13 @@ export function renderSteps(o: StepsOpts): TemplateResult {
         <span class="app">${t('steps.app')}</span>
       </div>
       ${MODES.map((m, n) => {
-        const s = stepState(m, o.level, o.status, o.power);
+        const s = stepState(m, o.level, o.status, o.power, o.rules);
         const current = m === o.mode;
         return html`<button class="step${current ? ' current' : ''}${s.done ? ' done' : ''}" data-mode=${m}
           aria-current=${current ? 'step' : nothing} @click=${() => o.onMode(m)}>
           <span class="n">${n + 1}</span><span class="name">${t(`mode.${m}`)}</span><span class="state">${s.text}</span>
         </button>`;
       })}
-      <button class="step later" data-step="automation" disabled>
-        <span class="n">${MODES.length + 1}</span><span class="name">${t('mode.automation')}</span>
-        <span class="state">${t('steps.later')}</span>
-      </button>
       <div class="nav">
         ${back ? html`<button class="btn" data-nav="back" @click=${() => o.onMode(back)}>${target('steps.back', back)}</button>` : nothing}
         ${next ? html`<button class="btn primary" data-nav="next" @click=${() => o.onMode(next)}>${target('steps.next', next)}</button>`

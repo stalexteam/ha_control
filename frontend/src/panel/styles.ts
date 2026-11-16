@@ -41,10 +41,12 @@ export const panelStyles = css`
   .ed.binding { grid-template-columns: 250px 300px 1fr; }
   .ed.binding.rail-off { grid-template-columns: 36px 300px 1fr; }
   .ed.power { grid-template-columns: 84px 300px 1fr; }
+  .ed.automation { grid-template-columns: 84px 340px 1fr; }
   @media (max-width: 700px) {
     .ed { grid-template-columns: 72px 170px 1fr; }
     .ed.binding { grid-template-columns: 170px 200px 1fr; }
     .ed.power { grid-template-columns: 72px 200px 1fr; }
+    .ed.automation { grid-template-columns: 72px 230px 1fr; }
     .tools .tool { font-size: 10.5px; }
     .ed.binding.rail-off { grid-template-columns: 36px 200px 1fr; }
     .props .row { flex-wrap: wrap; }
@@ -174,6 +176,20 @@ export const panelStyles = css`
     color: var(--ch-muted); font-size: 20px; line-height: 1; }
   .rail-toggle:hover { background: var(--ch-hover); color: var(--ch-text); }
   .blist.collapsed { align-items: center; padding-top: 10px; }
+
+  /* Automation step: the rules of the selected zone. */
+  .rrow { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 10px; align-items: start;
+    padding: 8px 4px; border-bottom: 1px solid var(--ch-divider); }
+  .rbody { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .rname { font-weight: 500; overflow-wrap: anywhere; }
+  .rname .orphan, .rstatus, .rlast { color: var(--ch-muted); font-size: 12px; }
+  .rstatus.error, .rwarn { color: var(--ch-error); font-size: 12px; }
+  .ractions { display: flex; flex-direction: column; gap: 4px; }
+  .ractions .btn { padding: 3px 10px; font-size: 12px; }
+  .vdot { width: 10px; height: 10px; margin-top: 4px; box-sizing: border-box; border-radius: 50%; border: 2px solid var(--ch-muted); }
+  .vdot[data-verdict='true'] { background: #22c55e; border-color: #22c55e; }
+  .vdot[data-verdict='false'] { background: var(--ch-muted); border-color: var(--ch-muted); }
+  .vdot[data-verdict='unknown'] { border-style: dashed; }
 
   /* Canvas: the drawing keeps the blueprint palette. */
   .canvas { position: relative; min-width: 0; min-height: 0; touch-action: none; }

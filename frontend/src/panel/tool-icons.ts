@@ -30,6 +30,7 @@ export const TOOL_ICONS: Record<ToolId, string> = {
   exhaust_fan: mdiFan,
   equipment: mdiCubeOutline,
   'binding-select': mdiCursorDefaultOutline,
+  'zone-pick': mdiCursorDefaultOutline,
   'power-select': mdiCursorDefaultOutline,
   'power-device': mdiCubeOutline,
   'power-bus': mdiRayStartEnd,

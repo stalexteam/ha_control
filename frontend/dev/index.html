@@ -67,7 +67,7 @@
     } else {
       panel.hass = createMockHass({
         darkMode: dark, demo: true,
-        ...(scene ? { storage: memoryStorage({ [STORAGE_KEY]: JSON.stringify({ plans }) }), powerFrame: scene.powerFrame } : {}),
+        ...(scene ? { storage: memoryStorage({ [STORAGE_KEY]: JSON.stringify({ plans }) }), powerFrame: scene.powerFrame, rulesFrame: scene.rulesFrame } : {}),
       });
     }
 

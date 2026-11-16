@@ -41,6 +41,9 @@ import { EditorInput } from './input';
 import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
+import { RulesFeed } from '../live/rules-feed';
+import { deleteRule } from '../model/rules';
+import type { RuleTemplate } from './rule-templates';
 import { PowerFeed, powerPayload } from '../live/power-feed';
 import { deviceLive, liveBubbles } from '../live/device-live';
 import { DeviceEventTracker, eventSources } from '../live/device-events';
@@ -61,7 +64,7 @@ export class PlanStudioPanel extends LitElement {
   @state() thickness = WALL_PRESETS.bearing;
   @state() boxMeasure: BoxMeasure = 'inner';
   @state() grid = true;
-  /** Wizard step: Plan / Equipment / Binding / Power (per session, not saved); cones: device cones and zones are drawn. */
+  /** Wizard step: Plan / Equipment / Binding / Power / Automation (per session, not saved); cones: device cones and zones are drawn. */
   @state() mode: EditorMode = 'plan';
   /** Binding step device list: Not bound / Bound / All and the text filter. */
   @state() bindFilter: ListFilter = 'unbound';
@@ -116,6 +119,8 @@ export class PlanStudioPanel extends LitElement {
   readonly haMeta = new MetaSource(this);
   /** Live state of the open plan's input containers (subscribed while the panel is attached). */
   readonly feed = new ContainerFeed(this, () => this.hass?.connection);
+  /** Live traces of the saved rules (subscribed only in the Automation step of an attached panel). */
+  readonly rulesFeed = new RulesFeed(this, () => this.hass?.connection);
   /** Live values of the schematic draft (subscribed only in the Power step of an attached panel). */
   readonly powerFeed = new PowerFeed(this, () => this.hass?.connection);
 
@@ -170,6 +175,7 @@ export class PlanStudioPanel extends LitElement {
     window.addEventListener('pagehide', this.onPageHide);
     this.feed.watch(this.plan?.id ?? null); // re-attached: subscribe again (no-op before the first load)
     this.watchPower();
+    this.watchRules();
     this.watchEntities();
   }
 
@@ -187,6 +193,7 @@ export class PlanStudioPanel extends LitElement {
     this.resizeObs = null;
     this.feed.stop();
     this.powerFeed.stop();
+    this.rulesFeed.stop();
     this.entityFeed.stop();
     this.stopTicker();
   }
@@ -206,11 +213,17 @@ export class PlanStudioPanel extends LitElement {
     // A detached panel still updates when handed a new hass: it keeps no subscription until it is attached again.
     this.feed.watch(this.isConnected ? this.plan?.id ?? null : null);
     this.watchPower();
+    this.watchRules();
   }
 
-  /** The entity feed watches the open level's event sources in the Binding step of an attached panel. */
+  /** The rules feed watches the open plan in the Automation step of an attached panel. */
+  private watchRules(): void {
+    this.rulesFeed.watch(this.isConnected && this.mode === 'automation' ? this.plan?.id ?? null : null);
+  }
+
+  /** The entity feed watches the open level's event sources in the Binding and Automation steps of an attached panel. */
   private watchEntities(): void {
-    const level = this.isConnected && this.mode === 'binding' ? this.history?.current.level : undefined;
+    const level = this.isConnected && (this.mode === 'binding' || this.mode === 'automation') ? this.history?.current.level : undefined;
     this.entityFeed.watch(level ? eventSources(level) : null);
   }
 
@@ -231,7 +244,7 @@ export class PlanStudioPanel extends LitElement {
   private syncTicker(): void {
     const level = this.history?.current.level;
     const now = Date.now();
-    const need = this.isConnected && this.mode === 'binding' && !!level && !!this.hass && level.devices.some(d =>
+    const need = this.isConnected && (this.mode === 'binding' || this.mode === 'automation') && !!level && !!this.hass && level.devices.some(d =>
       deviceLive(d, this.hass!.states).timerSince !== undefined || this.events.event(d.id, now) !== null
       || this.events.leaving(d.id, now).length > 0);
     if (need && !this.ticker) this.ticker = setInterval(() => this.requestUpdate(), 1000);
@@ -295,6 +308,16 @@ export class PlanStudioPanel extends LitElement {
 
   get rules(): Rule[] { return this.history?.current.rules ?? []; }
 
+  /** Opens the rule dialog from a template (new rule) or for a rule id (edit). The dialog itself is not built yet. */
+  openRuleDialog(_template: RuleTemplate, _ruleId?: Id): void {}
+
+  /** Deletes the rule a 'delete-rule' dialog asked about (undoable until the plan is saved). */
+  private confirmDeleteRule(): void {
+    const d = this.dialog;
+    this.dialog = null;
+    if (d?.kind === 'delete-rule') this.commitRules(deleteRule(this.rules, d.id));
+  }
+
   private dropStaleSelection(): void {
     if (this.history && this.selection && !selectionExists(this.history.current.level, this.selection, this.power)) {
       this.activeTool.cancel();
@@ -310,7 +333,7 @@ export class PlanStudioPanel extends LitElement {
   deleteSelection(): boolean {
     const s = this.selection;
     const level = this.level;
-    if (this.mode === 'binding' || !s || !level || s.kind === 'node' || !selectionExists(level, s, this.power)) return false;
+    if (this.mode === 'binding' || this.mode === 'automation' || !s || !level || s.kind === 'node' || !selectionExists(level, s, this.power)) return false;
     if (this.mode === 'power') return this.deletePower(s);
     if (s.kind === 'powerBlock' || s.kind === 'powerWire') return false;
     if (s.kind === 'device') {
@@ -459,9 +482,10 @@ export class PlanStudioPanel extends LitElement {
   private renderDialog(): TemplateResult | typeof nothing {
     return renderActiveDialog({
       dialog: this.dialog, draft: this.pendingDraft, planName: this.plan?.name ?? '',
+      ruleName: this.dialog?.kind === 'delete-rule' ? this.rules.find(r => r.id === (this.dialog as { id: string }).id)?.name ?? '' : '',
       saving: this.save.state === 'saving', message: this.save.errorMessage,
       restore: d => this.session.restoreDraft(d), discard: d => this.session.discardDraft(d), startNew: () => this.session.startNewPlan(),
-      confirmDelete: () => { void this.session.confirmDelete(); }, confirmSwitch: () => this.session.confirmSwitch(),
+      confirmDelete: () => { void this.session.confirmDelete(); }, confirmDeleteRule: () => this.confirmDeleteRule(), confirmSwitch: () => this.session.confirmSwitch(),
       overwrite: () => this.session.doOverwrite(), saveAsNew: () => this.session.doSaveAsNew(),
       close: () => { this.dialog = null; },
     });
@@ -484,12 +508,12 @@ export class PlanStudioPanel extends LitElement {
     const now = Date.now();
     const states = this.hass?.states;
     return html`
-      <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : power ? ' power' : ''}"
+      <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : power ? ' power' : this.mode === 'automation' ? ' automation' : ''}"
         style=${paletteVars(pal)}
         @click=${this.refocus} @change=${this.refocusAfterChange}>
         ${renderTopBar({
           steps: renderSteps({
-            mode: this.mode, level, status: this.bindStatus, power: this.power, planName: this.plan.name,
+            mode: this.mode, level, status: this.bindStatus, power: this.power, rules: this.rules.length, planName: this.plan.name,
             onRename: name => { this.plan = { ...this.plan!, name }; s.markDirty(); },
             onMode: m => this.setMode(m),
           }),

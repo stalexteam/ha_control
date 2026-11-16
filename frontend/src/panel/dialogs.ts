@@ -8,7 +8,8 @@ import type { Draft } from '../editor/draft';
  */
 export type Dialog =
   | { kind: 'restore' | 'new' | 'delete' | 'conflict' | 'conflict-again' }
-  | { kind: 'switch'; to: string };
+  | { kind: 'switch'; to: string }
+  | { kind: 'delete-rule'; id: string };
 
 export interface RestoreOpts {
   savedAt: number;
@@ -53,12 +54,15 @@ export interface ActiveDialogOpts {
   dialog: Dialog | null;
   draft: Draft | null;
   planName: string;
+  /** The rule a 'delete-rule' dialog asks about. */
+  ruleName: string;
   saving: boolean;
   message: string | null;
   restore(d: Draft): void;
   discard(d: Draft): void;
   startNew(): void;
   confirmDelete(): void;
+  confirmDeleteRule(): void;
   confirmSwitch(): void;
   overwrite(): void;
   saveAsNew(): void;
@@ -86,6 +90,11 @@ export function renderActiveDialog(o: ActiveDialogOpts): TemplateResult | typeof
       return renderDialog(t('delete.title'), t('delete.text').replace('{name}', o.planName), [
         { action: 'delete-confirm', label: t('delete.confirm'), primary: true, onClick: o.confirmDelete },
         { ...cancel, action: 'delete-cancel' },
+      ]);
+    case 'delete-rule':
+      return renderDialog(t('delete.rule.title'), t('delete.rule.text').replace('{name}', o.ruleName), [
+        { action: 'delete-rule-confirm', label: t('delete.confirm'), primary: true, onClick: o.confirmDeleteRule },
+        { ...cancel, action: 'delete-rule-cancel' },
       ]);
     case 'switch':
       return renderDialog(t('switch.title'), t('switch.text'), [

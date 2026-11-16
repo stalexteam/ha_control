@@ -4,6 +4,7 @@ import type { BindStatus } from '../model/bindings';
 import type { ContainerState } from '../live/container-feed';
 import type { WallProps } from '../model/ops';
 import type { Preview, Selection } from '../editor/tools/types';
+import { zoneOutline } from '../geometry/zones';
 import { segmentFrame, wallFrame, wallOutlines, wallPieces, wallsUnion, type WallFrame } from '../geometry/walls';
 import { add, cross, dist, perpLeft, scale as mul, sub } from '../geometry/vec';
 import { t } from '../i18n';
@@ -20,14 +21,15 @@ export interface RenderOpts {
   scale: number;
   /**
    * plan: devices dimmed, zones filled and labelled with their handles and draft; equipment and binding: walls,
-   * openings and zone outlines dimmed. Default plan.
+   * openings and zone outlines dimmed; automation: like binding (live looks and bubbles) with the zones filled and
+   * labelled as in plan and the selected one outlined. Default plan.
    */
-  mode?: 'plan' | 'equipment' | 'binding';
+  mode?: 'plan' | 'equipment' | 'binding' | 'automation';
   /** Binding status per device; drawn as rings in the binding mode only. */
   bindingStatus?: (d: Device) => BindStatus;
-  /** Live state of an input container; drawn in the binding mode only. */
+  /** Live state of an input container; drawn in the binding and automation modes. */
   containerState?: (d: Device) => ContainerState | undefined;
-  /** Live look and bubbles of a device; drawn in the binding mode only. */
+  /** Live look and bubbles of a device; drawn in the binding and automation modes. */
   live?: DeviceRenderOpts['live'];
   bubbles?: DeviceRenderOpts['bubbles'];
   /** Default true. */
@@ -194,6 +196,11 @@ function renderSelection(level: Level, o: RenderOpts): SVGTemplateResult | typeo
         stroke-width="1.5" stroke-dasharray="4 3" vector-effect=${NS}></path>
       ${segs.filter(([s, e]) => e - s >= 1).map(([s, e]) => dimension(at(s), at(e), R, off, o))}`;
   }
+  if (sel.kind === 'zone' && o.mode === 'automation') {
+    const z = level.zones.find(x => x.id === sel.id);
+    return z ? svg`<path class="zone-pick" d=${ringD(zoneOutline(level, z))} fill="none" stroke=${p.selection} stroke-width="2.5"
+      vector-effect=${NS}></path>` : nothing;
+  }
   return nothing; // zones are highlighted by their own outline
 }
 
@@ -306,7 +313,7 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
   const zoneId = sel?.kind === 'zone' ? sel.id : null;
   const mode = o.mode ?? 'plan';
   return svg`
-    ${renderZoneAreas(lv, { palette: p, scale: o.scale, selectedId: zoneId, mode })}
+    ${renderZoneAreas(lv, { palette: p, scale: o.scale, selectedId: zoneId, mode: mode === 'automation' ? 'plan' : mode })}
     <path class="walls" d=${union.map(poly => poly.map(ringD).join('')).join('')} fill=${p.wall} fill-rule="evenodd" opacity=${dimOp}></path>
     ${pieces ? svg`<g class="railings" opacity=${dimOp}>${lightWalls.flatMap(w => (pieces.get(w.id) ?? []).map(r =>
       svg`<path d=${ringD(r)} fill=${p.railing}></path>`))}</g>` : nothing}
@@ -318,7 +325,9 @@ export function renderLevel(level: Level, o: RenderOpts): SVGTemplateResult {
     }) : nothing}
     <g class="devices-layer">${plan ? nothing : renderDevices(lv, {
       palette: p, scale: o.scale, selection: sel, showCones: o.showCones ?? true, dim: false, preview: o.preview.device,
-      ...(mode === 'binding' ? { bindingStatus: o.bindingStatus, containerState: o.containerState, live: o.live, bubbles: o.bubbles } : {}),
+      ...(mode === 'binding' || mode === 'automation' ? {
+        bindingStatus: mode === 'binding' ? o.bindingStatus : undefined, containerState: o.containerState, live: o.live, bubbles: o.bubbles,
+      } : {}),
     })}</g>
     <g class="selection">${renderSelection(lv, o)}</g>
     <g class="preview">${renderPreview(lv, o)}</g>`;

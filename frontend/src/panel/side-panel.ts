@@ -1,15 +1,21 @@
-import type { TemplateResult } from 'lit';
+import { html, type TemplateResult } from 'lit';
 import type { Level } from '../model/types';
 import { renderEquipmentProps } from './device-props';
 import { renderProps } from './props-panel';
-import { renderToolRail } from './toolbar';
 import { renderBindingList } from './binding-list';
 import { renderBindingProps } from './binding-props';
 import { renderPowerProps } from './power-props';
+import { renderRulesPanel } from './rules-panel';
+import { renderToolRail, toolButtons } from './toolbar';
+import { ruleTemplateButtons } from './rule-templates';
 import type { PlanStudioPanel } from './plan-studio-panel';
 
 /** The left rail: the step's tool buttons, or the device list in the Binding step. */
 export function renderRail(h: PlanStudioPanel, level: Level): TemplateResult {
+  if (h.mode === 'automation') {
+    return html`<div class="tools">${toolButtons(h.mode, h.toolId, id => h.pickTool(id))}<div class="tool-sep"></div>${
+      ruleTemplateButtons(tpl => h.openRuleDialog(tpl))}</div>`;
+  }
   if (h.mode !== 'binding') return renderToolRail(h.mode, h.toolId, id => h.pickTool(id));
   return renderBindingList({
     level, selection: h.selection, status: h.bindStatus, filter: h.bindFilter, query: h.bindQuery,
@@ -35,6 +41,12 @@ function bindingSide(h: PlanStudioPanel, level: Level): TemplateResult {
 /** The properties panel of the active step. */
 export function renderSide(h: PlanStudioPanel, level: Level): TemplateResult {
   if (h.mode === 'binding') return bindingSide(h, level);
+  if (h.mode === 'automation') {
+    return html`<div class="props">${renderRulesPanel({
+      level, rules: h.rules, selection: h.selection, trace: id => h.rulesFeed.trace(id), live: h.rulesFeed.ready,
+      feedError: h.rulesFeed.error, onEdit: id => h.openRuleDialog('condition', id), onDelete: id => { h.dialog = { kind: 'delete-rule', id }; },
+    })}</div>`;
+  }
   if (h.mode === 'power') {
     return renderPowerProps({
       power: h.power, level, selection: h.selection, meta: h.haMeta.get(), states: h.hass?.states, frame: h.powerFeed.frame,

@@ -1,10 +1,11 @@
-import type { Device, DeviceProps, Plan, Zone } from '../src/model/types';
+import type { Device, DeviceProps, Plan, Rule, Zone } from '../src/model/types';
+import type { RuleTrace } from '../src/live/rules-feed';
 import { fitWallMount } from '../src/geometry/devices';
 import type { PowerFrame, PowerSchema } from '../src/model/power';
 import { rectRoomLevel } from '../test/fixtures';
 
 /** A named dev-harness state: the plans seeded into the mock store and the power frame the mock answers with. */
-export interface Scene { plans: Plan[]; powerFrame?: PowerFrame }
+export interface Scene { plans: Plan[]; powerFrame?: PowerFrame; rulesFrame?: Record<string, RuleTrace> }
 
 function room(): Plan {
   const level = rectRoomLevel(4000, 3000, 100);
@@ -65,8 +66,31 @@ function room(): Plan {
       placement: fitWallMount(level, box, { mode: 'wall', wallId: 'w0', side: 'right', offset: 1900 }, 0),
     },
   ];
-  return { id: 'room', name: 'Room', schemaVersion: 2, revision: 1, levels: [level] };
+  const rules: Rule[] = [
+    {
+      id: 'rule-leak', name: 'Leak Main -> valve', zoneId: 'r0', combine: 'any', inputs: [{ source: { device: 'd-leak' } }],
+      onDelay: 0, offDelay: 0, onTrue: [{ device: 'd-valve', do: 'close' }], onFalse: [],
+    },
+    {
+      id: 'rule-motion', name: 'Light on motion', zoneId: 'r0', combine: 'all',
+      inputs: [{ source: { device: 'd-motion' } }, { source: { device: 'd-socket' }, not: true }],
+      onDelay: 0, offDelay: 120, onTrue: [{ device: 'd-light', do: 'on' }], onFalse: [{ device: 'd-light', do: 'off' }],
+    },
+  ];
+  return { id: 'room', name: 'Room', schemaVersion: 2, revision: 1, levels: [level], rules };
 }
+
+/** The mock's rules snapshot of the room scene: one rule that fired, one waiting for an input without data. */
+const ROOM_RULES: Record<string, RuleTrace> = {
+  'rule-leak': {
+    status: 'ok', verdict: true, inputs: [{ label: 'Leak sensor', value: true, detail: 'wet' }], unknownInputs: 0,
+    last: { action: 'close', target: 'Water valve', at: new Date().setHours(21, 43, 0, 0), reason: 'leak' },
+  },
+  'rule-motion': {
+    status: 'waiting', verdict: null, unknownInputs: 1,
+    inputs: [{ label: 'Motion sensor', value: true, detail: 'motion' }, { label: 'Socket', value: null, detail: 'unavailable' }],
+  },
+};
 
 const equipment = (id: string, name: string, placement: Device['placement'], bindings: Device['bindings'],
   flags: { inverter?: true; controllable?: true } = {}): Device => ({
@@ -213,7 +237,7 @@ const POWER_OFF_FRAME: PowerFrame = {
 };
 
 export const SCENES: Record<string, Scene> = {
-  room: { plans: [room()] },
+  room: { plans: [room()], rulesFrame: ROOM_RULES },
   power: { plans: [powerPlan()], powerFrame: POWER_FRAME },
   'power-off': { plans: [powerPlan()], powerFrame: POWER_OFF_FRAME },
   'power-nodata': { plans: [powerPlan()], powerFrame: { wires: {}, blocks: {} } },

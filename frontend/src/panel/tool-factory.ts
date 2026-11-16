@@ -8,12 +8,13 @@ import { createDeviceSelectTool } from '../editor/tools/device-select-tool';
 import { createBindingSelectTool } from '../editor/tools/binding-select-tool';
 import { createPowerSelectTool } from '../editor/tools/power-select-tool';
 import { createPowerPlaceTool } from '../editor/tools/power-place-tool';
+import { createZonePickTool } from '../editor/tools/zone-pick-tool';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
 import type { PowerSchema } from '../model/power';
 import type { Level } from '../model/types';
 
 export type ToolId = Tool['id'];
-export type EditorMode = 'plan' | 'equipment' | 'binding' | 'power';
+export type EditorMode = 'plan' | 'equipment' | 'binding' | 'power' | 'automation';
 
 export const PLAN_TOOL_IDS: ToolId[] = ['select', 'box', 'wall', 'door', 'window', 'opening', 'zone'];
 export const EQUIPMENT_TOOL_IDS: ToolId[] = ['device-select', 'ceiling_light', 'wall_light', 'motion_sensor',
@@ -24,13 +25,16 @@ export const BINDING_TOOL_IDS: ToolId[] = ['binding-select'];
 export const POWER_TOOL_IDS: ToolId[] = ['power-select', 'power-device', 'power-bus', 'power-battery', 'power-pv',
   'power-transfer', 'power-remainder'];
 
+/** The Automation step's only tool picks a zone; its templates (Condition, Leak -> valve) are rail buttons, not tools. */
+export const AUTOMATION_TOOL_IDS: ToolId[] = ['zone-pick'];
+
 /** Plan step single-key shortcuts (the letter of the physical key, e.code `Key<letter>`); other steps have none. */
 export const PLAN_SHORTCUTS: Partial<Record<ToolId, string>> = {
   select: 'V', box: 'B', wall: 'W', door: 'D', window: 'N', opening: 'O', zone: 'Z',
 };
 
 const TOOL_IDS: Record<EditorMode, ToolId[]> = {
-  plan: PLAN_TOOL_IDS, equipment: EQUIPMENT_TOOL_IDS, binding: BINDING_TOOL_IDS, power: POWER_TOOL_IDS,
+  plan: PLAN_TOOL_IDS, equipment: EQUIPMENT_TOOL_IDS, binding: BINDING_TOOL_IDS, power: POWER_TOOL_IDS, automation: AUTOMATION_TOOL_IDS,
 };
 
 export function toolIdsFor(mode: EditorMode): ToolId[] {
@@ -47,6 +51,7 @@ export function createTool(id: ToolId, ctx: ToolContext): Tool {
     case 'device-select': return createDeviceSelectTool(ctx);
     case 'binding-select': return createBindingSelectTool(ctx);
     case 'power-select': return createPowerSelectTool(ctx);
+    case 'zone-pick': return createZonePickTool(ctx);
     case 'power-device': case 'power-bus': case 'power-battery': case 'power-pv':
     case 'power-transfer': case 'power-remainder':
       return createPowerPlaceTool(ctx, id);

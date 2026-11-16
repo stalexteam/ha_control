@@ -2,6 +2,7 @@ import type { HassLike } from '../src/api';
 import type { ContainerState } from '../src/live/container-feed';
 import type { Plan } from '../src/model/types';
 import type { PowerFrame } from '../src/model/power';
+import type { RuleTrace } from '../src/live/rules-feed';
 import { DEMO_REGISTRY, DEMO_STATES } from './demo-ha';
 
 /** localStorage key holding { plans: { [id]: Plan } } — same shape as the HA Store data. */
@@ -43,13 +44,14 @@ function notConfiguredStates(plan: Plan | undefined): Record<string, ContainerSt
  * an existing plan needs expected_revision == current unless force; a missing plan with a non-null
  * expected_revision is a conflict even with force.
  * `plan_studio/containers/subscribe` answers once with a full snapshot: every container of the stored plan as error,
- * not configured. `plan_studio/power/subscribe` answers once with `powerFrame` (an empty frame by default), and
+ * not configured. `plan_studio/rules/subscribe` answers once with a full snapshot of `rulesFrame` (none by default).
+ * `plan_studio/power/subscribe` answers once with `powerFrame` (an empty frame by default), and
  * `plan_studio/power/set_position` resolves `{}`. Other subscriptions are unknown.
  * With `demo` it also has live states and answers the entity, device and area registry commands with a small
  * sample (dev harness); without it those commands are unknown, so tests bring their own HA data.
  */
 export function createMockHass(
-  opts: { darkMode?: boolean; storage?: Storage; demo?: boolean; powerFrame?: PowerFrame } = {},
+  opts: { darkMode?: boolean; storage?: Storage; demo?: boolean; powerFrame?: PowerFrame; rulesFrame?: Record<string, RuleTrace> } = {},
 ): HassLike {
   const storage = opts.storage ?? localStorage;
   return {
@@ -108,6 +110,8 @@ export function createMockHass(
           first = { full: true, containers: notConfiguredStates(read(storage).plans[msg.plan_id as string]) };
         } else if (msg.type === 'plan_studio/power/subscribe') {
           first = structuredClone(opts.powerFrame ?? { wires: {}, blocks: {} });
+        } else if (msg.type === 'plan_studio/rules/subscribe') {
+          first = { full: true, rules: structuredClone(opts.rulesFrame ?? {}) };
         } else {
           return fail('unknown_command', `Unknown command ${String(msg.type)}`);
         }

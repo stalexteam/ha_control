@@ -11,7 +11,7 @@ const MODIFIER_KEYS = ['Shift', 'Control', 'Alt', 'Meta'];
 
 /** The select tool an unconsumed Esc returns to, per step; the Binding step has no other tool. */
 const HOME_TOOL: Partial<Record<EditorMode, ToolId>> = {
-  plan: 'select', equipment: 'device-select', power: 'power-select',
+  plan: 'select', equipment: 'device-select', power: 'power-select', automation: 'zone-pick',
 };
 
 /** Plan step tools by physical key code (`KeyW` -> wall). */

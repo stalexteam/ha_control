@@ -37,7 +37,7 @@ describe('wizard steps in the panel', () => {
     localStorage.clear();
   });
 
-  it('Next cycles plan -> equipment -> binding -> power, Back returns; each step activates its first tool', async () => {
+  it('Next cycles plan -> equipment -> binding -> power -> automation, Back returns; each step activates its first tool', async () => {
     const el = await mount();
     expect(el.mode).toBe('plan');
     await press(el, '.steps [data-nav="next"]');
@@ -49,7 +49,12 @@ describe('wizard steps in the panel', () => {
     await press(el, '.steps [data-nav="next"]');
     expect(el.mode).toBe('power');
     expect(el.toolId).toBe('power-select');
+    await press(el, '.steps [data-nav="next"]');
+    expect(el.mode).toBe('automation');
+    expect(el.toolId).toBe('zone-pick');
     expect(el.shadowRoot!.querySelector('.steps [data-nav="next"]')).toBeNull();
+    await press(el, '.steps [data-nav="back"]');
+    expect(el.mode).toBe('power');
     await press(el, '.steps [data-nav="back"]');
     expect(el.mode).toBe('binding');
     await press(el, '.steps [data-nav="back"]');

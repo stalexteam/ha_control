@@ -103,7 +103,7 @@ export interface Preview {
 export type PowerPlaceToolId = `power-${Exclude<PowerKind, "grid">}`;
 
 export interface Tool {
-  readonly id: "select" | "box" | "wall" | "door" | "window" | "opening" | "zone" | "device-select" | "binding-select"
+  readonly id: "select" | "box" | "wall" | "door" | "window" | "opening" | "zone" | "device-select" | "binding-select" | "zone-pick"
     | DeviceKind | "power-select" | PowerPlaceToolId;
   down(e: ToolEvent): void;
   move(e: ToolEvent): void;
