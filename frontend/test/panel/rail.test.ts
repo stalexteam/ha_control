@@ -66,6 +66,9 @@ describe('tool rail and status chip', () => {
     el.setMode('power');
     await el.updateComplete;
     expect(chip(el)).toBe('Select');
+    el.setMode('binding');
+    await el.updateComplete;
+    expect(chip(el)).toBe('Select');
   });
 
   it('the status bar shows the active tool\'s key hints', async () => {

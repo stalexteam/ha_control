@@ -19,6 +19,7 @@ const en: Dict = {
   'tool.equipment': 'Device',
   'tool.climate_sensor': 'Climate sensor',
   'tool.exhaust_fan': 'Exhaust fan',
+  'tool.binding-select': 'Select',
   'tool.power-select': 'Select',
   'tool.power-device': 'Device',
   'tool.power-bus': 'Bus',

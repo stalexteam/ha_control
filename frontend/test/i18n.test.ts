@@ -6,7 +6,7 @@ import { DEVICE_PLACEMENTS, WALL_PRESETS, OPENING_DEFAULT_WIDTH } from '../src/m
 import { LIGHT_SHAPES, EQUIPMENT_SHAPES } from '../src/panel/device-props';
 import { LIST_FILTERS } from '../src/panel/binding-list';
 import { ROLE_SPECS } from '../src/model/bindings';
-import { EQUIPMENT_TOOL_IDS, PLAN_TOOL_IDS, POWER_TOOL_IDS } from '../src/panel/tool-factory';
+import { BINDING_TOOL_IDS, EQUIPMENT_TOOL_IDS, PLAN_TOOL_IDS, POWER_TOOL_IDS } from '../src/panel/tool-factory';
 
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap(n => {
@@ -83,7 +83,7 @@ describe('i18n', () => {
       baseline: ['center', 'left', 'right'],
       mode: ['plan', 'equipment', 'binding', 'power', 'automation'],
       // The tools with a rail button (the Binding step's only tool has none).
-      tool: [...PLAN_TOOL_IDS, ...EQUIPMENT_TOOL_IDS, ...POWER_TOOL_IDS],
+      tool: [...PLAN_TOOL_IDS, ...EQUIPMENT_TOOL_IDS, ...BINDING_TOOL_IDS, ...POWER_TOOL_IDS],
       'power.err': ['missing', 'same-block', 'direction', 'port-taken', 'dc-mismatch', 'second-remainder', 'loop'],
       'power.help': ['select', 'place', 'device'],
       'power.title': ['grid', 'device', 'bus', 'battery', 'pv', 'transfer', 'remainder'],
