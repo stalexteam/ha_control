@@ -147,6 +147,39 @@ describe('power in the plan document', () => {
     expect(flags(again.level!.devices[0])).toEqual({ inverter: false, controllable: false });
   });
 
+  it('deleting the wall of a wall-mounted inverter drops its BAT wire; one undo brings both back', async () => {
+    const el = await mount();
+    await drawBox(el);
+    const wallId = el.level!.walls[0].id;
+    const inv: Device = {
+      id: 'inv', name: 'Inverter', invalid: false, placement: { mode: 'wall', wallId, side: 'right', offset: 500 },
+      props: { ...deviceDefaults('equipment', 'wall'), inverter: true } as Device['props'], bindings: {},
+    };
+    el.commit({ ...el.level!, devices: [inv] });
+    const block = newBlock('device', { x: 0, y: 100 }, el.power, 'inv');
+    const bat = newBlock('battery', { x: 0, y: 200 }, el.power);
+    const s = addBlock(addBlock(el.power, block), bat);
+    el.commitPower({ ...s, wires: [{ id: 'wb', from: { block: block.id, port: 'BAT' }, to: { block: bat.id, port: 'BAT' } }] });
+    const before = el.history!.current;
+    el.selection = { kind: 'wall', id: wallId };
+    expect(el.deleteSelection()).toBe(true);
+    expect(el.level!.devices).toHaveLength(0);
+    expect(el.power.wires).toEqual([]);
+    expect(el.power.blocks.map(b => b.id)).toContain(block.id);
+    await undo(el);
+    expect(el.history!.current).toBe(before);
+  });
+
+  it('a level edit with nothing stale keeps the same power object and adds no power key', async () => {
+    const el = await mount();
+    await drawBox(el);
+    expect(el.history!.current.power).toBeUndefined();
+    const p1 = withPv(el.power);
+    el.commitPower(p1);
+    el.commit({ ...el.level!, name: 'Edited' });
+    expect(el.history!.current.power).toBe(p1);
+  });
+
   it('selectionExists finds power blocks and wires', async () => {
     const el = await mount();
     const s = withPv(defaultPower());

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   addBlock, blockPorts, clearPins, connect, defaultPower, deleteBlock, deleteDeviceBlocks, deleteDeviceDoc, deleteWire,
   moveBlock, newBlock,
-  normalizePower, placeableDevices, pruneDeviceBlocks, setPin, stepDone, updateBlock, type PortName, type PowerBlock,
+  normalizePower, placeableDevices, pruneDeviceBlocks, pruneLevelDevices, setPin, stepDone, updateBlock, type PortName, type PowerBlock,
   type PowerSchema, type WireEnd, type WireError,
 } from '../../src/model/power';
 import type { GeoCtx } from '../../src/geometry/power';
@@ -420,6 +420,13 @@ describe('device blocks of one device', () => {
     const plain = pruneDeviceBlocks(pinned, 'i', geo(device('i')));
     expect(plain.wires.map((w) => w.id)).toEqual(['w-in', 'w-x']);
     expect('portPins' in plain.blocks[1]).toBe(false);
+  });
+
+  it('pruneLevelDevices prunes every device block with the devices of the level; the same schema otherwise', () => {
+    const inv = s();
+    const lvl = (...devices: Device[]) => ({ ...emptyLevel('L1'), devices });
+    expect(pruneLevelDevices(inv, lvl(device('i', 'equipment', { inverter: true }), device('x')))).toBe(inv);
+    expect(pruneLevelDevices(inv, lvl(device('x'))).wires.map((w) => w.id)).toEqual(['w-in', 'w-x']);
   });
 
   it('deleteDeviceBlocks removes every block of the device with its wires', () => {

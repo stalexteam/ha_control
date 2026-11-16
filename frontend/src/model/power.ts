@@ -160,6 +160,19 @@ export function pruneDeviceBlocks(s: PowerSchema, deviceId: Id, g: GeoCtx): Powe
   return { ...s, blocks, wires };
 }
 
+/**
+ * pruneDeviceBlocks over every device block of the schema, with the devices of `level`: a level edit that removed a
+ * device or its inverter flag (a wall delete, trim or merge) leaves no wire on a port its blocks lost. The same schema
+ * when nothing is stale.
+ */
+export function pruneLevelDevices(s: PowerSchema, level: Level): PowerSchema {
+  const g = geoOf(level);
+  const ids = new Set(s.blocks.flatMap((b) => (b.kind === 'device' ? [b.deviceId] : [])));
+  let out = s;
+  for (const id of ids) out = pruneDeviceBlocks(out, id, g);
+  return out;
+}
+
 /** Removes every device block of `deviceId` with its wires (the same schema when it has none). */
 export function deleteDeviceBlocks(s: PowerSchema, deviceId: Id): PowerSchema {
   const ids = blocksOf(s, deviceId);

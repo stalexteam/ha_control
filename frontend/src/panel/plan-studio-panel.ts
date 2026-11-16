@@ -12,7 +12,7 @@ import { presence } from '../binding/ha-meta';
 import { devicePose } from '../geometry/devices';
 import { History } from '../editor/history';
 import {
-  defaultPower, deleteBlock, deleteDeviceDoc, deleteWire, type PlanDoc, type Position, type PowerSchema,
+  defaultPower, deleteBlock, deleteDeviceDoc, deleteWire, pruneLevelDevices, type PlanDoc, type Position, type PowerSchema,
 } from '../model/power';
 import { schemaBounds } from '../geometry/power';
 import { SaveController } from '../editor/save';
@@ -210,10 +210,16 @@ export class PlanStudioPanel extends LitElement {
 
   get power(): PowerSchema { return this.history?.current.power ?? this.lazyPower; }
 
-  /** Pushes a level edit; `power` joins the same undo step when the edit changed the schematic too. */
+  /**
+   * Pushes a level edit; `power` joins the same undo step when the edit changed the schematic too. Without `power`, a
+   * stored schematic loses the wires on ports its device blocks no longer have (a wall delete took an inverter); the
+   * lazy default is never written.
+   */
   commit(next: Level, power?: PowerSchema): void {
     if (!this.history) return;
-    this.history.push({ ...this.history.current, level: next, ...(power && power !== this.power ? { power } : {}) });
+    const stored = this.history.current.power;
+    const p = power ?? (stored && pruneLevelDevices(stored, next));
+    this.history.push({ ...this.history.current, level: next, ...(p && p !== this.power ? { power: p } : {}) });
     this.save.markDirty();
     this.dropStaleSelection();
     this.requestUpdate();
