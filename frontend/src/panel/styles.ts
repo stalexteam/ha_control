@@ -307,6 +307,7 @@ export const panelStyles = css`
   .fc-blk.nodata .fc-box { stroke: #f59e0b; stroke-dasharray: 5 3; }
   .fc-t1 { fill: var(--ch-text); font-size: 13px; font-weight: 500; }
   .fc-t2, .fc-head { fill: var(--ch-muted); font-size: 12px; }
+  .fc-err { fill: var(--ch-error); font-size: 12px; }
   .fc-head { font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
   .fc-link { fill: none; stroke: var(--ch-muted); stroke-width: 1.5; opacity: .7; }
   .fc-note { margin: 0; color: var(--ch-muted); font-size: 12px; }

@@ -147,6 +147,17 @@ ROOM_RULES['rule-vent'] = {
   last: { action: 'on', target: 'WC fan', at: new Date().setHours(21, 43, 0, 0), reason: 'vent' },
 };
 
+/** Scene `vent-long`: long sensor names and a last fan call that failed (the diagram clips and adds an error line). */
+function ventLongPlan(): Plan {
+  const p = room();
+  const names: Record<string, string> = {
+    'd-wc-climate': 'Bathroom ceiling climate sensor (Aqara T1, by the shower)',
+    'd-main-climate': 'Living room reference climate sensor',
+  };
+  for (const d of p.levels[0].devices) if (names[d.id]) d.name = names[d.id];
+  return p;
+}
+
 /** The vent rule while the humidity of the reference sensor is unavailable (scene `vent-na`). */
 const VENT_NA: RuleTrace = {
   status: 'waiting', verdict: null, unknownInputs: 1,
@@ -304,6 +315,10 @@ const POWER_OFF_FRAME: PowerFrame = {
 export const SCENES: Record<string, Scene> = {
   room: { plans: [room()], rulesFrame: ROOM_RULES },
   'vent-na': { plans: [room()], rulesFrame: { ...ROOM_RULES, 'rule-vent': VENT_NA } },
+  'vent-long': {
+    plans: [ventLongPlan()],
+    rulesFrame: { ...ROOM_RULES, 'rule-vent': { ...ROOM_RULES['rule-vent'], last: { ...ROOM_RULES['rule-vent'].last!, error: 'target unavailable' } } },
+  },
   power: { plans: [powerPlan()], powerFrame: POWER_FRAME },
   'power-off': { plans: [powerPlan()], powerFrame: POWER_OFF_FRAME },
   'power-nodata': { plans: [powerPlan()], powerFrame: { wires: {}, blocks: {} } },

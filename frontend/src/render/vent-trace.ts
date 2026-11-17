@@ -3,7 +3,7 @@ import type { Id, Rule } from '../model/types';
 import type { RuleTrace, VentSensorTrace } from '../live/rules-feed';
 import { formatDuration } from '../live/device-live';
 import { clock } from '../panel/rules-panel';
-import { FLOW_MAX_SCALE, clip, durationText, tone, word } from './rule-trace';
+import { FLOW_MAX_SCALE, WIDTH, clip, durationText, tone, word } from './rule-trace';
 import { t } from '../i18n';
 
 export interface VentTraceOpts {
@@ -22,9 +22,13 @@ export interface VentTraceOpts {
   onFocus(field: string): void;
 }
 
-const PAD = 10, SW = 236, SGAP = 28, MW = 340, VGAP = 34;
-export const VENT_WIDTH = PAD + SW + SGAP + SW + PAD;
-const MX = (VENT_WIDTH - MW) / 2, CX = VENT_WIDTH / 2;
+/** As wide as the condition flowchart: in the same column both draw their text at the same scale. */
+export const VENT_WIDTH = WIDTH;
+const PAD = 10, SW = 330, SGAP = 40, MW = 460, VGAP = 34;
+const XA = (VENT_WIDTH - SW * 2 - SGAP) / 2, XB = XA + SW + SGAP, MX = (VENT_WIDTH - MW) / 2, CX = VENT_WIDTH / 2;
+/** Characters that fit a box of width w: 13 px medium first line, 12 px other lines (the clip box catches wide glyphs). */
+const chars1 = (w: number): number => Math.floor((w - 20) / 6.6);
+const chars2 = (w: number): number => Math.floor((w - 20) / 6);
 /** Height of a block of n text lines (first baseline 20, then every 18). */
 const blockH = (n: number): number => 14 + 18 * n;
 
@@ -35,15 +39,23 @@ const signed = (pct: number): string => `${pct > 0 ? '+' : ''}${pct} %`;
 /** m:ss (h:mm:ss from an hour) of whole seconds. */
 const mss = (sec: number): string => (sec < 60 ? `0:${String(sec).padStart(2, '0')}` : formatDuration(sec * 1000));
 
-interface Blk { x: number; y: number; w: number; h: number; field: string; cls: string; lines: string[]; chars: number }
+/**
+ * A block: `lines` (the first bold), then `err` in the error colour; the text is clipped to the box, the tooltip
+ * (`tip`, else the lines) has it all.
+ */
+interface Blk { x: number; y: number; w: number; h: number; field: string; cls: string; lines: string[]; err?: string; tip?: string }
 
 function block(o: VentTraceOpts, b: Blk): TemplateResult {
+  const all = b.err ? [...b.lines, b.err] : b.lines;
   return svg`
     <g class="fc-blk${b.cls}${o.focused === b.field ? ' hl' : ''}" data-block=${b.field} transform=${`translate(${b.x} ${b.y})`}
       @click=${() => o.onFocus(b.field)}>
-      <title>${b.lines.join('\n')}</title>
+      <title>${b.tip ?? all.join('\n')}</title>
       <rect class="fc-box" width=${b.w} height=${b.h} rx="8"></rect>
-      ${b.lines.map((l, k) => svg`<text class=${k === 0 ? 'fc-t1' : 'fc-t2'} x="10" y=${20 + 18 * k}>${clip(l, b.chars + (k === 0 ? 0 : 4))}</text>`)}
+      <svg class="fc-clip" width=${b.w - 8} height=${b.h}>
+        ${all.map((l, k) => svg`<text class=${k === 0 ? 'fc-t1' : k === b.lines.length ? 'fc-err' : 'fc-t2'} x="10" y=${20 + 18 * k}>${
+          clip(l, k === 0 ? chars1(b.w) : chars2(b.w))}</text>`)}
+      </svg>
     </g>`;
 }
 
@@ -73,7 +85,9 @@ export function renderVentTrace(o: VentTraceOpts): TemplateResult {
   const bLines = sensorLines(nameB, t('vent.than'), vt?.b);
   const sH = blockH(Math.max(aLines.length, bLines.length));
   const vs = t('vent.flow.vs').replace('{a}', nameA).replace('{b}', nameB);
-  const cmp = !input ? vs : vt ? `${vs}: ${vt.pct === null ? word(null) : signed(vt.pct)}` : `${vs}: ${input.detail}`;
+  // The percent (or "no data") stays whole: long names are clipped before it.
+  const pct = vt ? `: ${vt.pct === null ? word(null) : signed(vt.pct)}` : input ? `: ${input.detail}` : '';
+  const cmp = vt ? `${clip(vs, chars1(MW) - pct.length)}${pct}` : `${vs}${pct}`;
   const margins = t('vent.flow.margins').replace('{above}', shown(v.above)).replace('{below}', shown(v.below));
 
   const pending = tr?.pending;
@@ -85,24 +99,25 @@ export function renderVentTrace(o: VentTraceOpts): TemplateResult {
   ];
   const last = tr?.last;
   const fanLines = [o.deviceName(fan), `${r.onTrue[0]?.do ?? '?'} / ${r.onFalse[0]?.do ?? '?'}`,
-    ...(last ? [t('vent.flow.last').replace('{did}', t(`rules.did.${last.action}`)).replace('{at}', clock(last.at)) + (last.error ? `: ${last.error}` : '')] : [])];
+    ...(last ? [t('vent.flow.last').replace('{did}', t(`rules.did.${last.action}`)).replace('{at}', clock(last.at))] : [])];
+  const fanErr = last?.error;
+  const fanH = blockH(fanLines.length + (fanErr ? 1 : 0));
 
   const yC = PAD + sH + VGAP, yR = yC + blockH(2) + VGAP, yF = yR + blockH(2) + VGAP;
-  const H = yF + blockH(fanLines.length) + PAD;
-  const xB = PAD + SW + SGAP;
+  const H = yF + fanH + PAD;
   const elbow = (x: number) => svg`<path class="fc-link" d=${`M${x + SW / 2} ${PAD + sH} V${yC - VGAP / 2} H${CX} V${yC}`}></path>`;
   const status = tr && tr.status !== 'ok' ? (tr.status === 'error' && tr.reason ? `${t('rules.status.error')}: ${tr.reason}` : t(`rules.status.${tr.status}`)) : null;
 
   return html`
     <div class="flow">
       <svg class="vt" style=${`max-width:${VENT_WIDTH * FLOW_MAX_SCALE}px`} viewBox=${`0 0 ${VENT_WIDTH} ${H}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-label=${t('vent.flow.title')}>
-        ${elbow(PAD)}${elbow(xB)}
+        ${elbow(XA)}${elbow(XB)}
         <path class="fc-link" d=${`M${CX} ${yC + blockH(2)} V${yR} M${CX} ${yR + blockH(2)} V${yF}`}></path>
-        ${block(o, { x: PAD, y: PAD, w: SW, h: sH, field: 'vent-sensor', cls: vt?.a.why ? ' nodata' : '', lines: aLines, chars: 30 })}
-        ${block(o, { x: xB, y: PAD, w: SW, h: sH, field: 'vent-than', cls: vt?.b.why ? ' nodata' : '', lines: bLines, chars: 30 })}
-        ${block(o, { x: MX, y: yC, w: MW, h: blockH(2), field: 'vent-above', cls: input ? tone(input.value) : '', lines: [cmp, margins], chars: 43 })}
-        ${block(o, { x: MX, y: yR, w: MW, h: blockH(2), field: 'vent-runon', cls: tr ? tone(tr.verdict) : '', lines: resultLines, chars: 43 })}
-        ${block(o, { x: MX, y: yF, w: MW, h: blockH(fanLines.length), field: 'vent-fan', cls: '', lines: fanLines, chars: 43 })}
+        ${block(o, { x: XA, y: PAD, w: SW, h: sH, field: 'vent-sensor', cls: vt?.a.why ? ' nodata' : '', lines: aLines })}
+        ${block(o, { x: XB, y: PAD, w: SW, h: sH, field: 'vent-than', cls: vt?.b.why ? ' nodata' : '', lines: bLines })}
+        ${block(o, { x: MX, y: yC, w: MW, h: blockH(2), field: 'vent-above', cls: input ? tone(input.value) : '', lines: [cmp, margins], tip: `${vs}${pct}\n${margins}` })}
+        ${block(o, { x: MX, y: yR, w: MW, h: blockH(2), field: 'vent-runon', cls: tr ? tone(tr.verdict) : '', lines: resultLines })}
+        ${block(o, { x: MX, y: yF, w: MW, h: fanH, field: 'vent-fan', cls: '', lines: fanLines, err: fanErr })}
       </svg>
       ${status ? html`<p class="fc-warn" data-note="status">${status}</p>` : nothing}
       ${o.note ? html`<p class="fc-note">${o.note}</p>` : nothing}

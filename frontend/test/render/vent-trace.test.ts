@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render } from 'lit';
 import { renderVentTrace, VENT_WIDTH, type VentTraceOpts } from '../../src/render/vent-trace';
-import { FLOW_MAX_SCALE } from '../../src/render/rule-trace';
+import { FLOW_MAX_SCALE, WIDTH } from '../../src/render/rule-trace';
 import type { Rule } from '../../src/model/types';
 import type { RuleTrace } from '../../src/live/rules-feed';
 
@@ -34,9 +34,45 @@ const text = (host: HTMLElement, sel: string) => [...host.querySelector(sel)!.qu
 const blk = (host: HTMLElement, f: string) => host.querySelector(`[data-block="${f}"]`)!;
 
 describe('vent diagram', () => {
-  it('caps the scale of the svg', () => {
+  it('has the width of the condition flowchart, so both draw text at the same scale in the same column', () => {
     const { host } = draw();
-    expect((host.querySelector('svg.vt') as SVGElement).style.maxWidth).toBe(`${VENT_WIDTH * FLOW_MAX_SCALE}px`);
+    expect(VENT_WIDTH).toBe(WIDTH);
+    const svg = host.querySelector('svg.vt') as SVGElement;
+    expect(svg.style.maxWidth).toBe(`${WIDTH * FLOW_MAX_SCALE}px`);
+    expect(svg.getAttribute('viewBox')).toMatch(new RegExp(`^0 0 ${WIDTH} `));
+  });
+
+  it('long names are kept whole up to the box width and clipped to the box; the tooltip has the full text', () => {
+    const long = 'Bathroom ceiling climate sensor';
+    const { host } = draw({ deviceName: id => (id === 'wc' ? long : id === 'main' ? 'A'.repeat(80) : names[id]) });
+    expect(text(host, '[data-block="vent-sensor"]')).toContain(long);
+    const b = blk(host, 'vent-than');
+    const clipBox = b.querySelector('svg.fc-clip')!;
+    expect(Number(clipBox.getAttribute('width'))).toBeLessThan(Number(b.querySelector('rect')!.getAttribute('width')));
+    expect(clipBox.querySelectorAll('text').length).toBeGreaterThan(0);
+    expect(b.querySelector('text')!.textContent!.endsWith('…')).toBe(true);
+    expect(b.querySelector('title')!.textContent).toContain('A'.repeat(80));
+  });
+
+  it('long names clip the names of the comparison, never its percent', () => {
+    const { host } = draw({ trace: live, deviceName: id => (id === 'wc' ? 'W'.repeat(60) : id === 'main' ? 'M'.repeat(60) : names[id]) });
+    const first = blk(host, 'vent-above').querySelector('text')!.textContent!;
+    expect(first).toMatch(/…: \+79 %$/);
+  });
+
+  it('a failed last action puts the error on its own line', () => {
+    const tr: RuleTrace = { ...live, last: { ...live.last!, action: 'off', error: 'target unavailable' } };
+    const { host } = draw({ trace: tr });
+    const lines = [...blk(host, 'vent-fan').querySelectorAll('text')].map(x => x.textContent);
+    expect(lines[2]).toMatch(/^last: turned off \d\d?:43$/);
+    expect(lines[3]).toBe('target unavailable');
+    expect(blk(host, 'vent-fan').querySelectorAll('text')[3].classList).toContain('fc-err');
+  });
+
+  it('a status other than ok is shown, with the reason of an error; ok shows none', () => {
+    expect(draw({ trace: live }).host.querySelector('[data-note="status"]')).toBeNull();
+    const { host } = draw({ trace: { ...live, status: 'error', reason: 'target unavailable' } });
+    expect(host.querySelector('[data-note="status"]')!.textContent).toBe('Error: target unavailable');
   });
 
   it('without a trace the blocks show the parameters, no live colours, and the note', () => {

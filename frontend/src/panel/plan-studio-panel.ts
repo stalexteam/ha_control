@@ -41,7 +41,7 @@ import { EditorInput } from './input';
 import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
-import { RulesFeed } from '../live/rules-feed';
+import { RulesFeed, type RuleTrace } from '../live/rules-feed';
 import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakTemplate, ventTemplate, isVentRule, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import type { RuleTemplate } from './rule-templates';
 import { renderRuleDialog, type RuleDraft } from './rule-dialog';
@@ -252,7 +252,7 @@ export class PlanStudioPanel extends LitElement {
     const need = this.isConnected && (this.mode === 'binding' || this.mode === 'automation') && !!level && !!this.hass && level.devices.some(d =>
       deviceLive(d, this.hass!.states).timerSince !== undefined || this.events.event(d.id, now) !== null
       || this.events.leaving(d.id, now).length > 0);
-    const tr = this.modal && this.ruleDraft ? this.rulesFeed.trace(this.ruleDraft.rule.id) : undefined;
+    const tr = this.modal && this.ruleDraft ? this.shownRuleTrace(this.ruleDraft.rule) : undefined;
     const countdown = !!tr && (!!tr.pending || tr.inputs.some(i => i.until !== undefined && i.until > now) || (tr.gate?.until ?? 0) > now);
     if ((need || countdown) && !this.ticker) this.ticker = setInterval(() => this.requestUpdate(), 1000);
     else if (!need && !countdown) this.stopTicker();
@@ -379,18 +379,24 @@ export class PlanStudioPanel extends LitElement {
     else if (stored && !ruleEqual(stored, d.rule)) this.commitRules(updateRule(this.rules, d.rule));
   }
 
+  /**
+   * The live trace a rule dialog shows: only for a rule equal to its saved copy (not an OK-confirmed but unsaved
+   * edit), since after an edit the values would land on the wrong blocks. The 1 s ticker follows the same trace.
+   */
+  private shownRuleTrace(rule: Rule): RuleTrace | undefined {
+    const saved = this.session.savedRules.find(r => r.id === rule.id);
+    return saved && ruleEqual(saved, rule) ? this.rulesFeed.trace(rule.id) : undefined;
+  }
+
   private renderRuleDialogNow(): TemplateResult | typeof nothing {
     const d = this.ruleDraft;
     if (!this.modal || !d || !this.plan) return nothing;
     const levels = this.planLevels();
     const devices = levels.flatMap(l => l.devices);
     const rule = d.rule;
-    // Live values only for a rule equal to its saved copy (not an OK-confirmed but unsaved edit): after an edit they
-    // would land on the wrong blocks.
     const saved = this.session.savedRules.find(r => r.id === rule.id);
-    const same = !!saved && ruleEqual(saved, rule);
-    const trace = same ? this.rulesFeed.trace(rule.id) : undefined;
-    const note = !saved ? t('rules.flow.new') : same ? null : t('rules.flow.edited');
+    const trace = this.shownRuleTrace(rule);
+    const note = !saved ? t('rules.flow.new') : ruleEqual(saved, rule) ? null : t('rules.flow.edited');
     const multi = levels.length > 1;
     const zones = levels.flatMap(l => l.zones.map(z => ({ id: z.id, name: multi ? `${z.name} (${l.name})` : z.name })));
     const problems = ruleProblems(this.rules, rule, id => devices.some(x => x.id === id),

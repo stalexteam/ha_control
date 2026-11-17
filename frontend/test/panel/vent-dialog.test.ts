@@ -122,6 +122,7 @@ describe('Wet zone ventilation form', () => {
     expect(flow()).toContain('last: turned on');
     expect(el.tickerOn).toBe(true); // the run-on countdown ticks once a second
     await set(el, '[data-field="vent-above"]', '10');
+    expect(el.tickerOn).toBe(false); // the edited rule shows no countdown
     expect(flow()).not.toContain('24.0');
     expect(flow()).not.toContain('+79');
     expect(flow()).not.toContain('Result: true');
