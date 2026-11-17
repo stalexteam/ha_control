@@ -217,6 +217,32 @@ describe('Load control dialog', () => {
     expect(okBtn(el).disabled).toBe(false);
   });
 
+  const condRule = (): Rule => ({ id: 'rule-cond', name: 'Cond rule', zoneId: null, combine: 'any', inputs: [{ source: { device: 'd-motion' } }], onDelay: 0, offDelay: 0, onTrue: [], onFalse: [] });
+  const ctlRule = (): Rule => structuredClone(SCENES.control.plans[0].rules!.find(r => r.control)!);
+
+  it('a Load control rule is not offered as a source, input or gate; a condition rule is', async () => {
+    const el = await open([condRule(), ctlRule()]);
+    await openNew(el);
+    expect(options(el, 'select[data-action="add-source"]')).toContain('r:rule-cond');
+    expect(options(el, 'select[data-action="add-source"]')).not.toContain('r:rule-control');
+    expect(options(el, 'select[data-action="set-gate"]')).not.toContain('r:rule-control');
+    await press(el, 'button[data-action="rule-cancel"]');
+    await press(el, 'button[data-template="condition"]');
+    expect(options(el, 'select[data-action="add-input"]')).toContain('r:rule-cond');
+    expect(options(el, 'select[data-action="add-input"]')).not.toContain('r:rule-control');
+  });
+
+  it('the gate has its own hint in the Load control dialog; the condition dialog keeps its own', async () => {
+    const el = await open([condRule(), ctlRule()]);
+    await openNew(el);
+    expect(q(el, '.rsettings').textContent).toContain('While this is false or unknown, "on" and "toggle" events are dropped and nothing is replayed later. "off" events always act.');
+    expect(q(el, '.rsettings').textContent).not.toContain('Actions are sent only while the gate is open.');
+    await press(el, 'button[data-action="rule-cancel"]');
+    await press(el, 'button[data-template="condition"]');
+    expect(q(el, '.rsettings').textContent).toContain('Actions are sent only while the gate is open.');
+    expect(q(el, '.rsettings').textContent).not.toContain('events always act');
+  });
+
   it('a plan without a 0.20.0 rule keeps its rule objects', async () => {
     const el = await open();
     expect(el.rules.length).toBeGreaterThan(0);

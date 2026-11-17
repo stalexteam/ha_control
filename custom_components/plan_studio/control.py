@@ -45,7 +45,7 @@ class Control:
             actions = raw.get(kind) if isinstance(raw.get(kind), list) else []
             self.lists[kind] = [
                 (a["device"], a["do"]) for a in actions
-                if isinstance(a, dict) and _str(a.get("device")) and _str(a.get("do"))
+                if isinstance(a, dict) and _str(a.get("device")) and a.get("do") in ("on", "off", "toggle", "close")
             ]
         # runtime state, kept across an unchanged Save
         self.last: list[bool | None] = [None] * len(self.inputs)  # the remembered value of each input source

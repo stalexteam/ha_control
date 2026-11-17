@@ -81,7 +81,7 @@ export function renderControlDialog(o: ControlDialogOpts): TemplateResult {
         </select>
       </div>
 
-      ${gateGroup(o, t('control.gate'), 'control-gate')}
+      ${gateGroup(o, t('control.gate'), 'control-gate', t('control.gateNote'))}
 
       ${LISTS.map(l => actionList<ControlDo>(o, {
         label: t(HEADS[l]), addText: t('control.addAction'), add: `add-action-${l}`, addField: `control-${l}`,

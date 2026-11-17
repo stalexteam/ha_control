@@ -33,7 +33,8 @@ def _control_v20(plan: dict) -> dict:
 
 def _is_control_v20(rule: object) -> bool:
     c = rule.get("control") if isinstance(rule, dict) else None
-    return isinstance(c, dict) and "on" not in c and isinstance(c.get("sources"), list) and isinstance(c.get("loads"), list)         and all(isinstance(i, str) for i in c["sources"] + c["loads"])
+    return isinstance(c, dict) and "on" not in c and isinstance(c.get("sources"), list) and isinstance(c.get("loads"), list) \
+        and all(isinstance(i, str) for i in c["sources"] + c["loads"])
 
 
 def _control_v20_rule(rule: dict, kinds: dict) -> dict:

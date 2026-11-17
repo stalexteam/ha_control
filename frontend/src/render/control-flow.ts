@@ -36,7 +36,8 @@ const LISTS = ['on', 'off', 'toggle'] as const;
 const HEADS = { on: 'control.whenOn', off: 'control.whenOff', toggle: 'control.whenToggle' } as const;
 
 /** The last action written on a device block: "last: turned on 21:43", or in words when nothing was sent. */
-const lastLine = (l: RuleLast): string => (keptOn(l) || l.sent !== false ? lastFlowLine(l) : lastText(l));
+const lastLine = (l: RuleLast): string =>
+  l.error ? t('control.flow.notSent').replace('{at}', clock(l.at)) : keptOn(l) || l.sent !== false ? lastFlowLine(l) : lastText(l);
 
 /**
  * The flowchart of a load control rule, top to bottom: the sources in rows (name, live value, what they give), the
@@ -81,7 +82,7 @@ export function renderControlFlow(o: ControlFlowOpts): TemplateResult {
     last && ev && !ev.dropped && ev.what === list && last.target === o.nameOf(a.device) ? last : undefined;
   const actionBlock = (list: typeof LISTS[number], a: ControlAction, k: number, x: number, y: number): { svg: TemplateResult; h: number } => {
     const st = stateOf(a.device), l = lastHere(list, a);
-    const lines = [o.nameOf(a.device), t(`control.do.${a.do}`), ...(ct ? [st ?? t('control.flow.noData')] : []), ...(l ? [lastLine(l)] : [])];
+    const lines = [o.nameOf(a.device), t(`control.do.${a.do}`), ...(ct ? [t('control.flow.now').replace('{s}', st ?? t('control.flow.noData'))] : []), ...(l ? [lastLine(l)] : [])];
     const h = blockH(lines.length + (l?.error ? 1 : 0));
     return { svg: block({ x, y, w: CW, h, field: `${list}:${k}`, cls: ct ? tone(st == null ? null : st === 'on' || st === 'open') : '', lines, err: l?.error }), h };
   };
@@ -109,7 +110,7 @@ export function renderControlFlow(o: ControlFlowOpts): TemplateResult {
           const gives = t('control.gives').replace('{what}', tr?.gives ?? o.gives(s));
           return block({
             x: grid.xs[k], y: grid.inY(k), w: IN_W, h: bh, field: `source:${k}`, cls: tr && !isButtonSource(s) ? tone(tr.value) : '',
-            lines: [tr?.label ?? o.sourceLabel(s), ...(detail ? [detail] : []), gives],
+            lines: [`${'not' in s && s.not ? 'NOT ' : ''}${tr?.label ?? o.sourceLabel(s)}`, ...(detail ? [detail] : []), gives],
           });
         })}
         ${block({

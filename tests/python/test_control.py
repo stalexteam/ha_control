@@ -297,6 +297,12 @@ def test_not_inverts_the_event():
     assert w.calls == [off("switch.l2"), on("switch.l1")]
 
 
+def test_a_do_outside_on_off_toggle_close_is_dropped():
+    w = loaded([control_rule(sources=[src("ws")], on=[("v", "open"), ("l1", "on")])], valve__v="closed")
+    w.set("switch.a", "on")
+    assert w.calls == [on("switch.l1")]
+
+
 def test_light_device_as_a_source():
     w = loaded([repeat(sources=["cl"], loads=["l1"])], light__c="off")
     w.set("light.c", "on")
@@ -489,12 +495,32 @@ def test_gate_drops_the_event():
     assert w.calls == [] and "last" not in t
     assert t["control"]["event"] == {"source": "Switch A", "what": "on", "at": 1000000, "dropped": "gate closed"}
     w.set("binary_sensor.pir", "unavailable")
-    w.set("switch.a", "off")  # gate unknown
-    assert w.calls == [] and w.tr()["control"]["event"]["dropped"] == "gate closed"
+    w.set("switch.a", "off")  # gate unknown: an off event ignores the gate (l1 is off already: nothing to send)
+    assert w.calls == [] and "dropped" not in w.tr()["control"]["event"]
     w.set("binary_sensor.pir", "on")  # opening the gate replays nothing
     assert w.calls == [] and w.tr()["gate"]["value"] is True
     w.set("switch.a", "on")
     assert w.calls == [on("switch.l1")] and "dropped" not in w.tr()["control"]["event"]
+
+
+def test_off_event_passes_a_closed_gate():
+    w = loaded([control_rule(sources=[src("pir")], on=[("l1", "on")], off=[("l1", "off")], gate=src("ws"))],
+               switch__a="on")
+    w.set("binary_sensor.pir", "on")
+    assert w.calls == [on("switch.l1")]
+    w.set("switch.l1", "on")
+    w.set("switch.a", "off")  # gate false
+    w.set("binary_sensor.pir", "off")
+    assert w.calls == [on("switch.l1"), off("switch.l1")] and "dropped" not in w.tr()["control"]["event"]
+    w.set("binary_sensor.pir", "on")
+    assert w.calls == [on("switch.l1"), off("switch.l1")] and w.tr()["control"]["event"]["dropped"] == "gate closed"
+
+
+def test_toggle_is_dropped_by_a_closed_gate():
+    for gate_state in ("off", "unavailable"):
+        w = loaded([control_rule(sources=[btn("btn")], toggle=[("l1", "toggle")], gate=src("pir"))], binary_sensor__pir=gate_state)
+        w.press("btn", TOGGLE)
+        assert w.calls == [] and w.tr()["control"]["event"]["dropped"] == "gate closed"
 
 
 def test_gate_drops_a_button_event():

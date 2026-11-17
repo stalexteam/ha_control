@@ -231,7 +231,8 @@ def _validate_control(r: dict, c: object) -> list[str]:
         raise vol.Invalid("rule control needs at least one action")
     if targets & read:
         raise vol.Invalid("rule control needs a target device that its sources do not read")
-    if r["inputs"] or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "outside" in r or "beurer" in r or r["combine"] != "any"             or r["onDelay"] != 0 or r["offDelay"] != 0 or r["onTrue"] or r["onFalse"]:
+    if r["inputs"] or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "outside" in r or "beurer" in r or r["combine"] != "any" \
+            or r["onDelay"] != 0 or r["offDelay"] != 0 or r["onTrue"] or r["onFalse"]:
         raise vol.Invalid("rule control needs no inputs, other kinds or actions, combine any and no delays")
     return refs
 

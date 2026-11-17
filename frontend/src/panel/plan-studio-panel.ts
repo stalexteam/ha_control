@@ -553,7 +553,8 @@ export class PlanStudioPanel extends LitElement {
       },
       actionDevices: devices.filter(x => ruleActionsFor(x).length > 0),
       deviceById: id => devices.find(x => x.id === id),
-      otherRules: this.rules.filter(r => r.id !== rule.id),
+      // A Load control rule has no verdict, so it is never offered as a source (a rule that already reads one keeps its row).
+      otherRules: this.rules.filter(r => r.id !== rule.id && !isControlRule(r)),
       ruleName: id => this.rules.find(r => r.id === id)?.name,
       zones, problems,
       trace, note, now: Date.now(),

@@ -326,7 +326,7 @@ export const picker = (o: RuleDialogOpts, apply: (source: RuleSource) => void) =
 };
 
 /** The "Act only when" group (`label`): its hint, then the gate's input row (`field`) or the set-gate select; writes `rule.gate`. */
-export function gateGroup(o: RuleDialogOpts, label: string, field: string): TemplateResult {
+export function gateGroup(o: RuleDialogOpts, label: string, field: string, hint = t('rules.gate.hint')): TemplateResult {
   const r = o.draft.rule;
   const setGate = (i: RuleInput | null) => {
     const { gate: _g, ...rest } = r;
@@ -335,7 +335,7 @@ export function gateGroup(o: RuleDialogOpts, label: string, field: string): Temp
   return html`
       <div class="rgroup">
         <div class="rlabel">${label}</div>
-        <p class="muted">${t('rules.gate.hint')}</p>
+        <p class="muted">${hint}</p>
         ${r.gate
           ? inputRow(o, r.gate, field, setGate)
           : html`<select class="radd" data-action="set-gate" .value=${''} @change=${picker(o, source => setGate({ source }))}>

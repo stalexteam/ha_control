@@ -749,6 +749,7 @@ class RuleEngine:
                     rule.seen[eid] = st[0] if st is not None else None
             c = rule.control
             if c is not None and adopted.get(rule.key):
+                # A guard that does not depend on the evaluation order of the load (its settle already records the new value with events off).
                 for k, i in enumerate(rule.inputs):  # a referenced rule that started anew: its start verdict is no event
                     if i.type == "rule" and not adopted.get((rule.key[0], i.rule or "")):
                         c.forget(k)
@@ -1841,7 +1842,7 @@ class RuleEngine:
             self._control_event(rule, i.label, what)
 
     def _control_event(self, rule: _Rule, source: str, what: str) -> None:
-        """An event ("on", "off" or "toggle") of a source: recorded; dropped while the gate is not open; else the list
+        """An event ("on", "off" or "toggle") of a source: recorded; dropped while the gate is not open (an "off" event ignores the gate); else the list
         of its kind runs by direct calls (own context). Its toggle actions act as one group (any of their devices
         effectively on: all off, else all on); on / off / close are literal. A device in the wanted state already or
         without data gets nothing (never re-sent later)."""
@@ -1849,7 +1850,7 @@ class RuleEngine:
         assert c is not None
         at = int(self._now() * 1000)
         c.event = {"source": source, "what": what, "at": at}
-        if rule.gate is not None and (rule.gate_trace is None or rule.gate_trace["value"] is not True):
+        if what != "off" and rule.gate is not None and (rule.gate_trace is None or rule.gate_trace["value"] is not True):
             c.event["dropped"] = "gate closed"
             return
         actions = rule.control_actions.get(what, [])

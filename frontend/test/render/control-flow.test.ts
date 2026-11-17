@@ -68,10 +68,10 @@ describe('load control flowchart', () => {
     expect(text(host, 'source:1')).toBe('Button vent | gives toggle');
     expect(host.querySelector('[data-block="source:0"]')!.getAttribute('class')).toContain(' on');
     expect(text(host, 'event')).toBe(`Event | Button vent: toggle ${new Date(NOW).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
-    expect(text(host, 'on:0')).toBe('Light | on | on');
-    expect(text(host, 'off:0')).toBe('Light | off | on');
-    expect(text(host, 'toggle:0')).toBe('Light | toggle | on');
-    expect(text(host, 'toggle:1')).toMatch(/^Vent \| toggle \| no data \| last: .+ \| target unavailable$/);
+    expect(text(host, 'on:0')).toBe('Light | on | now on');
+    expect(text(host, 'off:0')).toBe('Light | off | now on');
+    expect(text(host, 'toggle:0')).toBe('Light | toggle | now on');
+    expect(text(host, 'toggle:1')).toMatch(/^Vent \| toggle \| now no data \| last: not sent .+ \| target unavailable$/);
     expect(host.querySelectorAll('.fc-err').length).toBe(1);
     expect(host.querySelector('[data-block="toggle:1"] .fc-err')!.textContent).toBe('target unavailable');
   });
@@ -84,10 +84,10 @@ describe('load control flowchart', () => {
     const dropped = draw(r, live({ event: { source: 'Switch hall', what: 'off', at: NOW, dropped: 'gate closed' }, devices }, { inputs, last })).host;
     expect(text(dropped, 'event')).toContain('dropped: gate closed');
     expect(dropped.querySelector('[data-block="event"]')!.getAttribute('class')).toContain(' nodata');
-    expect(text(dropped, 'off:0')).toBe('Light | off | off');
+    expect(text(dropped, 'off:0')).toBe('Light | off | now off');
     const ok = draw(r, live({ event: { source: 'Switch hall', what: 'off', at: NOW }, devices }, { inputs, last })).host;
-    expect(text(ok, 'off:0')).toMatch(/^Light \| off \| off \| last: /);
-    expect(text(ok, 'on:0')).toBe('Light | on | off');
+    expect(text(ok, 'off:0')).toMatch(/^Light \| off \| now off \| last: /);
+    expect(text(ok, 'on:0')).toBe('Light | on | now off');
   });
 
   it('live: a gate trace is drawn as the condition flowchart does; a valve shows open / closed', () => {
@@ -97,8 +97,36 @@ describe('load control flowchart', () => {
     });
     const { host } = draw(r, t);
     expect(text(host, 'gate')).toBe('Gate: Daylight | open');
-    expect(text(host, 'on:0')).toBe('Vent | on | open');
-    expect(text(host, 'off:0')).toBe('Cold valve | close | closed');
+    expect(text(host, 'on:0')).toBe('Vent | on | now open');
+    expect(text(host, 'off:0')).toBe('Cold valve | close | now closed');
+  });
+
+  it('a NOT source is drawn like the condition flowchart draws a NOT input', () => {
+    const r = rule([{ source: { device: 'sw' }, not: true }, dev('pir')], { on: [act('a', 'on')] });
+    const { host } = draw(r);
+    expect(text(host, 'source:0')).toBe('NOT Switch hall | gives on / off');
+    expect(text(host, 'source:1')).toBe('Motion sensor | gives on / off');
+    const t = live({ devices: [] }, { inputs: [{ label: 'Switch hall', value: true, detail: 'on', gives: 'on / off' }, { label: 'Motion sensor', value: false, detail: 'off', gives: 'on / off' }] });
+    const lv = draw(r, t).host;
+    expect(text(lv, 'source:0')).toBe('NOT Switch hall | on | gives on / off');
+    expect(lv.querySelector('[data-block="source:0"]')!.getAttribute('class')).toContain(' on');
+  });
+
+  it('a live action block labels its state; no now line without a trace', () => {
+    const r = rule([dev('sw')], { on: [act('a', 'on')] });
+    expect(text(draw(r).host, 'on:0')).toBe('Light | on');
+    expect(text(draw(r, live({ devices: [{ id: 'a', name: 'Light', state: 'on' }] })).host, 'on:0')).toBe('Light | on | now on');
+  });
+
+  it('an entry with an error reads "last: not sent", a sent one "turned on"', () => {
+    const r = rule([dev('sw')], { on: [act('a', 'on')] });
+    const ev = { source: 'Switch hall', what: 'on' as const, at: NOW };
+    const devices = [{ id: 'a', name: 'Light', state: 'off' as const }];
+    const clk = new Date(NOW).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const bad = draw(r, live({ event: ev, devices }, { last: { action: 'on', target: 'Light', at: NOW, reason: 'x', error: 'target unavailable' } })).host;
+    expect(text(bad, 'on:0')).toBe(`Light | on | now off | last: not sent ${clk} | target unavailable`);
+    const ok = draw(r, live({ event: ev, devices }, { last: { action: 'on', target: 'Light', at: NOW, reason: 'x' } })).host;
+    expect(text(ok, 'on:0')).toMatch(/last: turned on /);
   });
 
   it('no link runs through a block', () => {
