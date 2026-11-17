@@ -49,9 +49,9 @@ export function durationText(sec: number): string {
 const remaining = (until: number, now: number): string => durationText(Math.max(1, Math.ceil((until - now) / 1000)));
 
 /** The second line of an input block before live values: its parameters in a few words. */
-export function paramText(s: RuleSource): string {
+export function paramText(s: RuleSource, not = false): string {
   if ('light' in s) return `${t('rules.light.below').toLowerCase()} ${s.below} lx (+${s.hysteresis})`;
-  if ('sun' in s) return t('rules.sun.below');
+  if ('sun' in s) return t(not ? 'rules.sun.above' : 'rules.sun.below');
   if ('time' in s) return `${s.time.from}-${s.time.to}`;
   if ('held' in s) return `${t(`rules.held.${s.held.state}`)} ${durationText(s.held.seconds)}`;
   return 'rule' in s ? t('rules.src.rule') : t('rules.src.device');
@@ -149,7 +149,7 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
           return block({
             x: PAD, y: inY0 + k * (IN_H + 12), w: IN_W, h: IN_H, field: `input-${k}`, target: { input: k }, opts: o, chars: 26,
             cls: tr ? tone(tr.value) : '',
-            lines: [`${i.not ? 'NOT ' : ''}${o.inputName(i)}`, tr ? liveDetail(tr, o.now) : paramText(i.source)],
+            lines: [`${i.not ? 'NOT ' : ''}${o.inputName(i)}`, tr ? liveDetail(tr, o.now) : paramText(i.source, i.not === true)],
           });
         })}
         ${block({

@@ -283,7 +283,7 @@ export const panelStyles = css`
   .rsources { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
   .rchip { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 8px; border: 1px solid var(--ch-divider); border-radius: 10px; font-size: 12px; }
   .rchip.bad { border-color: var(--ch-error); }
-  .rwarn { flex-basis: 100%; margin: 0; color: #f59e0b; font-size: 12px; }
+  .rwarn { flex-basis: 100%; margin: 0; color: var(--ch-error); font-size: 12px; }
   .rline.bad { border-color: var(--ch-error); }
   .rline .grow, .rsettings .grow { flex: 1; min-width: 0; }
   .rline .btn { padding: 1px 8px; }

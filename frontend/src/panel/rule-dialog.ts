@@ -224,7 +224,10 @@ function params(o: RuleDialogOpts, field: string, s: RuleSource, set: (s: RuleSo
           </select></label>
         <label>${t('rules.held.for')}
           <input class="num" data-part="duration" type="number" min="0" step="any" .value=${shown}
-            @input=${(e: Event) => setHeld({ seconds: Math.round(num((e.target as HTMLInputElement).value) * UNIT_SECONDS[unit]) })} />
+            @input=${(e: Event) => {
+              if (o.draft.units?.[field] === undefined) o.onUnit(field, unit); // the unit stays what is shown until picked
+              setHeld({ seconds: Math.round(num((e.target as HTMLInputElement).value) * UNIT_SECONDS[unit]) });
+            }} />
           <select data-part="unit" data-value=${unit} @change=${(e: Event) => o.onUnit(field, (e.target as HTMLSelectElement).value as DurationUnit)}>
             ${UNITS.map(u => html`<option value=${u}>${t(`rules.unit.${u}`)}</option>`)}
           </select></label>
@@ -240,7 +243,7 @@ function inputRow(o: RuleDialogOpts, i: RuleInput, field: string, set: (i: RuleI
   const type = 'light' in s ? 'light' : 'sun' in s ? 'sun' : 'time' in s ? 'time' : 'held';
   return html`
     <div class="rline${isMissing(o, s) ? ' bad' : ''}" data-field=${field} tabindex="-1">
-      <span class="grow">${typed ? t(`rules.src.${type}`) : inputName(o, i)}${'sun' in s ? html` <span class="muted">${paramText(s)}</span>` : nothing}</span>
+      <span class="grow">${typed ? t(`rules.src.${type}`) : inputName(o, i)}${'sun' in s ? html` <span class="muted">${i.not ? t('rules.sun.above') : paramText(s)}</span>` : nothing}</span>
       <label class="rnot"><input type="checkbox" data-part="not" .checked=${i.not === true}
         @change=${(e: Event) => {
           const on = (e.target as HTMLInputElement).checked;

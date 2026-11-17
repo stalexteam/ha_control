@@ -408,9 +408,9 @@ export class PlanStudioPanel extends LitElement {
         id => { const x = devices.find(v => v.id === id); return x && ruleActionsFor(x); },
         id => devices.some(x => x.id === id && x.props.kind === 'illuminance_sensor')),
       trace, note, now: Date.now(),
-      onChange: r => { this.ruleDraft = { ...d, rule: r }; },
+      onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
       onFocus: f => this.focusRuleField(f),
-      onUnit: (field, unit) => { this.ruleDraft = { ...d, units: { ...d.units, [field]: unit } }; },
+      onUnit: (field, unit) => { const cur = this.ruleDraft ?? d; this.ruleDraft = { ...cur, units: { ...cur.units, [field]: unit } }; },
       onOk: () => this.commitRuleDraft(),
       onCancel: () => { this.dialog = null; this.ruleDraft = null; },
     });

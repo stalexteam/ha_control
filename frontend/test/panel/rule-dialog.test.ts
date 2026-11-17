@@ -388,4 +388,25 @@ describe('Rule dialog', () => {
       expect(q(el, '[data-note="held"]').textContent).toBe('Actions are held until the gate opens.');
     });
   });
+
+  it('Held duration keeps its unit while typing; a NOT Sun reads above horizon', async () => {
+    const el = await open();
+    el.openRuleDialog('condition', 'rule-outside');
+    await el.updateComplete;
+    const f = '[data-field="gate-input"]';
+    const held = () => (el.ruleDraft!.rule.gate!.source as { held: { seconds: number } }).held.seconds;
+    await type(el, `${f} [data-part="duration"]`, '60');
+    expect(held()).toBe(3600);
+    expect(q<HTMLInputElement>(el, `${f} [data-part="duration"]`).value).toBe('60');
+    expect(q<HTMLSelectElement>(el, `${f} [data-part="unit"]`).value).toBe('min');
+    await type(el, `${f} [data-part="duration"]`, '0.5');
+    expect(held()).toBe(30);
+    expect(q<HTMLInputElement>(el, `${f} [data-part="duration"]`).value).toBe('0.5');
+    await choose(el, `${f} [data-part="unit"]`, 'h');
+    await type(el, `${f} [data-part="duration"]`, '2');
+    expect(held()).toBe(7200);
+    await press(el, '[data-field="input-1"] input[data-part="not"]');
+    expect(q(el, '[data-block="input-1"]').textContent).toContain('above horizon');
+    expect(q(el, '[data-field="input-1"] .muted').textContent).toBe('above horizon');
+  });
 });
