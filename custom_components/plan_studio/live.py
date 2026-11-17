@@ -1,6 +1,6 @@
 """Runs the container runtime and the power hub inside Home Assistant: state lookup, state tracking and clock.
 
-The transfer positions, the boiler modes and the running timed switches are persisted."""
+The transfer positions, the boiler modes, the running timed switches and the outside light pauses are persisted."""
 
 from __future__ import annotations
 
@@ -17,7 +17,13 @@ from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import BOILER_STORAGE_KEY, POWER_STORAGE_KEY, RUNTIME_STORAGE_KEY, TIMED_STORAGE_KEY
+from .const import (
+    BOILER_STORAGE_KEY,
+    OUTSIDE_STORAGE_KEY,
+    POWER_STORAGE_KEY,
+    RUNTIME_STORAGE_KEY,
+    TIMED_STORAGE_KEY,
+)
 from .power import PowerHub
 from .rules import RuleEngine
 from .runtime import Runtime
@@ -57,6 +63,8 @@ class LiveRuntime:
         self._modes: dict | None = None  # stored boiler modes, handed to the first engine load only
         self._timed_store: Store = Store(hass, 1, TIMED_STORAGE_KEY)
         self._runs: dict | None = None  # stored timed runs, handed to the first engine load only
+        self._outside_store: Store = Store(hass, 1, OUTSIDE_STORAGE_KEY)
+        self._pauses: dict | None = None  # stored outside light pauses, handed to the first engine load only
         self._engine_start: CALLBACK_TYPE | None = None  # waits for HA to start after a boot load
         # rule actions fired before HA has started (a sensor known at boot), sent in order once it has
         self._deferred: list[tuple[str, str, str, Callable[..., None], Callable[[], bool]]] = []
@@ -77,12 +85,15 @@ class LiveRuntime:
         self._modes = stored if isinstance(stored, dict) else {}
         runs = await self._timed_store.async_load()
         self._runs = runs if isinstance(runs, dict) else {}
+        pauses = await self._outside_store.async_load()
+        self._pauses = pauses if isinstance(pauses, dict) else {}
         self.engine = RuleEngine(
             self._lookup, time.time, self._call, self._schedule,
             local=lambda ts: dt_util.as_local(dt_util.utc_from_timestamp(ts)),  # the real zone: DST-safe
             changed_at=self._changed_at,
             on_modes=self._save_modes,
             on_runs=self._save_runs,
+            on_pauses=self._save_pauses,
         )
         self.reload()
 
@@ -95,8 +106,9 @@ class LiveRuntime:
         self._loaded = True
         modes, self._modes = self._modes, None
         runs, self._runs = self._runs, None
-        self.engine.load_plans(plans, boot=boot, modes=modes, runs=runs)
-        if boot and self._engine_start is None:  # a restored auto or timed run waits for HA to have started
+        pauses, self._pauses = self._pauses, None
+        self.engine.load_plans(plans, boot=boot, modes=modes, runs=runs, pauses=pauses)
+        if boot and self._engine_start is None:  # a restored auto, timed run or pause waits for HA to have started
             self._engine_start = async_at_started(self._hass, self._engine_started)
         self.retrack()
 
@@ -128,6 +140,12 @@ class LiveRuntime:
         self._timed_store.async_delay_save(lambda: runs, 1)
 
     @callback
+    def _save_pauses(self, pauses: dict) -> None:
+        if self._stopped:  # stop reloads no plans: that report must not wipe the store
+            return
+        self._outside_store.async_delay_save(lambda: pauses, 1)
+
+    @callback
     def retrack(self) -> None:
         """Track the entities the containers, the rules and the power subscriptions read; a stopped runtime tracks nothing."""
         self._untrack_all()
@@ -156,6 +174,10 @@ class LiveRuntime:
             await self._timed_store.async_save(self.engine.runs())
         except Exception:  # noqa: BLE001 - stopping must go on
             _LOGGER.warning("could not save the timed runs", exc_info=True)
+        try:  # likewise the outside light pauses
+            await self._outside_store.async_save(self.engine.pauses())
+        except Exception:  # noqa: BLE001 - stopping must go on
+            _LOGGER.warning("could not save the outside light pauses", exc_info=True)
         self.engine.load_plans([], unload=True)  # cancels every rule timer; switches no boiler relay or timed device
 
     @callback

@@ -1059,3 +1059,113 @@ def test_boiler_stop_sends_no_relay_command(env):
         assert len(hass.services.calls) == n
 
     asyncio.run(go())
+
+
+# --- outside light rule ------------------------------------------------------------
+
+OUTSIDE_KEY = "plan_studio.outside"
+
+
+def _outside_plan():
+    def dev(i, kind, bindings):
+        return {"id": i, "name": i, "props": {"kind": kind}, "bindings": bindings}
+
+    return {
+        "id": "p1",
+        "levels": [{"devices": [dev("ext", "wall_light", {"control": "switch.ext"}),
+                                dev("ls", "illuminance_sensor", {"illuminance": "sensor.lux"})]}],
+        "rules": [
+            {
+                "id": "r1", "name": "Outside", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+                "inputs": [], "onTrue": [], "onFalse": [],
+                # no lux data (FakeStates has no unit): night by the flag
+                "outside": {"light": "ext", "sensor": "ls", "noDataNight": True, "pause": 30},
+            }
+        ],
+    }
+
+
+async def _ostart(env, hass, stored=None, light="on"):
+    if stored is not None:
+        FakeStore.contents[OUTSIDE_KEY] = stored
+    hass.services.known |= {("switch", "turn_on"), ("switch", "turn_off")}
+    hass.states.d.update({"switch.ext": light, "sensor.lux": "unavailable"})
+    live = env.live.LiveRuntime(hass, FakePlans([_outside_plan()]))
+    await live.async_start()
+    return live
+
+
+def _osaves():
+    return [s for s in FakeStore.saved if s[0] == OUTSIDE_KEY]
+
+
+def test_outside_pause_loads_before_the_first_load_and_saves_on_change(env):
+    async def go():
+        hass = FakeHass()
+        until = time.time() + 600
+        live = await _ostart(env, hass, stored={"p1": {"r1": until}}, light="off")
+        assert live.engine.pauses() == {"p1": {"r1": until}} and _osaves() == []
+        assert live.engine.snapshot("p1")["r1"]["outside"]["pausedUntil"] == int(until * 1000)
+        assert hass.services.calls == [] and [e for e in env.later if e["on"]]  # HA runs: the end is armed at once
+
+    asyncio.run(go())
+
+
+def test_outside_manual_switch_pauses_and_saves(env):
+    async def go():
+        hass = FakeHass()
+        live = await _ostart(env, hass)
+        await asyncio.gather(*hass.tasks)
+        _boiler_event(env, hass, "switch.ext", "off", old="on")  # a person, foreign context
+        await asyncio.gather(*hass.tasks)
+        (key, saved), = _osaves()
+        assert key == OUTSIDE_KEY and list(saved["p1"]) == ["r1"] and live.engine.pauses() == saved
+        assert [c[1] for c in hass.services.calls] == ["turn_on"]  # the start's on only
+
+    asyncio.run(go())
+
+
+def test_outside_stop_flushes_the_pauses_and_ignores_later_reports(env):
+    async def go():
+        hass = FakeHass()
+        live = await _ostart(env, hass)
+        _boiler_event(env, hass, "switch.ext", "off", old="on")
+        pauses = live.engine.pauses()
+        n = len(_osaves())
+        await live.async_stop()
+        assert (OUTSIDE_KEY, pauses) in FakeStore.flushed and FakeStore.contents[OUTSIDE_KEY] == pauses
+        assert len(_osaves()) == n and not [e for e in env.later if e["on"]]
+        live2 = env.live.LiveRuntime(hass, FakePlans([_outside_plan()]))  # an entry reload restores it
+        await live2.async_start()
+        assert live2.engine.pauses() == pauses
+
+    asyncio.run(go())
+
+
+def test_outside_restored_pause_is_armed_only_after_ha_started(env):
+    async def go():
+        hass = FakeHass()
+        hass.state = CoreState.not_running
+        live = await _ostart(env, hass, stored={"p1": {"r1": time.time() + 300}}, light="off")
+        assert not [e for e in env.later if e["on"]] and hass.services.calls == []
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        timers = [e for e in env.later if e["on"]]
+        assert len(timers) == 1 and 290 < timers[0]["delay"] <= 300 and hass.services.calls == []
+        assert live.engine.pauses()
+
+    asyncio.run(go())
+
+
+def test_outside_restored_expired_pause_applies_the_want_after_ha_started(env):
+    async def go():
+        hass = FakeHass()
+        hass.state = CoreState.not_running
+        live = await _ostart(env, hass, stored={"p1": {"r1": 1.0}}, light="off")
+        assert hass.services.calls == [] and hass.tasks == []
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_on"] and live.engine.pauses() == {}
+        assert _osaves()[-1] == (OUTSIDE_KEY, {})
+
+    asyncio.run(go())

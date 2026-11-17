@@ -14,3 +14,5 @@ POWER_STORAGE_KEY = "plan_studio.power"
 BOILER_STORAGE_KEY = "plan_studio.boiler"
 # Running timed switches: {plan_id: {rule_id: until epoch seconds}}, version 1.
 TIMED_STORAGE_KEY = "plan_studio.timed"
+# Outside light manual pauses: {plan_id: {rule_id: pause end epoch seconds}}, version 1.
+OUTSIDE_STORAGE_KEY = "plan_studio.outside"
