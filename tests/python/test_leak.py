@@ -121,3 +121,28 @@ def test_old_template_condition_rule_still_runs():
     assert "leak" not in trace(w)
     w.set("valve.v", "open")
     assert w.calls == [CLOSE]  # a plain condition rule does not re-close
+
+
+def test_attribute_event_while_open_sends_nothing_new():
+    w = world()
+    w.set("binary_sensor.s1", "on")
+    w.set("valve.v", "open", {"x": 1})
+    assert w.calls == [CLOSE]
+
+
+def test_opening_then_open_closes_once():
+    w = world(valve__v="closed")
+    w.set("binary_sensor.s1", "on")
+    w.set("valve.v", "opening")
+    w.set("valve.v", "open")
+    assert w.calls == [CLOSE, CLOSE]  # the leak close, then one re-close
+
+
+def test_closed_then_open_again_closes_again():
+    w = world()
+    w.set("binary_sensor.s1", "on")
+    w.set("valve.v", "closed")
+    w.set("valve.v", "open")
+    w.set("valve.v", "closed")
+    w.set("valve.v", "open")
+    assert w.calls == [CLOSE] * 3

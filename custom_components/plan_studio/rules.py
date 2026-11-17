@@ -388,6 +388,7 @@ class _Rule:
         if self.leak:
             self.mode = "any"  # ruling A3: a dead sensor must not block a leak
         # a leak rule is the same machinery over its own inputs and actions: the wet sensors close the valves
+        self.seen: dict[str, "bool | None"] = {}  # leak: valve entity -> open as of its last state change
         self.leak_valves = [(v, _label(devices.get(v), v), _valve_entity(devices.get(v))) for v in valves]
         if self.leak:
             raw_inputs = [{"source": {"device": s}} for s in sensors]
@@ -426,6 +427,7 @@ class _Rule:
     def adopt(self, old: "_Rule") -> None:
         self.verdict, self.pending, self.last, self.failed = old.verdict, old.pending, old.last, old.failed
         self.seq, self.entries, self.sent, self.open = old.seq, old.entries, old.sent, old.open
+        self.seen = dict(old.seen)
         for new, prev in zip(self.all_inputs, old.all_inputs):
             prev.stop()
             new.take(prev)
@@ -551,6 +553,10 @@ class RuleEngine:
         released = self._released_relays(old, rules)
         self._rules = rules
         self._link()
+        for rule in rules.values():
+            for _, _, eid in rule.leak_valves:
+                if eid is not None and eid not in rule.seen:
+                    rule.seen[eid] = _valve_open(eid, self._lookup(eid))
         for rule in stopped:
             self._boiler_send(rule, rule.boiler.command("off", self._now()), "rule disabled")
         for relay in released:
@@ -960,9 +966,13 @@ class RuleEngine:
     def _reclose(self, rule: _Rule, entity_id: str) -> None:
         """Leak protection: a valve of the rule opens while the verdict is true (by anyone): close it again at once.
         A close still waiting for the target is left to _resend. A close never produces an open, so this cannot loop."""
-        if not rule.leak or not rule.enabled or not rule.open or rule.verdict is not True:
+        if not rule.leak:
             return
-        if _valve_open(entity_id, self._lookup(entity_id)) is not True:
+        was, now = rule.seen.get(entity_id), _valve_open(entity_id, self._lookup(entity_id))
+        rule.seen[entity_id] = now
+        if now is not True or was is True:  # only a change into open counts, not an attribute update
+            return
+        if not rule.enabled or not rule.open or rule.verdict is not True:
             return
         again = [s for s in rule.sent if s.action.call[2] == entity_id and not s.waiting]
         for s in again:
