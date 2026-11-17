@@ -49,7 +49,7 @@ function daylightLines(o: OutsideTrace, noDataNight: boolean, now: number): stri
  * true)"), or an entry it did not send, never worded as a command ("switched off elsewhere 19:47, paused 30 min",
  * "kept on by Porch motion 06:10").
  */
-function lastLine(l: RuleLast): string {
+export function lastLine(l: RuleLast): string {
   const at = clock(l.at);
   if (keptOn(l)) return t('timed.flow.kept').replace('{reason}', l.reason).replace('{at}', at);
   if (switchedElsewhere(l)) {

@@ -32,10 +32,10 @@ type Outside = NonNullable<Rule['outside']>;
 /** The window a newly ticked "Time window" starts with (as the condition rule's Time input). */
 const DEFAULT_WINDOW = { from: '17:00', to: '01:00' };
 
-const num = (v: string): number => (v.trim() === '' ? NaN : Number(v));
+export const num = (v: string): number => (v.trim() === '' ? NaN : Number(v));
 
 /** A select of devices: the current id stays selectable (as missing) when it is not in the list. */
-function pick(field: string, value: Id, list: Device[], onPick: (id: Id) => void): TemplateResult {
+export function pick(field: string, value: Id, list: Device[], onPick: (id: Id) => void): TemplateResult {
   const known = value === '' || list.some(d => d.id === value);
   return html`
     <select data-field=${field} data-value=${value} @change=${(e: Event) => onPick((e.target as HTMLSelectElement).value)}>

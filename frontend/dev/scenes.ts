@@ -1,5 +1,5 @@
 import type { Device, DeviceProps, Plan, Rule, Zone } from '../src/model/types';
-import type { OutsideTrace, RuleTrace } from '../src/live/rules-feed';
+import type { BeurerTrace, OutsideTrace, RuleTrace } from '../src/live/rules-feed';
 import { fitWallMount } from '../src/geometry/devices';
 import type { PowerFrame, PowerSchema } from '../src/model/power';
 import { rectRoomLevel } from '../test/fixtures';
@@ -544,6 +544,33 @@ const OUTSIDE_WINDOW: Record<string, RuleTrace> = {
   }),
 };
 
+/**
+ * Scene `beurer`: the room with the heater "Leg heater" (a metered controllable device) and the power source "Desk PC" (power binding) and the
+ * rule `rule-beurer` "Beurer heater" in the Yard zone. Live: the PC draws 312 W, the heater is on, next re-power in 12:34.
+ * Scene `beurer-cycle`: the socket's off phase (0:03 left). `beurer-kept`: the PC reading dropped out, kept 4:12 more, the
+ * off delay running. `beurer-due`: the pad's timer is not fresh, re-power due. `beurer-idle`: nothing wanted, heater off.
+ */
+function beurerPlan(): Plan {
+  const p = room();
+  p.levels[0].devices.push(
+    equipment('d-leg', 'Leg heater', free(2000, 4200), { control: 'switch.leg_heater', power: 'sensor.leg_heater_power' }, { controllable: true }),
+    equipment('d-desk', 'Desk PC', free(3200, 4200), { power: 'sensor.desk_pc_power' }),
+  );
+  p.rules!.push({
+    id: 'rule-beurer', name: 'Beurer heater Yard', zoneId: 'z-yard', combine: 'any', inputs: [], onDelay: 0, offDelay: 60, onTrue: [], onFalse: [],
+    beurer: { heater: 'd-leg', source: 'd-desk', above: 200, keep: 10, every: 30 },
+  });
+  return p;
+}
+
+const beurerTrace = (b: Partial<BeurerTrace>, over: Partial<RuleTrace> = {}): RuleTrace => ({
+  status: 'ok', verdict: true, unknownInputs: 0, inputs: [],
+  beurer: { watts: 312, detail: '312 W', heater: 'on', fresh: true, cycleAt: Date.now() + 754_000, ...b },
+  last: { action: 'on', target: 'Leg heater', at: at(21, 10), reason: 're-power' },
+  ...over,
+});
+const BEURER_RULES: Record<string, RuleTrace> = { ...ROOM_RULES, 'rule-beurer': beurerTrace({}) };
+
 const equipment = (id: string, name: string, placement: Device['placement'], bindings: Device['bindings'],
   flags: { inverter?: true; controllable?: true } = {}): Device => ({
   id, name, invalid: false, bindings, placement,
@@ -715,4 +742,9 @@ export const SCENES: Record<string, Scene> = {
   'outside-paused': { plans: [outsidePlan()], rulesFrame: OUTSIDE_PAUSED },
   'outside-day': { plans: [outsidePlan()], rulesFrame: OUTSIDE_DAY },
   'outside-window': { plans: [outsidePlan()], rulesFrame: OUTSIDE_WINDOW },
+  beurer: { plans: [beurerPlan()], rulesFrame: BEURER_RULES },
+  'beurer-cycle': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ cycleAt: undefined, pausedUntil: Date.now() + 3_000, heater: 'off' }) } },
+  'beurer-kept': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ watts: null, detail: 'no data, kept', keptUntil: Date.now() + 252_000 }, { pending: { to: false, at: Date.now() + 45_000 } }) } },
+  'beurer-due': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ fresh: false, cycleAt: undefined }) } },
+  'beurer-idle': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ watts: 4, detail: '4 W', heater: 'off', fresh: false, cycleAt: undefined }, { verdict: false, last: { action: 'off', target: 'Leg heater', at: at(22, 5), reason: 'became false: Power below 200 W' } }) } },
 };

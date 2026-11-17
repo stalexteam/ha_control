@@ -57,7 +57,7 @@ describe('Timed switch form', () => {
     const el = await open([]);
     await press(el, 'button[data-action="automations"]');
     const items = [...el.shadowRoot!.querySelectorAll('.amenu [role="menuitem"]')];
-    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'outside']);
+    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'outside', 'beurer']);
     expect(items[3].textContent!.trim()).toBe('Timed switch');
   });
 

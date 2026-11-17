@@ -74,6 +74,22 @@ export interface OutsideTrace {
   light: 'on' | 'off' | null;
 }
 
+/**
+ * A beurer heater rule's state: `watts` the power source's reading (null = no data), `detail` it as text ("312 W",
+ * "no data, kept", "no data"), `keptUntil` = epoch ms the kept state ends (only while kept without data); `heater`
+ * null = no data; `fresh` = the pad's own timer was restarted within the interval, `cycleAt` = epoch ms of the next
+ * re-power (only while fresh, interval > 0 and no pause), `pausedUntil` = epoch ms the socket's off phase ends.
+ */
+export interface BeurerTrace {
+  watts: number | null;
+  detail: string;
+  keptUntil?: number;
+  heater: 'on' | 'off' | null;
+  fresh: boolean;
+  cycleAt?: number;
+  pausedUntil?: number;
+}
+
 /** A timed switch rule's run: `until` = epoch ms of its end (only while running); `device` null = no data. */
 export interface TimedTrace { running: boolean; until?: number; device: 'on' | 'off' | null }
 
@@ -102,6 +118,8 @@ export interface RuleTrace {
   timed?: TimedTrace;
   /** Outside light rule only. */
   outside?: OutsideTrace;
+  /** Beurer heater rule only. */
+  beurer?: BeurerTrace;
 }
 
 /** One `plan_studio/rules/subscribe` event: `full` replaces the map, otherwise the changed rules merge into it. */
