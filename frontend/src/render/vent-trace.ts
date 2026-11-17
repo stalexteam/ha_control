@@ -3,7 +3,7 @@ import type { Id, Rule } from '../model/types';
 import type { RuleTrace, VentSensorTrace } from '../live/rules-feed';
 import { clock } from '../panel/rules-panel';
 import { durationText, tone, word } from './rule-trace';
-import { FLOW_MAX_SCALE, FLOW_PAD as PAD, FLOW_VGAP as VGAP, FLOW_WIDTH, blockH, chars1, clip, countdown, flowBlock } from './flow-block';
+import { FLOW_PAD as PAD, FLOW_VGAP as VGAP, PURPOSE_WIDTH, blockH, chars1, clip, countdown, flowBlock } from './flow-block';
 import { t } from '../i18n';
 
 export interface VentTraceOpts {
@@ -22,9 +22,9 @@ export interface VentTraceOpts {
   onFocus(field: string): void;
 }
 
-/** As wide as the condition flowchart: in the same column both draw their text at the same scale. */
-export const VENT_WIDTH = FLOW_WIDTH;
-const SW = 330, SGAP = 40, MW = 460;
+/** The compact width of the purpose-built automation diagrams. */
+export const VENT_WIDTH = PURPOSE_WIDTH;
+const SGAP = 20, MW = VENT_WIDTH - 2 * PAD, SW = (MW - SGAP) / 2;
 const XA = (VENT_WIDTH - SW * 2 - SGAP) / 2, XB = XA + SW + SGAP, MX = (VENT_WIDTH - MW) / 2, CX = VENT_WIDTH / 2;
 
 /** One decimal; -0.0 shows as 0.0. */
@@ -89,7 +89,7 @@ export function renderVentTrace(o: VentTraceOpts): TemplateResult {
 
   return html`
     <div class="flow">
-      <svg class="vt" style=${`max-width:${VENT_WIDTH * FLOW_MAX_SCALE}px`} viewBox=${`0 0 ${VENT_WIDTH} ${H}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-label=${t('vent.flow.title')}>
+      <svg class="vt" style=${`max-width:${VENT_WIDTH}px`} viewBox=${`0 0 ${VENT_WIDTH} ${H}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-label=${t('vent.flow.title')}>
         ${elbow(XA)}${elbow(XB)}
         <path class="fc-link" d=${`M${CX} ${yC + blockH(2)} V${yR} M${CX} ${yR + blockH(2)} V${yF}`}></path>
         ${block(o, { x: XA, y: PAD, w: SW, h: sH, field: 'vent-sensor', cls: vt?.a.why ? ' nodata' : '', lines: aLines })}

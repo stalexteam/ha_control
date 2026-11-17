@@ -274,8 +274,8 @@ export const panelStyles = css`
   .bfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 18px;
     padding-top: 10px; border-top: 1px solid var(--ch-divider); color: var(--ch-muted); }
 
-  /* Both rule dialogs (condition, wet zone ventilation): about 90 % of the viewport; the form scrolls on the left,
-     the diagram is on the right, the footer below. */
+  /* The rule dialogs: the condition dialog about 90 % of the viewport (the purpose-built ones narrow it below); the
+     form scrolls on the left, the diagram is on the right, the footer below. */
   .dialog.rdlg { box-sizing: border-box; width: 90%; height: 90%; max-width: none; display: flex; flex-direction: column; padding: 14px 18px; }
   .rsettings > p.muted { margin: 0; }
   .rsettings .rcheck { margin-top: 12px; font-size: 13px; color: var(--ch-text); }
@@ -297,6 +297,7 @@ export const panelStyles = css`
   .rsources { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
   .rchip { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 8px; border: 1px solid var(--ch-divider); border-radius: 10px; font-size: 12px; }
   .rchip.bad { border-color: var(--ch-error); }
+  .rchip.hl { border-color: var(--ch-primary); background: var(--ch-tint); }
   .rwarn { flex-basis: 100%; margin: 0; color: var(--ch-error); font-size: 12px; }
   .rline.bad { border-color: var(--ch-error); }
   .rline .grow, .rsettings .grow { flex: 1; min-width: 0; }
@@ -325,6 +326,15 @@ export const panelStyles = css`
   .fc-warn { margin: 0; color: #f59e0b; font-size: 12px; }
   .fc-last { margin: 0; color: var(--ch-text); font-size: 12px; }
   @media (max-width: 700px) { .rcols { grid-template-columns: 1fr; overflow-y: auto; } }
+  /* The purpose-built automation dialogs (ventilation, boiler, leak protection): one compact frame sized to its content,
+     about 960 px wide (form ~420 px + the 480 px diagram at 1:1) and up to 90 % high, then the body scrolls as one;
+     on narrow screens 16 px margins, below 760 px the diagram goes under the form. */
+  .dialog.rdlg.pdlg { width: 960px; max-width: calc(100% - 32px); height: auto; max-height: min(90%, calc(100% - 32px)); }
+  .pdlg .rcols { flex: 0 1 auto; overflow-y: auto; grid-template-columns: minmax(260px, 42fr) minmax(0, 48fr); }
+  .pdlg .rsettings, .pdlg .flow { overflow: visible; }
+  .pdlg .flow { align-items: center; }
+  .pdlg .rsettings > .rsources { flex: none; }
+  @media (max-width: 760px) { .pdlg .rcols { grid-template-columns: 1fr; } }
 
   /* Status bar and dialogs. */
   .status { grid-column: 1 / 4; background: var(--ch-card); border-top: 1px solid var(--ch-divider); display: flex;

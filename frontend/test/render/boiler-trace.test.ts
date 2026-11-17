@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render } from 'lit';
 import { renderBoilerTrace, BOILER_WIDTH, type BoilerTraceOpts } from '../../src/render/boiler-trace';
-import { FLOW_MAX_SCALE, WIDTH } from '../../src/render/rule-trace';
+import { PURPOSE_WIDTH } from '../../src/render/flow-block';
 import type { Rule } from '../../src/model/types';
 import type { BoilerTrace, RuleTrace } from '../../src/live/rules-feed';
 
@@ -38,12 +38,12 @@ const order = (host: HTMLElement) => [...host.querySelectorAll('[data-block]')].
 const top = (host: HTMLElement, f: string) => Number(/translate\([\d.]+ ([\d.]+)\)/.exec(host.querySelector(`[data-block="${f}"]`)!.getAttribute('transform')!)![1]);
 
 describe('boiler diagram', () => {
-  it('has the width of the condition flowchart', () => {
+  it('has the compact width of the purpose-built family and never grows above 1:1', () => {
     const { host } = draw();
-    expect(BOILER_WIDTH).toBe(WIDTH);
+    expect(BOILER_WIDTH).toBe(PURPOSE_WIDTH);
     const svg = host.querySelector('svg.vt') as SVGElement;
-    expect(svg.style.maxWidth).toBe(`${WIDTH * FLOW_MAX_SCALE}px`);
-    expect(svg.getAttribute('viewBox')).toMatch(new RegExp(`^0 0 ${WIDTH} `));
+    expect(svg.style.maxWidth).toBe(`${PURPOSE_WIDTH}px`);
+    expect(svg.getAttribute('viewBox')).toMatch(new RegExp(`^0 0 ${PURPOSE_WIDTH} `));
   });
 
   it('with the power limit: Grid, Headroom, Mode, Relay, Boiler power from top to bottom', () => {

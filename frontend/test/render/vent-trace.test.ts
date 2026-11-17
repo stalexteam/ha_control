@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render } from 'lit';
 import { renderVentTrace, VENT_WIDTH, type VentTraceOpts } from '../../src/render/vent-trace';
-import { FLOW_MAX_SCALE, WIDTH } from '../../src/render/rule-trace';
+import { PURPOSE_WIDTH } from '../../src/render/flow-block';
 import type { Rule } from '../../src/model/types';
 import type { RuleTrace } from '../../src/live/rules-feed';
 
@@ -34,16 +34,16 @@ const text = (host: HTMLElement, sel: string) => [...host.querySelector(sel)!.qu
 const blk = (host: HTMLElement, f: string) => host.querySelector(`[data-block="${f}"]`)!;
 
 describe('vent diagram', () => {
-  it('has the width of the condition flowchart, so both draw text at the same scale in the same column', () => {
+  it('has the compact width of the purpose-built family and never grows above 1:1', () => {
     const { host } = draw();
-    expect(VENT_WIDTH).toBe(WIDTH);
+    expect(VENT_WIDTH).toBe(PURPOSE_WIDTH);
     const svg = host.querySelector('svg.vt') as SVGElement;
-    expect(svg.style.maxWidth).toBe(`${WIDTH * FLOW_MAX_SCALE}px`);
-    expect(svg.getAttribute('viewBox')).toMatch(new RegExp(`^0 0 ${WIDTH} `));
+    expect(svg.style.maxWidth).toBe(`${PURPOSE_WIDTH}px`);
+    expect(svg.getAttribute('viewBox')).toMatch(new RegExp(`^0 0 ${PURPOSE_WIDTH} `));
   });
 
   it('long names are kept whole up to the box width and clipped to the box; the tooltip has the full text', () => {
-    const long = 'Bathroom ceiling climate sensor';
+    const long = 'Bathroom climate sensor T1';
     const { host } = draw({ deviceName: id => (id === 'wc' ? long : id === 'main' ? 'A'.repeat(80) : names[id]) });
     expect(text(host, '[data-block="vent-sensor"]')).toContain(long);
     const b = blk(host, 'vent-than');

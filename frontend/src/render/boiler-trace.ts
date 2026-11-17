@@ -3,7 +3,7 @@ import type { Id, Rule } from '../model/types';
 import type { BoilerTrace, RuleTrace } from '../live/rules-feed';
 import { clock } from '../panel/rules-panel';
 import { tone, word } from './rule-trace';
-import { FLOW_MAX_SCALE, FLOW_PAD as PAD, FLOW_VGAP as VGAP, FLOW_WIDTH, blockH, countdown, flowBlock } from './flow-block';
+import { FLOW_PAD as PAD, FLOW_VGAP as VGAP, PURPOSE_WIDTH, blockH, countdown, flowBlock } from './flow-block';
 import { t } from '../i18n';
 
 export interface BoilerTraceOpts {
@@ -27,9 +27,9 @@ export interface BoilerTraceOpts {
 /** Blocks whose form field has another name: the relay and (without a power limit) the boiler power are the Boiler. */
 export const BOILER_FOCUS: Record<string, string> = { 'boiler-relay': 'boiler-device', 'boiler-power': 'boiler-device' };
 
-/** As wide as the condition flowchart: in the same column both draw their text at the same scale. */
-export const BOILER_WIDTH = FLOW_WIDTH;
-const MW = 460, MX = (BOILER_WIDTH - MW) / 2, CX = BOILER_WIDTH / 2;
+/** The compact width of the purpose-built automation diagrams. */
+export const BOILER_WIDTH = PURPOSE_WIDTH;
+const MW = BOILER_WIDTH - 2 * PAD, MX = PAD, CX = BOILER_WIDTH / 2;
 
 const watts = (w: number | null): string => (w === null ? word(null) : `${Math.round(w)} W`);
 const shown = (n: number): string => (Number.isFinite(n) ? String(+n.toFixed(4)) : '?');
@@ -108,7 +108,7 @@ export function renderBoilerTrace(o: BoilerTraceOpts): TemplateResult {
 
   return html`
     <div class="flow">
-      <svg class="vt" style=${`max-width:${BOILER_WIDTH * FLOW_MAX_SCALE}px`} viewBox=${`0 0 ${BOILER_WIDTH} ${H}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-label=${t('boiler.flow.title')}>
+      <svg class="vt" style=${`max-width:${BOILER_WIDTH}px`} viewBox=${`0 0 ${BOILER_WIDTH} ${H}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-label=${t('boiler.flow.title')}>
         <path class="fc-link" d=${links}></path>
         ${blocks.map(k => flowBlock({ x: MX, w: MW, ...k, focused: o.focused === k.field, onClick: () => o.onFocus(k.field) }))}
       </svg>

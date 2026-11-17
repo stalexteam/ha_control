@@ -11,7 +11,7 @@ const ICONS: Record<RuleTemplate, string> = {
 /** Condition templates: one rail button each. */
 const CONDITION_TEMPLATES = ['condition', 'timer', 'outside'] as const;
 /** Purpose-built automations, each with its own dialog: listed in the rail's "Automations" menu, in this order. */
-export const AUTOMATIONS: readonly RuleTemplate[] = ['vent', 'boiler'];
+export const AUTOMATIONS: readonly RuleTemplate[] = ['vent', 'boiler', 'leak'];
 
 const icon = (d: string): TemplateResult => html`<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true">${svg`<path d=${d}></path>`}</svg>`;
 

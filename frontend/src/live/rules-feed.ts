@@ -27,6 +27,9 @@ export interface BoilerTrace {
   until?: number;
 }
 
+/** One valve of a leak protection rule: `state` null = no data (unavailable, unknown, no entity). */
+export interface LeakValveTrace { id: string; name: string; state: 'open' | 'closed' | null }
+
 /** The gate as the server reports it: `value` is after NOT (true = open); `until` = epoch ms when a Held gate opens. */
 export interface RuleGateTrace { value: boolean | null; detail: string; until?: number }
 
@@ -50,6 +53,8 @@ export interface RuleTrace {
   last?: RuleLast;
   /** Boiler rule only. */
   boiler?: BoilerTrace;
+  /** Leak protection rule only: its valves (the sensors are the inputs). */
+  leak?: { valves: LeakValveTrace[] };
 }
 
 /** One `plan_studio/rules/subscribe` event: `full` replaces the map, otherwise the changed rules merge into it. */

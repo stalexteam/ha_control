@@ -281,21 +281,22 @@ describe('Automations menu', () => {
     expect(el.shadowRoot!.querySelector('.amenu')).toBeNull();
   });
 
-  it('lists both automations, focuses the first; arrows move the focus; the button toggles it', async () => {
+  it('lists the automations, focuses the first; arrows move the focus (wrapping); the button toggles it', async () => {
     const el = await open([]);
     await press(el, 'button[data-action="automations"]');
     expect($(el, 'button[data-action="automations"]').getAttribute('aria-expanded')).toBe('true');
-    expect(items(el).map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler']);
-    expect(items(el).map(i => i.textContent!.trim())).toEqual(['Wet zone ventilation', 'Cost effective boiler']);
+    expect(items(el).map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak']);
+    expect(items(el).map(i => i.textContent!.trim())).toEqual(['Wet zone ventilation', 'Cost effective boiler', 'Leak protection']);
     await el.updateComplete;
     expect(el.shadowRoot!.activeElement).toBe(items(el)[0]);
     const menu = $(el, '.amenu');
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true }));
     expect(el.shadowRoot!.activeElement).toBe(items(el)[1]);
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true }));
+    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true }));
     expect(el.shadowRoot!.activeElement).toBe(items(el)[0]);
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, composed: true }));
-    expect(el.shadowRoot!.activeElement).toBe(items(el)[1]);
+    expect(el.shadowRoot!.activeElement).toBe(items(el)[2]);
     (el.shadowRoot!.activeElement as HTMLElement).blur();
     await press(el, 'button[data-action="automations"]');
     expect(el.shadowRoot!.querySelector('.amenu')).toBeNull();

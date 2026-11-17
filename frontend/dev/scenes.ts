@@ -313,6 +313,49 @@ const BOILER_HEAT_RULES: Record<string, RuleTrace> = {
   },
 };
 
+/**
+ * Scene `leak`: the room with a second leak sensor (Leak WC) and a second valve (Hot water valve), and the leak
+ * protection rule `rule-leakp` over both (live: dry, both valves open). Scene `leak-wet`: Leak WC wet, both valves
+ * closed, the last action a re-close of the Water valve. Scene `leak-na`: the kitchen sensor and the Hot water valve
+ * unavailable; the close of that valve waits for it.
+ */
+function leakPlan(): Plan {
+  const p = room();
+  p.levels[0].devices.push(
+    {
+      id: 'd-leak2', name: 'Leak WC', invalid: false, bindings: { leak: 'binary_sensor.wc_leak' },
+      placement: { mode: 'free', x: 600, y: 2000, rotation: 0 }, props: { kind: 'leak_sensor' },
+    },
+    {
+      id: 'd-valve2', name: 'Hot water valve', invalid: false, bindings: { state: 'valve.hot_water' },
+      placement: { mode: 'free', x: 1200, y: 1100, rotation: 0 }, props: { kind: 'valve', autoByDoubleToggle: false, windowSec: 3 },
+    },
+  );
+  p.rules!.push({
+    id: 'rule-leakp', name: 'Leak protection Main', zoneId: 'r0', combine: 'any', inputs: [], onDelay: 0, offDelay: 0,
+    onTrue: [], onFalse: [], leak: { sensors: ['d-leak2', 'd-leak'], valves: ['d-valve', 'd-valve2'] },
+  });
+  return p;
+}
+
+const valves = (a: 'open' | 'closed' | null, b: 'open' | 'closed' | null) => ({
+  valves: [{ id: 'd-valve', name: 'Water valve', state: a }, { id: 'd-valve2', name: 'Hot water valve', state: b }],
+});
+const LEAK_DRY: RuleTrace = {
+  status: 'ok', verdict: false, unknownInputs: 0, leak: valves('open', 'open'),
+  inputs: [{ label: 'Leak WC', value: false, detail: 'dry' }, { label: 'Leak sensor', value: false, detail: 'dry' }],
+};
+const LEAK_WET: RuleTrace = {
+  status: 'ok', verdict: true, unknownInputs: 0, leak: valves('closed', 'closed'),
+  inputs: [{ label: 'Leak WC', value: true, detail: 'wet' }, { label: 'Leak sensor', value: false, detail: 'dry' }],
+  last: { action: 'close', target: 'Water valve', at: new Date().setHours(21, 47, 0, 0), reason: 're-closed: leak' },
+};
+const LEAK_NA: RuleTrace = {
+  status: 'error', reason: 'target unavailable', verdict: true, unknownInputs: 1, leak: valves('closed', null),
+  inputs: [{ label: 'Leak WC', value: true, detail: 'wet' }, { label: 'Leak sensor', value: null, detail: 'unavailable' }],
+  last: { action: 'close', target: 'Hot water valve', at: new Date().setHours(21, 43, 0, 0), reason: 'leak', error: 'waiting for target' },
+};
+
 const equipment = (id: string, name: string, placement: Device['placement'], bindings: Device['bindings'],
   flags: { inverter?: true; controllable?: true } = {}): Device => ({
   id, name, invalid: false, bindings, placement,
@@ -469,6 +512,9 @@ export const SCENES: Record<string, Scene> = {
   'power-off': { plans: [powerPlan()], powerFrame: POWER_OFF_FRAME },
   'power-nodata': { plans: [powerPlan()], powerFrame: { wires: {}, blocks: {} } },
   boiler: { plans: [boilerPlan()], rulesFrame: BOILER_RULES },
+  leak: { plans: [leakPlan()], rulesFrame: { ...ROOM_RULES, 'rule-leakp': LEAK_DRY } },
+  'leak-wet': { plans: [leakPlan()], rulesFrame: { ...ROOM_RULES, 'rule-leakp': LEAK_WET } },
+  'leak-na': { plans: [leakPlan()], rulesFrame: { ...ROOM_RULES, 'rule-leakp': LEAK_NA } },
   'boiler-limit': { plans: [boilerPlan()], rulesFrame: BOILER_LIMIT_RULES },
   'boiler-heat': { plans: [boilerPlan()], rulesFrame: BOILER_HEAT_RULES },
 };

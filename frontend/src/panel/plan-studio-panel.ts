@@ -42,11 +42,13 @@ import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { RulesFeed, type RuleTrace } from '../live/rules-feed';
-import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakProtectionTemplate, ventTemplate, isVentRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
+import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakProtectionTemplate, ventTemplate, isVentRule, isLeakRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import { renderAutomationsMenu, type RuleTemplate } from './rule-templates';
 import { renderRuleDialog, type RuleDraft } from './rule-dialog';
 import { renderVentDialog } from './vent-dialog';
 import { renderBoilerDialog } from './boiler-dialog';
+import { renderLeakDialog } from './leak-dialog';
+import { leakFocus } from '../render/leak-trace';
 import { BOILER_FOCUS } from '../render/boiler-trace';
 import { PowerFeed, powerPayload } from '../live/power-feed';
 import { deviceLive, liveBubbles } from '../live/device-live';
@@ -453,6 +455,19 @@ export class PlanStudioPanel extends LitElement {
         zones, problems, trace, note, now: Date.now(),
         onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
         onFocus: f => this.focusRuleField(f, BOILER_FOCUS[f] ?? f),
+        onOk: () => this.commitRuleDraft(),
+        onCancel: () => { this.dialog = null; this.ruleDraft = null; },
+      });
+    }
+    if (isLeakRule(rule)) {
+      return renderLeakDialog({
+        draft: d,
+        sensors: devices.filter(x => x.props.kind === 'leak_sensor'),
+        valves: devices.filter(x => x.props.kind === 'valve'),
+        deviceById: id => devices.find(x => x.id === id),
+        zones, problems, trace, note, now: Date.now(),
+        onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
+        onFocus: f => this.focusRuleField(f, leakFocus(f)),
         onOk: () => this.commitRuleDraft(),
         onCancel: () => { this.dialog = null; this.ruleDraft = null; },
       });

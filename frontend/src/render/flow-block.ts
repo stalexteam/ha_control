@@ -2,12 +2,17 @@ import { svg, type TemplateResult } from 'lit';
 import { formatDuration } from '../live/device-live';
 
 /**
- * Shared look of the rule diagrams (the condition flowchart and the wet zone ventilation diagram): one viewBox
- * width, so in the same dialog column both draw their text at the same scale, and one block style.
+ * Shared look of the rule diagrams (the condition flowchart and the purpose-built automation diagrams): one block
+ * style and one font size. This is the viewBox width of the condition flowchart.
  */
 export const FLOW_WIDTH = 1046;
 /** The diagrams never grow beyond this scale (on-screen text at most 1.25 x its font size). */
 export const FLOW_MAX_SCALE = 1.25;
+/**
+ * viewBox width of the purpose-built automation diagrams (ventilation, boiler, leak protection): drawn at most 1:1
+ * in their compact dialog frame (form ~420 px + this), so their text shows at its font size.
+ */
+export const PURPOSE_WIDTH = 480;
 /** Margin around the diagram and the vertical gap between linked blocks (the link elbows at its middle). */
 export const FLOW_PAD = 10, FLOW_VGAP = 34;
 
