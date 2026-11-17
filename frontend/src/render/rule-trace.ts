@@ -1,6 +1,6 @@
 import { html, nothing, svg, type TemplateResult } from 'lit';
 import type { Rule, RuleDo, RuleInput, RuleSource } from '../model/types';
-import type { RuleTrace } from '../live/rules-feed';
+import type { RuleGateTrace, RuleTrace } from '../live/rules-feed';
 import { lastText } from '../panel/rules-panel';
 import { t } from '../i18n';
 import { FLOW_MAX_SCALE, FLOW_PAD as PAD, FLOW_VGAP as VGAP, FLOW_WIDTH, blockH, countdown, flowBlock } from './flow-block';
@@ -36,12 +36,14 @@ export interface RuleTraceOpts {
 
 /** The viewBox width, the same as the vent diagram's. */
 export const WIDTH = FLOW_WIDTH;
-const CX = WIDTH / 2;
+export const CX = WIDTH / 2;
+export const IN_W = 230;
 /** Inputs: up to PER_ROW blocks a row on a grid centred on CX; the middle grid gap is at CX, so the trunk passes rows. */
-const IN_W = 230, IN_GAP = 26, PER_ROW = 4, ROW_GAP = 36, BH = blockH(2);
+const IN_GAP = 26, PER_ROW = 4, ROW_GAP = 36, BH = blockH(2);
 const GRID_X = (WIDTH - PER_ROW * IN_W - (PER_ROW - 1) * IN_GAP) / 2;
 /** The ANY / ALL block, the result and gate blocks, the two action columns (as the vent diagram's sensors). */
-const COMB_W = 200, MW = 460, SW = 330, SGAP = 40, ACT_GAP = 8, HEAD_H = 24;
+const COMB_W = 200, SW = 330, SGAP = 40;
+export const MW = 460, ACT_GAP = 8, HEAD_H = 24;
 const XA = (WIDTH - SW * 2 - SGAP) / 2, XB = XA + SW + SGAP;
 
 /** "45 s", "30 min", "1 h", "1 h 30 min": a duration in whole seconds, the biggest exact units. */
@@ -55,7 +57,7 @@ export function durationText(sec: number): string {
 }
 
 /** The live countdown to `until` (at least 1 s while it runs), as the vent diagram's run-on. */
-const remaining = (until: number, now: number): string => countdown(Math.max(1, Math.ceil((until - now) / 1000)));
+export const remaining = (until: number, now: number): string => countdown(Math.max(1, Math.ceil((until - now) / 1000)));
 
 /** The second line of an input block before live values: its parameters in a few words. */
 export function paramText(s: RuleSource, not = false): string {
@@ -76,18 +78,18 @@ export function gateValue(combine: 'all' | 'any', values: (boolean | null)[]): b
   return values.includes(true) ? true : values.some(v => v !== null) ? false : null;
 }
 
-type LiveTrace = { value: boolean | null; detail: string; until?: number };
+export type LiveTrace = { value: boolean | null; detail: string; until?: number };
 
 /**
  * A Held input counts down by its `until`: the server's text is stale between evaluations. A Daylight input's detail
  * ends in its pending change ("night, 62 lx (day in 0:42)"), whose countdown ticks from `until` the same way.
  */
-function liveDetail(tr: LiveTrace, now: number, s: RuleSource): string {
+export function liveDetail(tr: LiveTrace, now: number, s: RuleSource): string {
   if ('daylight' in s) return daylightDetail(tr, now);
   return tr.until !== undefined && tr.until > now && tr.value !== true ? t('rules.flow.trueIn').replace('{t}', remaining(tr.until, now)) : tr.detail;
 }
 
-const daylightDetail = (tr: LiveTrace, now: number): string =>
+export const daylightDetail = (tr: LiveTrace, now: number): string =>
   tr.until === undefined ? tr.detail : tr.detail.replace(/ in [\d:]+\)$/, ` in ${remaining(tr.until, now)})`);
 
 export const word = (v: boolean | null): string => t(`rules.val.${v === null ? 'unknown' : v}`);
@@ -105,6 +107,36 @@ function inputXs(n: number): number[] {
     const col = k % PER_ROW;
     return GRID_X + (k >= n - last ? start + col : col) * (IN_W + IN_GAP);
   });
+}
+
+/** The two lines of the "Act only when" block: its input (with NOT) and its live state, or its parameters before live values. */
+export function gateLines(gate: RuleInput, name: string, gt: RuleGateTrace | undefined, now: number): string[] {
+  const state = !gt ? paramText(gate.source)
+    // A Daylight gate shows the sensor's state (and pending change) after open / closed.
+    : 'daylight' in gate.source && gt.value !== null ? `${t(gt.value ? 'rules.flow.open' : 'rules.flow.closed')}, ${daylightDetail(gt, now)}`
+    : gt.value === true ? t('rules.flow.open')
+    : gt.value === null ? `${t('rules.flow.closed')}, ${t('rules.val.unknown')}`
+    : gt.until !== undefined && gt.until > now ? `${t('rules.flow.closed')}, ${t('rules.flow.opensIn').replace('{t}', remaining(gt.until, now))}`
+    : `${t('rules.flow.closed')}${gt.detail ? `, ${gt.detail}` : ''}`;
+  return [`${t('rules.flow.gate')}: ${gate.not ? 'NOT ' : ''}${name}`, state];
+}
+
+/**
+ * Geometry of `n` input blocks of height `bh` in rows: their left edges, row tops, the bus y of each row and the links
+ * (a stub from each block down to its row's bus, the buses joined at the trunk x CX); `bottom` is the lowest block edge.
+ */
+export function inputGrid(n: number, bh: number): { xs: number[]; inY(k: number): number; busY(r: number): number; bottom: number; links: string[] } {
+  const rows = Math.ceil(n / PER_ROW), xs = inputXs(n);
+  const rowY = (r: number): number => PAD + r * (bh + ROW_GAP);
+  const inY = (k: number): number => rowY(Math.floor(k / PER_ROW));
+  const busY = (r: number): number => rowY(r) + bh + (r === rows - 1 ? VGAP : ROW_GAP) / 2;
+  const links: string[] = [];
+  xs.forEach((x, k) => links.push(`M${x + IN_W / 2} ${inY(k) + bh} V${busY(Math.floor(k / PER_ROW))}`));
+  for (let r = 0; r < rows; r++) {
+    const cs = [CX, ...xs.slice(r * PER_ROW, (r + 1) * PER_ROW).map(x => x + IN_W / 2)];
+    if (Math.max(...cs) > Math.min(...cs)) links.push(`M${Math.min(...cs)} ${busY(r)} H${Math.max(...cs)}`);
+  }
+  return { xs, inY, busY, bottom: n === 0 ? PAD - VGAP : rowY(rows - 1) + bh, links };
 }
 
 /**
@@ -129,24 +161,15 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
   const unknown = trace?.unknownInputs ?? 0;
 
   const gt = rule.gate ? trace?.gate : undefined;
-  const gateLine = !rule.gate ? '' : !gt ? paramText(rule.gate.source)
-    // A Daylight gate shows the sensor's state (and pending change) after open / closed.
-    : 'daylight' in rule.gate.source && gt.value !== null ? `${t(gt.value ? 'rules.flow.open' : 'rules.flow.closed')}, ${daylightDetail(gt, o.now)}`
-    : gt.value === true ? t('rules.flow.open')
-    : gt.value === null ? `${t('rules.flow.closed')}, ${t('rules.val.unknown')}`
-    : gt.until !== undefined && gt.until > o.now ? `${t('rules.flow.closed')}, ${t('rules.flow.opensIn').replace('{t}', remaining(gt.until, o.now))}`
-    : `${t('rules.flow.closed')}${gt.detail ? `, ${gt.detail}` : ''}`;
+  const gateText = rule.gate ? gateLines(rule.gate, o.inputName(rule.gate), gt, o.now) : [];
   const delayText = t('rules.flow.delay').replace('{on}', secs(rule.onDelay)).replace('{off}', secs(rule.offDelay));
   const verdictLine = trace === undefined ? delayText
     : `${word(verdict ?? null)}${pending ? `, ${t('rules.flow.pending').replace('{to}', word(pending.to)).replace('{t}', countdown(left))}` : ''}`;
 
   // Geometry: the input rows, the chain of centred blocks, the two action columns.
-  const n = rule.inputs.length, rows = Math.ceil(n / PER_ROW);
-  const xs = inputXs(n);
-  const rowY = (r: number): number => PAD + r * (BH + ROW_GAP);
-  const inY = (k: number): number => rowY(Math.floor(k / PER_ROW));
-  const busY = (r: number): number => rowY(r) + BH + (r === rows - 1 ? VGAP : ROW_GAP) / 2;
-  const yComb = n === 0 ? PAD : rowY(rows - 1) + BH + VGAP;
+  const n = rule.inputs.length, grid = inputGrid(n, BH);
+  const { xs, inY } = grid;
+  const yComb = n === 0 ? PAD : grid.bottom + VGAP;
   const yRes = yComb + BH + VGAP;
   const yGate = yRes + BH + VGAP;
   const yEnd = (rule.gate ? yGate : yRes) + BH;
@@ -160,13 +183,8 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
 
   // Links: a stub from each input down to its row's bus, the buses join the trunk at CX, the trunk runs down the
   // middle grid gap to ANY / ALL; then block to block; then a split into both columns. No two paths overlap.
-  const links: string[] = [];
-  xs.forEach((x, k) => links.push(`M${x + IN_W / 2} ${inY(k) + BH} V${busY(Math.floor(k / PER_ROW))}`));
-  for (let r = 0; r < rows; r++) {
-    const cs = [CX, ...xs.slice(r * PER_ROW, (r + 1) * PER_ROW).map(x => x + IN_W / 2)];
-    if (Math.max(...cs) > Math.min(...cs)) links.push(`M${Math.min(...cs)} ${busY(r)} H${Math.max(...cs)}`);
-  }
-  if (n > 0) links.push(`M${CX} ${busY(0)} V${yComb}`);
+  const links: string[] = [...grid.links];
+  if (n > 0) links.push(`M${CX} ${grid.busY(0)} V${yComb}`);
   links.push(`M${CX} ${yComb + BH} V${yRes}`);
   if (rule.gate) links.push(`M${CX} ${yRes + BH} V${yGate}`);
   links.push(`M${CX} ${yEnd} V${ySplit} H${XA + SW / 2} V${yHead}`, `M${CX} ${ySplit} H${XB + SW / 2} V${yHead}`);
@@ -195,7 +213,7 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
         })}
         ${rule.gate ? block({
           x: (WIDTH - MW) / 2, y: yGate, w: MW, field: 'gate-input', target: 'gate-input', cls: gt ? tone(gt.value) : '',
-          lines: [`${t('rules.flow.gate')}: ${rule.gate.not ? 'NOT ' : ''}${o.inputName(rule.gate)}`, gateLine],
+          lines: gateText,
         }) : nothing}
         ${sides.map(s => svg`
           <text class="fc-head" text-anchor="middle" x=${s.x + SW / 2} y=${yHead + 14}>${s.head}</text>

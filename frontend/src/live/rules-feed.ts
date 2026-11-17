@@ -8,6 +8,8 @@ export interface RuleInputTrace {
   label: string; value: boolean | null; detail: string;
   /** Held input only: epoch ms when it turns true (the detail text is stale between evaluations). */
   until?: number;
+  /** Load control rule only: what the source gives, "toggle" or "on / off". */
+  gives?: string;
   /** Wet zone ventilation rule only: the two sensors (a = wet zone, b = compare with) and the signed whole percent. */
   vent?: { a: VentSensorTrace; b: VentSensorTrace; pct: number | null };
 }
@@ -91,8 +93,17 @@ export interface BeurerTrace {
   pausedUntil?: number;
 }
 
-/** A load control rule's devices: each source's kind and state (null = no data; a smart button's is always null) and each load's state. */
+/**
+ * A load control rule's event and devices: the latest event (`what` = the action list it ran; `dropped` = the closed gate
+ * stopped it) and every device of the three lists once with its state (null = no data; open / closed for a valve).
+ */
 export interface ControlTrace {
+  event?: { source: string; what: 'on' | 'off' | 'toggle'; at: number; dropped?: 'gate closed' };
+  devices: { id: Id; name: string; state: 'on' | 'off' | 'open' | 'closed' | null }[];
+}
+
+/** The 0.20.0 compact load control UI's trace shape: each source's kind and state and each load's state. Removed with that UI. */
+export interface LegacyControlTrace {
   sources: { id: Id; name: string; kind: string | null; state: 'on' | 'off' | null }[];
   loads: { id: Id; name: string; state: 'on' | 'off' | null }[];
 }

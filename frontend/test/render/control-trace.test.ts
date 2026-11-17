@@ -4,7 +4,7 @@ import { render } from 'lit';
 import { renderControlTrace, controlFocus, CONTROL_WIDTH, type ControlTraceOpts } from '../../src/render/control-trace';
 import { PURPOSE_WIDTH } from '../../src/render/flow-block';
 import type { Rule } from '../../src/model/types';
-import type { ControlTrace, RuleTrace } from '../../src/live/rules-feed';
+import type { LegacyControlTrace as ControlTrace, RuleTrace } from '../../src/live/rules-feed';
 
 const NOW = new Date(2026, 10, 17, 20, 0).getTime();
 const rule = (sources: string[], loads: string[]): Rule => ({
@@ -17,7 +17,7 @@ const rule = (sources: string[], loads: string[]): Rule => ({
 const names: Record<string, string> = { sw: 'Switch hall', btn: 'Button vent', pir: 'Motion sensor', a: 'Light', b: 'Vent', c: 'Socket', d: 'Fan', e: 'Heater' };
 const kinds: Record<string, string> = { sw: 'wall_switch', btn: 'smart_button', 'btn-sep': 'smart_button', pir: 'motion_sensor' };
 const live = (c: Partial<ControlTrace>, over: Partial<RuleTrace> = {}): RuleTrace => ({
-  status: 'ok', verdict: null, inputs: [], unknownInputs: 0, control: { sources: [], loads: [], ...c }, ...over,
+  status: 'ok', verdict: null, inputs: [], unknownInputs: 0, control: { sources: [], loads: [], ...c } as unknown as RuleTrace['control'], ...over,
 });
 
 function draw(r: Rule, over: Partial<ControlTraceOpts> = {}): { host: HTMLElement; onFocus: ReturnType<typeof vi.fn> } {

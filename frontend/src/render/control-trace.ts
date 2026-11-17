@@ -1,6 +1,6 @@
 import { html, nothing, svg, type TemplateResult } from 'lit';
 import { isButtonSource, type ControlSource, type Id, type Rule } from '../model/types';
-import type { RuleLast, RuleTrace } from '../live/rules-feed';
+import type { LegacyControlTrace, RuleLast, RuleTrace } from '../live/rules-feed';
 import { clock } from '../panel/rules-panel';
 import { tone } from './rule-trace';
 import { FLOW_PAD as PAD, FLOW_VGAP as VGAP, PURPOSE_WIDTH, blockH, flowBlock } from './flow-block';
@@ -86,7 +86,7 @@ function group(y0: number, items: Item[], above: boolean, edge: number): { block
 export function renderControlTrace(o: ControlTraceOpts): TemplateResult {
   const c = { sources: legacySourceIds(o.rule.control!.sources), loads: legacyLoadIds(o.rule.control!) };
   const tr = o.trace;
-  const ct = tr?.control;
+  const ct = tr?.control as unknown as LegacyControlTrace | undefined;
   const state = (s: 'on' | 'off' | null | undefined, on: string, off: string): string => (s === 'on' ? on : s === 'off' ? off : t('control.flow.noData'));
   const toneOf = (s: 'on' | 'off' | null | undefined): string => (ct ? tone(s == null ? null : s === 'on') : '');
 

@@ -1,5 +1,5 @@
 import type { Device, DeviceProps, Plan, Rule, Zone } from '../src/model/types';
-import type { BeurerTrace, ControlTrace, OutsideTrace, RuleTrace } from '../src/live/rules-feed';
+import type { BeurerTrace, LegacyControlTrace, OutsideTrace, RuleTrace } from '../src/live/rules-feed';
 import { fitWallMount } from '../src/geometry/devices';
 import type { PowerFrame, PowerSchema } from '../src/model/power';
 import { rectRoomLevel } from '../test/fixtures';
@@ -591,7 +591,7 @@ function controlPlan(extraLoads = false): Plan {
   return p;
 }
 
-const controlTrace = (over: Partial<RuleTrace> = {}, c: Partial<ControlTrace> = {}): RuleTrace => ({
+const controlTrace = (over: Partial<RuleTrace> = {}, c: Partial<LegacyControlTrace> = {}): RuleTrace => ({
   status: 'ok', verdict: null, unknownInputs: 0, inputs: [],
   control: {
     sources: [
@@ -605,7 +605,7 @@ const controlTrace = (over: Partial<RuleTrace> = {}, c: Partial<ControlTrace> = 
       { id: 'd-socket', name: 'Socket', state: null },
     ],
     ...c,
-  },
+  } as unknown as RuleTrace['control'],
   last: { action: 'on', target: 'Socket', at: at(21, 43), reason: 'Switch hall: on' },
   ...over,
 });
