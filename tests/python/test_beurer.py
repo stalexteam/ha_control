@@ -125,6 +125,22 @@ def test_step_pause_end_no_data_drops_the_cycle():
     assert b.step(105, True, None) is None and b.pause is None and not b.fresh
 
 
+def test_step_retries_on_while_wanted_and_off():
+    b = pure()
+    assert b.step(100, True, "off") is None and b.retry == 105 and b.wake() == 105
+    assert b.step(104, True, "off") is None and b.retry == 105
+    assert b.step(105, True, "off") == "retry" and b.retry == 110 and b.wake() == 110
+    b.fresh, b.since = True, 100.0
+    assert b.step(106, True, "on") is None and b.retry is None  # confirmed
+    b.fresh = False
+    assert b.step(107, True, "off") is None and b.retry == 112
+    assert b.step(108, False, "off") is None and b.retry is None and b.wake() is None  # not wanted
+    assert b.step(109, True, "off") is None and b.retry == 114
+    assert b.step(110, True, None) is None and b.retry is None and b.wake() is None  # no data
+    b.pause = 120.0
+    assert b.step(120, True, "off") == "on" and b.retry == 125  # the pause end's on is repeated 5 s later
+
+
 def test_heater_changed_table():
     b = pure()
     b.seen = "off"
@@ -303,6 +319,61 @@ def test_no_data_at_the_pause_end_drops_the_cycle():
             assert w.bt()["pausedUntil"] == (T0 + CYCLE + 5 + 5) * 1000
 
 
+def test_unconfirmed_pause_end_on_is_sent_again():
+    w = heating()
+    w.advance(T0 + CYCLE)
+    w.pad("off", own=True)
+    w.advance(T0 + CYCLE + 5)
+    assert w.calls == [OFF, ON]  # the pause end's on; the pad keeps reading off
+    w.advance(T0 + CYCLE + 9)
+    assert w.calls == [OFF, ON]
+    w.advance(T0 + CYCLE + 10)
+    assert w.calls == [OFF, ON, ON] and w.tr()["last"] == {"action": "on", "target": "Pad",
+                                                           "at": (T0 + CYCLE + 10) * 1000, "reason": "no confirmation"}
+    w.advance(T0 + CYCLE + 15)
+    assert w.calls == [OFF, ON, ON, ON] and w.tr()["last"]["reason"] == "no confirmation"
+    w.pad("on", own=True)
+    w.advance(T0 + CYCLE + 60)
+    assert w.calls == [OFF, ON, ON, ON] and w.bt()["fresh"] is True
+
+
+def test_unconfirmed_start_on_is_sent_again():
+    w = loaded()
+    assert w.calls == [ON]
+    w.advance(T0 + 4)
+    assert w.calls == [ON]
+    w.advance(T0 + 5)
+    assert w.calls == [ON, ON] and w.tr()["last"]["reason"] == "no confirmation"
+
+
+def test_no_retry_when_not_wanted_or_no_data():
+    w = loaded(sensor__pc=pw(100))
+    sent = list(w.calls)
+    assert ON not in sent and not w.pending()
+    w.advance(T0 + 60)
+    assert w.calls == sent
+    w = loaded(switch__pad="unavailable")  # wanted, no data: the start's on waits for the pad, no retry timer
+    assert w.calls == [ON] and not w.pending()
+    w.advance(T0 + 60)
+    assert w.calls == [ON]
+    w = heating()
+    w.pad("unavailable")
+    assert not w.pending()
+    w.advance(T0 + 60)
+    assert w.calls == []
+
+
+def test_cycle_off_gives_up_a_waiting_on():
+    w = loaded(switch__pad="unavailable")
+    assert w.calls == [ON]
+    w.calls.clear()
+    w.pad("on")  # back reading on: not fresh, a cycle; the waiting on is not sent again inside the pause
+    assert w.calls == [OFF] and "error" not in w.tr()["last"]
+    w.pad("off", own=True)
+    w.advance(T0 + 5)
+    assert w.calls == [OFF, ON]
+
+
 def test_verdict_false_during_the_pause_leaves_it_off():
     w = heating([beurer_rule(off=0)])
     w.advance(T0 + CYCLE)
@@ -399,6 +470,12 @@ def test_trace_shape():
     w.power("unavailable")
     assert w.bt()["keptUntil"] == (T0 + CYCLE + 600) * 1000 and w.bt()["detail"] == "no data, kept"
     assert w.tr()["inputs"][0]["until"] == (T0 + CYCLE + 600) * 1000 and w.tr()["inputs"][0]["watts"] is None
+
+
+def test_no_cycle_at_while_not_wanted():
+    w = heating([beurer_rule(off=0)])
+    w.power(150)  # the pad still reads on, fresh: no next cycle while the rule does not want it on
+    assert w.calls == [OFF] and w.tr()["verdict"] is False and w.bt()["fresh"] is True and "cycleAt" not in w.bt()
 
 
 def test_shared_with_a_condition_pair():

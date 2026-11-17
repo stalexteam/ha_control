@@ -1668,15 +1668,18 @@ class RuleEngine:
 
     def _beurer_step(self, rule: _Rule) -> None:
         """The power-cycle after an evaluation of an enabled beurer rule: the off goes straight to the heater (not
-        through the slots, never waiting); the on at the pause end goes through the slots while a rule holds the
-        heater. Then the pause end or the next cycle is armed."""
+        through the slots, never waiting); the on at the pause end and an unconfirmed on repeated go through the slots
+        while a rule holds the heater. Then the pause end, the next retry or the next cycle is armed."""
         b = rule.beurer
         assert b is not None
         now = self._now()
         do = b.step(now, not b.missing and rule.verdict is True, b.state(self._lookup))
         if do is not None and b.eid is not None:
-            entry = {"action": do, "target": b.label, "at": int(now * 1000), "reason": "re-power"}
+            why = "no confirmation" if do == "retry" else "re-power"
+            do = "on" if do == "retry" else do
+            entry = {"action": do, "target": b.label, "at": int(now * 1000), "reason": why}
             if do == "off":
+                self._give_up(b.eid)  # a waiting on is not re-sent inside the pause
                 self._beurer_off(b.eid)
                 rule.last = entry
             elif self._holders(b.eid):
@@ -1719,7 +1722,7 @@ class RuleEngine:
         out["heater"], out["fresh"] = b.state(self._lookup), b.fresh
         if b.pause is not None:
             out["pausedUntil"] = int(b.pause * 1000)
-        elif b.fresh and b.every > 0:
+        elif b.fresh and b.every > 0 and rule.verdict is True:
             out["cycleAt"] = int((b.since + b.every * 60) * 1000)
         return out
 

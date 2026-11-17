@@ -45,14 +45,15 @@ class Beurer:
         self.fresh = False  # the rule itself switched the heater on from off: `since` is trustworthy
         self.since = 0.0  # epoch s the heater read on after that command
         self.pause: float | None = None  # epoch s the running power-cycle pause ends; None when no cycle runs
-        self.timer: "tuple[float, Callable[[], None]] | None" = None  # the pause end or the next cycle
+        self.retry: float | None = None  # epoch s the next on goes out while wanted and the heater reads off
+        self.timer: "tuple[float, Callable[[], None]] | None" = None  # the pause end, the next retry or cycle
 
     def input(self) -> dict:
         """The rule's one input: the source's power above the threshold, the last value kept `keep` min without data."""
         return {"source": {"power": {"device": self.source, "above": self.above, "keep": self.keep}}}
 
     def take(self, old: "Beurer") -> None:
-        self.seen, self.fresh, self.since, self.pause = old.seen, old.fresh, old.since, old.pause
+        self.seen, self.fresh, self.since, self.pause, self.retry = old.seen, old.fresh, old.since, old.pause, old.retry
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -86,8 +87,10 @@ class Beurer:
 
     def step(self, now: float, wanted: bool, state: str | None) -> str | None:
         """The power-cycle after an evaluation: "off" (start a pause, or repeat it while the heater still reads on),
-        "on" (the pause ended with the heater off; sent only while a rule holds it) or None."""
+        "on" (the pause ended with the heater off; sent only while a rule holds it), "retry" (an on again: wanted and
+        the heater still reads off PAUSE s after it was first seen so, a lost command) or None."""
         if self.pause is not None:
+            self.retry = None
             if now < self.pause:
                 return None
             if state == "on":  # a slow socket: off again, never on while it reads on
@@ -95,18 +98,29 @@ class Beurer:
                 return "off"
             self.pause = None
             if state == "off":
+                self.retry = now + PAUSE  # repeated while the heater keeps reading off
                 return "on"
             self.fresh = False  # no data: the cycle is dropped
             return None
         if self.every > 0 and wanted and state == "on" and (not self.fresh or now - self.since >= self.every * 60):
-            self.pause, self.fresh = now + PAUSE, False
+            self.pause, self.fresh, self.retry = now + PAUSE, False, None
             return "off"
+        if wanted and state == "off":
+            if self.retry is None:  # first seen: the on that brought us here has just gone out
+                self.retry = now + PAUSE
+                return None
+            if now >= self.retry:
+                self.retry = now + PAUSE
+                return "retry"
+            return None
+        self.retry = None  # not wanted, reads on or no data
         return None
 
     def wake(self) -> float | None:
-        """When the power-cycle has to be looked at again: the pause end, else the next cycle while fresh."""
+        """When the power-cycle has to be looked at again: the pause end, else the earliest of the next retry and the
+        next cycle while fresh."""
         if self.pause is not None:
             return self.pause
-        if self.fresh and self.every > 0:
-            return self.since + self.every * 60
-        return None
+        due = [t for t in (self.retry, self.since + self.every * 60 if self.fresh and self.every > 0 else None)
+               if t is not None]
+        return min(due) if due else None

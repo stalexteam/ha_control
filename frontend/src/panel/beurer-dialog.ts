@@ -75,7 +75,7 @@ export function renderBeurerDialog(o: BeurerDialogOpts): TemplateResult {
       ${pick('beurer-source', c.source, o.sources.filter(d => d.id !== c.heater), id => set({ ...c, source: id }))}
 
       ${field('above', t('beurer.above'), c.above, 1, 100000, n => set({ ...c, above: n }))}
-      ${field('off', t('beurer.off'), r.offDelay, 0, 86400, n => o.onChange({ ...r, offDelay: n }))}
+      ${field('off', t('beurer.off'), r.offDelay, 0, 3600, n => o.onChange({ ...r, offDelay: n }))}
       ${field('keep', t('beurer.keep'), c.keep, 0, 1440, n => set({ ...c, keep: n }))}
       ${field('every', t('beurer.every'), c.every, 0, 1440, n => set({ ...c, every: n }), t('beurer.everyNote'))}`,
     diagram: renderBeurerTrace({

@@ -53,7 +53,8 @@ export function renderBeurerTrace(o: BeurerTraceOpts): TemplateResult {
   const kept = bt?.watts === null && bt.keptUntil !== undefined;
   const reading = !bt ? t('beurer.source') : bt.watts !== null ? bt.detail
     : kept ? t('beurer.flow.kept').replace('{t}', left(bt.keptUntil!, o.now)) : t('beurer.flow.noData');
-  add('beurer-source', bt ? tone(bt.watts !== null ? bt.watts > cfg.above : kept ? true : null) : '', [o.deviceName(cfg.source), reading]);
+  add('beurer-source', bt ? tone(bt.watts !== null ? bt.watts > cfg.above : kept ? tr!.inputs[0]?.value ?? null : null) : '',
+    [o.deviceName(cfg.source), reading]);
 
   const pending = tr?.pending;
   add('beurer-wants', tr ? tone(tr.verdict) : '', [
@@ -64,6 +65,7 @@ export function renderBeurerTrace(o: BeurerTraceOpts): TemplateResult {
 
   const wanted = tr?.verdict === true;
   const repower = cfg.every === 0 ? t('beurer.flow.never')
+    : bt && !wanted ? '—'
     : bt?.pausedUntil !== undefined ? t('beurer.flow.now').replace('{t}', left(bt.pausedUntil, o.now))
     : bt?.cycleAt !== undefined ? t('beurer.flow.next').replace('{t}', left(bt.cycleAt, o.now))
     : bt && wanted && bt.heater === 'on' && !bt.fresh ? t('beurer.flow.due')

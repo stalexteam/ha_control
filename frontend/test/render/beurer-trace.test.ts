@@ -66,9 +66,19 @@ describe('beurer heater diagram', () => {
     expect(gone.querySelector('[data-block="beurer-source"]')!.classList.contains('nodata')).toBe(true);
   });
 
+  it('a kept reading takes its tone from the kept value', () => {
+    const kept = (value: boolean) => live({ watts: null, detail: 'no data, kept', keptUntil: NOW + 252_000 },
+      { inputs: [{ label: 'Desk PC', value, detail: 'no data, kept' }] });
+    const idle = draw({ trace: kept(false) }).host.querySelector('[data-block="beurer-source"]')!;
+    expect(idle.classList.contains('on')).toBe(false);
+    expect(idle.classList.contains('off')).toBe(true);
+    expect(draw({ trace: kept(true) }).host.querySelector('[data-block="beurer-source"]')!.classList.contains('on')).toBe(true);
+  });
+
   it('due when wanted, the heater on, the pad\'s timer not fresh and no pause; a dash when nothing is wanted', () => {
     expect(text(draw({ trace: live({ fresh: false }) }).host, 'beurer-every')).toBe('Re-power | due');
     expect(text(draw({ trace: live({ fresh: false, heater: 'off' }, { verdict: false }) }).host, 'beurer-every')).toBe('Re-power | —');
+    expect(text(draw({ trace: live({ cycleAt: NOW + 754_000 }, { verdict: false }) }).host, 'beurer-every')).toBe('Re-power | —');
   });
 
   it('every 0 reads never, with and without live values', () => {

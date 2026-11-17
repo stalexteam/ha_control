@@ -59,6 +59,7 @@ describe('Beurer heater form', () => {
     expect(q<HTMLSelectElement>(el, '[data-field="beurer-heater"]').value).toBe('');
     expect(q<HTMLSelectElement>(el, '[data-field="beurer-source"]').value).toBe('');
     expect(['above', 'off', 'keep', 'every'].map(k => q<HTMLInputElement>(el, `[data-field="beurer-${k}"]`).value)).toEqual(['200', '60', '10', '30']);
+    expect(q<HTMLInputElement>(el, '[data-field="beurer-off"]').max).toBe('3600');
     expect(q(el, '.rsettings').textContent).toContain('0 = never');
     expect(q(el, '.fc-note').textContent).toBe('Live state appears after Save');
   });
