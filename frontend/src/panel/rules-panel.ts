@@ -1,7 +1,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import type { Id, Level, Rule } from '../model/types';
 import type { Selection } from '../editor/tools/types';
-import type { RuleLast, RuleTrace } from '../live/rules-feed';
+import { SWITCHED_ELSEWHERE, type RuleLast, type RuleTrace } from '../live/rules-feed';
 import { ruleEqual, rulesFor } from '../model/rules';
 import { t } from '../i18n';
 
@@ -26,8 +26,15 @@ export function clock(at: number): string {
   try { return new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ''; }
 }
 
-/** "closed Water valve 21:43", with the failure after it when the call failed. */
+/**
+ * "closed Water valve 21:43", with the failure after it when the call failed. An entry the rule did not send (a timed
+ * switch's `sent: false`) is never worded as a command: "Vent switched off elsewhere 21:46" / "Vent already on 21:50".
+ */
 export function lastText(l: RuleLast): string {
+  if (l.sent === false) {
+    return t(l.reason === SWITCHED_ELSEWHERE ? 'rules.last.elsewhere' : 'rules.last.already')
+      .replace('{target}', l.target).replace('{s}', l.action).replace('{at}', clock(l.at)).trim();
+  }
   const base = `${t(`rules.did.${l.action}`)} ${l.target} ${clock(l.at)}`.trim();
   return l.error ? `${base}: ${l.error}` : base;
 }

@@ -374,6 +374,83 @@ const LEAK_NA: RuleTrace = {
   last: { action: 'close', target: 'Hot water valve', at: new Date().setHours(21, 43, 0, 0), reason: 'leak', error: 'waiting for target' },
 };
 
+/**
+ * Scene `timed`: the room with a WC zone in its top-right corner holding the smart button "Button vent" (1 hold
+ * starts, 2 hold stops) and the fan "Vent", the wall switch "Switch hall", and two timed switch rules: `rule-timed`
+ * "Vent (10min)" and the inverted `rule-timed-inv` (Switch hall -> Socket off for 30 min, then on). Live: both idle,
+ * the vent's last run ended by time. Scene `timed-run`: the vent runs (ends in 8:12). Scene `timed-else`: the vent
+ * was switched off elsewhere. Scene `timed-inv`: the inverted rule runs; the vent run started with the vent already on.
+ */
+function timedPlan(): Plan {
+  const p = room();
+  const level = p.levels[0];
+  level.zones.push({
+    id: 'z-wc', name: 'WC', invalid: false,
+    shape: { kind: 'polygon', vertices: [[3300, 100], [3950, 100], [3950, 1000], [3300, 1000]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
+  });
+  level.devices.push(
+    {
+      id: 'd-button-vent', name: 'Button vent', invalid: false, bindings: { on: 'sensor.button_vent_action' },
+      placement: { mode: 'wall', wallId: 'w1', side: 'right', offset: 800 },
+      props: {
+        kind: 'smart_button', separateOff: true, autoEnabled: false,
+        on: { slot: 1, event: 'hold' }, off: { slot: 2, event: 'hold' }, auto: { slot: 0, event: 'double' },
+      },
+    },
+    {
+      id: 'd-vent', name: 'Vent', invalid: false, bindings: { control: 'switch.vent' },
+      placement: { mode: 'wall', wallId: 'w1', side: 'right', offset: 400 },
+      props: { kind: 'exhaust_fan', diameter: 100 },
+    },
+    {
+      id: 'd-switch-hall', name: 'Switch hall', invalid: false, bindings: { state: 'switch.wallswitch_hall' },
+      placement: { mode: 'wall', wallId: 'w3', side: 'right', offset: 1500 },
+      props: { kind: 'wall_switch', autoByDoubleToggle: false, windowSec: 3 },
+    },
+  );
+  const fixed = { combine: 'any' as const, inputs: [], onDelay: 0, offDelay: 0, onTrue: [], onFalse: [] };
+  p.rules!.push(
+    { id: 'rule-timed', name: 'Vent (10min)', zoneId: 'z-wc', ...fixed, timed: { button: 'd-button-vent', device: 'd-vent', minutes: 10 } },
+    { id: 'rule-timed-inv', name: 'Socket pause', zoneId: 'r0', ...fixed, timed: { button: 'd-switch-hall', device: 'd-socket', minutes: 30, invert: true } },
+  );
+  return p;
+}
+
+const at = (h: number, m: number): number => new Date().setHours(h, m, 0, 0);
+const TIMED_IDLE: Record<string, RuleTrace> = {
+  ...ROOM_RULES,
+  'rule-timed': {
+    status: 'ok', verdict: false, inputs: [], unknownInputs: 0, timed: { running: false, device: 'off' },
+    last: { action: 'off', target: 'Vent', at: at(21, 43), reason: 'time over' },
+  },
+  'rule-timed-inv': { status: 'ok', verdict: false, inputs: [], unknownInputs: 0, timed: { running: false, device: 'on' } },
+};
+const TIMED_RUN: Record<string, RuleTrace> = {
+  ...TIMED_IDLE,
+  'rule-timed': {
+    status: 'ok', verdict: true, inputs: [], unknownInputs: 0, timed: { running: true, until: Date.now() + 492_000, device: 'on' },
+    last: { action: 'on', target: 'Vent', at: at(21, 50), reason: 'button start' },
+  },
+};
+const TIMED_ELSE: Record<string, RuleTrace> = {
+  ...TIMED_IDLE,
+  'rule-timed': {
+    status: 'ok', verdict: false, inputs: [], unknownInputs: 0, timed: { running: false, device: 'off' },
+    last: { action: 'off', target: 'Vent', at: at(21, 46), reason: 'ended: switched elsewhere', sent: false },
+  },
+};
+const TIMED_INV: Record<string, RuleTrace> = {
+  ...TIMED_IDLE,
+  'rule-timed': {
+    status: 'ok', verdict: true, inputs: [], unknownInputs: 0, timed: { running: true, until: Date.now() + 185_000, device: 'on' },
+    last: { action: 'on', target: 'Vent', at: at(21, 50), reason: 'button start', sent: false },
+  },
+  'rule-timed-inv': {
+    status: 'ok', verdict: true, inputs: [], unknownInputs: 0, timed: { running: true, until: Date.now() + 1_385_000, device: 'off' },
+    last: { action: 'off', target: 'Socket', at: at(21, 40), reason: 'button start' },
+  },
+};
+
 const equipment = (id: string, name: string, placement: Device['placement'], bindings: Device['bindings'],
   flags: { inverter?: true; controllable?: true } = {}): Device => ({
   id, name, invalid: false, bindings, placement,
@@ -536,4 +613,8 @@ export const SCENES: Record<string, Scene> = {
   'leak-na': { plans: [leakPlan()], rulesFrame: { ...ROOM_RULES, 'rule-leakp': LEAK_NA } },
   'boiler-limit': { plans: [boilerPlan()], rulesFrame: BOILER_LIMIT_RULES },
   'boiler-heat': { plans: [boilerPlan()], rulesFrame: BOILER_HEAT_RULES },
+  timed: { plans: [timedPlan()], rulesFrame: TIMED_IDLE },
+  'timed-run': { plans: [timedPlan()], rulesFrame: TIMED_RUN },
+  'timed-else': { plans: [timedPlan()], rulesFrame: TIMED_ELSE },
+  'timed-inv': { plans: [timedPlan()], rulesFrame: TIMED_INV },
 };

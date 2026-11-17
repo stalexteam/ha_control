@@ -33,8 +33,18 @@ export interface LeakValveTrace { id: string; name: string; state: 'open' | 'clo
 /** The gate as the server reports it: `value` is after NOT (true = open); `until` = epoch ms when a Held gate opens. */
 export interface RuleGateTrace { value: boolean | null; detail: string; until?: number }
 
-/** The last firing of a rule: `action` is on / off / open / close, `target` a device name, `at` epoch ms. */
-export interface RuleLast { action: 'on' | 'off' | 'open' | 'close'; target: string; at: number; reason: string; error?: string }
+/**
+ * The last firing of a rule: `action` is on / off / open / close, `target` a device name, `at` epoch ms. `sent: false`
+ * (timed switch only) = the rule sent no command: the device already read `action`, or someone else switched it to
+ * `action` (reason `ended: switched elsewhere`).
+ */
+export interface RuleLast { action: 'on' | 'off' | 'open' | 'close'; target: string; at: number; reason: string; error?: string; sent?: false }
+
+/** The `RuleLast.reason` of a timed switch run that ended because someone else switched its device. */
+export const SWITCHED_ELSEWHERE = 'ended: switched elsewhere';
+
+/** A timed switch rule's run: `until` = epoch ms of its end (only while running); `device` null = no data. */
+export interface TimedTrace { running: boolean; until?: number; device: 'on' | 'off' | null }
 
 /** Live state of one saved rule, from `plan_studio/rules/subscribe`. */
 export interface RuleTrace {
@@ -55,6 +65,8 @@ export interface RuleTrace {
   boiler?: BoilerTrace;
   /** Leak protection rule only: its valves (the sensors are the inputs). */
   leak?: { valves: LeakValveTrace[] };
+  /** Timed switch rule only. */
+  timed?: TimedTrace;
 }
 
 /** One `plan_studio/rules/subscribe` event: `full` replaces the map, otherwise the changed rules merge into it. */

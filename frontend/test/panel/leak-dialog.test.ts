@@ -46,11 +46,11 @@ async function add(el: PlanStudioPanel, f: string, value: string): Promise<void>
 describe('Leak protection form', () => {
   beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
 
-  it('the Automations menu lists Leak protection after the others', async () => {
+  it('the Automations menu lists Leak protection after the boiler', async () => {
     const el = await open([]);
     await press(el, 'button[data-action="automations"]');
     const items = [...el.shadowRoot!.querySelectorAll('.amenu [role="menuitem"]')];
-    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak']);
+    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed']);
     expect(items[2].textContent!.trim()).toBe('Leak protection');
   });
 

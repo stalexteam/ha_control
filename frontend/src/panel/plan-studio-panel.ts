@@ -42,12 +42,13 @@ import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { RulesFeed, type RuleTrace } from '../live/rules-feed';
-import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakProtectionTemplate, ventTemplate, isVentRule, isLeakRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
+import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakProtectionTemplate, ventTemplate, isVentRule, isLeakRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isTimedRule, timedTemplate, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import { renderAutomationsMenu, type RuleTemplate } from './rule-templates';
 import { renderRuleDialog, type RuleDraft } from './rule-dialog';
 import { renderVentDialog } from './vent-dialog';
 import { renderBoilerDialog } from './boiler-dialog';
 import { renderLeakDialog } from './leak-dialog';
+import { renderTimedDialog } from './timed-dialog';
 import { leakFocus } from '../render/leak-trace';
 import { BOILER_FOCUS } from '../render/boiler-trace';
 import { PowerFeed, powerPayload } from '../live/power-feed';
@@ -260,7 +261,7 @@ export class PlanStudioPanel extends LitElement {
       || this.events.leaving(d.id, now).length > 0);
     const tr = this.modal && this.ruleDraft ? this.shownRuleTrace(this.ruleDraft.rule) : undefined;
     const countdown = !!tr && (!!tr.pending || tr.inputs.some(i => i.until !== undefined && i.until > now) || (tr.gate?.until ?? 0) > now
-      || (tr.boiler?.until ?? 0) > now);
+      || (tr.boiler?.until ?? 0) > now || (tr.timed?.running === true && (tr.timed.until ?? 0) > now));
     if ((need || countdown) && !this.ticker) this.ticker = setInterval(() => this.requestUpdate(), 1000);
     else if (!need && !countdown) this.stopTicker();
   }
@@ -356,6 +357,7 @@ export class PlanStudioPanel extends LitElement {
         : template === 'timer' ? timerTemplate({ levels }, zid, dev && isRuleInputDevice(dev) ? dev.id : null, dev && isRuleInputDevice(dev) ? dev.name : '')
         : template === 'outside' ? outsideLightTemplate({ levels }, zid, zone?.name ?? null)
         : template === 'vent' ? ventTemplate({ levels }, zid, zone?.name ?? null)
+        : template === 'timed' ? timedTemplate({ levels }, zid, zone?.name ?? null)
         : template === 'boiler' ? boilerTemplate({ levels, power: { ...this.power, blocks: this.boilerGridBlocks() } }, zid, zone?.name ?? null)
         : newRule(zid);
       draft = { rule, isNew: true, focused: null };
@@ -470,6 +472,19 @@ export class PlanStudioPanel extends LitElement {
         zones, problems, trace, note, now: Date.now(),
         onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
         onFocus: f => this.focusRuleField(f, leakFocus(f)),
+        onOk: () => this.commitRuleDraft(),
+        onCancel: () => { this.dialog = null; this.ruleDraft = null; },
+      });
+    }
+    if (isTimedRule(rule)) {
+      return renderTimedDialog({
+        draft: d,
+        buttons: devices.filter(x => x.props.kind === 'wall_switch' || x.props.kind === 'smart_button'),
+        devices: devices.filter(x => ruleActionsFor(x).includes('on')),
+        deviceById: id => devices.find(x => x.id === id),
+        zones, problems, trace, note, now: Date.now(),
+        onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
+        onFocus: f => this.focusRuleField(f),
         onOk: () => this.commitRuleDraft(),
         onCancel: () => { this.dialog = null; this.ruleDraft = null; },
       });

@@ -1,17 +1,18 @@
 import { html, svg, type TemplateResult } from 'lit';
-import { mdiCodeBraces, mdiRobotOutline, mdiTimerOutline, mdiWaterAlert, mdiWaterBoiler, mdiWeatherNight, mdiFan } from '@mdi/js';
+import { mdiCodeBraces, mdiRobotOutline, mdiTimerOutline, mdiTimerPlayOutline, mdiWaterAlert, mdiWaterBoiler, mdiWeatherNight, mdiFan } from '@mdi/js';
 import { t } from '../i18n';
 
-export type RuleTemplate = 'condition' | 'leak' | 'timer' | 'outside' | 'vent' | 'boiler';
+export type RuleTemplate = 'condition' | 'leak' | 'timer' | 'outside' | 'vent' | 'boiler' | 'timed';
 
 const ICONS: Record<RuleTemplate, string> = {
   condition: mdiCodeBraces, leak: mdiWaterAlert, timer: mdiTimerOutline, outside: mdiWeatherNight, vent: mdiFan, boiler: mdiWaterBoiler,
+  timed: mdiTimerPlayOutline,
 };
 
 /** Condition templates: one rail button each. */
 const CONDITION_TEMPLATES = ['condition', 'timer', 'outside'] as const;
 /** Purpose-built automations, each with its own dialog: listed in the rail's "Automations" menu, in this order. */
-export const AUTOMATIONS: readonly RuleTemplate[] = ['vent', 'boiler', 'leak'];
+export const AUTOMATIONS: readonly RuleTemplate[] = ['vent', 'boiler', 'leak', 'timed'];
 
 const icon = (d: string): TemplateResult => html`<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true">${svg`<path d=${d}></path>`}</svg>`;
 
