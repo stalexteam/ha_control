@@ -64,6 +64,9 @@ class MotionLight:
         self.on_at: float | None = None  # when the rule decided to switch the light on (None for a light found on)
         self.seen: str | None = None  # the light's last on / off reading (None after no data)
         self.skip = False  # the next change of the light is the wall-switch double toggle that returned auto
+        self.entered = False  # auto was just entered: its entry stays the last one (no "found on" over it)
+        # the rule's own recent decisions (state, until epoch s): a late echo of one is never a manual switch
+        self.own: list[tuple[str, float]] = []
         self.timer: "tuple[float, Callable[[], None]] | None" = None  # the auto-return
 
     def inputs(self) -> "list[dict]":
@@ -75,7 +78,7 @@ class MotionLight:
 
     def take(self, old: "MotionLight") -> None:
         self.mode, self.since, self.moving, self.on_at = old.mode, old.since, old.moving, old.on_at
-        self.seen, self.skip = old.seen, old.skip
+        self.seen, self.skip, self.entered, self.own = old.seen, old.skip, old.entered, list(old.own)
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -127,11 +130,18 @@ class MotionLight:
             return "auto", None
         return None, None
 
-    def light_changed(self, state: "str | None", confirms: bool, active: bool) -> "str | None":
+    def decide(self, state: str, until: float) -> None:
+        """The rule decided `state` (sent or not): until then a change of the light to it is the rule's own."""
+        self.own.append((state, until))
+
+    def light_changed(self, state: "str | None", confirms: bool, active: bool, now: float = 0.0) -> "str | None":
         """A state change of the light in auto: "manual" for a known -> known change that does not confirm the slots'
-        last command (whatever its context), "back" for a return from no data (or the wall-switch change behind an auto
-        intent: the auto start applies again), "found" for an off -> on that confirms, else None."""
+        last command (whatever its context) and is not to a state the rule itself decided within its window (an
+        overtaken command arriving late; each decision counts once), "back" for a return from no data (or the
+        wall-switch change behind an auto intent: the auto start applies again), "found" for an off -> on that
+        confirms, else None."""
         was, self.seen = self.seen, state
+        self.own = [o for o in self.own if o[1] > now]
         if not active or self.mode != "auto" or state is None or state == was:
             return None
         if was is None:
@@ -140,15 +150,19 @@ class MotionLight:
             self.skip = False
             return "back"
         if not confirms:
-            return "manual"
+            mine = next((o for o in self.own if o[0] == state), None)
+            if mine is None:
+                return "manual"
+            self.own.remove(mine)
+            return None
         return "found" if state == "on" else None
 
     def auto_due(self, now: float, motion: bool) -> "float | None":
-        """While manual with auto_after > 0: the epoch auto returns at (None while motion lasts); `since` follows the
-        motion. At or after it the caller enters auto."""
+        """While manual with auto_after > 0: the epoch auto returns at (None while motion lasts); `since` moves only to
+        the moment the motion ends. At or after it the caller enters auto."""
         if self.mode != "manual" or self.auto_after <= 0:
             return None
-        if motion or self.moving or self.since is None:
+        if (self.moving and not motion) or self.since is None:
             self.since = now
         self.moving = motion
         return None if motion else self.since + self.auto_after * 60

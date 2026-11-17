@@ -1788,27 +1788,33 @@ class RuleEngine:
         m.stop()
         rule.open = True
         if rule.verdict is None:  # rule start, entering auto, the light back from no data: take the light as it is
-            self._motion_hold(rule, m.state(self._lookup) == "on")
+            self._motion_hold(rule, m.state(self._lookup) == "on", note=not m.entered)
+        m.entered = False
         if self._step(rule, due):
             # the rule decided to switch the light on: the minimum on time counts from here
             m.on_at = now if rule.verdict is True else None
+            m.decide("on" if rule.verdict else "off", now + ON_WAY)  # its late echo is not a manual switch
         return rule.verdict != was
 
-    def _motion_hold(self, rule: _Rule, on: bool) -> None:
+    def _motion_hold(self, rule: _Rule, on: bool, note: bool = True) -> None:
         """Take the light's state as the verdict without a command: a light found on is held (its off comes after the
-        off delay; the minimum on time does not apply), one found off is not."""
+        off delay; the minimum on time does not apply; recorded as "found on" unless `note` is False), one found off
+        is not."""
         m = rule.motion_light
         assert m is not None and m.eid is not None
         rule.cancel()
         rule.verdict, m.on_at = on, None
         self._new_firing(rule)
         self._give_up(m.eid, rule.key)  # a command of the rule still waiting for the light is stale
+        if on and note:
+            rule.last, rule.failed = {"action": "on", "target": m.label, "at": int(self._now() * 1000),
+                                      "reason": "found on", "sent": False}, None
 
     def _motion_manual(self, rule: _Rule, why: str, action: "str | None", sent: bool = False) -> dict:
         """Enter (or stay in) manual: out of the slots at once, nothing owed or waiting for the light any more."""
         m = rule.motion_light
         assert m is not None and m.eid is not None
-        m.mode, m.since, m.moving, m.on_at, m.skip = "manual", self._now(), False, None, False
+        m.mode, m.since, m.moving, m.on_at, m.skip, m.entered, m.own = "manual", self._now(), False, None, False, False, []
         rule.cancel()
         rule.open, rule.verdict = False, None
         self._give_up(m.eid, rule.key)
@@ -1825,7 +1831,7 @@ class RuleEngine:
         """Enter auto: the auto rules apply from now on (the evaluation takes the light as it is)."""
         m = rule.motion_light
         assert m is not None
-        m.mode, m.since, m.moving, m.on_at = "auto", None, False, None
+        m.mode, m.since, m.moving, m.on_at, m.entered, m.own = "auto", None, False, None, True, []
         m.stop()
         rule.cancel()
         rule.verdict = None
@@ -1855,7 +1861,7 @@ class RuleEngine:
         m = rule.motion_light
         assert m is not None
         state = m.state(self._lookup)
-        change = m.light_changed(state, confirms, rule.enabled and not m.missing and not self._booting)
+        change = m.light_changed(state, confirms, rule.enabled and not m.missing and not self._booting, self._now())
         if change == "manual":
             self._motion_manual(rule, "switched elsewhere: manual", state)
         elif change == "back":

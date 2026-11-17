@@ -435,6 +435,80 @@ def test_auto_again_waits_while_motion_lasts():
     assert w.ml()["mode"] == "auto"
 
 
+def test_since_changes_only_when_motion_ends():
+    w = loaded([ml_rule(auto_after=10)])
+    w.light("on")  # manual at T0
+    n = len(w.saved)
+    w.advance(T0 + 60)
+    w.pir("on")
+    for k in range(3):  # repeated reports while the motion lasts
+        w.advance(T0 + 70 + k)
+        w.pir("on")
+    assert len(w.saved) == n and w.engine.motion_modes()["p"]["m"]["since"] == T0
+    w.advance(T0 + 120)
+    w.pir("off")
+    assert len(w.saved) == n + 1 and w.saved[-1] == {"p": {"m": {"mode": "manual", "since": T0 + 120}}}
+    w.advance(T0 + 719)
+    assert w.ml()["mode"] == "manual"
+    w.advance(T0 + 720)
+    assert w.ml()["mode"] == "auto"
+
+
+def test_own_off_overtaken_by_motion_is_not_manual():
+    w = lit()
+    w.pir("off")
+    w.advance(T0 + 180)
+    assert w.calls == [OFF]
+    w.advance(T0 + 182)
+    w.pir("on")  # motion returns before the light reports off
+    assert w.calls == [OFF, ON]
+    w.light("off", own=True)  # the off arrives late
+    w.light("on", own=True)  # then the on
+    t = w.tr()
+    assert t["motionLight"]["mode"] == "auto" and t["verdict"] is True and t["motionLight"]["light"] == "on"
+    assert w.calls == [OFF, ON]
+
+
+def test_own_on_overtaken_by_off_is_not_manual():
+    w = loaded([ml_rule(off=0)])
+    w.pir("on")
+    w.pir("off")  # before the light reports on
+    assert w.calls == [ON, OFF]
+    w.light("on", own=True)
+    w.light("off", own=True)
+    t = w.tr()
+    assert t["motionLight"]["mode"] == "auto" and t["verdict"] is False and w.calls == [ON, OFF]
+
+
+def test_manual_switch_to_the_opposite_state_inside_the_window_is_manual():
+    w = lit()
+    w.advance(T0 + 3)
+    w.light("off")
+    assert w.ml()["mode"] == "manual"
+
+
+def test_own_window_expires():
+    w = loaded()
+    w.pir("on")  # the rule decides on at T0
+    w.pir("off")
+    w.light("on", own=True)  # confirms
+    w.light("unavailable")
+    w.light("off")  # back from no data: not manual, the light is taken as off
+    assert w.ml()["mode"] == "auto" and w.tr()["verdict"] is False and w.calls == [ON]
+    w.advance(T0 + 11)
+    w.light("on")  # by hand, not confirming, after the window
+    assert w.ml()["mode"] == "manual"
+
+
+def test_found_on_is_recorded():
+    w = loaded([ml_rule(buttons=("btn",))], light__k="on")
+    last = w.tr()["last"]
+    assert last == {"action": "on", "target": "Lamp", "at": T0 * 1000, "reason": "found on", "sent": False}
+    w.press("btn", "set", "on")  # manual, already on
+    w.press("btn", "auto")
+    assert w.tr()["last"]["reason"] == "button: auto" and w.tr()["verdict"] is True
+
+
 def test_manual_drops_owed_offs():
     def setup():
         w = loaded([ml_rule(), pair_rule()])
