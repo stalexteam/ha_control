@@ -388,7 +388,7 @@ class _Rule:
         if self.leak:
             self.mode = "any"  # ruling A3: a dead sensor must not block a leak
         # a leak rule is the same machinery over its own inputs and actions: the wet sensors close the valves
-        self.seen: dict[str, "bool | None"] = {}  # leak: valve entity -> open as of its last state change
+        self.seen: dict[str, "str | None"] = {}  # leak: valve entity -> its state string as of its last state change
         self.leak_valves = [(v, _label(devices.get(v), v), _valve_entity(devices.get(v))) for v in valves]
         if self.leak:
             raw_inputs = [{"source": {"device": s}} for s in sensors]
@@ -556,7 +556,8 @@ class RuleEngine:
         for rule in rules.values():
             for _, _, eid in rule.leak_valves:
                 if eid is not None and eid not in rule.seen:
-                    rule.seen[eid] = _valve_open(eid, self._lookup(eid))
+                    st = self._lookup(eid)
+                    rule.seen[eid] = st[0] if st is not None else None
         for rule in stopped:
             self._boiler_send(rule, rule.boiler.command("off", self._now()), "rule disabled")
         for relay in released:
@@ -968,9 +969,12 @@ class RuleEngine:
         A close still waiting for the target is left to _resend. A close never produces an open, so this cannot loop."""
         if not rule.leak:
             return
-        was, now = rule.seen.get(entity_id), _valve_open(entity_id, self._lookup(entity_id))
+        st = self._lookup(entity_id)
+        was, now = rule.seen.get(entity_id), st[0] if st is not None else None
         rule.seen[entity_id] = now
-        if now is not True or was is True:  # only a change into open counts, not an attribute update
+        # a change into open (also from opening) or into opening from a non-open state; an attribute update sends nothing
+        opened = {"open": was != "open", "opening": was not in ("open", "opening"), "on": was != "on"}
+        if not opened.get(now or "", False) or _valve_open(entity_id, st) is not True:
             return
         if not rule.enabled or not rule.open or rule.verdict is not True:
             return
@@ -981,7 +985,8 @@ class RuleEngine:
             self._send(rule, s)
         if again:
             self._refresh(rule)
-            rule.last = again[-1].entry
+            if not any(x.waiting for x in rule.sent):  # an error-first pick of _refresh is kept
+                rule.last = again[-1].entry
 
     def _resend(self, entity_id: str) -> None:
         """The target came back: send its waiting actions again, once per such state change."""

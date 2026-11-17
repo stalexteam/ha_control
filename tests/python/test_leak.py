@@ -135,7 +135,7 @@ def test_opening_then_open_closes_once():
     w.set("binary_sensor.s1", "on")
     w.set("valve.v", "opening")
     w.set("valve.v", "open")
-    assert w.calls == [CLOSE, CLOSE]  # the leak close, then one re-close
+    assert w.calls == [CLOSE] * 3  # the leak close, then a close at opening and again at open
 
 
 def test_closed_then_open_again_closes_again():
@@ -146,3 +146,14 @@ def test_closed_then_open_again_closes_again():
     w.set("valve.v", "closed")
     w.set("valve.v", "open")
     assert w.calls == [CLOSE] * 3
+
+
+def test_last_keeps_a_waiting_error_over_a_reclose():
+    v2 = dev("v2", "valve", "Valve 2", state="valve.v2")
+    devs = [*LEAKS, VALVE, v2]
+    w = World(binary_sensor__s1="off", binary_sensor__s2="off", valve__v="closed", valve__v2="unavailable")
+    w.engine.load_plans([plan(devs, [leak_rule(valves=("v", "v2"))])])
+    w.set("binary_sensor.s1", "on")
+    w.set("valve.v", "open")
+    t = trace(w)
+    assert t["last"]["target"] == "Valve 2" and t["last"]["error"] == "waiting for target"
