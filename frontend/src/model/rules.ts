@@ -65,7 +65,7 @@ export function ruleCycle(rules: Rule[], candidate: Rule): Id[] | null {
   return null;
 }
 
-export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'time' | 'held' | 'vent' | 'boiler';
+export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
@@ -93,9 +93,10 @@ const delayOk = (n: unknown): boolean => Number.isInteger(n) && (n as number) >=
  * `actionsOf` (optional) gives the actions a device takes; an action outside them is the 'action' problem.
  * `lightSensorExists` (optional) tells whether an id is an illuminance_sensor device; default = any existing device.
  * `climateSensorExists` (optional) the same for climate_sensor devices (vent rules).
- * `boilerDeviceExists` (optional) tells whether an id is a device with control and power bindings, `buttonExists` a
+ * `boilerDeviceExists` (optional) tells whether an id is a boiler device (`isBoilerDevice`), `buttonExists` a
  * wall_switch or smart_button, `gridBlockExists` a Power grid block with a power entity (boiler rules); defaults: any
- * existing device, any existing device, no check.
+ * existing device, any existing device, no check. `buttonAutoOk` (optional) tells whether the boiler's button has an
+ * Auto action ('boiler-auto' otherwise; not checked for a missing device).
  */
 export function ruleProblems(
   rules: Rule[], r: Rule, deviceExists: (id: Id) => boolean, actionsOf?: (id: Id) => RuleDo[] | undefined,
@@ -104,6 +105,7 @@ export function ruleProblems(
   boilerDeviceExists?: (id: Id) => boolean,
   buttonExists?: (id: Id) => boolean,
   gridBlockExists?: (id: Id) => boolean,
+  buttonAutoOk?: (id: Id) => boolean,
 ): RuleProblem[] {
   const out: RuleProblem[] = [];
   if (!r.name.trim()) out.push('name');
@@ -125,6 +127,7 @@ export function ruleProblems(
   }
   if (r.vent && ventProblem(r, r.vent)) out.push('vent');
   if (r.boiler && boilerProblem(r, r.boiler)) out.push('boiler');
+  if (r.boiler?.button && buttonAutoOk && !out.includes('device-missing') && !buttonAutoOk(r.boiler.button)) out.push('boiler-auto');
   if (actionsOf && [...r.onTrue, ...r.onFalse].some(a => { const ok = actionsOf(a.device); return ok !== undefined && !ok.includes(a.do); })) out.push('action');
   return out;
 }
@@ -150,6 +153,18 @@ function boilerProblem(r: Rule, b: NonNullable<Rule['boiler']>): boolean {
 
 export const isBoilerRule = (r: Rule): boolean => r.boiler !== undefined;
 
+/** A device a boiler rule can drive: control and power bound; equipment only when controllable (as rule actions). */
+export const isBoilerDevice = (d: Device): boolean =>
+  !!d.bindings?.control && !!d.bindings?.power && (d.props.kind !== 'equipment' || d.props.controllable === true);
+
+/** A boiler button has an Auto action: a wall switch's double toggle, a smart button's auto trigger with an event. */
+export function buttonHasAuto(d: Device): boolean {
+  const p = d.props;
+  if (p.kind === 'wall_switch') return p.autoByDoubleToggle;
+  if (p.kind === 'smart_button') return p.autoEnabled && p.auto.event.trim() !== '';
+  return true;
+}
+
 export const BOILER_LIMIT = 3000;
 export const BOILER_NOMINAL = 1400;
 
@@ -159,7 +174,7 @@ export function boilerTemplate(plan: { levels: Level[]; power?: PowerSchema }, z
   rule.name = zoneId !== null && zoneName ? `Cost effective boiler ${zoneName}` : 'Cost effective boiler';
   const level = zoneId === null ? undefined : plan.levels.find(l => l.zones.some(z => z.id === zoneId));
   const members = level ? zoneMembers(level, zoneId as Id).filter(m => m.participates).map(m => m.device) : [];
-  const devices = members.filter(d => !!d.bindings?.control && !!d.bindings?.power);
+  const devices = members.filter(isBoilerDevice);
   const buttons = members.filter(d => d.props.kind === 'wall_switch' || d.props.kind === 'smart_button');
   rule.boiler = { device: devices.length === 1 ? devices[0].id : '', button: buttons.length === 1 ? buttons[0].id : '' };
   const grids = (plan.power?.blocks ?? []).filter(b => b.kind === 'grid');

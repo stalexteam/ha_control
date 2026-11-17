@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RULE_DELAY_MAX, boilerTemplate, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isRuleInputDevice, leakTemplate, newRule, outsideLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
+  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isRuleInputDevice, leakTemplate, newRule, outsideLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
   rulesFor, ruleUsers, updateRule,
 } from '../../src/model/rules';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Rule, type Zone } from '../../src/model/types';
@@ -334,7 +334,34 @@ describe('boiler rule', () => {
     levels: [{ ...emptyLevel('L'), zones: [zone], devices }],
     power: { blocks: [...Array(grids).keys()].map(i => ({ id: `g${i}`, kind: 'grid' as const, x: 0, y: 0 })), wires: [] },
   });
-  const heater = (id: string, x = 100): Device => ({ ...dev(id, 'equipment', x, 100), bindings: { control: 'switch.a', power: 'sensor.a' } });
+  const heater = (id: string, x = 100): Device => ({ ...dev(id, 'equipment', x, 100, { controllable: true }), bindings: { control: 'switch.a', power: 'sensor.a' } });
+  it('a boiler device has control and power; equipment only when controllable', () => {
+    expect(isBoilerDevice(heater('h'))).toBe(true);
+    expect(isBoilerDevice({ ...heater('h'), props: { ...heater('h').props, controllable: undefined } as Device['props'] })).toBe(false);
+    expect(isBoilerDevice({ ...dev('s', 'socket'), bindings: { control: 'switch.s', power: 'sensor.s' } })).toBe(true);
+    expect(isBoilerDevice({ ...dev('s', 'socket'), bindings: { control: 'switch.s' } })).toBe(false);
+    expect(isBoilerDevice({ ...heater('h'), bindings: { power: 'sensor.a' } })).toBe(false);
+  });
+  it('template skips equipment that is not controllable', () => {
+    const plain: Device = { ...dev('p', 'equipment', 100, 100), bindings: { control: 'switch.a', power: 'sensor.a' } };
+    expect(boilerTemplate(plan([plain]), 'z1', 'WC').boiler?.device).toBe('');
+  });
+  it('a button has an Auto action: wall switch double toggle; smart button auto enabled with an event', () => {
+    expect(buttonHasAuto(dev('w', 'wall_switch', 0, 0, { autoByDoubleToggle: true }))).toBe(true);
+    expect(buttonHasAuto(dev('w', 'wall_switch', 0, 0, { autoByDoubleToggle: false }))).toBe(false);
+    expect(buttonHasAuto(dev('s', 'smart_button', 0, 0, { autoEnabled: true, auto: { slot: 0, event: 'hold' } }))).toBe(true);
+    expect(buttonHasAuto(dev('s', 'smart_button', 0, 0, { autoEnabled: false, auto: { slot: 0, event: 'hold' } }))).toBe(false);
+    expect(buttonHasAuto(dev('s', 'smart_button', 0, 0, { autoEnabled: true, auto: { slot: 0, event: ' ' } }))).toBe(false);
+  });
+  it('a button without an Auto action is a boiler-auto problem', () => {
+    const r = boiler();
+    expect(ruleProblems([r], r, exists, undefined, undefined, undefined, undefined, undefined, undefined, id => id !== 'btn')).toEqual(['boiler-auto']);
+    expect(ruleProblems([r], r, exists, undefined, undefined, undefined, undefined, undefined, undefined, () => true)).toEqual([]);
+    expect(ruleProblems([r], r, exists, undefined, undefined, undefined, undefined, id => id !== 'btn', undefined, () => false)).toEqual(['device-missing']);
+    expect(ruleProblems([r], r, exists, undefined, undefined, undefined, undefined, undefined, undefined, () => false)).toEqual(['boiler-auto']);
+    const empty = boiler({}, { button: '' });
+    expect(ruleProblems([empty], empty, exists, undefined, undefined, undefined, undefined, undefined, undefined, () => false)).toEqual(['boiler']);
+  });
   it('template picks the single device, button and grid', () => {
     const r = boilerTemplate(plan([heater('h'), dev('w', 'wall_switch', 200, 200), dev('c', 'climate_sensor', 300, 300)]), 'z1', 'WC');
     expect(r.name).toBe('Cost effective boiler WC');

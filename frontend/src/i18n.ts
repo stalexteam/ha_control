@@ -319,6 +319,7 @@ const en: Dict = {
   'boiler.flow.power': 'Boiler power',
   'boiler.flow.nominal': 'nominal {w} W',
   'boiler.flow.done': 'done at ≤ 1 W',
+  'rules.problem.boiler-auto': "This button has no Auto action: enable it in the button's properties",
   'rules.problem.boiler': 'Boiler: a boiler and a button; Limit and Boiler power above 0 W.',
   'rules.problem.vent': 'Ventilation: two different climate sensors, a fan, On above > 0 and Off below from 0 to On above.',
   'rules.noZone': 'Rules without a zone',

@@ -48,22 +48,22 @@ describe('boiler diagram', () => {
 
   it('with the power limit: Grid, Headroom, Mode, Relay, Boiler power from top to bottom', () => {
     const { host } = draw();
-    expect(order(host)).toEqual(['boiler-grid', 'boiler-limit', 'boiler-button', 'boiler-device', 'boiler-nominal']);
+    expect(order(host)).toEqual(['boiler-grid', 'boiler-limit', 'boiler-button', 'boiler-relay', 'boiler-nominal']);
     const ys = order(host).map(f => top(host, f!));
     expect([...ys].sort((a, b) => a - b)).toEqual(ys);
     expect(text(host, 'boiler-grid')).toBe('AC-IN | grid power');
     expect(text(host, 'boiler-limit')).toBe('Headroom | grid + 1400 - boiler ≤ 3000 W');
     expect(text(host, 'boiler-button')).toBe('Mode | button: Button Boiler');
-    expect(text(host, 'boiler-device')).toBe('Relay | Boiler');
+    expect(text(host, 'boiler-relay')).toBe('Relay | Boiler');
     expect(text(host, 'boiler-nominal')).toBe('Boiler power | nominal 1400 W, done at ≤ 1 W');
     expect(host.querySelector('.fc-blk.on, .fc-blk.off, .fc-blk.nodata')).toBeNull();
   });
 
-  it('without the power limit: no Grid or Headroom block; the power block points at the boiler field', () => {
+  it('without the power limit: no Grid or Headroom block; Relay and Boiler power stay distinct blocks', () => {
     const { host } = draw({ rule: plain });
-    expect(order(host)).toEqual(['boiler-button', 'boiler-device', 'boiler-device']);
+    expect(order(host)).toEqual(['boiler-button', 'boiler-relay', 'boiler-power']);
     expect(text(host, 'boiler-button')).toBe('Mode | button: Button Boiler');
-    expect([...host.querySelectorAll('[data-block="boiler-device"]')][1].textContent).toContain('done at ≤ 1 W');
+    expect(text(host, 'boiler-power')).toBe('Boiler power | done at ≤ 1 W');
   });
 
   it('live heating: grid watts, headroom ok, auto, relay on with the power check countdown, boiler watts', () => {
@@ -73,8 +73,8 @@ describe('boiler diagram', () => {
     expect(cls(host, 'boiler-limit')).toContain('on');
     expect(text(host, 'boiler-button')).toBe('Mode: auto | button: Button Boiler');
     expect(cls(host, 'boiler-button')).toContain('on');
-    expect(text(host, 'boiler-device')).toMatch(/^Relay: on \| Boiler \| heating, power check in 0:45 \| last: turned on .+$/);
-    expect(cls(host, 'boiler-device')).toContain('on');
+    expect(text(host, 'boiler-relay')).toMatch(/^Relay: on \| Boiler \| heating, power check in 0:45 \| last: turned on .+$/);
+    expect(cls(host, 'boiler-relay')).toContain('on');
     expect(text(host, 'boiler-nominal')).toBe('Boiler power: 0 W | nominal 1400 W, done at ≤ 1 W');
     expect(cls(host, 'boiler-nominal')).toContain('off');
   });
@@ -83,15 +83,15 @@ describe('boiler diagram', () => {
     const { host } = draw({ trace: live({ boilerW: 1380.4, headroom: 566 }) });
     expect(text(host, 'boiler-nominal')).toMatch(/^Boiler power: 1380 W/);
     expect(cls(host, 'boiler-nominal')).toContain('on');
-    expect(text(host, 'boiler-device')).toBe('Relay: on | Boiler | heating');
+    expect(text(host, 'boiler-relay')).toBe('Relay: on | Boiler | heating');
   });
 
   it('over the limit: headroom over in the off tone, relay off with "power limit"', () => {
     const { host } = draw({ trace: live({ phase: 'limit', grid: 2546, headroom: 3946, relay: 'off' }) });
     expect(text(host, 'boiler-limit')).toBe('Headroom: over the limit | grid + 1400 - boiler = 3946 / 3000 W');
     expect(cls(host, 'boiler-limit')).toContain('off');
-    expect(text(host, 'boiler-device')).toBe('Relay: off | Boiler | power limit');
-    expect(cls(host, 'boiler-device')).toContain('off');
+    expect(text(host, 'boiler-relay')).toBe('Relay: off | Boiler | power limit');
+    expect(cls(host, 'boiler-relay')).toContain('off');
   });
 
   it('the limit itself is still ok', () => {
@@ -105,22 +105,22 @@ describe('boiler diagram', () => {
     expect(cls(host, 'boiler-grid')).toContain('nodata');
     expect(text(host, 'boiler-limit')).toBe('Headroom: no data | grid + 1400 - boiler ≤ 3000 W');
     expect(cls(host, 'boiler-limit')).toContain('nodata');
-    expect(text(host, 'boiler-device')).toBe('Relay: off | Boiler | blackout');
-    expect(cls(host, 'boiler-device')).toContain('off');
+    expect(text(host, 'boiler-relay')).toBe('Relay: off | Boiler | blackout');
+    expect(cls(host, 'boiler-relay')).toContain('off');
   });
 
   it('waiting counts down m:ss; done; manual follows the relay; an unknown relay and power have no data', () => {
-    expect(text(draw({ trace: live({ phase: 'waiting', relay: 'off', until: NOW + 12_400 }) }).host, 'boiler-device')).toBe('Relay: off | Boiler | waiting 0:13');
-    expect(text(draw({ trace: live({ phase: 'waiting', relay: 'off', until: NOW - 5000 }) }).host, 'boiler-device')).toBe('Relay: off | Boiler | waiting 0:00');
-    expect(text(draw({ trace: live({ mode: 'manual', phase: 'done', relay: 'off' }) }).host, 'boiler-device')).toBe('Relay: off | Boiler | heating done');
+    expect(text(draw({ trace: live({ phase: 'waiting', relay: 'off', until: NOW + 12_400 }) }).host, 'boiler-relay')).toBe('Relay: off | Boiler | waiting 0:13');
+    expect(text(draw({ trace: live({ phase: 'waiting', relay: 'off', until: NOW - 5000 }) }).host, 'boiler-relay')).toBe('Relay: off | Boiler | waiting 0:00');
+    expect(text(draw({ trace: live({ mode: 'manual', phase: 'done', relay: 'off' }) }).host, 'boiler-relay')).toBe('Relay: off | Boiler | heating done');
     const manual = draw({ trace: live({ mode: 'manual', phase: null, relay: 'on' }) }).host;
     expect(text(manual, 'boiler-button')).toBe('Mode: manual | button: Button Boiler');
     expect(cls(manual, 'boiler-button')).toContain('off');
-    expect(text(manual, 'boiler-device')).toBe('Relay: on | Boiler');
-    expect(cls(manual, 'boiler-device')).toContain('on');
+    expect(text(manual, 'boiler-relay')).toBe('Relay: on | Boiler');
+    expect(cls(manual, 'boiler-relay')).toContain('on');
     const none = draw({ trace: live({ mode: 'manual', phase: null, relay: null, boilerW: null }) }).host;
-    expect(text(none, 'boiler-device')).toBe('Relay: no data | Boiler');
-    expect(cls(none, 'boiler-device')).toContain('nodata');
+    expect(text(none, 'boiler-relay')).toBe('Relay: no data | Boiler');
+    expect(cls(none, 'boiler-relay')).toContain('nodata');
     expect(text(none, 'boiler-nominal')).toMatch(/^Boiler power: no data/);
     expect(cls(none, 'boiler-nominal')).toContain('nodata');
   });
@@ -132,13 +132,13 @@ describe('boiler diagram', () => {
         last: { action: 'on', target: 'Boiler', at: NOW, reason: 'auto', error: 'waiting for target' },
       }),
     });
-    expect(host.querySelector('[data-block="boiler-device"] .fc-err')!.textContent).toBe('waiting for target');
+    expect(host.querySelector('[data-block="boiler-relay"] .fc-err')!.textContent).toBe('waiting for target');
     expect(host.querySelector('[data-note="status"]')!.textContent).toBe('Error: target unavailable');
   });
 
   it('a click on a block calls onFocus with its field; the focused block is highlighted', () => {
     const { host, onFocus } = draw({ focused: 'boiler-limit' });
-    for (const f of ['boiler-grid', 'boiler-limit', 'boiler-button', 'boiler-device', 'boiler-nominal']) {
+    for (const f of ['boiler-grid', 'boiler-limit', 'boiler-button', 'boiler-relay', 'boiler-nominal']) {
       host.querySelector(`[data-block="${f}"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       expect(onFocus).toHaveBeenLastCalledWith(f);
     }

@@ -50,11 +50,14 @@ class Boiler:
         name = dev.get("name") if dev else None
         self.label = name if isinstance(name, str) and name else self.device or ""
         relay = _bound(dev, "control")
-        self.relay = relay if relay and relay.split(".", 1)[0] in RELAY_DOMAINS else None
+        props = dev.get("props") if dev else None
+        # equipment is switched only when marked controllable (as the actions of condition rules)
+        switchable = not (isinstance(props, dict) and props.get("kind") == "equipment" and props.get("controllable") is not True)
+        self.relay = relay if switchable and relay and relay.split(".", 1)[0] in RELAY_DOMAINS else None
         self.power = _bound(dev, "power")
         btn = devices.get(self.button) if self.button else None
-        props = btn.get("props") if btn else None
-        button_ok = isinstance(props, dict) and props.get("kind") in BUTTONS
+        btn_props = btn.get("props") if btn else None
+        button_ok = isinstance(btn_props, dict) and btn_props.get("kind") in BUTTONS
         grid = raw.get("grid") if isinstance(raw.get("grid"), dict) else None
         block_id = _str(grid.get("block")) if grid else None
         block = blocks.get(block_id) if block_id else None
@@ -120,6 +123,8 @@ class Boiler:
         configuration conflict, not a human)."""
         human = active and self.mode == "auto" and not own and None not in (self.seen, relay) \
             and relay != self.seen and relay != self.cmd
+        if self.mode == "manual" and self.phase == "done" and relay == "on" and self.seen != "on":
+            self.phase = None  # switched on again after heating done: "heating done" no longer describes the relay
         self.seen = relay
         if human:
             self.manual()

@@ -20,9 +20,12 @@ export interface BoilerTraceOpts {
   now: number;
   /** The `data-field` last focused from the diagram, highlighted. */
   focused?: string | null;
-  /** A click on a block: the `data-field` of its form field. */
+  /** A click on a block: its `data-block` (the form field it belongs to is `BOILER_FOCUS[block] ?? block`). */
   onFocus(field: string): void;
 }
+
+/** Blocks whose form field has another name: the relay and (without a power limit) the boiler power are the Boiler. */
+export const BOILER_FOCUS: Record<string, string> = { 'boiler-relay': 'boiler-device', 'boiler-power': 'boiler-device' };
 
 /** As wide as the condition flowchart: in the same column both draw their text at the same scale. */
 export const BOILER_WIDTH = FLOW_WIDTH;
@@ -87,14 +90,14 @@ export function renderBoilerTrace(o: BoilerTraceOpts): TemplateResult {
   ]);
   const phase = b ? phaseText(b, o.now) : null;
   const last = tr?.last;
-  add('boiler-device', b ? relayTone(b) : '', [
+  add('boiler-relay', b ? relayTone(b) : '', [
     b ? `${t('boiler.flow.relay')}: ${b.relay ?? word(null)}` : t('boiler.flow.relay'),
     boilerName,
     ...(phase ? [phase] : []),
     ...(last ? [t('vent.flow.last').replace('{did}', t(`rules.did.${last.action}`)).replace('{at}', clock(last.at))] : []),
   ], last?.error);
   const done = t('boiler.flow.done');
-  add(g ? 'boiler-nominal' : 'boiler-device', b ? tone(b.boilerW === null ? null : b.boilerW > 1) : '', [
+  add(g ? 'boiler-nominal' : 'boiler-power', b ? tone(b.boilerW === null ? null : b.boilerW > 1) : '', [
     b ? `${t('boiler.flow.power')}: ${watts(b.boilerW)}` : t('boiler.flow.power'),
     g ? `${t('boiler.flow.nominal').replace('{w}', shown(g.nominal))}, ${done}` : done,
   ]);

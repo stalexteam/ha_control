@@ -635,3 +635,74 @@ def test_disabling_an_auto_rule_after_a_restart_switches_a_running_relay_off():
     w.calls.clear()
     w.engine.load_plans([boiler_plan([boiler_rule(enabled=False)])])
     assert w.calls == [OFF] and w.b()["mode"] == "manual"
+
+
+# --- final review follow-ups ------------------------------------------------------------
+
+def test_deleting_an_auto_rule_with_the_relay_on_switches_it_off():
+    w = heating()
+    w.engine.load_plans([boiler_plan([])])
+    assert w.calls == [OFF] and w.engine.modes() == {} and not w.pending()
+
+
+def test_deleting_an_auto_rule_with_the_relay_off_sends_nothing():
+    w = loaded()
+    w.press("auto")
+    w.calls.clear()
+    w.engine.load_plans([boiler_plan([])])
+    assert w.calls == []
+
+
+def test_deleting_a_manual_rule_with_the_relay_on_sends_nothing():
+    w = loaded(switch__relay="on")
+    w.engine.load_plans([boiler_plan([])])
+    assert w.calls == []
+
+
+@pytest.mark.parametrize("changed", [{"device": "b2"}, {"grid": None}, {"button": "ws"}])
+def test_a_save_resetting_an_auto_rule_switches_the_old_relay_off(changed):
+    w = heating()
+    boiler2 = dev("b2", "equipment", "Boiler 2", controllable=True, control="switch.relay2", power="sensor.bp2")
+    w.states["switch.relay2"] = ("on", {})
+    w.engine.load_plans([boiler_plan([boiler_rule(**{"grid": GRID, **changed})], devices=[BOILER, boiler2, BUTTON, WALL])])
+    assert w.calls == [OFF] and w.b()["mode"] == "manual" and not w.pending()
+    assert w.saved[-1] == {"p": {"r": "manual"}}
+
+
+def test_a_rule_that_stops_being_a_boiler_switches_the_relay_off():
+    w = heating()
+    light = dev("l", "ceiling_light", "Light", control="light.l")
+    other = rule("r", [{"source": {"device": "l"}}], name="Other")
+    w.engine.load_plans([boiler_plan([other], devices=[BOILER, BUTTON, WALL, light])])
+    assert OFF in w.calls
+
+
+def test_heating_done_is_cleared_when_the_relay_is_switched_on_later():
+    w = heating()
+    w.set("sensor.grid", "500", W)
+    w.set("sensor.bp", "0", W)
+    assert w.b()["phase"] == "done"
+    w.set("sensor.grid", "505", W)
+    assert w.b()["phase"] == "done"  # the off is not confirmed yet: still done
+    w.set("switch.relay", "off", own=True)
+    w.set("sensor.grid", "510", W)
+    assert w.b()["phase"] == "done"  # stays while the relay is off
+    w.set("switch.relay", "on")  # a human, later
+    assert w.b()["phase"] is None and w.b()["mode"] == "manual" and w.calls == [OFF]
+
+
+def test_a_non_controllable_equipment_boiler_is_a_missing_device():
+    plain = dev("b", "equipment", "Boiler", control="switch.relay", power="sensor.bp")
+    w = BWorld()
+    w.engine.load_plans([boiler_plan(devices=[plain, BUTTON])], boot=False)
+    w.press("auto")
+    t = w.engine.snapshot("p")["r"]
+    assert t["status"] == "error" and t["reason"] == "device missing" and w.calls == []
+
+
+def test_a_socket_boiler_needs_no_controllable_flag():
+    sock = dev("b", "socket", "Socket", control="switch.relay", power="sensor.bp")
+    w = BWorld()
+    w.engine.load_plans([boiler_plan(devices=[sock, BUTTON])], boot=False)
+    w.press("auto")
+    assert w.calls == [ON]

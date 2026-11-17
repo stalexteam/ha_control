@@ -42,11 +42,12 @@ import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { RulesFeed, type RuleTrace } from '../live/rules-feed';
-import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakTemplate, ventTemplate, isVentRule, boilerTemplate, isBoilerRule, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
+import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakTemplate, ventTemplate, isVentRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import { renderAutomationsMenu, type RuleTemplate } from './rule-templates';
 import { renderRuleDialog, type RuleDraft } from './rule-dialog';
 import { renderVentDialog } from './vent-dialog';
 import { renderBoilerDialog } from './boiler-dialog';
+import { BOILER_FOCUS } from '../render/boiler-trace';
 import { PowerFeed, powerPayload } from '../live/power-feed';
 import { deviceLive, liveBubbles } from '../live/device-live';
 import { DeviceEventTracker, eventSources } from '../live/device-events';
@@ -375,17 +376,26 @@ export class PlanStudioPanel extends LitElement {
     void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('.amenu [role="menuitem"]')?.focus());
   }
 
+  /** Closes the "Automations" menu (Escape, a click outside) and hands the focus back to its rail button. */
+  closeAutomationsMenu(): void {
+    this.automationsMenu = null;
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('.tools button[data-action="automations"]')?.focus());
+  }
+
   /** A purpose-built automation picked from the menu: its dialog, pre-filled for the selected zone. */
   private pickAutomation(tpl: RuleTemplate): void {
     this.automationsMenu = null;
     this.openRuleDialog(tpl);
   }
 
-  /** A click on a flowchart block: the matching form field gets the focus and the highlight. */
-  private focusRuleField(field: string): void {
+  /**
+   * A click on a flowchart block: the block (`field`) gets the highlight, the form field `target` (by default the
+   * one of the same name) the focus.
+   */
+  private focusRuleField(field: string, target = field): void {
     if (this.ruleDraft) this.ruleDraft = { ...this.ruleDraft, focused: field };
     void this.updateComplete.then(() => {
-      const row = this.renderRoot.querySelector<HTMLElement>(`.rule-backdrop [data-field="${field}"]`);
+      const row = this.renderRoot.querySelector<HTMLElement>(`.rule-backdrop [data-field="${target}"]`);
       const el = row?.matches('input, select, button') ? row : row?.querySelector<HTMLElement>('select, input, button') ?? row;
       el?.scrollIntoView?.({ block: 'nearest' });
       el?.focus();
@@ -427,19 +437,20 @@ export class PlanStudioPanel extends LitElement {
       id => { const x = devices.find(v => v.id === id); return x && ruleActionsFor(x); },
       id => devices.some(x => x.id === id && x.props.kind === 'illuminance_sensor'),
       id => devices.some(x => x.id === id && x.props.kind === 'climate_sensor'),
-      id => devices.some(x => x.id === id && !!x.bindings?.control && !!x.bindings?.power),
+      id => devices.some(x => x.id === id && isBoilerDevice(x)),
       id => devices.some(x => x.id === id && (x.props.kind === 'wall_switch' || x.props.kind === 'smart_button')),
-      id => this.boilerGridBlocks().some(b => b.id === id));
+      id => this.boilerGridBlocks().some(b => b.id === id),
+      id => { const x = devices.find(v => v.id === id); return !x || buttonHasAuto(x); });
     if (isBoilerRule(rule)) {
       return renderBoilerDialog({
         draft: d,
-        boilers: devices.filter(x => !!x.bindings?.control && !!x.bindings?.power),
+        boilers: devices.filter(isBoilerDevice),
         buttons: devices.filter(x => x.props.kind === 'wall_switch' || x.props.kind === 'smart_button'),
         grids: this.boilerGridBlocks().map(b => ({ id: b.id, name: b.name || t('power.kind.grid') })),
         deviceById: id => devices.find(x => x.id === id),
         zones, problems, trace, note, now: Date.now(),
         onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
-        onFocus: f => this.focusRuleField(f),
+        onFocus: f => this.focusRuleField(f, BOILER_FOCUS[f] ?? f),
         onOk: () => this.commitRuleDraft(),
         onCancel: () => { this.dialog = null; this.ruleDraft = null; },
       });
@@ -739,7 +750,7 @@ export class PlanStudioPanel extends LitElement {
           onGrid: on => { this.grid = on; }, cones: this.cones, onCones: on => { this.cones = on; },
           tool: this.toolId, zoneMethod: this.nextObj.zone.method, power,
         })}
-        ${this.automationsMenu ? renderAutomationsMenu(this.automationsMenu, tpl => this.pickAutomation(tpl), () => { this.automationsMenu = null; }) : nothing}
+        ${this.automationsMenu ? renderAutomationsMenu(this.automationsMenu, tpl => this.pickAutomation(tpl), () => this.closeAutomationsMenu()) : nothing}
         ${this.renderDialog()}
         ${this.renderRuleDialogNow()}
       </div>`;

@@ -521,15 +521,44 @@ class RuleEngine:
         for key, prev in old.items():
             if key not in rules:
                 prev.stop()
+        released = self._released_relays(old, rules)
         self._rules = rules
         self._link()
         for rule in stopped:
             self._boiler_send(rule, rule.boiler.command("off", self._now()), "rule disabled")
+        for relay in released:
+            self._release(relay)
         self._settle(set(rules))
         self._published = {key: self._trace(r) for key, r in rules.items()}
         for pid in list(self._subs):
             self._notify(pid, True, self.snapshot(pid))
         self._report_modes()
+
+    def _released_relays(self, old: "dict[Key, _Rule]", rules: "dict[Key, _Rule]") -> "list[str]":
+        """Relays of boiler rules that were auto and lose their state in this load (rule deleted, no longer a boiler,
+        or its device / button / grid block changed, which resets it to manual) while the relay reads on: they go off,
+        as on disabling (no inverter protection without the rule)."""
+        out: list[str] = []
+        for key, prev in old.items():
+            b = prev.boiler
+            if b is None or b.mode != "auto" or not prev.enabled or b.relay is None or b.relay in out:
+                continue
+            now = rules.get(key)
+            if now is not None and now.boiler is not None and now.boiler.ident == b.ident:
+                continue  # state carried over
+            if b.relay_state(self._lookup) == "on":
+                out.append(b.relay)
+        return out
+
+    def _release(self, relay: str) -> None:
+        """Switch off the relay of a boiler rule that lost its auto state; a failure is only logged."""
+        def on_error(err: str, why: str = "service failed") -> None:
+            _LOGGER.warning("boiler relay %s: turn_off failed: %s", relay, err)
+
+        try:
+            self._call(relay.split(".", 1)[0], "turn_off", relay, on_error=on_error, current=lambda: True)
+        except Exception as err:  # noqa: BLE001 - a failing relay must not stop the engine
+            _LOGGER.warning("boiler relay %s: turn_off failed: %s", relay, err)
 
     def _load_boiler(self, rule: _Rule, prev: "_Rule | None", modes: "dict | None") -> bool:
         """Keep the state of the same boiler (device, button and grid block unchanged); a boiler not loaded yet takes

@@ -184,7 +184,7 @@ describe('Boiler form', () => {
   it('the relay countdown runs the 1 s ticker while the saved rule is shown', async () => {
     const el = await open();
     await edit(el, 'rule-boiler-nl');
-    expect(q<HTMLElement>(el, '[data-block="boiler-device"]').textContent).toMatch(/heating, power check in 0:\d\d/);
+    expect(q<HTMLElement>(el, '[data-block="boiler-relay"]').textContent).toMatch(/heating, power check in 0:\d\d/);
     expect(el.tickerOn).toBe(true);
     await set(el, '[data-field="name"]', 'Other');
     expect(el.tickerOn).toBe(false);
@@ -201,14 +201,54 @@ describe('Boiler form', () => {
   it('a click on a diagram block focuses its form field and highlights the block', async () => {
     const el = await open();
     await edit(el, 'rule-boiler');
-    for (const f of ['boiler-grid', 'boiler-limit', 'boiler-button', 'boiler-device', 'boiler-nominal']) {
-      q(el, `[data-block="${f}"]`).dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    const blocks: [string, string][] = [['boiler-grid', 'boiler-grid'], ['boiler-limit', 'boiler-limit'],
+      ['boiler-button', 'boiler-button'], ['boiler-relay', 'boiler-device'], ['boiler-nominal', 'boiler-nominal']];
+    for (const [b, f] of blocks) {
+      q(el, `[data-block="${b}"]`).dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
       await el.updateComplete;
       await el.updateComplete;
       expect(el.shadowRoot!.activeElement?.getAttribute('data-field')).toBe(f);
-      expect(q(el, `[data-block="${f}"]`).classList).toContain('hl');
+      expect(q(el, `[data-block="${b}"]`).classList).toContain('hl');
     }
     (el.shadowRoot!.activeElement as HTMLElement).blur(); // happy-dom trips over a focused element of a removed panel
+  });
+
+  it('without the power limit, Relay and Boiler power both focus the Boiler select but only the clicked one is highlighted', async () => {
+    const el = await open();
+    await edit(el, 'rule-boiler-nl');
+    for (const [b, other] of [['boiler-relay', 'boiler-power'], ['boiler-power', 'boiler-relay']]) {
+      q(el, `[data-block="${b}"]`).dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+      await el.updateComplete;
+      await el.updateComplete;
+      expect(el.shadowRoot!.activeElement?.getAttribute('data-field')).toBe('boiler-device');
+      expect(q(el, `[data-block="${b}"]`).classList).toContain('hl');
+      expect(q(el, `[data-block="${other}"]`).classList).not.toContain('hl');
+    }
+    (el.shadowRoot!.activeElement as HTMLElement).blur();
+  });
+
+  it('equipment that is not controllable is no boiler: not offered, and a saved one blocks OK as missing', async () => {
+    const el = await open([sceneRule('rule-boiler')], p => {
+      const d = p.levels[0].devices.find(x => x.id === 'd-boiler')!;
+      delete (d.props as { controllable?: true }).controllable;
+      p.levels[0].switchesMigrated = true; // else the panel's migration marks equipment with a switch controllable
+    });
+    await edit(el, 'rule-boiler');
+    const opts = [...q<HTMLSelectElement>(el, '[data-field="boiler-device"]').options].map(o => o.value);
+    expect(opts).toEqual(['', 'd-boiler', 'd-socket']); // d-boiler only as the kept (missing) pick
+    expect(okBtn(el).disabled).toBe(true);
+    expect(q(el, '.rproblems [data-problem="device-missing"]')).toBeTruthy();
+  });
+
+  it('a button without an Auto action blocks OK with a hint', async () => {
+    const el = await open([sceneRule('rule-boiler')], p => {
+      const d = p.levels[0].devices.find(x => x.id === 'd-button-boiler')!;
+      (d.props as { autoByDoubleToggle: boolean }).autoByDoubleToggle = false;
+    });
+    await edit(el, 'rule-boiler');
+    expect(okBtn(el).disabled).toBe(true);
+    expect(q(el, '.rproblems [data-problem="boiler-auto"]').textContent)
+      .toBe("This button has no Auto action: enable it in the button's properties");
   });
 
   it('Cancel leaves rules untouched; one undo reverts an OK', async () => {
@@ -280,14 +320,20 @@ describe('Automations menu', () => {
     await press(el, 'button[data-action="automations"]');
     el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, composed: true }));
     await el.updateComplete;
+    await el.updateComplete;
     expect(el.automationsMenu).toBeNull();
     expect(el.shadowRoot!.querySelector('.amenu')).toBeNull();
     expect(el.selection).toEqual({ kind: 'zone', id: 'z-util' });
+    expect(el.shadowRoot!.activeElement?.getAttribute('data-action')).toBe('automations'); // focus back on the button
+    (el.shadowRoot!.activeElement as HTMLElement).blur();
     await press(el, 'button[data-action="automations"]');
     $(el, '.amenu-back').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }));
     await el.updateComplete;
+    await el.updateComplete;
     expect(el.shadowRoot!.querySelector('.amenu')).toBeNull();
     expect(el.dialog).toBeNull();
+    expect(el.shadowRoot!.activeElement?.getAttribute('data-action')).toBe('automations');
+    (el.shadowRoot!.activeElement as HTMLElement).blur();
   });
 
   it('leaving the Automation step closes the menu', async () => {
