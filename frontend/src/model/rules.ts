@@ -70,7 +70,7 @@ export function ruleCycle(rules: Rule[], candidate: Rule): Id[] | null {
   return null;
 }
 
-export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'daylight' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto' | 'leak' | 'timed' | 'outside' | 'beurer' | 'control';
+export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'daylight' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto' | 'leak' | 'timed' | 'outside' | 'beurer' | 'control' | 'motionLight';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
@@ -110,6 +110,8 @@ const delayOk = (n: unknown): boolean => Number.isInteger(n) && (n as number) >=
  * `heaterExists` / `powerSourceExists` (optional) tell whether an id is a device taking 'on' / a device with a power reading
  * (beurer rules); default = any existing device. `controlSourceExists` / `controlLoadExists` (optional) tell whether an id is a button /
  * wall switch / motion sensor and a device taking 'on' and 'off' (control rules); default = any existing device.
+ * `motionLightExists` / `motionSensorExists` / `motionButtonExists` (optional) tell whether an id is a device taking 'on' and 'off' / a motion sensor /
+ * a button or wall switch (motion light rules; the daylight sensor is checked with `lightSensorExists`); default = any existing device.
  */
 export function ruleProblems(
   rules: Rule[], r: Rule, deviceExists: (id: Id) => boolean, actionsOf?: (id: Id) => RuleDo[] | undefined,
@@ -128,10 +130,13 @@ export function ruleProblems(
   powerSourceExists?: (id: Id) => boolean,
   controlSourceExists?: (id: Id) => boolean,
   controlLoadExists?: (id: Id) => boolean,
+  motionLightExists?: (id: Id) => boolean,
+  motionSensorExists?: (id: Id) => boolean,
+  motionButtonExists?: (id: Id) => boolean,
 ): RuleProblem[] {
   const out: RuleProblem[] = [];
   if (!r.name.trim()) out.push('name');
-  if (r.inputs.length === 0 && !r.vent && !r.boiler && !r.leak && !r.timed && !r.outside && !r.beurer && !r.control) out.push('inputs');
+  if (r.inputs.length === 0 && !r.vent && !r.boiler && !r.leak && !r.timed && !r.outside && !r.beurer && !r.control && !r.motionLight) out.push('inputs');
   const ctl = r.control;
   const ctlButtons = (Array.isArray(ctl?.sources) ? ctl.sources : []).filter((s): s is { button: Id } => typeof s === 'object' && s !== null && isButtonSource(s)).map(s => s.button);
   const ctlTargets = ctl ? ([ctl.on, ctl.off, ctl.toggle] as unknown[]).flatMap(l => (Array.isArray(l) ? (l as ControlAction[]) : [])) : [];
@@ -146,6 +151,8 @@ export function ruleProblems(
     || (r.timed && (!(timedButtonExists ?? deviceExists)(r.timed.button) || !(timedDeviceExists ?? deviceExists)(r.timed.device)))
     || (r.outside && (!(outsideLightExists ?? deviceExists)(r.outside.light) || !(lightSensorExists ?? deviceExists)(r.outside.sensor)))
     || (r.beurer && (!(heaterExists ?? deviceExists)(r.beurer.heater) || !(powerSourceExists ?? deviceExists)(r.beurer.source)))
+    || (r.motionLight && (!(motionLightExists ?? deviceExists)(r.motionLight.light) || r.motionLight.sensors.some(id => !(motionSensorExists ?? deviceExists)(id))
+      || r.motionLight.buttons.some(id => !(motionButtonExists ?? deviceExists)(id)) || (r.motionLight.daylight && !(lightSensorExists ?? deviceExists)(r.motionLight.daylight.sensor))))
     || ctlButtons.some(id => !(controlSourceExists ?? deviceExists)(id)) || ctlTargets.some(a => !(controlLoadExists ?? deviceExists)(a.device))) out.push('device-missing');
   const known = new Set(rules.map(x => x.id));
   if (ruleRefs(r).some(id => id !== r.id && !known.has(id))) out.push('rule-missing');
@@ -162,6 +169,7 @@ export function ruleProblems(
   if (r.outside && outsideProblem(r, r.outside)) out.push('outside');
   if (r.beurer && beurerProblem(r, r.beurer)) out.push('beurer');
   if (r.control && controlProblem(r, r.control)) out.push('control');
+  if (r.motionLight && motionLightProblem(r, r.motionLight)) out.push('motionLight');
   if (r.boiler?.button && buttonAutoOk && !out.includes('device-missing') && !buttonAutoOk(r.boiler.button)) out.push('boiler-auto');
   if (actionsOf && [...r.onTrue, ...r.onFalse].some(a => { const ok = actionsOf(a.device); return ok !== undefined && !ok.includes(a.do); })) out.push('action');
   if (ctl && ctlTargets.some(a => !CONTROL_DOS.includes(a.do) || (actionsOf && !controlDoOk(a.do, actionsOf(a.device))))) out.push('action');
@@ -170,7 +178,7 @@ export function ruleProblems(
 
 /** A vent rule's fixed shape and data bounds; true = violated. */
 function ventProblem(r: Rule, v: NonNullable<Rule['vent']>): boolean {
-  if (r.inputs.length > 0 || r.beurer || r.control || r.gate || r.leak || r.timed || r.outside || r.combine !== 'any' || r.onDelay !== 0) return true;
+  if (r.inputs.length > 0 || r.motionLight || r.beurer || r.control || r.gate || r.leak || r.timed || r.outside || r.combine !== 'any' || r.onDelay !== 0) return true;
   if (!v.sensor || !v.than || v.sensor === v.than) return true;
   if (!isNum(v.above) || !isNum(v.below) || v.above <= 0 || v.below < 0 || v.below > v.above) return true;
   const [on, off] = [r.onTrue[0], r.onFalse[0]];
@@ -179,7 +187,7 @@ function ventProblem(r: Rule, v: NonNullable<Rule['vent']>): boolean {
 
 /** A leak rule's fixed shape and data bounds; true = violated. */
 function leakProblem(r: Rule, l: NonNullable<Rule['leak']>): boolean {
-  if (r.vent || r.boiler || r.timed || r.outside || r.beurer || r.control || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.vent || r.boiler || r.timed || r.outside || r.beurer || r.control || r.motionLight || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
   const list = (ids: unknown): boolean => Array.isArray(ids) && ids.length >= 1 && ids.every(id => typeof id === 'string' && id !== '') && new Set(ids).size === ids.length;
   return !list(l.sensors) || !list(l.valves);
@@ -201,7 +209,7 @@ export const TIMED_DEFAULT_MINUTES = 15;
 
 /** A timed switch rule's fixed shape and data bounds; true = violated. */
 function timedProblem(r: Rule, t: NonNullable<Rule['timed']>): boolean {
-  if (r.vent || r.boiler || r.leak || r.outside || r.beurer || r.control || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.vent || r.boiler || r.leak || r.outside || r.beurer || r.control || r.motionLight || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
   if (!t.button || !t.device || t.button === t.device) return true;
   if (!Number.isInteger(t.minutes) || t.minutes < 1 || t.minutes > 1440) return true;
@@ -214,7 +222,7 @@ export const OUTSIDE_DEFAULT_PAUSE = 30;
 
 /** An outside light rule's fixed shape and data bounds; true = violated. */
 function outsideProblem(r: Rule, o: NonNullable<Rule['outside']>): boolean {
-  if (r.vent || r.boiler || r.leak || r.timed || r.beurer || r.control || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.vent || r.boiler || r.leak || r.timed || r.beurer || r.control || r.motionLight || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
   if (!o.light || !o.sensor || o.light === o.sensor) return true;
   if (o.noDataNight !== undefined && o.noDataNight !== true) return true;
@@ -229,7 +237,7 @@ export const BEURER_DEFAULTS = { above: 200, offDelay: 60, keep: 10, every: 30 }
 
 /** A beurer heater rule's fixed shape and data bounds; true = violated. */
 function beurerProblem(r: Rule, b: NonNullable<Rule['beurer']>): boolean {
-  if (r.vent || r.boiler || r.leak || r.timed || r.outside || r.control || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0) return true;
+  if (r.vent || r.boiler || r.leak || r.timed || r.outside || r.control || r.motionLight || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
   if (!b.heater || !b.source || b.heater === b.source) return true;
   if (!isNum(b.above) || b.above <= 0) return true;
@@ -257,7 +265,7 @@ function jsonEqual(a: unknown, b: unknown): boolean {
 
 /** A load control rule's fixed shape and data bounds; true = violated. */
 function controlProblem(r: Rule, c: NonNullable<Rule['control']>): boolean {
-  if (r.vent || r.boiler || r.leak || r.timed || r.outside || r.beurer || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.vent || r.boiler || r.leak || r.timed || r.outside || r.beurer || r.motionLight || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
   const lists = [c.on, c.off, c.toggle];
   if (!Array.isArray(c.sources) || c.sources.length === 0 || !lists.every(Array.isArray) || lists.every(l => l.length === 0)) return true;
@@ -327,6 +335,41 @@ export function outsideTemplate(plan: { levels: Level[] }, zoneId: Id | null, zo
   return rule;
 }
 
+export const MOTION_LIGHT_DEFAULTS = { offDelay: 180, minOn: 0, autoAfter: 0, is: 'dark' } as const;
+
+/** A light motion control rule's fixed shape and data bounds; true = violated. */
+function motionLightProblem(r: Rule, m: NonNullable<Rule['motionLight']>): boolean {
+  if (r.vent || r.boiler || r.leak || r.timed || r.outside || r.beurer || r.control || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0) return true;
+  if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
+  const list = (ids: unknown, min: number): ids is Id[] => Array.isArray(ids) && ids.length >= min && ids.every(id => typeof id === 'string' && id !== '') && new Set(ids).size === ids.length;
+  if (typeof m.light !== 'string' || m.light === '' || !list(m.sensors, 1) || !list(m.buttons, 0)) return true;
+  if (m.sensors.includes(m.light) || m.buttons.includes(m.light)) return true;
+  if (m.daylight !== undefined && (typeof m.daylight !== 'object' || m.daylight === null || typeof m.daylight.sensor !== 'string' || m.daylight.sensor === '' || (m.daylight.is !== 'night' && m.daylight.is !== 'dark'))) return true;
+  return !Number.isInteger(m.minOn) || m.minOn < 0 || m.minOn > 3600 || !Number.isInteger(m.autoAfter) || m.autoAfter < 0 || m.autoAfter > 1440;
+}
+
+export const isMotionLightRule = (r: Rule): boolean => r.motionLight !== undefined;
+
+/** The "Light motion control" template: the zone's single participating on/off ceiling / wall light, all its motion sensors, smart buttons and wall switches, the plan's single illuminance sensor (daylight 'dark'); never invents a device. */
+export function motionLightTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
+  const rule = newRule(zoneId);
+  rule.name = zoneId !== null && zoneName ? `Light motion control ${zoneName}` : 'Light motion control';
+  rule.offDelay = MOTION_LIGHT_DEFAULTS.offDelay;
+  const level = zoneId === null ? undefined : plan.levels.find(l => l.zones.some(z => z.id === zoneId));
+  const members = level ? zoneMembers(level, zoneId as Id).filter(m => m.participates).map(m => m.device) : [];
+  const lights = members.filter(d => (d.props.kind === 'ceiling_light' || d.props.kind === 'wall_light') && ruleActionsFor(d).includes('on') && ruleActionsFor(d).includes('off'));
+  const lux = plan.levels.flatMap(l => l.devices).filter(d => d.props.kind === 'illuminance_sensor');
+  rule.motionLight = {
+    light: lights.length === 1 ? lights[0].id : '',
+    sensors: members.filter(d => d.props.kind === 'motion_sensor').map(d => d.id),
+    ...(lux.length === 1 ? { daylight: { sensor: lux[0].id, is: MOTION_LIGHT_DEFAULTS.is } } : {}),
+    minOn: MOTION_LIGHT_DEFAULTS.minOn,
+    buttons: members.filter(d => d.props.kind === 'smart_button' || d.props.kind === 'wall_switch').map(d => d.id),
+    autoAfter: MOTION_LIGHT_DEFAULTS.autoAfter,
+  };
+  return rule;
+}
+
 /** The "Timed switch" template: the zone's single button container and single on/off device (else empty), 15 min. */
 export function timedTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
   const rule = newRule(zoneId);
@@ -341,7 +384,7 @@ export function timedTemplate(plan: { levels: Level[] }, zoneId: Id | null, zone
 
 /** A boiler rule's fixed shape and data bounds; true = violated. */
 function boilerProblem(r: Rule, b: NonNullable<Rule['boiler']>): boolean {
-  if (r.vent || r.leak || r.timed || r.outside || r.beurer || r.control || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.vent || r.leak || r.timed || r.outside || r.beurer || r.control || r.motionLight || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
   if (!b.device || !b.button || b.device === b.button) return true;
   if (b.grid === undefined) return false;

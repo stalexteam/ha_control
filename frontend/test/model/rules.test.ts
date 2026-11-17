@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isTimedRule, timedTemplate, isRuleInputDevice, leakProtectionTemplate, newRule, isOutsideRule, outsideTemplate, beurerTemplate, isBeurerRule, BEURER_DEFAULTS, controlTemplate, controlActionsFor, migrateControl, isControlRule, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
+  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isTimedRule, timedTemplate, isRuleInputDevice, leakProtectionTemplate, newRule, isOutsideRule, outsideTemplate, beurerTemplate, isBeurerRule, BEURER_DEFAULTS, controlTemplate, controlActionsFor, migrateControl, isControlRule, MOTION_LIGHT_DEFAULTS, isMotionLightRule, motionLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
   rulesFor, ruleUsers, updateRule,
 } from '../../src/model/rules';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Rule, type Zone } from '../../src/model/types';
@@ -237,6 +237,86 @@ describe('rules model', () => {
       expect(ruleProblems([], { ...leakRule(), beurer: b }, exists)).toContain('leak');
       expect(ruleProblems([], { ...newRule(null), id: 't', name: 'T', timed: { button: 'b', device: 'd', minutes: 5 }, beurer: b }, exists)).toContain('timed');
       expect(ruleProblems([], { ...newRule(null), id: 'o', name: 'O', outside: { light: 'l', sensor: 's', pause: 5 }, beurer: b }, exists)).toContain('outside');
+    });
+  });
+
+  describe('motion light rule', () => {
+    const zone: Zone = {
+      id: 'z1', name: 'Hall', invalid: false,
+      shape: { kind: 'polygon', vertices: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
+    };
+    const lvl = (devices: Device[]) => ({ levels: [{ ...emptyLevel('L'), zones: [zone], devices }] });
+    const ctlBody = { sources: [{ button: 'b' }], on: [], off: [], toggle: [{ device: 't', do: 'toggle' as const }] };
+    const ml = (over: Partial<Rule> = {}, m: Partial<NonNullable<Rule['motionLight']>> = {}): Rule => ({
+      ...newRule(null), id: 'm', name: 'M', offDelay: 180,
+      motionLight: { light: 'l', sensors: ['s1', 's2'], daylight: { sensor: 'ls', is: 'dark' }, minOn: 0, buttons: ['b1'], autoAfter: 0, ...m }, ...over,
+    });
+    const probs = (r: Rule, p: { light?: (id: string) => boolean; sensor?: (id: string) => boolean; button?: (id: string) => boolean; lux?: (id: string) => boolean } = {}) =>
+      ruleProblems([r], r, exists, undefined, p.lux, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, p.light, p.sensor, p.button);
+    const noDay = (r: Rule): Rule => { const { daylight: _d, ...rest } = r.motionLight!; return { ...r, motionLight: rest }; };
+
+    it('defaults and the rule test', () => {
+      expect(MOTION_LIGHT_DEFAULTS).toEqual({ offDelay: 180, minOn: 0, autoAfter: 0, is: 'dark' });
+      expect(isMotionLightRule(ml())).toBe(true);
+      expect(isMotionLightRule(rule('a'))).toBe(false);
+    });
+    it('a valid rule has no problems and never the inputs problem', () => {
+      expect(probs(ml())).toEqual([]);
+      expect(probs(noDay(ml()))).toEqual([]);
+      expect(probs(ml({}, { buttons: [] }))).toEqual([]);
+      expect(probs(ml({ offDelay: 0 }, { minOn: 3600, autoAfter: 1440, daylight: { sensor: 'ls', is: 'night' } }))).toEqual([]);
+      expect(probs(ml({ offDelay: 3600 }))).toEqual([]);
+    });
+    it('shape, numbers and duplicates', () => {
+      for (const m of [{ light: '' }, { sensors: [] }, { sensors: ['s1', 's1'] }, { sensors: ['s1', ''] }, { buttons: ['b1', 'b1'] }, { buttons: [''] },
+        { sensors: ['l', 's1'] }, { buttons: ['l'] },
+        { daylight: { sensor: 'ls', is: 'day' as unknown as 'dark' } }, { daylight: { sensor: '', is: 'dark' as const } },
+        { minOn: -1 }, { minOn: 1.5 }, { minOn: 3601 }, { autoAfter: -1 }, { autoAfter: 1.5 }, { autoAfter: 1441 }])
+        expect(probs(ml({}, m)), JSON.stringify(m)).toContain('motionLight');
+      for (const o of [{ inputs: [{ source: { device: 'x' } }] }, { combine: 'all' as const }, { onDelay: 5 },
+        { onTrue: [{ device: 'f', do: 'on' as const }] }, { onFalse: [{ device: 'f', do: 'off' as const }] },
+        { gate: { source: { sun: true as const } } },
+        { vent: { sensor: 'a', than: 'b', above: 9, below: 5 } }, { boiler: { device: 'd', button: 'b' } }, { leak: { sensors: ['s'], valves: ['v'] } },
+        { timed: { button: 'b', device: 'd', minutes: 5 } }, { outside: { light: 'l', sensor: 's', pause: 5 } },
+        { beurer: { heater: 'h', source: 'p', above: 200, keep: 10, every: 30 } }, { control: ctlBody }])
+        expect(probs(ml(o)), JSON.stringify(o)).toContain('motionLight');
+      expect(probs(ml({ inputs: [{ source: { device: 'x' } }] }))).not.toContain('inputs');
+    });
+    it('offDelay out of range stays the delay problem', () => {
+      expect(probs(ml({ offDelay: 3601 }))).toEqual(['delay']);
+    });
+    it('a missing light, sensor, button or daylight sensor is device-missing', () => {
+      expect(probs(ml(), { light: id => id !== 'l' })).toEqual(['device-missing']);
+      expect(probs(ml(), { sensor: id => id !== 's2' })).toEqual(['device-missing']);
+      expect(probs(ml(), { button: id => id !== 'b1' })).toEqual(['device-missing']);
+      expect(probs(ml(), { lux: id => id !== 'ls' })).toEqual(['device-missing']);
+      expect(probs(noDay(ml()), { lux: () => false })).toEqual([]);
+    });
+    it('other kinds reject a motionLight key', () => {
+      const m = ml().motionLight!;
+      expect(ruleProblems([], { ...newRule(null), id: 'v', name: 'V', vent: { sensor: 'a', than: 'b', above: 9, below: 5 }, onTrue: [{ device: 'f', do: 'on' }], onFalse: [{ device: 'f', do: 'off' }], motionLight: m }, exists)).toContain('vent');
+      expect(ruleProblems([], { ...newRule(null), id: 'k', name: 'K', boiler: { device: 'd', button: 'b' }, motionLight: m }, exists)).toContain('boiler');
+      expect(ruleProblems([], { ...leakRule(), motionLight: m }, exists)).toContain('leak');
+      expect(ruleProblems([], { ...newRule(null), id: 't', name: 'T', timed: { button: 'b', device: 'd', minutes: 5 }, motionLight: m }, exists)).toContain('timed');
+      expect(ruleProblems([], { ...newRule(null), id: 'o', name: 'O', outside: { light: 'l', sensor: 's', pause: 5 }, motionLight: m }, exists)).toContain('outside');
+      expect(ruleProblems([], { ...newRule(null), id: 'u', name: 'U', offDelay: 60, beurer: { heater: 'h', source: 'p', above: 200, keep: 10, every: 30 }, motionLight: m }, exists)).toContain('beurer');
+      expect(ruleProblems([], { ...newRule(null), id: 'c', name: 'C', control: ctlBody, motionLight: m }, exists)).toContain('control');
+    });
+    it('template: the zone single light, its motion sensors and buttons, the single plan illuminance sensor', () => {
+      const r = motionLightTemplate(lvl([dev('l', 'ceiling_light', 100, 100), dev('m1', 'motion_sensor', 200, 200), dev('m2', 'motion_sensor', 300, 300),
+        dev('b', 'smart_button', 400, 400), dev('w', 'wall_switch', 500, 500), dev('ls', 'illuminance_sensor', 5000, 5000)]), 'z1', 'Hall');
+      expect(r.name).toBe('Light motion control Hall');
+      expect(r).toMatchObject({ zoneId: 'z1', inputs: [], onTrue: [], onFalse: [], combine: 'any', onDelay: 0, offDelay: 180 });
+      expect(r.motionLight).toEqual({ light: 'l', sensors: ['m1', 'm2'], buttons: ['b', 'w'], daylight: { sensor: 'ls', is: 'dark' }, minOn: 0, autoAfter: 0 });
+      expect(ruleProblems([r], r, exists)).toEqual([]);
+    });
+    it('template never invents devices', () => {
+      const two = motionLightTemplate(lvl([dev('l', 'ceiling_light', 100, 100), dev('w', 'wall_light', 200, 200), dev('ls', 'illuminance_sensor', 5000, 5000), dev('ls2', 'illuminance_sensor', 6000, 6000)]), 'z1', 'Hall');
+      expect(two.motionLight).toEqual({ light: '', sensors: [], buttons: [], minOn: 0, autoAfter: 0 });
+      expect(ruleProblems([two], two, exists)).toEqual(['motionLight']);
+      const g = motionLightTemplate(lvl([dev('l', 'ceiling_light', 100, 100), dev('m1', 'motion_sensor', 200, 200), dev('ls', 'illuminance_sensor', 5000, 5000)]), null, null);
+      expect(g.name).toBe('Light motion control');
+      expect(g.motionLight).toEqual({ light: '', sensors: [], buttons: [], daylight: { sensor: 'ls', is: 'dark' }, minOn: 0, autoAfter: 0 });
     });
   });
 

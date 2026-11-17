@@ -389,6 +389,49 @@ def test_validate_plan_beurer_rule():
             validate_plan({**plan("p"), "rules": [{**other, "beurer": {"heater": "h", "source": "p", "above": 200, "keep": 10, "every": 30}}]})
 
 
+def motion_rule(rid="u1", ml=None, **kw):
+    r = rule(rid, inputs=[], onTrue=[], offDelay=180, motionLight={"light": "l", "sensors": ["s1", "s2"], "daylight": {"sensor": "ls", "is": "dark"}, "minOn": 0, "buttons": ["b1"], "autoAfter": 0} if ml is None else ml)
+    r.update(kw)
+    return r
+
+
+def test_validate_plan_motion_light_rule():
+    validate_plan({**plan("p"), "rules": [motion_rule()]})
+    base = {"light": "l", "sensors": ["s1"], "minOn": 3600, "buttons": [], "autoAfter": 1440}
+    validate_plan({**plan("p"), "rules": [motion_rule(ml=base, offDelay=0)]})
+    validate_plan({**plan("p"), "rules": [motion_rule(ml={**base, "daylight": {"sensor": "ls", "is": "night"}}, offDelay=3600)]})
+    good = motion_rule()["motionLight"]
+    bad = [
+        "x", [], {}, {k: v for k, v in good.items() if k != "autoAfter"}, {k: v for k, v in good.items() if k != "buttons"}, {**good, "x": 1},
+        {**good, "light": ""}, {**good, "light": 3}, {**good, "sensors": []}, {**good, "sensors": "s1"}, {**good, "sensors": ["s1", "s1"]}, {**good, "sensors": ["s1", ""]},
+        {**good, "buttons": ["b1", "b1"]}, {**good, "buttons": [""]}, {**good, "sensors": ["l"]}, {**good, "buttons": ["l"]},
+        {**good, "daylight": "x"}, {**good, "daylight": {"sensor": "ls"}}, {**good, "daylight": {"is": "dark"}}, {**good, "daylight": {"sensor": "", "is": "dark"}},
+        {**good, "daylight": {"sensor": "ls", "is": "day"}}, {**good, "daylight": {"sensor": "ls", "is": "dark", "x": 1}},
+        {**good, "minOn": -1}, {**good, "minOn": 1.5}, {**good, "minOn": 3601}, {**good, "minOn": True}, {**good, "minOn": "5"},
+        {**good, "autoAfter": -1}, {**good, "autoAfter": 1.5}, {**good, "autoAfter": 1441}, {**good, "autoAfter": True},
+    ]
+    for b in bad:
+        with pytest.raises(vol.Invalid, match="rule motionLight"):
+            validate_plan({**plan("p"), "rules": [motion_rule(ml=b)]})
+    for kw in (
+        {"inputs": ref("x")}, {"combine": "all"}, {"onDelay": 5}, {"gate": {"source": {"sun": True}}},
+        {"onTrue": [{"device": "d", "do": "on"}]}, {"onFalse": [{"device": "d", "do": "off"}]},
+        {"vent": {"sensor": "a", "than": "b", "above": 9, "below": 5}}, {"boiler": {"device": "d", "button": "b"}},
+        {"leak": {"sensors": ["s"], "valves": ["v"]}}, {"timed": {"button": "b", "device": "d", "minutes": 5}},
+        {"outside": {"light": "l", "sensor": "s", "pause": 5}}, {"beurer": {"heater": "h", "source": "p", "above": 200, "keep": 10, "every": 30}},
+        {"control": {"sources": [{"button": "b"}], "on": [], "off": [], "toggle": [{"device": "t", "do": "toggle"}]}},
+    ):
+        with pytest.raises(vol.Invalid, match="rule "):
+            validate_plan({**plan("p"), "rules": [motion_rule(**kw)]})
+    with pytest.raises(vol.Invalid, match="rule (offDelay|motionLight)"):
+        validate_plan({**plan("p"), "rules": [motion_rule(offDelay=3601)]})
+    # the other kinds reject a motionLight key too
+    other_control = {**rule("c1", inputs=[], onTrue=[]), "control": {"sources": [{"button": "b"}], "on": [], "off": [], "toggle": [{"device": "t", "do": "toggle"}]}}
+    for other in (vent_rule(), boiler_rule(), leak_rule(), timed_rule(), outside_rule(), beurer_rule(), other_control):
+        with pytest.raises(vol.Invalid, match="rule (timed|vent|boiler|leak|outside|beurer|control|motionLight)"):
+            validate_plan({**plan("p"), "rules": [{**other, "motionLight": good}]})
+
+
 def ctl(**kw):
     c = {"sources": [{"button": "b"}], "on": [], "off": [], "toggle": [{"device": "l", "do": "toggle"}]}
     c.update(kw)
