@@ -9,6 +9,11 @@ import math
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from typing import Callable
 
+try:
+    from .boiler import MODES, Boiler
+except ImportError:  # pytest: module dir on sys.path
+    from boiler import MODES, Boiler
+
 _LOGGER = logging.getLogger(__name__)
 
 # entity id -> (state, attributes); None when the entity is missing
@@ -354,13 +359,15 @@ class _Pending:
 
 
 class _Rule:
-    def __init__(self, pid: str, raw: dict, devices: dict, rule_names: dict) -> None:
+    def __init__(self, pid: str, raw: dict, devices: dict, rule_names: dict, blocks: "dict | None" = None) -> None:
         self.key: Key = (pid, raw["id"])
         self.name = raw.get("name") if isinstance(raw.get("name"), str) else raw["id"]
         self.enabled = raw.get("enabled") is not False
         self.mode = raw.get("combine") if raw.get("combine") in ("all", "any") else "any"
         vent = raw.get("vent")
         self.vent = isinstance(vent, dict)
+        boiler = raw.get("boiler")
+        self.boiler = Boiler(boiler, devices, blocks or {}) if isinstance(boiler, dict) else None
         raw_inputs = [{"source": {"vent": vent}}] if isinstance(vent, dict) else raw.get("inputs") or []
         self.inputs = [_Input(i, devices, rule_names) for i in raw_inputs if isinstance(i, dict)]
         self.gate = _Input(raw["gate"], devices, rule_names) if isinstance(raw.get("gate"), dict) else None
@@ -402,10 +409,12 @@ class _Rule:
             self.pending = None
 
     def stop(self) -> None:
-        """Cancel every timer: the debounce and the time / held inputs."""
+        """Cancel every timer: the debounce, the time / held inputs and the boiler's."""
         self.cancel()
         for i in self.all_inputs:
             i.stop()
+        if self.boiler is not None:
+            self.boiler.stop()
 
     def actions(self) -> "list[_Action]":
         """The actions of the current verdict."""
@@ -420,6 +429,8 @@ class _Rule:
                 found.add("rule missing" if i.rule is not None else "device missing")
         if any(a.call is None for a in self.on_true + self.on_false):
             found.add("target missing")
+        if self.boiler is not None and self.boiler.missing:
+            found.add("device missing")
         return next((r for r in STATIC_REASONS if r in found), None)
 
 
@@ -437,6 +448,7 @@ class RuleEngine:
         *,
         local: "Callable[[float], datetime]" = lambda t: datetime.fromtimestamp(t, timezone.utc),
         changed_at: "Callable[[str], float | None]" = lambda eid: None,
+        on_modes: "Callable[[dict[str, dict[str, str]]], None]" = lambda modes: None,
     ) -> None:
         self._lookup = lookup
         self._now = now  # epoch seconds
@@ -452,12 +464,22 @@ class RuleEngine:
         self._targets: dict[str, list[Key]] = {}  # action target entity -> enabled rules
         self._published: dict[Key, dict] = {}
         self._subs: dict[str, list[Callback]] = {}
+        self._on_modes = on_modes  # the boiler modes {plan id: {rule id: mode}} after any of them changed
+        self._modes: dict[str, dict[str, str]] = {}  # the modes last reported (or loaded)
 
     # --- loading -------------------------------------------------------------
 
-    def load_plans(self, plans: "list[dict]", *, boot: "bool | None" = None) -> None:
-        """boot: True when this load is the HA start; None keeps "the first call is the start"."""
+    def load_plans(
+        self, plans: "list[dict]", *, boot: "bool | None" = None, modes: "dict | None" = None
+    ) -> None:
+        """boot: True when this load is the HA start; None keeps "the first call is the start".
+        modes: the stored boiler modes {plan id: {rule id: 'auto' | 'manual'}}, used for boiler rules not loaded yet."""
         old = self._rules
+        if modes is not None:
+            self._modes = {
+                pid: {rid: m for rid, m in ms.items() if m in MODES}
+                for pid, ms in modes.items() if isinstance(ms, dict)
+            } if isinstance(modes, dict) else {}
         first, self._started = not self._started, True
         if boot is None:
             boot = first
@@ -471,10 +493,14 @@ class RuleEngine:
                 for d in (level.get("devices") or []) if isinstance(level, dict) else []:
                     if isinstance(d, dict) and isinstance(d.get("id"), str):
                         devices.setdefault(d["id"], d)
+            power = plan.get("power") if isinstance(plan.get("power"), dict) else {}
+            blocks = {
+                b["id"]: b for b in power.get("blocks") or [] if isinstance(b, dict) and isinstance(b.get("id"), str)
+            }
             raws = [r for r in plan.get("rules") or [] if isinstance(r, dict) and isinstance(r.get("id"), str)]
             names = {r["id"]: (r.get("name") if isinstance(r.get("name"), str) else r["id"]) for r in raws}
             for raw in raws:
-                rule = _Rule(pid, raw, devices, names)
+                rule = _Rule(pid, raw, devices, names, blocks)
                 if rule.key in rules:
                     continue
                 prev = old.get(rule.key)
@@ -485,6 +511,8 @@ class RuleEngine:
                         prev.stop()
                     for i in rule.all_inputs:
                         i.boot = boot
+                if rule.boiler is not None:
+                    self._load_boiler(rule, prev, modes)
                 rules[rule.key] = rule
         for key, prev in old.items():
             if key not in rules:
@@ -495,6 +523,23 @@ class RuleEngine:
         self._published = {key: self._trace(r) for key, r in rules.items()}
         for pid in list(self._subs):
             self._notify(pid, True, self.snapshot(pid))
+        self._report_modes()
+
+    def _load_boiler(self, rule: _Rule, prev: "_Rule | None", modes: "dict | None") -> None:
+        """Keep the state of the same boiler (device, button and grid block unchanged); a boiler not loaded yet takes
+        its stored mode; any other one starts manual."""
+        b = rule.boiler
+        assert b is not None
+        old = prev.boiler if prev is not None else None
+        if old is not None and old.ident == b.ident:
+            old.stop()
+            b.take(old)
+            rule.last, rule.failed = prev.last, prev.failed
+            return
+        b.seen = b.relay_state(self._lookup)
+        stored = self._modes.get(rule.key[0], {}).get(rule.key[1]) if prev is None and modes is not None else None
+        if stored == "auto":
+            b.enter_auto(self._now(), b.seen)  # evaluated by the settle of this load (held until HA has started)
 
     def _link(self) -> None:
         """Order rules so references come first; a reference closing a cycle is marked and ignored."""
@@ -520,10 +565,10 @@ class RuleEngine:
             if key not in state:
                 visit(key)
         for key, rule in self._rules.items():
-            for i in (p for top in rule.all_inputs for p in top.parts()):
-                for eid in i.reads:
-                    if key not in self._readers.get(eid, []):
-                        self._readers.setdefault(eid, []).append(key)
+            reads = [eid for top in rule.all_inputs for p in top.parts() for eid in p.reads]
+            for eid in reads + (rule.boiler.reads if rule.boiler is not None else []):
+                if key not in self._readers.get(eid, []):
+                    self._readers.setdefault(eid, []).append(key)
             for a in rule.on_true + rule.on_false if rule.enabled else []:
                 if a.call is not None and key not in self._targets.get(a.call[2], []):
                     self._targets.setdefault(a.call[2], []).append(key)
@@ -705,6 +750,8 @@ class RuleEngine:
 
     def _evaluate(self, rule: _Rule, due: "_Pending | None" = None) -> bool:
         """Recompute the rule; True when its debounced verdict changed. An opening gate sends the current verdict."""
+        if rule.boiler is not None:
+            return self._boiler(rule)
         self._compute(rule)
         if not rule.enabled:
             return False
@@ -858,12 +905,150 @@ class RuleEngine:
             if waiting:
                 self._refresh(rule)
 
+    # --- boiler --------------------------------------------------------------
+
+    def _boiler(self, rule: _Rule) -> bool:
+        """Evaluate a boiler rule (auto steps only in auto); True when its verdict (mode is auto) changed."""
+        b = rule.boiler
+        assert b is not None
+        grid, power, relay = b.readings(self._lookup)
+        b.until = None
+        active = rule.enabled and not b.missing
+        if active and b.mode == "auto":
+            do, why = b.auto(self._now(), grid, power, relay)
+            if do is not None:
+                self._boiler_send(rule, do, why)
+        b.view = b.trace(grid, power, relay)
+        wake = b.until if active else None
+        if b.timer is not None and b.timer[0] != wake:
+            b.stop()
+        if wake is not None and b.timer is None:
+            key = rule.key
+            b.timer = (wake, self._schedule(max(0.0, wake - self._now()), lambda: self._boiler_wake(key, b)))
+        verdict = b.mode == "auto" if rule.enabled else None
+        rule.raw = verdict
+        changed = verdict != rule.verdict
+        rule.verdict = verdict
+        return changed
+
+    def _boiler_wake(self, key: Key, b: Boiler) -> None:
+        rule = self._rules.get(key)
+        if rule is None or rule.boiler is not b:
+            return
+        b.timer = None
+        self._settle({key})
+        self._flush()
+
+    def _boiler_send(self, rule: _Rule, do: str, why: str) -> None:
+        """Switch the boiler relay; an unavailable relay or a failed call waits until the relay comes back."""
+        b = rule.boiler
+        assert b is not None and b.relay is not None
+        b.sends += 1
+        key, n, relay = rule.key, b.sends, b.relay
+        entry = {"action": do, "target": b.label, "at": int(self._now() * 1000), "reason": why}
+        rule.last, rule.failed = entry, None
+
+        def current() -> "_Rule | None":
+            now = self._rules.get(key)
+            ok = now is not None and now.boiler is not None and now.boiler.sends == n and now.boiler.relay == relay
+            return now if ok else None
+
+        def on_error(err: str, why: str = "service failed") -> None:
+            now = current()
+            if now is None:
+                return
+            now.failed = "service failed" if "service failed" in (now.failed, why) else why
+            if now.last is not None:
+                now.last["error"] = WAITING
+            self._flush()
+
+        try:
+            held = self._call(relay.split(".", 1)[0], f"turn_{do}", relay, on_error=on_error,
+                              current=lambda: current() is not None)
+        except Exception as err:  # noqa: BLE001 - a failing relay must not stop the engine
+            _LOGGER.warning("rule %s: turn_%s %s failed: %s", rule.name, do, relay, err)
+            rule.failed, entry["error"] = "service failed", WAITING
+            return
+        if held is not True and not _available(self._lookup(relay)):
+            rule.failed, entry["error"] = "target unavailable", WAITING
+
+    def _boiler_relay(self, rule: _Rule, own: bool) -> None:
+        """A state change of a boiler relay, before the evaluation: a human taking over, a command that got through or
+        a waiting one to send again."""
+        b = rule.boiler
+        assert b is not None
+        active = rule.enabled and not b.missing
+        relay = b.relay_state(self._lookup)
+        if b.relay_changed(relay, own, active):
+            b.cmd = None
+            if rule.failed is not None and rule.last is not None:
+                rule.last["error"] = rule.failed  # given up: the human took over
+            rule.failed = None
+            return
+        if b.cmd is None:
+            return
+        if relay == b.cmd:
+            if rule.failed is not None:
+                rule.failed = None
+                if rule.last is not None:
+                    rule.last.pop("error", None)
+        elif rule.failed is not None and active and _available(self._lookup(b.relay)):
+            reason = rule.last["reason"] if rule.last is not None else ""
+            self._boiler_send(rule, b.command(b.cmd, self._now()), reason)
+        elif relay is not None:
+            b.cmd = None  # the relay moved away from the command: auto may send it again
+
+    def on_intent(self, plan_id: str, container_id: str, intent: dict) -> None:
+        """A container intent ({"action": "toggle"}, {"action": "set", "value": "on" | "off"}, {"action": "auto"}); a
+        boiler rule whose button it is takes it. Status events and other actions are ignored."""
+        if not isinstance(intent, dict):
+            return
+        dirty: set[Key] = set()
+        for key, rule in self._rules.items():
+            b = rule.boiler
+            if key[0] != plan_id or b is None or b.button != container_id or not rule.enabled or b.missing:
+                continue
+            relay = b.relay_state(self._lookup)
+            taken, do, why = b.press(intent, relay, self._now())
+            if not taken:
+                continue
+            b.seen = relay  # a wall switch over the relay: the change behind this intent is no take-over
+            if do is not None:
+                self._boiler_send(rule, do, why)
+            dirty.add(key)
+        if dirty:
+            self._settle(dirty)
+            self._flush()
+
+    def modes(self) -> "dict[str, dict[str, str]]":
+        """The boiler modes {plan id: {rule id: 'auto' | 'manual'}} of every loaded boiler rule."""
+        out: dict[str, dict[str, str]] = {}
+        for (pid, rid), rule in self._rules.items():
+            if rule.boiler is not None:
+                out.setdefault(pid, {})[rid] = rule.boiler.mode
+        return out
+
+    def _report_modes(self) -> None:
+        modes = self.modes()
+        if modes == self._modes:
+            return
+        self._modes = modes
+        try:
+            self._on_modes(copy.deepcopy(modes))
+        except Exception:  # noqa: BLE001 - a failing store must not stop the engine
+            _LOGGER.exception("saving the boiler modes failed")
+
     # --- state changes -------------------------------------------------------
 
-    def handle_state(self, entity_id: str) -> None:
+    def handle_state(self, entity_id: str, own: bool = False) -> None:
+        """own: the change carries a Plan Studio context (a rule's own call)."""
         keys = self._readers.get(entity_id)
         if not keys and entity_id not in self._targets:
             return
+        for key in keys or ():
+            rule = self._rules[key]
+            if rule.boiler is not None and rule.boiler.relay == entity_id:
+                self._boiler_relay(rule, own)
         if keys:
             self._settle(set(keys))
         self._resend(entity_id)  # after the inputs: a newer firing has already dropped stale waiting actions
@@ -895,12 +1080,15 @@ class RuleEngine:
                 out["held"] = True  # the current verdict's actions wait for the gate
         if rule.last is not None:
             out["last"] = dict(rule.last)
+        if rule.boiler is not None:
+            out["boiler"] = dict(rule.boiler.view)
         return out
 
     def snapshot(self, plan_id: str) -> "dict[str, dict]":
         return {rid: self._trace(r) for (pid, rid), r in self._rules.items() if pid == plan_id}
 
     def _flush(self) -> None:
+        self._report_modes()
         frames: dict[str, dict[str, dict]] = {}
         for key, rule in self._rules.items():
             trace = self._trace(rule)
