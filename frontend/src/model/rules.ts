@@ -65,14 +65,15 @@ export function ruleCycle(rules: Rule[], candidate: Rule): Id[] | null {
   return null;
 }
 
-export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto' | 'leak' | 'timed';
+export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'daylight' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto' | 'leak' | 'timed';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
 
-/** The parameter problem of one input ('light' | 'time' | 'held'), if any. */
+/** The parameter problem of one input ('light' | 'daylight' | 'time' | 'held'), if any. */
 function paramProblem(i: RuleInput): RuleProblem | null {
   const s = i.source;
+  if ('daylight' in s) return ['night', 'dark', 'day'].includes(s.is) && i.not === undefined ? null : 'daylight';
   if ('light' in s) return isNum(s.below) && s.below > 0 && isNum(s.hysteresis) && s.hysteresis >= 0 && (s.unknownDark === undefined || s.unknownDark === true) ? null : 'light';
   if ('time' in s) {
     const { from, to } = s.time;
@@ -119,7 +120,7 @@ export function ruleProblems(
   if (r.inputs.length === 0 && !r.vent && !r.boiler && !r.leak && !r.timed) out.push('inputs');
   const all = [...r.inputs, ...(r.gate ? [r.gate] : [])];
   const devices = [...all.flatMap(inputDevices), ...r.onTrue.map(a => a.device), ...r.onFalse.map(a => a.device)];
-  const lights = all.flatMap(i => ('light' in i.source ? [i.source.light] : []));
+  const lights = all.flatMap(i => ('light' in i.source ? [i.source.light] : 'daylight' in i.source ? [i.source.daylight] : []));
   if (devices.some(id => !deviceExists(id)) || lights.some(id => !(lightSensorExists ?? deviceExists)(id))
     || (r.vent && [r.vent.sensor, r.vent.than].some(id => !(climateSensorExists ?? deviceExists)(id)))
     || (r.boiler && (!(boilerDeviceExists ?? deviceExists)(r.boiler.device) || !(buttonExists ?? deviceExists)(r.boiler.button)

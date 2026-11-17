@@ -85,6 +85,16 @@ describe('bindingStatus', () => {
     const { level, id } = withDevice('climate_sensor');
     expect(bindingStatus(setBinding(level, id, 'humidity', 'sensor.h').devices[0], present)).toBe('bound');
   });
+  it('illuminance sensor: lux only or sun only -> bound, none -> unbound; sun role is kept by sanitize', () => {
+    const { level, id } = withDevice('illuminance_sensor');
+    expect(bindingStatus(setBinding(level, id, 'illuminance', 'sensor.l').devices[0], present)).toBe('bound');
+    const sunOnly = setBinding(level, id, 'sun', 'sun.sun').devices[0];
+    expect(sunOnly.bindings).toEqual({ sun: 'sun.sun' });
+    expect(bindingStatus(sunOnly, present)).toBe('bound');
+    expect(sanitizeBindings(sunOnly)).toBe(sunOnly);
+    expect(bindingStatus(level.devices[0], present)).toBe('unbound');
+    expect(setBinding(withDevice('motion_sensor').level, withDevice('motion_sensor').id, 'sun', 'sun.sun').devices[0].bindings).toBeUndefined();
+  });
   it('missing entity -> missing, even when primary is set', () => {
     const { level, id } = withDevice('motion_sensor');
     const d = setBinding(level, id, 'motion', 'binary_sensor.m').devices[0];

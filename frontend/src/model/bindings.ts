@@ -15,6 +15,8 @@ export const VOLTAGE: RoleSpec = { role: 'voltage', domains: ['sensor'], deviceC
 /** An inverter's input and output power: the Power filter. */
 export const POWER_IN: RoleSpec = { ...POWER, role: 'power_in' };
 export const POWER_OUT: RoleSpec = { ...POWER, role: 'power_out' };
+/** The sun entity (`sun.sun`): its elevation backs the illuminance sensor's daylight state. */
+export const SUN: RoleSpec = { role: 'sun', domains: ['sun'], primary: true };
 /** Smart button roles whose binding is a trigger (entity, slot and event). */
 const TRIGGER_ROLES = ['on', 'off', 'auto'] as const;
 export type TriggerRole = typeof TRIGGER_ROLES[number];
@@ -28,7 +30,9 @@ export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
   ceiling_light: [{ role: 'control', domains: ['light', 'switch'], primary: true }],
   wall_light: [{ role: 'control', domains: ['light', 'switch'], primary: true }],
   motion_sensor: [{ role: 'motion', domains: ['binary_sensor'], deviceClasses: ['occupancy', 'motion', 'presence'], primary: true }],
-  illuminance_sensor: [{ role: 'illuminance', domains: ['sensor'], deviceClasses: ['illuminance'], units: ['lx'], primary: true }],
+  illuminance_sensor: [{ role: 'illuminance', domains: ['sensor'], deviceClasses: ['illuminance'], units: ['lx'], primary: true },
+    // Fallback while the lux reading is unusable; one of illuminance / sun is enough (see PRIMARY_MODE).
+    SUN],
   climate_sensor: [
     { role: 'temperature', domains: ['sensor'], deviceClasses: ['temperature'], units: ['°C', '°F'], primary: true },
     { role: 'humidity', domains: ['sensor'], deviceClasses: ['humidity'], units: ['%'], primary: true },
@@ -48,7 +52,7 @@ export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
 export const countNotBound = (statuses: Iterable<BindStatus>): number => { let n = 0; for (const s of statuses) if (s !== 'bound') n++; return n; };
 
 /** Kinds where one set primary is enough; all other kinds need every primary. */
-export const PRIMARY_MODE: Partial<Record<DeviceKind, 'any'>> = { climate_sensor: 'any' };
+export const PRIMARY_MODE: Partial<Record<DeviceKind, 'any'>> = { climate_sensor: 'any', illuminance_sensor: 'any' };
 
 export type Presence = 'present' | 'unavailable' | 'missing' | 'unknown';
 export type BindStatus = 'bound' | 'partial' | 'unbound' | 'missing';

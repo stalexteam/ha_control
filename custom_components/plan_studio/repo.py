@@ -54,6 +54,12 @@ def _validate_input(i: object) -> list[str]:
         if not _is_num(src["below"]) or src["below"] <= 0 or not _is_num(src["hysteresis"]) or src["hysteresis"] < 0:
             raise vol.Invalid("rule light input needs below > 0 and hysteresis >= 0")
         return []
+    if "daylight" in src:
+        if set(src) != {"daylight", "is"} or not _is_id(src["daylight"]) or src["is"] not in ("night", "dark", "day"):
+            raise vol.Invalid("rule daylight input needs a sensor id and is night, dark or day")
+        if "not" in i:
+            raise vol.Invalid("rule daylight input does not take not")
+        return []
     if "sun" in src:
         if len(src) != 1 or src["sun"] is not True:
             raise vol.Invalid("rule sun input must be {sun: true}")

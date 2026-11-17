@@ -64,6 +64,7 @@ function inputName(o: RuleDialogOpts, i: RuleInput): string {
   const s = i.source;
   if ('device' in s || 'rule' in s) return sourceName(o, s);
   if ('light' in s) return o.deviceById(s.light)?.name ?? t('rules.light.noSensor');
+  if ('daylight' in s) return o.deviceById(s.daylight)?.name ?? t('rules.light.noSensor');
   if ('sun' in s) return t('rules.src.sun');
   if ('time' in s) return t('rules.src.time');
   return s.held.sources.length === 0 ? t('rules.src.held') : `${t('rules.src.held')}: ${s.held.sources.map(x => sourceName(o, x)).join(', ')}`;
@@ -75,6 +76,7 @@ const sourceMissing = (o: RuleDialogOpts, s: { device: Id } | { rule: Id }): boo
 function isMissing(o: RuleDialogOpts, s: RuleSource): boolean {
   if ('device' in s || 'rule' in s) return sourceMissing(o, s);
   if ('light' in s) return s.light !== '' && !o.deviceById(s.light);
+  if ('daylight' in s) return s.daylight !== '' && !o.deviceById(s.daylight);
   if ('held' in s) return s.held.sources.some(x => sourceMissing(o, x));
   return false;
 }

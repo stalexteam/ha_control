@@ -92,7 +92,9 @@ export type DeviceProps =
   | { kind: 'motion_sensor'; zoneAngle: number; zoneRange: number }
   | { kind: 'exhaust_fan'; diameter: FanDiameter }
   // A climate sensor's reading applies to the zones containing it (its stage-2a `zoneIds` is retired).
-  | { kind: 'illuminance_sensor' } | { kind: 'socket' } | { kind: 'climate_sensor' } | { kind: 'leak_sensor' }
+  // Daylight thresholds (see model/daylight.ts); a missing field = its default.
+  | { kind: 'illuminance_sensor'; nightBelow?: number; dayAbove?: number; sunNight?: number; sunDay?: number; debounce?: number }
+  | { kind: 'socket' } | { kind: 'climate_sensor' } | { kind: 'leak_sensor' }
   // inverter: Power is replaced by Input / Output power; controllable: Plan Studio may switch its control.
   // A missing flag means false. Shape, size, icon and label matter only while the device is on the plan.
   | { kind: 'equipment'; shape: 'rect' | 'circle'; width: number; depth: number; diameter: number;
@@ -109,7 +111,7 @@ export const DEFAULT_EQUIPMENT_ICON = 'mdi:cube-outline';
 export const TRIGGER_EVENTS = ['single', 'double', 'hold'] as const;
 
 export type BindingRole = 'control' | 'motion' | 'illuminance' | 'temperature' | 'humidity' | 'state' | 'power'
-  | 'leak' | 'on' | 'off' | 'auto' | 'voltage' | 'power_in' | 'power_out';
+  | 'leak' | 'on' | 'off' | 'auto' | 'voltage' | 'power_in' | 'power_out' | 'sun';
 
 /** zoneBlacklist: zones the device opts out of (missing = []; the field is removed when it becomes empty). */
 export interface Device {
@@ -151,6 +153,8 @@ export type RuleSource =
   | { device: Id } | { rule: Id }
   | { light: Id; below: number; hysteresis: number; unknownDark?: true }
   | { sun: true }
+  // The illuminance sensor's debounced daylight state; dark = night or twilight. NOT is not allowed.
+  | { daylight: Id; is: 'night' | 'dark' | 'day' }
   | { time: { from: string; to: string } }
   | { held: { sources: ({ device: Id } | { rule: Id })[]; state: 'on' | 'off' | 'any'; seconds: number } };
 export interface RuleInput { source: RuleSource; not?: true }

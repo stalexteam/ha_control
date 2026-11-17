@@ -49,6 +49,20 @@ describe('rules model', () => {
     expect(ruleCycle([rule('x', { inputs: refs('y') }), rule('y', { inputs: refs('x') })], rule('c', { inputs: refs('x') }))).toBeNull();
   });
 
+  it('daylight source: problems, sensor check, no refs', () => {
+    const dl = (over: object = {}, not?: true): Rule => rule('a', { inputs: [{ source: { daylight: 's', is: 'night', ...over } as never, ...(not ? { not } : {}) }] });
+    expect(ruleProblems([], dl(), exists)).toEqual([]);
+    for (const is of ['night', 'dark', 'day']) expect(ruleProblems([], dl({ is }), exists)).toEqual([]);
+    expect(ruleProblems([], dl({ is: 'twilight' }), exists)).toContain('daylight');
+    expect(ruleProblems([], dl({}, true), exists)).toContain('daylight');
+    expect(ruleProblems([], dl(), exists, undefined, () => false)).toContain('device-missing');
+    expect(ruleProblems([], dl(), id => id !== 's')).toContain('device-missing');
+    expect(ruleRefs(dl())).toEqual([]);
+    // the old light source is still valid
+    const old = rule('a', { inputs: [{ source: { light: 's', below: 10, hysteresis: 5, unknownDark: true } }] });
+    expect(ruleProblems([], old, exists)).toEqual([]);
+  });
+
   it('ruleProblems', () => {
     const ok = rule('a', { onTrue: [{ device: 'd', do: 'on' }] });
     expect(ruleProblems([ok], ok, exists)).toEqual([]);
