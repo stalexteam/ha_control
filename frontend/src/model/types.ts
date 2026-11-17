@@ -175,6 +175,8 @@ export interface Rule {
   timed?: { button: Id; device: Id; minutes: number; invert?: true };
   /** Outside light: on at night (daylight sensor, optionally after sunset and inside a time window), paused `pause` min after a manual switch; inputs/actions stay empty. */
   outside?: { light: Id; sensor: Id; noDataNight?: true; afterSunset?: true; window?: { from: string; to: string }; pause: number };
+  /** Beurer heater: a heating pad (heater) is kept on while a power source draws above `above` W, off `offDelay` s after it stops, re-powered every `every` min (0 = never) and kept at least `keep` min (0 = none); inputs/actions stay empty. */
+  beurer?: { heater: Id; source: Id; above: number; keep: number; every: number };
 }
 
 export const WALL_PRESETS: Record<WallType, number> = {

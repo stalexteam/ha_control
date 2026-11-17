@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isTimedRule, timedTemplate, isRuleInputDevice, leakProtectionTemplate, newRule, isOutsideRule, outsideTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
+  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isTimedRule, timedTemplate, isRuleInputDevice, leakProtectionTemplate, newRule, isOutsideRule, outsideTemplate, beurerTemplate, isBeurerRule, BEURER_DEFAULTS, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
   rulesFor, ruleUsers, updateRule,
 } from '../../src/model/rules';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Rule, type Zone } from '../../src/model/types';
@@ -183,6 +183,60 @@ describe('rules model', () => {
       const o = { light: 'l', sensor: 's', pause: 5 };
       expect(ruleProblems([], { ...leakRule(), outside: o }, exists)).toContain('leak');
       expect(ruleProblems([], { ...newRule(null), id: 't', name: 'T', inputs: [], timed: { button: 'b', device: 'd', minutes: 5 }, outside: o }, exists)).toContain('timed');
+    });
+  });
+
+  describe('beurer rule', () => {
+    const beurer = (over: Partial<Rule> = {}, b: Partial<NonNullable<Rule['beurer']>> = {}): Rule => ({
+      ...newRule(null), id: 'b', name: 'B', offDelay: 60, beurer: { heater: 'h', source: 'p', above: 200, keep: 10, every: 30, ...b }, ...over,
+    });
+    const probs = (r: Rule, heater?: (id: string) => boolean, source?: (id: string) => boolean) =>
+      ruleProblems([r], r, exists, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, heater, source);
+
+    it('template and defaults', () => {
+      const t = beurerTemplate(null, null);
+      expect(t.name).toBe('Beurer heater');
+      expect(beurerTemplate('z1', 'WC').name).toBe('Beurer heater WC');
+      expect(beurerTemplate('z1', 'WC').zoneId).toBe('z1');
+      expect(t).toMatchObject({ inputs: [], onTrue: [], onFalse: [], combine: 'any', onDelay: 0, offDelay: 60, beurer: { heater: '', source: '', above: 200, keep: 10, every: 30 } });
+      expect(BEURER_DEFAULTS).toEqual({ above: 200, offDelay: 60, keep: 10, every: 30 });
+      expect(isBeurerRule(t)).toBe(true);
+      expect(isBeurerRule(rule('a'))).toBe(false);
+      expect(ruleProblems([t], t, exists)).toEqual(['beurer']);
+      const ok = { ...t, beurer: { ...t.beurer!, heater: 'h', source: 'p' } };
+      expect(ruleProblems([ok], ok, exists)).toEqual([]);
+      expect(ruleProblems([ok], ok, () => false)).toEqual(['device-missing']);
+    });
+    it('a valid rule has no problems and never the inputs problem', () => {
+      expect(probs(beurer())).toEqual([]);
+      expect(probs(beurer({ offDelay: 0 }, { keep: 0, every: 0 }))).toEqual([]);
+      expect(probs(beurer({ offDelay: 3600 }, { keep: 1440, every: 1440, above: 0.5 }))).toEqual([]);
+    });
+    it('shape and bounds', () => {
+      for (const b of [{ heater: '' }, { source: '' }, { source: 'h' }, { above: 0 }, { above: -1 }, { above: NaN },
+        { keep: 1.5 }, { keep: -1 }, { keep: 1441 }, { every: 1.5 }, { every: -1 }, { every: 1441 }])
+        expect(probs(beurer({}, b)), JSON.stringify(b)).toContain('beurer');
+      for (const o of [{ inputs: [{ source: { device: 'x' } }] }, { combine: 'all' as const }, { onDelay: 5 },
+        { onTrue: [{ device: 'f', do: 'on' as const }] }, { onFalse: [{ device: 'f', do: 'off' as const }] },
+        { gate: { source: { sun: true as const } } },
+        { vent: { sensor: 'a', than: 'b', above: 9, below: 5 } }, { boiler: { device: 'd', button: 'b' } }, { leak: { sensors: ['s'], valves: ['v'] } },
+        { timed: { button: 'b', device: 'd', minutes: 5 } }, { outside: { light: 'l', sensor: 's', pause: 5 } }])
+        expect(probs(beurer(o)), JSON.stringify(o)).toContain('beurer');
+    });
+    it('offDelay out of range stays the delay problem', () => {
+      expect(probs(beurer({ offDelay: 3601 }))).toContain('delay');
+    });
+    it('a missing heater or power source is device-missing', () => {
+      expect(probs(beurer(), id => id !== 'h')).toEqual(['device-missing']);
+      expect(probs(beurer(), undefined, id => id !== 'p')).toEqual(['device-missing']);
+    });
+    it('other kinds reject a beurer key', () => {
+      const b = { heater: 'h', source: 'p', above: 200, keep: 10, every: 30 };
+      expect(ruleProblems([], { ...newRule(null), id: 'v', name: 'V', vent: { sensor: 'a', than: 'b', above: 9, below: 5 }, onTrue: [{ device: 'f', do: 'on' }], onFalse: [{ device: 'f', do: 'off' }], beurer: b }, exists)).toContain('vent');
+      expect(ruleProblems([], { ...newRule(null), id: 'k', name: 'K', boiler: { device: 'd', button: 'b' }, beurer: b }, exists)).toContain('boiler');
+      expect(ruleProblems([], { ...leakRule(), beurer: b }, exists)).toContain('leak');
+      expect(ruleProblems([], { ...newRule(null), id: 't', name: 'T', timed: { button: 'b', device: 'd', minutes: 5 }, beurer: b }, exists)).toContain('timed');
+      expect(ruleProblems([], { ...newRule(null), id: 'o', name: 'O', outside: { light: 'l', sensor: 's', pause: 5 }, beurer: b }, exists)).toContain('outside');
     });
   });
 

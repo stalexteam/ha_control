@@ -350,3 +350,40 @@ def test_validate_plan_outside_rule():
     for other in (vent_rule(), boiler_rule(), leak_rule(), timed_rule()):
         with pytest.raises(vol.Invalid, match="rule (timed|vent|boiler|leak)"):
             validate_plan({**plan("p"), "rules": [{**other, "outside": {"light": "l", "sensor": "s", "pause": 30}}]})
+
+
+def beurer_rule(rid="u1", beurer=None, **kw):
+    r = rule(rid, inputs=[], onTrue=[], offDelay=60, beurer={"heater": "h", "source": "p", "above": 200, "keep": 10, "every": 30} if beurer is None else beurer)
+    r.update(kw)
+    return r
+
+
+def test_validate_plan_beurer_rule():
+    validate_plan({**plan("p"), "rules": [beurer_rule()]})
+    validate_plan({**plan("p"), "rules": [beurer_rule(offDelay=3600, beurer={"heater": "h", "source": "p", "above": 0.5, "keep": 0, "every": 1440})]})
+    base = {"heater": "h", "source": "p", "above": 200, "keep": 10, "every": 30}
+    bad = [
+        "x", [], {}, {k: v for k, v in base.items() if k != "every"}, {**base, "x": 1},
+        {**base, "heater": ""}, {**base, "source": 3}, {**base, "source": "h"},
+        {**base, "above": 0}, {**base, "above": -1}, {**base, "above": True}, {**base, "above": "5"}, {**base, "above": float("nan")},
+        {**base, "keep": 1.5}, {**base, "keep": -1}, {**base, "keep": 1441}, {**base, "keep": True},
+        {**base, "every": 1.5}, {**base, "every": -1}, {**base, "every": 1441}, {**base, "every": True},
+    ]
+    for b in bad:
+        with pytest.raises(vol.Invalid, match="rule beurer"):
+            validate_plan({**plan("p"), "rules": [beurer_rule(beurer=b)]})
+    for kw in (
+        {"inputs": ref("x")}, {"combine": "all"}, {"onDelay": 5}, {"gate": {"source": {"sun": True}}},
+        {"onTrue": [{"device": "d", "do": "on"}]}, {"onFalse": [{"device": "d", "do": "off"}]},
+        {"vent": {"sensor": "a", "than": "b", "above": 9, "below": 5}}, {"boiler": {"device": "d", "button": "b"}},
+        {"leak": {"sensors": ["s"], "valves": ["v"]}}, {"timed": {"button": "b", "device": "d", "minutes": 5}},
+        {"outside": {"light": "l", "sensor": "s", "pause": 5}},
+    ):
+        with pytest.raises(vol.Invalid, match="rule "):
+            validate_plan({**plan("p"), "rules": [beurer_rule(**kw)]})
+    with pytest.raises(vol.Invalid, match="rule (offDelay|beurer)"):
+        validate_plan({**plan("p"), "rules": [beurer_rule(offDelay=3601)]})
+    # the other kinds reject a beurer key too
+    for other in (vent_rule(), boiler_rule(), leak_rule(), timed_rule(), outside_rule()):
+        with pytest.raises(vol.Invalid, match="rule (timed|vent|boiler|leak|outside)"):
+            validate_plan({**plan("p"), "rules": [{**other, "beurer": {"heater": "h", "source": "p", "above": 200, "keep": 10, "every": 30}}]})
