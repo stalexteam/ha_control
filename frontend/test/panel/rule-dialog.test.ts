@@ -193,6 +193,23 @@ describe('Rule dialog', () => {
     expect(q(el, '.fc-blk[data-block="input-1"]').classList.contains('hl')).toBe(true);
   });
 
+  it('draws the flowchart top to bottom; a tall chart keeps its width and scrolls in its column', async () => {
+    const el = await open();
+    el.openRuleDialog('condition', 'rule-outside');
+    await el.updateComplete;
+    const y = (f: string) => Number(/translate\([\d.-]+ ([\d.-]+)\)/.exec(q(el, `[data-block="${f}"]`).getAttribute('transform')!)![1]);
+    expect(y('input-0')).toBeLessThan(y('combine'));
+    expect(y('combine')).toBeLessThan(y('delays'));
+    expect(y('delays')).toBeLessThan(y('gate-input'));
+    expect(y('gate-input')).toBeLessThan(y('action-true-0'));
+    const css = (el.constructor as typeof PlanStudioPanel & { styles: { cssText: string }[] | { cssText: string } }).styles;
+    const text = (Array.isArray(css) ? css : [css]).map(s => s.cssText).join('\n');
+    const rule = /svg\.fc, svg\.vt \{([^}]*)\}/.exec(text)![1];
+    expect(rule).toContain('width: 100%');
+    expect(rule).not.toContain('max-height');
+    expect(/\.flow \{[^}]*overflow: auto/.test(text)).toBe(true);
+  });
+
   it('notes: "Live state appears after Save" for a new rule; the saved trace plus a note after an edit', async () => {
     const el = await open();
     await press(el, 'button[data-template="condition"]');

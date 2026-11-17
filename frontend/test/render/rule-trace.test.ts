@@ -22,7 +22,32 @@ function draw(over: Partial<RuleTraceOpts> = {}): { host: HTMLElement; onFocus: 
   }), host);
   return { host, onFocus };
 }
-const text = (host: HTMLElement, sel: string) => host.querySelector(sel)!.textContent!.replace(/\s+/g, ' ').trim();
+/** The visible lines of a block (its <title> tooltip left out). */
+const text = (host: HTMLElement, sel: string) =>
+  [...host.querySelector(sel)!.querySelectorAll('text')].map(x => x.textContent!.trim()).join(' ').replace(/\s+/g, ' ');
+type Box = { x: number; y: number; w: number; h: number };
+/** A block's box in viewBox units. */
+function box(host: HTMLElement, f: string): Box {
+  const g = host.querySelector(`[data-block="${f}"]`)!;
+  const [, x, y] = /translate\(([\d.-]+) ([\d.-]+)\)/.exec(g.getAttribute('transform')!)!.map(Number);
+  const r = g.querySelector('rect')!;
+  return { x, y, w: Number(r.getAttribute('width')), h: Number(r.getAttribute('height')) };
+}
+const fields = (host: HTMLElement) => [...host.querySelectorAll('[data-block]')].map(b => b.getAttribute('data-block')!);
+const viewH = (host: HTMLElement) => Number(host.querySelector('svg.fc')!.getAttribute('viewBox')!.split(' ')[3]);
+/** The corner points of the orthogonal link paths ("M x y V y H x ..."), one list per path. */
+function linkPoints(host: HTMLElement): [number, number][][] {
+  return [...host.querySelectorAll('.fc-link')].map(p => {
+    const pts: [number, number][] = [];
+    let x = 0, y = 0;
+    for (const [, c, n] of p.getAttribute('d')!.matchAll(/([MVH])\s*([\d.-]+(?:\s+[\d.-]+)?)/g)) {
+      const v = n.trim().split(/\s+/).map(Number);
+      if (c === 'M') [x, y] = v; else if (c === 'V') y = v[0]; else x = v[0];
+      pts.push([x, y]);
+    }
+    return pts;
+  });
+}
 
 describe('rule flowchart', () => {
   it('caps the scale of the svg', () => {
@@ -94,6 +119,108 @@ describe('rule flowchart', () => {
     expect(gateValue('all', [])).toBeNull();
   });
 
+  describe('top to bottom', () => {
+    const many = (n: number, over: Partial<Rule> = {}): Rule => ({
+      ...rule, inputs: Array.from({ length: n }, () => ({ source: { device: 'leak' } })), ...over,
+    });
+    const bottom = (b: Box) => b.y + b.h;
+    const overlaps = (a: Box, b: Box) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+    it('has the vent diagram width: inputs, then ANY/ALL, then the result, then the gate, then the actions', () => {
+      const { host } = draw({ rule: { ...rule, gate: { source: { sun: true } } } });
+      expect(host.querySelector('svg.fc')!.getAttribute('viewBox')).toMatch(new RegExp(`^0 0 ${WIDTH} `));
+      const inputsBottom = Math.max(...[0, 1].map(k => bottom(box(host, `input-${k}`))));
+      expect(inputsBottom).toBeLessThan(box(host, 'combine').y);
+      expect(bottom(box(host, 'combine'))).toBeLessThan(box(host, 'delays').y);
+      expect(bottom(box(host, 'delays'))).toBeLessThan(box(host, 'gate-input').y);
+      expect(bottom(box(host, 'gate-input'))).toBeLessThan(box(host, 'action-true-0').y);
+      expect(bottom(box(host, 'gate-input'))).toBeLessThan(box(host, 'action-false-0').y);
+    });
+
+    it('draws When true on the left of When false, each a column under its heading', () => {
+      const { host } = draw();
+      const t0 = box(host, 'action-true-0'), f0 = box(host, 'action-false-0'), f1 = box(host, 'action-false-1');
+      expect(t0.x + t0.w).toBeLessThan(f0.x);
+      expect(f1.x).toBe(f0.x);
+      expect(f1.y).toBeGreaterThan(bottom(f0));
+      expect(t0.y).toBe(f0.y);
+      const heads = [...host.querySelectorAll('.fc-head')];
+      expect(heads.map(h => h.textContent)).toEqual(['When true', 'When false']);
+      expect(Number(heads[0].getAttribute('y'))).toBeLessThan(t0.y);
+    });
+
+    it('says No actions in an empty column; a long column does not move the other one', () => {
+      const r: Rule = { ...rule, onFalse: [], onTrue: Array.from({ length: 6 }, () => ({ device: 'valve', do: 'close' as const })) };
+      const { host } = draw({ rule: r });
+      expect(host.textContent).toContain('No actions');
+      expect(fields(host).filter(f => f.startsWith('action-true-'))).toHaveLength(6);
+      expect(viewH(host)).toBeGreaterThanOrEqual(bottom(box(host, 'action-true-5')));
+      const short = draw();
+      expect(box(host, 'action-true-0')).toEqual(box(short.host, 'action-true-0'));
+    });
+
+    it('wraps many inputs into rows inside the width, nothing overlaps', () => {
+      for (const n of [1, 3, 4, 5, 6, 9, 10]) {
+        const { host } = draw({ rule: many(n, { gate: { source: { sun: true } } }) });
+        const boxes = fields(host).map(f => box(host, f));
+        for (const b of boxes) {
+          expect(b.x).toBeGreaterThanOrEqual(0);
+          expect(b.x + b.w).toBeLessThanOrEqual(WIDTH);
+          expect(b.y + b.h).toBeLessThanOrEqual(viewH(host));
+        }
+        for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(overlaps(boxes[i], boxes[j])).toBe(false);
+        const ins = Array.from({ length: n }, (_, k) => box(host, `input-${k}`));
+        expect(new Set(ins.map(b => b.y)).size).toBe(Math.ceil(n / 4));
+        expect(Math.max(...ins.map(bottom))).toBeLessThan(box(host, 'combine').y);
+      }
+    });
+
+    it('links stay attached: every input and every chain block is joined, no link crosses a block', () => {
+      for (const n of [1, 2, 3, 5, 9, 10]) {
+        for (const gate of [undefined, { source: { sun: true as const } }]) {
+          const { host } = draw({ rule: many(n, gate ? { gate } : {}) });
+          const paths = linkPoints(host);
+          const all = paths.flat(), starts = paths.map(p => p[0]), ends = paths.map(p => p[p.length - 1]);
+          const at = (pts: [number, number][], x: number, y: number) => pts.some(([px, py]) => Math.abs(px - x) < 0.01 && Math.abs(py - y) < 0.01);
+          for (let k = 0; k < n; k++) {
+            const b = box(host, `input-${k}`);
+            expect(at(starts, b.x + b.w / 2, bottom(b)), `n=${n} input-${k}`).toBe(true);
+          }
+          const chain = ['combine', 'delays', ...(gate ? ['gate-input'] : [])].map(f => box(host, f));
+          for (const b of chain) expect(at(all, b.x + b.w / 2, b.y)).toBe(true);
+          for (const b of chain) expect(at(all, b.x + b.w / 2, bottom(b))).toBe(true);
+          expect(ends.filter(([, y]) => y > bottom(chain[chain.length - 1]))).toHaveLength(2); // into both columns
+          // Each segment stays clear of every block (ending on its edge where it attaches is fine).
+          const boxes = fields(host).map(f => box(host, f));
+          for (const p of paths) for (let i = 1; i < p.length; i++) {
+            const [x1, y1] = p[i - 1], [x2, y2] = p[i];
+            const seg: Box = x1 === x2
+              ? { x: x1, y: Math.min(y1, y2) + 0.5, w: 0.001, h: Math.abs(y2 - y1) - 1 }
+              : { x: Math.min(x1, x2) + 0.5, y: y1, w: Math.abs(x2 - x1) - 1, h: 0.001 };
+            for (const b of boxes) expect(overlaps(seg, b), `n=${n} gate=${!!gate} ${p.join(' ')}`).toBe(false);
+          }
+        }
+      }
+    });
+
+    it('grows taller with more inputs and actions', () => {
+      const small = viewH(draw().host);
+      expect(viewH(draw({ rule: many(10) }).host)).toBeGreaterThan(small);
+      expect(viewH(draw({ rule: { ...rule, onTrue: Array.from({ length: 8 }, () => ({ device: 'valve', do: 'close' as const })) } }).host)).toBeGreaterThan(small);
+    });
+
+    it('clips long names to the box; the tooltip has the full text', () => {
+      const long = 'L'.repeat(90);
+      const { host } = draw({ inputName: () => long, actionName: () => long });
+      for (const f of ['input-0', 'action-true-0']) {
+        const b = host.querySelector(`[data-block="${f}"]`)!;
+        expect(b.querySelector('svg.fc-clip')).not.toBeNull();
+        expect(b.querySelector('text')!.textContent!.endsWith('…')).toBe(true);
+        expect(b.querySelector('title')!.textContent).toContain(long);
+      }
+    });
+  });
+
   describe('stage 2', () => {
     const nm = (i: { source: object }): string => {
       const s = i.source as Record<string, unknown>;
@@ -115,9 +242,8 @@ describe('rule flowchart', () => {
       expect(text(host, '[data-block="input-2"]')).toBe('Time window 17:00-01:00');
       expect(text(host, '[data-block="input-3"]')).toBe('Held: Light any (unchanged) 30 min');
       expect(text(host, '[data-block="gate-input"]')).toContain('Gate: Held: Light');
-      const x = (b: string) => Number(/translate\(([\d.]+)/.exec(host.querySelector(`[data-block="${b}"]`)!.getAttribute('transform')!)![1]);
-      expect(x('delays')).toBeLessThan(x('gate-input'));
-      expect(x('gate-input')).toBeLessThan(x('action-true-0'));
+      expect(box(host, 'delays').y + box(host, 'delays').h).toBeLessThan(box(host, 'gate-input').y);
+      expect(box(host, 'gate-input').y + box(host, 'gate-input').h).toBeLessThan(box(host, 'action-true-0').y);
     });
 
     it('shows the server detail of a dark-by-default light input', () => {

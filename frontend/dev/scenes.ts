@@ -158,6 +158,73 @@ function ventLongPlan(): Plan {
   return p;
 }
 
+/**
+ * Scene `flow`: the room with long device names and more condition rules for the flowchart: `rule-leak2` (two leak
+ * sensors close the valve), `rule-many` (ten inputs, six actions on one side only, live trace) and `rule-six` (six
+ * inputs, a gate, both sides).
+ */
+function flowPlan(): Plan {
+  const p = room();
+  const names: Record<string, string> = {
+    'd-leak': 'Leak sensor under the kitchen sink cabinet (Aqara)',
+    'd-motion': 'Hallway motion sensor by the entrance door',
+    'd-light': 'Ceiling light in the living room, main group',
+    'd-valve': 'Cold water main valve in the bathroom riser',
+  };
+  for (const d of p.levels[0].devices) if (names[d.id]) d.name = names[d.id];
+  p.levels[0].devices.push({
+    id: 'd-leak2', name: 'Leak WC', invalid: false, bindings: { leak: 'binary_sensor.wc_leak' },
+    placement: { mode: 'free', x: 600, y: 2000, rotation: 0 }, props: { kind: 'leak_sensor' },
+  });
+  const act = (device: string, d: 'on' | 'off' | 'close' | 'open') => ({ device, do: d });
+  p.rules!.push({
+    id: 'rule-leak2', name: 'Leak WC -> valve', zoneId: 'r0', combine: 'any', onDelay: 0, offDelay: 0,
+    inputs: [{ source: { device: 'd-leak2' } }, { source: { device: 'd-leak' } }],
+    onTrue: [act('d-valve', 'close')], onFalse: [],
+  }, {
+    id: 'rule-many', name: 'Ten inputs', zoneId: 'r0', combine: 'any', onDelay: 5, offDelay: 300,
+    inputs: [
+      { source: { device: 'd-leak' } }, { source: { device: 'd-motion' } }, { source: { device: 'd-socket' }, not: true },
+      { source: { light: 'd-lux', below: 10, hysteresis: 5 } }, { source: { sun: true } },
+      { source: { time: { from: '22:00', to: '06:30' } } }, { source: { rule: 'rule-leak' } }, { source: { rule: 'rule-motion' }, not: true },
+      { source: { held: { sources: [{ device: 'd-light' }, { device: 'd-socket' }], state: 'on', seconds: 5400 } } },
+      { source: { device: 'd-fan' } },
+    ],
+    onTrue: [act('d-light', 'on'), act('d-valve', 'close'), act('d-socket', 'off'), act('d-fan', 'on'), act('d-socket', 'on'), act('d-fan', 'off')],
+    onFalse: [],
+  }, {
+    id: 'rule-six', name: 'Six inputs', zoneId: 'r0', combine: 'all', onDelay: 0, offDelay: 60,
+    inputs: [
+      { source: { device: 'd-motion' } }, { source: { light: 'd-lux', below: 25, hysteresis: 5 } }, { source: { sun: true } },
+      { source: { time: { from: '17:00', to: '01:00' } } }, { source: { device: 'd-socket' }, not: true }, { source: { rule: 'rule-leak' }, not: true },
+    ],
+    gate: { source: { held: { sources: [{ device: 'd-light' }], state: 'any', seconds: 1800 } } },
+    onTrue: [act('d-light', 'on')], onFalse: [act('d-light', 'off'), act('d-fan', 'off')],
+  });
+  return p;
+}
+
+const FLOW_RULES: Record<string, RuleTrace> = {
+  ...ROOM_RULES,
+  'rule-leak2': {
+    status: 'ok', verdict: true, unknownInputs: 0,
+    inputs: [{ label: 'Leak WC', value: false, detail: 'dry' }, { label: 'Leak kitchen', value: true, detail: 'wet' }],
+    last: { action: 'close', target: 'Cold water main valve', at: new Date().setHours(21, 43, 0, 0), reason: 'leak' },
+  },
+  'rule-many': {
+    status: 'ok', verdict: true, unknownInputs: 1, pending: { to: false, at: Date.now() + 4 * 60_000 },
+    inputs: [
+      { label: '', value: true, detail: 'wet' }, { label: '', value: false, detail: 'clear' }, { label: '', value: false, detail: 'on' },
+      { label: '', value: true, detail: '8 lx' }, { label: '', value: true, detail: 'below horizon' },
+      { label: '', value: false, detail: 'outside the window' }, { label: '', value: true, detail: 'true' },
+      { label: '', value: null, detail: 'unknown' },
+      { label: '', value: false, detail: 'on 40 / 90 min', until: Date.now() + 50 * 60_000 },
+      { label: '', value: false, detail: 'off' },
+    ],
+    last: { action: 'on', target: 'Ceiling light', at: new Date().setHours(21, 43, 0, 0), reason: 'many', error: 'target unavailable' },
+  },
+};
+
 /** The vent rule while the humidity of the reference sensor is unavailable (scene `vent-na`). */
 const VENT_NA: RuleTrace = {
   status: 'waiting', verdict: null, unknownInputs: 1,
@@ -319,6 +386,7 @@ export const SCENES: Record<string, Scene> = {
     plans: [ventLongPlan()],
     rulesFrame: { ...ROOM_RULES, 'rule-vent': { ...ROOM_RULES['rule-vent'], last: { ...ROOM_RULES['rule-vent'].last!, error: 'target unavailable' } } },
   },
+  flow: { plans: [flowPlan()], rulesFrame: FLOW_RULES },
   power: { plans: [powerPlan()], powerFrame: POWER_FRAME },
   'power-off': { plans: [powerPlan()], powerFrame: POWER_OFF_FRAME },
   'power-nodata': { plans: [powerPlan()], powerFrame: { wires: {}, blocks: {} } },

@@ -298,7 +298,8 @@ export const panelStyles = css`
   .rfoot { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--ch-divider); }
   .rfoot .rlabel { margin: 0; }
   .flow { min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
-  svg.fc, svg.vt { width: 100%; height: auto; max-height: 100%; flex: none; }
+  /* The diagrams keep their width; a tall one scrolls in its column. */
+  svg.fc, svg.vt { width: 100%; height: auto; flex: none; }
   .fc-blk { cursor: pointer; }
   .fc-box { fill: var(--ch-card); stroke: var(--ch-divider); stroke-width: 1.5; }
   .fc-blk:hover .fc-box { stroke: var(--ch-primary); }
