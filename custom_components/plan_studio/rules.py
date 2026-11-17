@@ -11,12 +11,14 @@ from typing import Callable
 
 try:
     from . import daylight
-    from .boiler import MODES, Boiler
+    from .beurer import Beurer
+    from .boiler import MODES, Boiler, watts
     from .outside import Outside
     from .timed import Timed
 except ImportError:  # pytest: module dir on sys.path
     import daylight
-    from boiler import MODES, Boiler
+    from beurer import Beurer
+    from boiler import MODES, Boiler, watts
     from outside import Outside
     from timed import Timed
 
@@ -255,7 +257,7 @@ def combine(mode: str, values: "list[bool | None]") -> "bool | None":
 
 
 class _Input:
-    """A rule input, the gate or a held source; type device, rule, light, daylight, sun, time or held."""
+    """A rule input, the gate or a held source; type device, rule, light, daylight, sun, time, held, vent or power."""
 
     def __init__(self, raw: dict, devices: dict, rule_names: dict) -> None:
         src = raw.get("source") if isinstance(raw.get("source"), dict) else {}
@@ -277,6 +279,8 @@ class _Input:
         self.known: bool | None = None  # held: the last known combined state
         self.since = 0.0  # held: when the known combined state last changed
         self.boot = False  # held: its first known state counts as held since long ago (loaded at HA start)
+        self.lost: float | None = None  # power: epoch s the data was lost; None while the data is good
+        self.had = False  # power: a good reading was seen since the rule started
         if isinstance(src.get("rule"), str):
             self.type, self.rule = "rule", src["rule"]
             self.missing = self.rule not in rule_names
@@ -295,6 +299,19 @@ class _Input:
             self.above = float(v["above"]) if isinstance(v.get("above"), (int, float)) else 0.0
             self.below = float(v["below"]) if isinstance(v.get("below"), (int, float)) else 0.0
             self.sig = ("vent", v.get("sensor"), v.get("than"), self.above, self.below, tuple(self.reads))
+        elif isinstance(src.get("power"), dict):
+            # the Beurer heater's synthetic input: the device's Power binding above a threshold (not offered elsewhere)
+            self.type = "power"
+            p = src["power"]
+            did = p.get("device") if isinstance(p.get("device"), str) else ""
+            device = devices.get(did)
+            self.eid = _bound(device, "power") if device is not None else None
+            self.missing = device is None or self.eid is None
+            self.label = _label(device, did)
+            self.above = float(p["above"]) if isinstance(p.get("above"), (int, float)) else 0.0
+            self.keep = p["keep"] if type(p.get("keep")) is int and p["keep"] >= 0 else 0
+            self.sig = ("power", did, self.eid, self.above, self.keep)
+            self.reads = [self.eid] if self.eid else []
         elif "light" in src:
             self.type = "light"
             did = src["light"] if isinstance(src["light"], str) else ""
@@ -358,7 +375,7 @@ class _Input:
     def take(self, old: "_Input") -> None:
         """Keep the runtime state of the same input of an unchanged rule (its timer is re-armed on evaluation)."""
         self.prev, self.mem, self.known, self.since, self.boot = old.prev, old.mem, old.known, old.since, old.boot
-        self.was = old.was
+        self.was, self.lost, self.had = old.was, old.lost, old.had
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -430,6 +447,14 @@ class _Rule:
             light = outside.get("light") if isinstance(outside.get("light"), str) else ""
             call = _Action({"device": light, "do": "on"}, devices).call
             self.outside = Outside(outside, devices, call[2] if call is not None else None)
+        beurer = raw.get("beurer")
+        self.beurer: Beurer | None = None
+        if isinstance(beurer, dict):
+            heater = beurer.get("heater") if isinstance(beurer.get("heater"), str) else ""
+            call = _Action({"device": heater, "do": "on"}, devices).call
+            source = devices.get(beurer.get("source")) if isinstance(beurer.get("source"), str) else None
+            power = _bound(source, "power") if source is not None else None
+            self.beurer = Beurer(beurer, devices, call[2] if call is not None else None, power)
         leak = raw.get("leak")
         sensors = [x for x in leak.get("sensors") or [] if isinstance(x, str)] if isinstance(leak, dict) else []
         valves = [x for x in leak.get("valves") or [] if isinstance(x, str)] if isinstance(leak, dict) else []
@@ -445,6 +470,8 @@ class _Rule:
             raw_inputs = [{"source": {"vent": vent}}]
         elif self.outside is not None:
             raw_inputs = self.outside.inputs()
+        elif self.beurer is not None:
+            raw_inputs = [self.beurer.input()]
         else:
             raw_inputs = raw.get("inputs") or []
         self.inputs = [_Input(i, devices, rule_names) for i in raw_inputs if isinstance(i, dict)]
@@ -455,6 +482,9 @@ class _Rule:
         if self.outside is not None:  # the light is held on while the rule wants it on (holder slots)
             light = self.outside.light or ""
             on_true, on_false = [{"device": light, "do": "on"}], [{"device": light, "do": "off"}]
+        if self.beurer is not None:  # the heater is held on while the source is in use (holder slots)
+            heater = self.beurer.heater or ""
+            on_true, on_false = [{"device": heater, "do": "on"}], [{"device": heater, "do": "off"}]
         self.on_true = [_Action(a, devices) for a in on_true if isinstance(a, dict)]
         self.on_false = [_Action(a, devices) for a in on_false if isinstance(a, dict)]
         # Shared devices (spec timed switch §10): the on / off devices this rule keeps on by its own state. A condition
@@ -496,6 +526,9 @@ class _Rule:
         if self.outside is not None and old.outside is not None:
             old.outside.stop()
             self.outside.take(old.outside)
+        if self.beurer is not None and old.beurer is not None:
+            old.beurer.stop()
+            self.beurer.take(old.beurer)
         for new, prev in zip(self.all_inputs, old.all_inputs):
             prev.stop()
             new.take(prev)
@@ -506,10 +539,13 @@ class _Rule:
             self.pending = None
 
     def stop(self) -> None:
-        """Cancel every timer: the debounce, the time / held inputs, the boiler's, the timed run's and the pause's."""
+        """Cancel every timer: the debounce, the time / held inputs, the boiler's, the timed run's, the pause's and the
+        power-cycle's."""
         self.cancel()
         if self.outside is not None:
             self.outside.stop()
+        if self.beurer is not None:
+            self.beurer.stop()
         for i in self.all_inputs:
             i.stop()
         if self.boiler is not None:
@@ -530,7 +566,7 @@ class _Rule:
                 found.add("rule missing" if i.rule is not None else "device missing")
         if any(a.call is None for a in self.on_true + self.on_false):
             found.add("target missing")
-        if any(x is not None and x.missing for x in (self.boiler, self.timed, self.outside)):
+        if any(x is not None and x.missing for x in (self.boiler, self.timed, self.outside, self.beurer)):
             found.add("device missing")
         return next((r for r in STATIC_REASONS if r in found), None)
 
@@ -658,6 +694,8 @@ class RuleEngine:
                     ended.append(rule)
                 if rule.outside is not None:
                     self._load_outside(rule, prev, pauses)
+                if rule.beurer is not None and (prev is None or prev.sig != rule.sig):
+                    rule.beurer.seen = rule.beurer.state(self._lookup)  # a new one reads its heater
                 rules[rule.key] = rule
                 for i in (p for top in rule.all_inputs for p in top.parts()):
                     if i.type == "daylight" and i.kind == "illuminance_sensor":
@@ -699,6 +737,9 @@ class RuleEngine:
         for eid in deferred:
             if eid in self._holds:
                 self._hold_call(eid, self._holds[eid])
+        for rule in rules.values():
+            if rule.beurer is not None and rule.enabled and not self._booting:
+                self._beurer_step(rule)  # after the load's calls: a cycle's off comes after a start's on
         self._prune_holds()
         self._published = {key: self._trace(r) for key, r in rules.items()}
         for pid in list(self._subs):
@@ -882,6 +923,8 @@ class RuleEngine:
             timed = [rule.timed.eid] if rule.timed is not None and rule.timed.eid else []
             if rule.outside is not None and rule.outside.eid:
                 timed.append(rule.outside.eid)  # its light: a manual switch pauses the rule
+            if rule.beurer is not None and rule.beurer.eid:
+                timed.append(rule.beurer.eid)  # its heater: switched off elsewhere, the power-cycle
             for eid in reads + (rule.boiler.reads if rule.boiler is not None else []) + timed:
                 if key not in self._readers.get(eid, []):
                     self._readers.setdefault(eid, []).append(key)
@@ -938,6 +981,11 @@ class RuleEngine:
                 out["until"] = int(d.due * 1000)  # the sensor's pending change (one timer per sensor)
         if i.type == "vent":
             out["vent"] = self._vent_trace(i)
+        if i.type == "power":
+            w = watts(self._lookup, i.eid) if i.eid else None
+            out["watts"] = None if w is None else round(w)
+            if wake is not None:
+                out["until"] = int(wake * 1000)  # the last value is kept until then
         if i.timer is not None and i.timer[0] != wake:
             i.stop()
         if wake is not None and i.timer is None:
@@ -973,6 +1021,8 @@ class RuleEngine:
             return None, "missing", None
         if i.type == "vent":
             return (*self._vent(i), None)
+        if i.type == "power":
+            return self._power(i, now)
         if i.type == "light":
             return (*self._light(i), None)
         if i.type == "daylight":
@@ -1000,6 +1050,23 @@ class RuleEngine:
         elif r < 1 + i.below / 100 or i.prev is None:
             i.prev = False
         return i.prev, f"{a:.1f} / {b:.1f} g/m³ ({round((r - 1) * 100):+d} %)"
+
+    def _power(self, i: _Input, now: float) -> "tuple[bool | None, str, float | None]":
+        """Above the threshold: true. Without data the last value is kept for `keep` minutes from the moment the loss
+        was seen (the input wakes the rule then), then it is false; with no good reading since the rule started it is
+        unknown."""
+        p = watts(self._lookup, i.eid) if i.eid else None
+        if p is not None:
+            i.prev, i.had, i.lost = p > i.above, True, None
+            return i.prev, f"{round(p)} W", None
+        if not i.had:
+            return None, "no data", None
+        if i.lost is None:
+            i.lost = now
+        until = i.lost + i.keep * 60
+        if now < until:
+            return i.prev, "no data, kept", until
+        return False, "no data", None
 
     def _light(self, i: _Input) -> "tuple[bool | None, str]":
         """Below the threshold: true; above it plus the hysteresis: false; in between: the previous value."""
@@ -1095,6 +1162,8 @@ class RuleEngine:
         if rule.open and not was_open and rule.seq == seq and actions:
             self._new_firing(rule)
             self._fire(rule, actions, "pause ended" if rule.outside is not None else "gate opened")
+        if rule.beurer is not None and not self._booting and not self._loading:
+            self._beurer_step(rule)  # in a load: after its calls (load_plans); at HA start: after started()
         return changed
 
     def _step(self, rule: _Rule, due: "_Pending | None") -> bool:
@@ -1585,6 +1654,75 @@ class RuleEngine:
         out["light"] = o.state(self._lookup)
         return out
 
+    # --- beurer heater ---------------------------------------------------------
+
+    def _beurer_heater(self, rule: _Rule, ours: bool) -> None:
+        """A state change of a beurer rule's heater, before the evaluation: switched off elsewhere while wanted (also
+        back from no data reading off) gets on again; a change during a power-cycle pause is the cycle's own."""
+        b = rule.beurer
+        assert b is not None
+        wanted = rule.enabled and not b.missing and rule.verdict is True
+        if b.heater_changed(b.state(self._lookup), ours, wanted, self._now()):
+            self._new_firing(rule)
+            self._fire(rule, rule.actions(), "switched off elsewhere")
+
+    def _beurer_step(self, rule: _Rule) -> None:
+        """The power-cycle after an evaluation of an enabled beurer rule: the off goes straight to the heater (not
+        through the slots, never waiting); the on at the pause end goes through the slots while a rule holds the
+        heater. Then the pause end or the next cycle is armed."""
+        b = rule.beurer
+        assert b is not None
+        now = self._now()
+        do = b.step(now, not b.missing and rule.verdict is True, b.state(self._lookup))
+        if do is not None and b.eid is not None:
+            entry = {"action": do, "target": b.label, "at": int(now * 1000), "reason": "re-power"}
+            if do == "off":
+                self._beurer_off(b.eid)
+                rule.last = entry
+            elif self._holders(b.eid):
+                self._hold_send(b.eid, "on", rule, entry)
+                rule.last = entry
+        wake = b.wake()
+        if wake is not None and wake <= now:
+            wake = None  # a cycle due but not done (not wanted, heater not on): only an evaluation can change that
+        if b.timer is not None and b.timer[0] != wake:
+            b.stop()
+        if wake is not None and b.timer is None:
+            key = rule.key
+            b.timer = (wake, self._schedule(max(0.0, wake - now), lambda: self._beurer_wake(key, b)))
+
+    def _beurer_off(self, eid: str) -> None:
+        """The power-cycle's off (own context); a failure is only logged: the pause end reads the heater anyway."""
+        def on_error(err: str, why: str = "service failed") -> None:
+            _LOGGER.warning("beurer heater %s: turn_off failed: %s", eid, err)
+
+        try:
+            self._call(eid.split(".", 1)[0], "turn_off", eid, on_error=on_error, current=lambda: True)
+        except Exception as err:  # noqa: BLE001 - a failing heater must not stop the engine
+            _LOGGER.warning("beurer heater %s: turn_off failed: %s", eid, err)
+
+    def _beurer_wake(self, key: Key, b: Beurer) -> None:
+        rule = self._rules.get(key)
+        if rule is None or rule.beurer is not b:
+            return
+        b.timer = None
+        self._settle({key})
+        self._flush()
+
+    def _beurer_trace(self, rule: _Rule) -> dict:
+        b = rule.beurer
+        assert b is not None
+        t = rule.trace_inputs[0] if rule.trace_inputs else {}
+        out: dict = {"watts": t.get("watts"), "detail": t.get("detail", "missing")}
+        if "until" in t:
+            out["keptUntil"] = t["until"]
+        out["heater"], out["fresh"] = b.state(self._lookup), b.fresh
+        if b.pause is not None:
+            out["pausedUntil"] = int(b.pause * 1000)
+        elif b.fresh and b.every > 0:
+            out["cycleAt"] = int((b.since + b.every * 60) * 1000)
+        return out
+
     def runs(self) -> "dict[str, dict[str, float]]":
         """The running timed switches {plan id: {rule id: until epoch s}} of every loaded rule."""
         out: dict[str, dict[str, float]] = {}
@@ -1605,12 +1743,12 @@ class RuleEngine:
 
     def started(self) -> None:
         """HA has started: end the boot phase and evaluate the boiler rules in auto, the restored timed runs and the
-        restored outside light pauses once."""
+        restored outside light pauses once, and run the beurer power-cycles."""
         if not self._booting:
             return
         self._booting = False
-        self._settle({key for key, rule in self._rules.items()
-                      if rule.boiler is not None or rule.timed is not None or rule.outside is not None})
+        self._settle({key for key, rule in self._rules.items() if rule.boiler is not None or rule.timed is not None
+                      or rule.outside is not None or rule.beurer is not None})
         self._flush()
 
     def _boiler_wake(self, key: Key, b: Boiler) -> None:
@@ -1772,6 +1910,8 @@ class RuleEngine:
                 self._timed_device(rule, own)
             if rule.outside is not None and rule.outside.eid == entity_id:
                 self._outside_light(rule, own or confirms)
+            if rule.beurer is not None and rule.beurer.eid == entity_id:
+                self._beurer_heater(rule, own or confirms)
         if keys:
             self._settle(set(keys))
         self._resend(entity_id)  # after the inputs: a newer firing has already dropped stale waiting actions
@@ -1812,6 +1952,8 @@ class RuleEngine:
             out["timed"] = rule.timed.trace(self._lookup)
         if rule.outside is not None:
             out["outside"] = self._outside_trace(rule)
+        if rule.beurer is not None:
+            out["beurer"] = self._beurer_trace(rule)
         if rule.leak:
             out["leak"] = {"valves": [
                 {"id": v, "name": name, "state": None if eid is None else
