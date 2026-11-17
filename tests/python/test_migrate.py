@@ -155,3 +155,66 @@ def test_repo_marks_migrated():
     assert repo.get("p1")["schemaVersion"] == 2 and repo.get("p1")["revision"] == 7
     assert PlanRepo({"plans": {"p2": v2}}).migrated == []
     assert PlanRepo(None).migrated == []
+
+
+def control_plan(control, rules_extra=()):
+    devices = [{"id": "btn", "props": {"kind": "smart_button"}}, {"id": "ws", "props": {"kind": "wall_switch"}},
+               {"id": "l1", "props": {"kind": "ceiling_light"}}, {"id": "l2", "props": {"kind": "socket"}}]
+    rule = {"id": "r1", "name": "Load control", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+            "inputs": [], "onTrue": [], "onFalse": [], "control": control}
+    return {"id": "p1", "name": "P", "schemaVersion": 2, "revision": 9, "levels": [{"id": "l", "devices": devices}],
+            "rules": [rule, *rules_extra]}
+
+
+def old_control():
+    return {"sources": ["btn", "ws"], "loads": ["l1", "l2"]}
+
+
+def test_control_v20_is_converted():
+    p = control_plan(old_control())
+    before = copy.deepcopy(p)
+    out = migrate_plan(p)
+    assert p == before  # not mutated
+    assert out["rules"][0]["control"] == {
+        "sources": [{"button": "btn"}, {"source": {"device": "ws"}}],
+        "on": [{"device": "l1", "do": "on"}, {"device": "l2", "do": "on"}],
+        "off": [{"device": "l1", "do": "off"}, {"device": "l2", "do": "off"}],
+        "toggle": [{"device": "l1", "do": "toggle"}, {"device": "l2", "do": "toggle"}],
+    }
+    assert out["revision"] == 9 and out["schemaVersion"] == 2
+    validate_plan(out)
+
+
+def test_control_v20_second_run_and_plain_plans_return_the_same_object():
+    out = migrate_plan(control_plan(old_control()))
+    assert migrate_plan(out) is out
+    plain = control_plan(old_control())
+    plain["rules"] = []
+    assert migrate_plan(plain) is plain
+    no_rules = {"schemaVersion": 2, "id": "a", "levels": []}
+    assert migrate_plan(no_rules) is no_rules
+    new_shape = control_plan({"sources": [{"button": "btn"}], "on": [], "off": [], "toggle": [{"device": "l1", "do": "toggle"}]})
+    assert migrate_plan(new_shape) is new_shape
+
+
+def test_control_v20_leaves_other_rules_and_junk_alone():
+    other = {"id": "r2", "name": "R", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+             "inputs": [{"source": {"device": "ws"}}], "onTrue": [], "onFalse": []}
+    out = migrate_plan(control_plan(old_control(), [other]))
+    assert out["rules"][1] is other
+    junk = control_plan({"sources": [3], "loads": ["l1"]})
+    assert migrate_plan(junk) is junk
+    assert migrate_plan({"schemaVersion": 2, "rules": "x", "levels": "y"}) == {"schemaVersion": 2, "rules": "x", "levels": "y"}
+
+
+def test_control_v20_validate_rejects_the_old_shape():
+    with pytest.raises(vol.Invalid, match="rule control"):
+        validate_plan(control_plan(old_control()))
+
+
+def test_repo_marks_control_v20_converted_and_keeps_the_revision():
+    repo = PlanRepo({"plans": {"p1": control_plan(old_control())}})
+    assert repo.migrated == ["p1"]
+    plan = repo.get("p1")
+    assert plan["revision"] == 9 and "on" in plan["rules"][0]["control"]
+    assert PlanRepo({"plans": {"p1": plan}}).migrated == []

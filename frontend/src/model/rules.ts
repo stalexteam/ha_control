@@ -2,7 +2,9 @@
 import { zoneMembers } from '../geometry/zones';
 import { newId } from './ids';
 import type { PowerSchema } from './power';
-import type { Device, Id, Level, Rule, RuleDo, RuleInput } from './types';
+import { isButtonSource, type ControlAction, type ControlDo, type ControlSource, type Device, type Id, type Level, type Rule, type RuleDo, type RuleInput } from './types';
+
+export { isButtonSource };
 
 export const RULE_DELAY_MAX = 3600;
 
@@ -28,8 +30,11 @@ const inputRefs = (i: RuleInput): Id[] => {
   return [];
 };
 
-/** Every rule id the rule references: inputs, the gate and held sources. */
-export const ruleRefs = (r: Rule): Id[] => [...r.inputs, ...(r.gate ? [r.gate] : [])].flatMap(inputRefs);
+/** The condition inputs of a load control rule's sources (buttons are not inputs). */
+const controlInputs = (r: Rule): RuleInput[] => (Array.isArray(r.control?.sources) ? r.control.sources : []).filter((s): s is RuleInput => typeof s === 'object' && s !== null && !isButtonSource(s));
+
+/** Every rule id the rule references: inputs, the gate, held sources and a load control rule's sources. */
+export const ruleRefs = (r: Rule): Id[] => [...r.inputs, ...controlInputs(r), ...(r.gate ? [r.gate] : [])].flatMap(inputRefs);
 
 const inputDevices = (i: RuleInput): Id[] => {
   const s = i.source;
@@ -127,7 +132,10 @@ export function ruleProblems(
   const out: RuleProblem[] = [];
   if (!r.name.trim()) out.push('name');
   if (r.inputs.length === 0 && !r.vent && !r.boiler && !r.leak && !r.timed && !r.outside && !r.beurer && !r.control) out.push('inputs');
-  const all = [...r.inputs, ...(r.gate ? [r.gate] : [])];
+  const ctl = r.control;
+  const ctlButtons = (Array.isArray(ctl?.sources) ? ctl.sources : []).filter((s): s is { button: Id } => typeof s === 'object' && s !== null && isButtonSource(s)).map(s => s.button);
+  const ctlTargets = ctl ? ([ctl.on, ctl.off, ctl.toggle] as unknown[]).flatMap(l => (Array.isArray(l) ? (l as ControlAction[]) : [])) : [];
+  const all = [...r.inputs, ...controlInputs(r), ...(r.gate ? [r.gate] : [])];
   const devices = [...all.flatMap(inputDevices), ...r.onTrue.map(a => a.device), ...r.onFalse.map(a => a.device)];
   const lights = all.flatMap(i => ('light' in i.source ? [i.source.light] : 'daylight' in i.source ? [i.source.daylight] : []));
   if (devices.some(id => !deviceExists(id)) || lights.some(id => !(lightSensorExists ?? deviceExists)(id))
@@ -138,7 +146,7 @@ export function ruleProblems(
     || (r.timed && (!(timedButtonExists ?? deviceExists)(r.timed.button) || !(timedDeviceExists ?? deviceExists)(r.timed.device)))
     || (r.outside && (!(outsideLightExists ?? deviceExists)(r.outside.light) || !(lightSensorExists ?? deviceExists)(r.outside.sensor)))
     || (r.beurer && (!(heaterExists ?? deviceExists)(r.beurer.heater) || !(powerSourceExists ?? deviceExists)(r.beurer.source)))
-    || (r.control && (r.control.sources.some(id => !(controlSourceExists ?? deviceExists)(id)) || r.control.loads.some(id => !(controlLoadExists ?? deviceExists)(id))))) out.push('device-missing');
+    || ctlButtons.some(id => !(controlSourceExists ?? deviceExists)(id)) || ctlTargets.some(a => !(controlLoadExists ?? deviceExists)(a.device))) out.push('device-missing');
   const known = new Set(rules.map(x => x.id));
   if (ruleRefs(r).some(id => id !== r.id && !known.has(id))) out.push('rule-missing');
   if (ruleCycle(rules, r)) out.push('cycle');
@@ -156,6 +164,7 @@ export function ruleProblems(
   if (r.control && controlProblem(r, r.control)) out.push('control');
   if (r.boiler?.button && buttonAutoOk && !out.includes('device-missing') && !buttonAutoOk(r.boiler.button)) out.push('boiler-auto');
   if (actionsOf && [...r.onTrue, ...r.onFalse].some(a => { const ok = actionsOf(a.device); return ok !== undefined && !ok.includes(a.do); })) out.push('action');
+  if (ctl && ctlTargets.some(a => !CONTROL_DOS.includes(a.do) || (actionsOf && !controlDoOk(a.do, actionsOf(a.device))))) out.push('action');
   return out;
 }
 
@@ -227,12 +236,38 @@ function beurerProblem(r: Rule, b: NonNullable<Rule['beurer']>): boolean {
   return ![b.keep, b.every].every(n => Number.isInteger(n) && n >= 0 && n <= 1440);
 }
 
+const CONTROL_DOS: ControlDo[] = ['on', 'off', 'toggle', 'close'];
+
+/** The actions a device takes in a load control rule: on / off / toggle when it takes on and off, close for a valve, else none. */
+export function controlActionsFor(d: Device): ControlDo[] {
+  const a = ruleActionsFor(d);
+  return a.includes('on') && a.includes('off') ? ['on', 'off', 'toggle'] : a.includes('close') ? ['close'] : [];
+}
+
+/** `do` against what the device takes as a rule action (`ruleActionsFor`); undefined (device unknown) is no problem. */
+const controlDoOk = (d: ControlDo, taken: RuleDo[] | undefined): boolean =>
+  taken === undefined || (d === 'close' ? taken.includes('close') : taken.includes('on') && taken.includes('off'));
+
+/** JSON equality whatever the key order. */
+function jsonEqual(a: unknown, b: unknown): boolean {
+  const canon = (_k: string, v: unknown): unknown =>
+    v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([x], [y]) => (x < y ? -1 : 1))) : v;
+  return JSON.stringify(a, canon) === JSON.stringify(b, canon);
+}
+
 /** A load control rule's fixed shape and data bounds; true = violated. */
 function controlProblem(r: Rule, c: NonNullable<Rule['control']>): boolean {
-  if (r.vent || r.boiler || r.leak || r.timed || r.outside || r.beurer || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.vent || r.boiler || r.leak || r.timed || r.outside || r.beurer || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
-  const list = (ids: unknown): ids is string[] => Array.isArray(ids) && ids.length >= 1 && ids.every(id => typeof id === 'string' && id !== '') && new Set(ids).size === ids.length;
-  return !list(c.sources) || !list(c.loads) || c.sources.some(id => c.loads.includes(id));
+  const lists = [c.on, c.off, c.toggle];
+  if (!Array.isArray(c.sources) || c.sources.length === 0 || !lists.every(Array.isArray) || lists.every(l => l.length === 0)) return true;
+  const sourceOk = (s: unknown): boolean => typeof s === 'object' && s !== null && (isButtonSource(s as ControlSource)
+    ? typeof (s as { button: unknown }).button === 'string' && (s as { button: string }).button !== '' : typeof (s as RuleInput).source === 'object' && (s as RuleInput).source !== null);
+  if (!c.sources.every(sourceOk) || c.sources.some((s, i) => c.sources.some((o, k) => k < i && jsonEqual(s, o)))) return true;
+  const listOk = (l: ControlAction[]): boolean => l.every(a => typeof a === 'object' && a !== null && typeof a.device === 'string' && a.device !== '') && new Set(l.map(a => a.device)).size === l.length;
+  if (!lists.every(listOk)) return true;
+  const read = new Set(controlInputs(r).flatMap(inputDevices));
+  return lists.some(l => l.some(a => read.has(a.device)));
 }
 
 export const isControlRule = (r: Rule): boolean => r.control !== undefined;
@@ -248,8 +283,23 @@ export function controlTemplate(plan: { levels: Level[] }, zoneId: Id | null, zo
   const source = buttons.length === 1 ? buttons[0] : undefined;
   const load = loads.length === 1 ? loads[0] : undefined;
   const sameRelay = source?.props.kind === 'wall_switch' && !!source.bindings?.state && source.bindings.state === load?.bindings?.control;
-  rule.control = { sources: source ? [source.id] : [], loads: load && !sameRelay ? [load.id] : [] };
+  const act = (do_: ControlDo): ControlAction[] => (load && !sameRelay ? [{ device: load.id, do: do_ }] : []);
+  rule.control = { sources: source ? [source.props.kind === 'smart_button' ? { button: source.id } : { source: { device: source.id } }] : [], on: act('on'), off: act('off'), toggle: act('toggle') };
   return rule;
+}
+
+/**
+ * Converts a 0.20.0 load control rule (`control: { sources: Id[], loads: Id[] }`) to the event shape: a smart button id
+ * becomes `{ button }`, any other id a device input; `on`, `off` and `toggle` hold every load. The same object comes back
+ * for any other rule, so a plan without such a rule is unchanged. `kindOf` gives a device's `props.kind`.
+ */
+export function migrateControl(rule: Rule, kindOf: (id: Id) => string | undefined): Rule {
+  const c = rule.control as unknown as { sources?: unknown; loads?: unknown; on?: unknown } | undefined;
+  if (!c || 'on' in c || !Array.isArray(c.sources) || !Array.isArray(c.loads) || ![...c.sources, ...c.loads].every(id => typeof id === 'string')) return rule;
+  const loads = c.loads as Id[];
+  const act = (do_: ControlDo): ControlAction[] => loads.map(device => ({ device, do: do_ }));
+  const sources = (c.sources as Id[]).map((id): ControlSource => (kindOf(id) === 'smart_button' ? { button: id } : { source: { device: id } }));
+  return { ...rule, control: { sources, on: act('on'), off: act('off'), toggle: act('toggle') } };
 }
 
 export const isBeurerRule = (r: Rule): boolean => r.beurer !== undefined;
@@ -372,8 +422,4 @@ export function ruleActionsFor(d: Device): RuleDo[] {
 }
 
 /** Same content, whatever the key order (a dialog copy edited back to the saved values is equal). */
-export function ruleEqual(a: Rule, b: Rule): boolean {
-  const canon = (_k: string, v: unknown): unknown =>
-    v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).sort(([x], [y]) => (x < y ? -1 : 1))) : v;
-  return JSON.stringify(a, canon) === JSON.stringify(b, canon);
-}
+export const ruleEqual = (a: Rule, b: Rule): boolean => jsonEqual(a, b);

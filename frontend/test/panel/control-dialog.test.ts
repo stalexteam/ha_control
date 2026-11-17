@@ -6,6 +6,7 @@ import { SCENES } from '../../dev/scenes';
 import type { Plan, Rule } from '../../src/model/types';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 import { isControlRule } from '../../src/model/rules';
+import { legacyLoadIds, legacySourceIds } from '../../src/render/control-trace';
 
 async function open(rules?: Rule[], mutate?: (p: Plan) => void): Promise<PlanStudioPanel> {
   const plan: Plan = structuredClone(SCENES.control.plans[0]);
@@ -70,13 +71,13 @@ describe('Load control form', () => {
     expect(okBtn(el).disabled).toBe(true);
     expect(problems(el)).toEqual(['Add a button, a wall switch or a motion sensor', 'Add a load']);
     await add(el, 'control-sources', 'd-motion');
-    expect(el.ruleDraft!.rule.control).toEqual({ sources: ['d-motion'], loads: [] });
+    expect(el.ruleDraft!.rule.control).toEqual({ sources: [{ source: { device: 'd-motion' } }], on: [], off: [], toggle: [] });
     expect(problems(el)).toEqual(['Add a load']);
     await add(el, 'control-loads', 'd-light');
     expect(problems(el)).toEqual([]);
     expect(okBtn(el).disabled).toBe(false);
     await press(el, 'button[data-action="rule-ok"]');
-    expect(el.rules[0]).toMatchObject({ combine: 'any', inputs: [], onTrue: [], onFalse: [], control: { sources: ['d-motion'], loads: ['d-light'] } });
+    expect(el.rules[0]).toMatchObject({ combine: 'any', inputs: [], onTrue: [], onFalse: [], control: { sources: [{ source: { device: 'd-motion' } }], on: [{ device: 'd-light', do: 'on' }], off: [{ device: 'd-light', do: 'off' }], toggle: [{ device: 'd-light', do: 'toggle' }] } });
   });
 
   it('the Sources add select lists wall switches, smart buttons and motion sensors only', async () => {
@@ -104,11 +105,11 @@ describe('Load control form', () => {
     expect(chips(el, 'control-sources')).toEqual(['d-switch-hall', 'd-button-vent', 'd-motion']);
     expect(chips(el, 'control-loads')).toEqual(['d-light', 'd-vent', 'd-socket']);
     await press(el, '[data-group="control-loads"] .rchip[data-id="d-vent"] button[data-action="remove"]');
-    expect(el.ruleDraft!.rule.control!.loads).toEqual(['d-light', 'd-socket']);
+    expect(legacyLoadIds(el.ruleDraft!.rule.control!)).toEqual(['d-light', 'd-socket']);
     await press(el, '[data-group="control-sources"] .rchip[data-id="d-motion"] button[data-action="remove"]');
-    expect(el.ruleDraft!.rule.control!.sources).toEqual(['d-switch-hall', 'd-button-vent']);
+    expect(legacySourceIds(el.ruleDraft!.rule.control!.sources)).toEqual(['d-switch-hall', 'd-button-vent']);
     await add(el, 'control-sources', 'd-motion');
-    expect(el.ruleDraft!.rule.control!.sources).toEqual(['d-switch-hall', 'd-button-vent', 'd-motion']);
+    expect(legacySourceIds(el.ruleDraft!.rule.control!.sources)).toEqual(['d-switch-hall', 'd-button-vent', 'd-motion']);
   });
 
   it('Edit opens the compact frame with the live values of the saved rule; an edit drops them', async () => {
@@ -143,5 +144,20 @@ describe('Load control form', () => {
     expect(q(el, '[data-block="control-load:d-vent"]').classList.contains('hl')).toBe(true);
     expect(q(el, '[data-group="control-loads"] .rchip[data-id="d-vent"]').classList.contains('hl')).toBe(true);
     (el.shadowRoot!.activeElement as HTMLElement).blur(); // happy-dom: a focused element of a removed panel breaks the next test
+  });
+
+  it('a stored 0.20.0 rule is converted when the plan opens', async () => {
+    const old = { ...SCENES.control.plans[0].rules!.find(r => r.control)!, control: { sources: ['d-button-vent', 'd-motion'], loads: ['d-light'] } } as unknown as Rule;
+    const el = await open([old]);
+    expect(el.rules[0].control).toEqual({
+      sources: [{ button: 'd-button-vent' }, { source: { device: 'd-motion' } }],
+      on: [{ device: 'd-light', do: 'on' }], off: [{ device: 'd-light', do: 'off' }], toggle: [{ device: 'd-light', do: 'toggle' }],
+    });
+  });
+
+  it('a plan without a 0.20.0 rule keeps its rule objects', async () => {
+    const el = await open();
+    expect(el.rules.length).toBeGreaterThan(0);
+    el.rules.forEach((r, i) => expect(r).toBe(el.session.savedRules[i]));
   });
 });

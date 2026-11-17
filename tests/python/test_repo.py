@@ -389,27 +389,46 @@ def test_validate_plan_beurer_rule():
             validate_plan({**plan("p"), "rules": [{**other, "beurer": {"heater": "h", "source": "p", "above": 200, "keep": 10, "every": 30}}]})
 
 
+def ctl(**kw):
+    c = {"sources": [{"button": "b"}], "on": [], "off": [], "toggle": [{"device": "l", "do": "toggle"}]}
+    c.update(kw)
+    return c
+
+
 def control_rule(rid="c1", control=None, **kw):
-    r = rule(rid, inputs=[], onTrue=[], control={"sources": ["s"], "loads": ["l"]} if control is None else control)
+    r = rule(rid, inputs=[], onTrue=[], control=ctl() if control is None else control)
     r.update(kw)
     return r
 
 
 def test_validate_plan_control_rule():
     validate_plan({**plan("p"), "rules": [control_rule()]})
-    validate_plan({**plan("p"), "rules": [control_rule(control={"sources": ["s", "s2"], "loads": ["l", "l2"]})]})
+    validate_plan({**plan("p"), "rules": [control_rule(control=ctl(
+        sources=[{"source": {"device": "w"}, "not": True}, {"button": "b"}, {"source": {"sun": True}}],
+        on=[{"device": "l", "do": "on"}], off=[{"device": "l", "do": "off"}, {"device": "l2", "do": "off"}]))]})
+    validate_plan({**plan("p"), "rules": [control_rule(control=ctl(toggle=[], on=[{"device": "v", "do": "close"}]))]})
+    validate_plan({**plan("p"), "rules": [control_rule(gate={"source": {"sun": True}})]})
     bad = [
-        "x", [], {}, {"sources": ["s"]}, {"loads": ["l"]}, {"sources": ["s"], "loads": ["l"], "x": 1},
-        {"sources": [], "loads": ["l"]}, {"sources": ["s"], "loads": []},
-        {"sources": "s", "loads": ["l"]}, {"sources": ["s"], "loads": "l"},
-        {"sources": ["s", "s"], "loads": ["l"]}, {"sources": ["s"], "loads": ["l", "l"]},
-        {"sources": [3], "loads": ["l"]}, {"sources": ["s"], "loads": [""]}, {"sources": ["s"], "loads": ["s"]},
+        "x", [], {}, {"sources": [{"button": "b"}]}, ctl(x=1),
+        # the 0.20.0 shape
+        {"sources": ["s"], "loads": ["l"]},
+        ctl(sources=[]), ctl(sources="b"), ctl(sources=["b"]), ctl(sources=[{"button": ""}]), ctl(sources=[{"button": "b", "x": 1}]),
+        ctl(toggle=[]), ctl(on="x"), ctl(toggle=[{"device": "l", "do": "open"}]), ctl(toggle=[{"device": "", "do": "on"}]),
+        ctl(toggle=[{"device": "l", "do": "toggle", "x": 1}]),
+        ctl(sources=[{"button": "b"}, {"button": "b"}]),
+        ctl(sources=[{"source": {"device": "w"}, "not": True}, {"not": True, "source": {"device": "w"}}]),
+        ctl(toggle=[{"device": "l", "do": "toggle"}, {"device": "l", "do": "toggle"}]),
+        ctl(sources=[{"source": {"device": "l"}}]),
+        ctl(sources=[{"source": {"held": {"sources": [{"device": "l"}], "state": "any", "seconds": 5}}}]),
+        ctl(sources=[{"source": {"daylight": "s", "is": "night"}, "not": True}]),
     ]
     for c in bad:
-        with pytest.raises(vol.Invalid, match="rule control"):
+        with pytest.raises(vol.Invalid, match="rule "):
             validate_plan({**plan("p"), "rules": [control_rule(control=c)]})
+    # a button source may also be a target; a rule source may be anything
+    validate_plan({**plan("p"), "rules": [control_rule(control=ctl(sources=[{"button": "l"}]))]})
     for kw in (
-        {"inputs": ref("x")}, {"combine": "all"}, {"onDelay": 5}, {"offDelay": 5}, {"gate": {"source": {"sun": True}}},
+        {"inputs": ref("x")}, {"combine": "all"}, {"onDelay": 5}, {"offDelay": 5},
         {"onTrue": [{"device": "d", "do": "on"}]}, {"onFalse": [{"device": "d", "do": "off"}]},
         {"vent": {"sensor": "a", "than": "b", "above": 9, "below": 5}}, {"boiler": {"device": "d", "button": "b"}},
         {"leak": {"sensors": ["s"], "valves": ["v"]}}, {"timed": {"button": "b", "device": "d", "minutes": 5}},
@@ -420,4 +439,12 @@ def test_validate_plan_control_rule():
     # the other kinds reject a control key too
     for other in (vent_rule(), boiler_rule(), leak_rule(), timed_rule(), outside_rule(), beurer_rule()):
         with pytest.raises(vol.Invalid, match="rule (timed|vent|boiler|leak|outside|beurer)"):
-            validate_plan({**plan("p"), "rules": [{**other, "control": {"sources": ["s"], "loads": ["l"]}}]})
+            validate_plan({**plan("p"), "rules": [{**other, "control": ctl()}]})
+
+
+def test_validate_plan_control_rule_source_refs():
+    # a rule source takes part in the reference check (cycles)
+    other = rule("r2", inputs=ref("c1"))
+    with pytest.raises(vol.Invalid, match="cycle"):
+        validate_plan({**plan("p"), "rules": [control_rule(control=ctl(sources=[{"source": {"rule": "r2"}}])), other]})
+    validate_plan({**plan("p"), "rules": [control_rule(control=ctl(sources=[{"source": {"rule": "r2"}}])), rule("r2")]})

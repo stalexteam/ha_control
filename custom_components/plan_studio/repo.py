@@ -189,19 +189,51 @@ def _validate_beurer(r: dict, b: object) -> None:
         raise vol.Invalid("rule beurer needs no inputs, gate, vent, boiler, leak, timed, outside, control or actions, combine any and onDelay 0")
 
 
-def _validate_control(r: dict, c: object) -> None:
-    """A load control rule: sources (buttons, wall switches, motion sensors) switch loads directly; no inputs, gate, other kinds, actions or delays."""
-    if not isinstance(c, dict) or set(c) != {"sources", "loads"}:
-        raise vol.Invalid("rule control needs sources and loads")
-    for key in ("sources", "loads"):
-        ids = c[key]
-        if not isinstance(ids, list) or not ids or not all(_is_id(i) for i in ids) or len(set(ids)) != len(ids):
-            raise vol.Invalid(f"rule control {key} needs at least one distinct device id")
-    if set(c["sources"]) & set(c["loads"]):
-        raise vol.Invalid("rule control needs a device in only one of sources and loads")
-    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "outside" in r or "beurer" in r or r["combine"] != "any" \
-            or r["onDelay"] != 0 or r["offDelay"] != 0 or r["onTrue"] or r["onFalse"]:
-        raise vol.Invalid("rule control needs no inputs, gate, other kinds or actions, combine any and no delays")
+_CONTROL_DOS = ("on", "off", "toggle", "close")
+
+
+def _validate_control(r: dict, c: object) -> list[str]:
+    """A load control rule: sources (buttons or condition inputs) give events that run the on / off / toggle action lists; a gate is allowed. Returns the rule ids the sources reference."""
+    if not isinstance(c, dict) or set(c) != {"sources", "on", "off", "toggle"}:
+        raise vol.Invalid("rule control needs sources, on, off and toggle")
+    sources = c["sources"]
+    if not isinstance(sources, list) or not sources:
+        raise vol.Invalid("rule control needs at least one source")
+    refs: list[str] = []
+    seen: set[str] = set()
+    read: set[str] = set()
+    for s in sources:
+        if isinstance(s, dict) and "button" in s:
+            if set(s) != {"button"} or not _is_id(s["button"]):
+                raise vol.Invalid("rule control button source needs a button id")
+        else:
+            refs.extend(_validate_input(s))
+            src = s["source"]
+            read.update([src["device"]] if "device" in src else [x["device"] for x in src["held"]["sources"] if "device" in x] if "held" in src else [])
+        key = json.dumps(s, sort_keys=True)
+        if key in seen:
+            raise vol.Invalid("rule control needs distinct sources")
+        seen.add(key)
+    targets: set[str] = set()
+    for key in ("on", "off", "toggle"):
+        actions = c[key]
+        if not isinstance(actions, list):
+            raise vol.Invalid(f"rule control {key} must be a list")
+        ids = []
+        for a in actions:
+            if not isinstance(a, dict) or set(a) != {"device", "do"} or not _is_id(a["device"]) or a["do"] not in _CONTROL_DOS:
+                raise vol.Invalid("rule control action needs a device and do on/off/toggle/close")
+            ids.append(a["device"])
+        if len(set(ids)) != len(ids):
+            raise vol.Invalid(f"rule control needs a device once in {key}")
+        targets.update(ids)
+    if not (c["on"] or c["off"] or c["toggle"]):
+        raise vol.Invalid("rule control needs at least one action")
+    if targets & read:
+        raise vol.Invalid("rule control needs a target device that its sources do not read")
+    if r["inputs"] or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "outside" in r or "beurer" in r or r["combine"] != "any"             or r["onDelay"] != 0 or r["offDelay"] != 0 or r["onTrue"] or r["onFalse"]:
+        raise vol.Invalid("rule control needs no inputs, other kinds or actions, combine any and no delays")
+    return refs
 
 
 def _validate_rules(rules: object) -> None:
@@ -254,7 +286,7 @@ def _validate_rules(rules: object) -> None:
         if "beurer" in r:
             _validate_beurer(r, r["beurer"])
         if "control" in r:
-            _validate_control(r, r["control"])
+            refs.extend(_validate_control(r, r["control"]))
         graph[r["id"]] = refs
     state: dict[str, int] = {}
 

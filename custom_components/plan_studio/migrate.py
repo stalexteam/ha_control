@@ -13,8 +13,33 @@ def migrate_plan(plan: dict) -> dict:
             f"plan schemaVersion {version} is newer than supported {CURRENT_SCHEMA}"
         )
     if type(version) is int and version == 1:
-        return _v1_to_v2(plan)
-    return plan
+        plan = _v1_to_v2(plan)
+    return _control_v20(plan)
+
+
+def _control_v20(plan: dict) -> dict:
+    """0.20.0 load control rules (`control: {sources: [id], loads: [id]}`) get the event shape: a smart button id becomes `{button}`, any other id a device input; on / off / toggle hold every load. A plan without such a rule is returned as the same object; the input is not mutated."""
+    rules = plan.get("rules")
+    if not isinstance(rules, list) or not any(_is_control_v20(r) for r in rules):
+        return plan
+    kinds: dict[object, object] = {}
+    for level in _dicts(plan.get("levels")):
+        for device in _dicts(level.get("devices")):
+            props = device.get("props")
+            kinds[device.get("id")] = props.get("kind") if isinstance(props, dict) else None
+    converted = [_control_v20_rule(r, kinds) if _is_control_v20(r) else r for r in rules]
+    return {**plan, "rules": converted}
+
+
+def _is_control_v20(rule: object) -> bool:
+    c = rule.get("control") if isinstance(rule, dict) else None
+    return isinstance(c, dict) and "on" not in c and isinstance(c.get("sources"), list) and isinstance(c.get("loads"), list)         and all(isinstance(i, str) for i in c["sources"] + c["loads"])
+
+
+def _control_v20_rule(rule: dict, kinds: dict) -> dict:
+    c = rule["control"]
+    sources = [{"button": i} if kinds.get(i) == "smart_button" else {"source": {"device": i}} for i in c["sources"]]
+    return {**rule, "control": {"sources": sources, **{do: [{"device": i, "do": do} for i in c["loads"]] for do in ("on", "off", "toggle")}}}
 
 
 def _v1_to_v2(plan: dict) -> dict:

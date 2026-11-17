@@ -3,7 +3,7 @@ import type { Device, Id, Rule } from '../model/types';
 import type { RuleProblem } from '../model/rules';
 import type { RuleTrace } from '../live/rules-feed';
 import type { RuleDraft } from './rule-dialog';
-import { renderControlTrace } from '../render/control-trace';
+import { legacyLoadIds, legacySourceIds, renderControlTrace } from '../render/control-trace';
 import { renderPurposeDialog } from './purpose-dialog';
 import { chips } from './leak-dialog';
 import { t } from '../i18n';
@@ -29,7 +29,7 @@ export interface ControlDialogOpts {
 
 /** The messages under the form: a hint per empty list, the rest as the rule dialog words them. */
 function problemTexts(o: ControlDialogOpts): { key: string; text: string }[] {
-  const c = o.draft.rule.control!;
+  const c = { sources: legacySourceIds(o.draft.rule.control!.sources), loads: legacyLoadIds(o.draft.rule.control!) };
   const hints: { key: string; text: string }[] = [];
   if (c.sources.length === 0) hints.push({ key: 'pick-sources', text: t('control.problem.sources') });
   if (c.loads.length === 0) hints.push({ key: 'pick-loads', text: t('control.problem.loads') });
@@ -47,15 +47,18 @@ function problemTexts(o: ControlDialogOpts): { key: string; text: string }[] {
  */
 export function renderControlDialog(o: ControlDialogOpts): TemplateResult {
   const r = o.draft.rule;
-  const c = r.control!;
+  const rc = r.control!;
+  const c = { sources: legacySourceIds(rc.sources), loads: legacyLoadIds(rc) };
+  const setSources = (ids: Id[]): void => o.onChange({ ...r, control: { ...rc, sources: ids.map(id => (o.deviceById(id)?.props.kind === 'smart_button' ? { button: id } : { source: { device: id } })) } });
+  const setLoads = (ids: Id[]): void => o.onChange({ ...r, control: { ...rc, on: ids.map(device => ({ device, do: 'on' as const })), off: ids.map(device => ({ device, do: 'off' as const })), toggle: ids.map(device => ({ device, do: 'toggle' as const })) } });
   return renderPurposeDialog({
     prefix: 'control', title: t('control.title'), hint: t('control.hint'), rule: r, zones: o.zones, problems: o.problems,
     texts: problemTexts(o), onChange: o.onChange, onOk: o.onOk, onCancel: o.onCancel,
     form: html`
       <label class="rlabel">${t('control.sources')}</label>
-      ${chips(o, 'control-sources', 'control-source', c.sources, o.sources, t('control.addSource'), ids => o.onChange({ ...r, control: { ...c, sources: ids } }))}
+      ${chips(o, 'control-sources', 'control-source', c.sources, o.sources, t('control.addSource'), setSources)}
       <label class="rlabel">${t('control.loads')}</label>
-      ${chips(o, 'control-loads', 'control-load', c.loads, o.loads.filter(d => !c.sources.includes(d.id)), t('control.addLoad'), ids => o.onChange({ ...r, control: { ...c, loads: ids } }))}`,
+      ${chips(o, 'control-loads', 'control-load', c.loads, o.loads.filter(d => !c.sources.includes(d.id)), t('control.addLoad'), setLoads)}`,
     diagram: renderControlTrace({
       rule: r, deviceName: id => o.deviceById(id)?.name ?? t('rules.missingDevice'),
       deviceKind: id => o.deviceById(id)?.props.kind,

@@ -580,7 +580,13 @@ function controlPlan(extraLoads = false): Plan {
   p.rules = p.rules!.filter(r => r.timed === undefined);
   p.rules.push({
     id: 'rule-control', name: 'Load control Main', zoneId: 'r0', combine: 'any', inputs: [], onDelay: 0, offDelay: 0, onTrue: [], onFalse: [],
-    control: { sources: ['d-switch-hall', 'd-button-vent', 'd-motion'], loads: ['d-light', 'd-vent', 'd-socket', ...(extraLoads ? ['d-fan', 'd-heater'] : [])] },
+    control: (() => {
+      const loads = ['d-light', 'd-vent', 'd-socket', ...(extraLoads ? ['d-fan', 'd-heater'] : [])];
+      return {
+        sources: [{ source: { device: 'd-switch-hall' } }, { button: 'd-button-vent' }, { source: { device: 'd-motion' } }],
+        on: loads.map(device => ({ device, do: 'on' as const })), off: loads.map(device => ({ device, do: 'off' as const })), toggle: loads.map(device => ({ device, do: 'toggle' as const })),
+      };
+    })(),
   });
   return p;
 }

@@ -3,6 +3,7 @@ import { emptyPlan, normalizeLevel } from '../model/types';
 import { History } from '../editor/history';
 import { defaultPower, normalizePower, type PlanDoc } from '../model/power';
 import { markSwitchesMigrated, migrateDevices } from '../model/migrate-devices';
+import { migrateControl } from '../model/rules';
 import type { Draft } from '../editor/draft';
 import { deletePlan, getPlan, listPlans, type PlanSummary } from '../api';
 import { t } from '../i18n';
@@ -186,7 +187,9 @@ export class PlanSession {
     this.h.plan = { ...input, levels: input.levels.map(normalizeLevel) };
     const doc = migrateDevices({ level: this.h.plan.levels[0], power: this.h.plan.power });
     const power = normalizePower(doc.power, { device: id => doc.level.devices.find(d => d.id === id) });
-    const rules = input.rules && input.rules.length > 0 ? input.rules : undefined;
+    const kinds = new Map(this.h.plan.levels.flatMap(l => l.devices.map(d => [d.id, d.props.kind] as const)));
+    const migrated = input.rules?.map(r => migrateControl(r, id => kinds.get(id)));
+    const rules = input.rules && migrated && input.rules.length > 0 ? (migrated.some((r, i) => r !== input.rules![i]) ? migrated : input.rules) : undefined;
     this.h.history = new History<PlanDoc>({ level: doc.level, ...(power ? { power } : {}), ...(rules ? { rules } : {}) });
     this.h.lazyPower = defaultPower();
     this.h.activeTool.cancel();

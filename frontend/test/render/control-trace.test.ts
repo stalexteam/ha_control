@@ -8,7 +8,11 @@ import type { ControlTrace, RuleTrace } from '../../src/live/rules-feed';
 
 const NOW = new Date(2026, 10, 17, 20, 0).getTime();
 const rule = (sources: string[], loads: string[]): Rule => ({
-  id: 'r', name: 'Load control', zoneId: null, combine: 'any', inputs: [], onDelay: 0, offDelay: 0, onTrue: [], onFalse: [], control: { sources, loads },
+  id: 'r', name: 'Load control', zoneId: null, combine: 'any', inputs: [], onDelay: 0, offDelay: 0, onTrue: [], onFalse: [],
+  control: {
+    sources: sources.map(id => (kinds[id] === 'smart_button' ? { button: id } : { source: { device: id } })),
+    on: loads.map(device => ({ device, do: 'on' as const })), off: loads.map(device => ({ device, do: 'off' as const })), toggle: loads.map(device => ({ device, do: 'toggle' as const })),
+  },
 });
 const names: Record<string, string> = { sw: 'Switch hall', btn: 'Button vent', pir: 'Motion sensor', a: 'Light', b: 'Vent', c: 'Socket', d: 'Fan', e: 'Heater' };
 const kinds: Record<string, string> = { sw: 'wall_switch', btn: 'smart_button', 'btn-sep': 'smart_button', pir: 'motion_sensor' };

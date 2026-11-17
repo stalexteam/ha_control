@@ -159,6 +159,10 @@ export type RuleSource =
   | { held: { sources: ({ device: Id } | { rule: Id })[]; state: 'on' | 'off' | 'any'; seconds: number } };
 export interface RuleInput { source: RuleSource; not?: true }
 export interface RuleAction { device: Id; do: RuleDo }
+export type ControlDo = 'on' | 'off' | 'toggle' | 'close';
+export type ControlSource = RuleInput | { button: Id };
+export interface ControlAction { device: Id; do: ControlDo }
+export const isButtonSource = (s: ControlSource): s is { button: Id } => 'button' in s;
 /** zoneId only says where the rule is listed; enabled missing = enabled; delays are whole seconds 0..3600. */
 export interface Rule {
   id: Id; name: string; zoneId: Id | null; enabled?: false; combine: 'all' | 'any';
@@ -177,8 +181,8 @@ export interface Rule {
   outside?: { light: Id; sensor: Id; noDataNight?: true; afterSunset?: true; window?: { from: string; to: string }; pause: number };
   /** Beurer heater: a heating pad (heater) is kept on while a power source draws above `above` W, off `offDelay` s after it stops, re-powered every `every` min (0 = never) and kept at least `keep` min (0 = none); inputs/actions stay empty. */
   beurer?: { heater: Id; source: Id; above: number; keep: number; every: number };
-  /** Load control: buttons, wall switches and motion sensors (`sources`) switch the `loads` directly; inputs/actions stay empty and there are no delays. */
-  control?: { sources: Id[]; loads: Id[] };
+  /** Load control, the event twin of the condition rule: each source gives events (a button its intents, a condition input its on / off edges) and the event runs its action list; `gate` is "Act only when"; inputs/actions stay empty and there are no delays. */
+  control?: { sources: ControlSource[]; on: ControlAction[]; off: ControlAction[]; toggle: ControlAction[] };
 }
 
 export const WALL_PRESETS: Record<WallType, number> = {

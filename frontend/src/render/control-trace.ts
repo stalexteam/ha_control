@@ -1,5 +1,5 @@
 import { html, nothing, svg, type TemplateResult } from 'lit';
-import type { Id, Rule } from '../model/types';
+import { isButtonSource, type ControlSource, type Id, type Rule } from '../model/types';
 import type { RuleLast, RuleTrace } from '../live/rules-feed';
 import { clock } from '../panel/rules-panel';
 import { tone } from './rule-trace';
@@ -26,6 +26,10 @@ export interface ControlTraceOpts {
 }
 
 export const CONTROL_WIDTH = PURPOSE_WIDTH;
+
+/** The 0.20.0 compact UI (replaced by the event-rule UI) still thinks in device ids: a source's device (a button or a device input) and the loads (every device of the three lists, once). */
+export const legacySourceIds = (sources: ControlSource[]): Id[] => sources.flatMap(s => (isButtonSource(s) ? [s.button] : 'device' in s.source ? [s.source.device] : []));
+export const legacyLoadIds = (c: NonNullable<Rule['control']>): Id[] => [...new Set([...c.on, ...c.off, ...c.toggle].map(a => a.device))];
 /** Source and load blocks: up to 3 per row (a block holds about 19 characters) on a grid, rows RGAP apart with a bus in each gap. */
 const PER_ROW = 3, GAP = 10, RGAP = 24;
 const BW = (CONTROL_WIDTH - 2 * PAD - (PER_ROW - 1) * GAP) / PER_ROW;
@@ -80,7 +84,7 @@ function group(y0: number, items: Item[], above: boolean, edge: number): { block
  * overlaid when `trace` is given (a saved unchanged rule). A click on a block calls `onFocus` with its `data-block`.
  */
 export function renderControlTrace(o: ControlTraceOpts): TemplateResult {
-  const c = o.rule.control!;
+  const c = { sources: legacySourceIds(o.rule.control!.sources), loads: legacyLoadIds(o.rule.control!) };
   const tr = o.trace;
   const ct = tr?.control;
   const state = (s: 'on' | 'off' | null | undefined, on: string, off: string): string => (s === 'on' ? on : s === 'off' ? off : t('control.flow.noData'));

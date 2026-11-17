@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isTimedRule, timedTemplate, isRuleInputDevice, leakProtectionTemplate, newRule, isOutsideRule, outsideTemplate, beurerTemplate, isBeurerRule, BEURER_DEFAULTS, controlTemplate, isControlRule, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
+  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isTimedRule, timedTemplate, isRuleInputDevice, leakProtectionTemplate, newRule, isOutsideRule, outsideTemplate, beurerTemplate, isBeurerRule, BEURER_DEFAULTS, controlTemplate, controlActionsFor, migrateControl, isControlRule, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
   rulesFor, ruleUsers, updateRule,
 } from '../../src/model/rules';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Rule, type Zone } from '../../src/model/types';
@@ -246,61 +246,131 @@ describe('rules model', () => {
       shape: { kind: 'polygon', vertices: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
     };
     const lvl = (devices: Device[]) => ({ levels: [{ ...emptyLevel('L'), zones: [zone], devices }] });
-    const control = (over: Partial<Rule> = {}, c: Partial<NonNullable<Rule['control']>> = {}): Rule => ({
-      ...newRule(null), id: 'c', name: 'C', control: { sources: ['s'], loads: ['l'], ...c }, ...over,
+    const ctl = (c: Partial<NonNullable<Rule['control']>> = {}): NonNullable<Rule['control']> => ({
+      sources: [{ button: 'b' }], on: [], off: [], toggle: [{ device: 'l', do: 'toggle' }], ...c,
     });
-    const probs = (r: Rule, src?: (id: string) => boolean, load?: (id: string) => boolean) =>
-      ruleProblems([r], r, exists, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, src, load);
+    const control = (over: Partial<Rule> = {}, c: Partial<NonNullable<Rule['control']>> = {}): Rule => ({
+      ...newRule(null), id: 'c', name: 'C', control: ctl(c), ...over,
+    });
+    const probs = (r: Rule, src?: (id: string) => boolean, load?: (id: string) => boolean, actionsOf?: Parameters<typeof ruleProblems>[3], rules: Rule[] = [r]) =>
+      ruleProblems(rules, r, exists, actionsOf, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, src, load);
 
-    it('template: the single button/switch and the single on/off device of the zone', () => {
+    it('template: the single button and the single on/off device of the zone', () => {
       const r = controlTemplate(lvl([dev('b', 'smart_button', 100, 100), dev('s', 'socket', 200, 200), dev('m', 'motion_sensor', 300, 300)]), 'z1', 'Hall');
       expect(r.name).toBe('Load control Hall');
-      expect(r.control).toEqual({ sources: ['b'], loads: ['s'] });
+      expect(r.control).toEqual({ sources: [{ button: 'b' }], on: [{ device: 's', do: 'on' }], off: [{ device: 's', do: 'off' }], toggle: [{ device: 's', do: 'toggle' }] });
       expect(r).toMatchObject({ zoneId: 'z1', inputs: [], combine: 'any', onDelay: 0, offDelay: 0, onTrue: [], onFalse: [] });
       expect(isControlRule(r)).toBe(true);
       expect(isControlRule(rule('a'))).toBe(false);
     });
+    it('template: a wall switch is a device source', () => {
+      const r = controlTemplate(lvl([dev('w', 'wall_switch', 100, 100), dev('l', 'ceiling_light', 250, 250)]), 'z1', 'Hall');
+      expect(r.control!.sources).toEqual([{ source: { device: 'w' } }]);
+      expect(r.control!.toggle).toEqual([{ device: 'l', do: 'toggle' }]);
+    });
     it('template leaves ambiguous or missing picks empty', () => {
       const r = controlTemplate(lvl([dev('b', 'wall_switch', 100, 100), dev('b2', 'smart_button', 150, 150), dev('f', 'exhaust_fan', 200, 200), dev('l', 'ceiling_light', 250, 250)]), 'z1', 'Hall');
-      expect(r.control).toEqual({ sources: [], loads: [] });
+      expect(r.control).toEqual({ sources: [], on: [], off: [], toggle: [] });
       const g = controlTemplate(lvl([dev('b', 'wall_switch', 100, 100), dev('l', 'ceiling_light', 250, 250)]), null, null);
       expect(g.name).toBe('Load control');
-      expect(g.control).toEqual({ sources: [], loads: [] });
+      expect(g.control).toEqual({ sources: [], on: [], off: [], toggle: [] });
     });
-    it('template leaves the loads empty when the wall switch and the load are the same relay', () => {
+    it('template leaves the lists empty when the wall switch and the load are the same relay', () => {
       const ws = { ...dev('b', 'wall_switch', 100, 100), bindings: { state: 'switch.hall' } };
       const same = { ...dev('l', 'ceiling_light', 250, 250), bindings: { control: 'switch.hall' } };
-      expect(controlTemplate(lvl([ws, same]), 'z1', 'Hall').control).toEqual({ sources: ['b'], loads: [] });
+      expect(controlTemplate(lvl([ws, same]), 'z1', 'Hall').control).toEqual({ sources: [{ source: { device: 'b' } }], on: [], off: [], toggle: [] });
       const other = { ...same, bindings: { control: 'switch.lamp' } };
-      expect(controlTemplate(lvl([ws, other]), 'z1', 'Hall').control).toEqual({ sources: ['b'], loads: ['l'] });
+      expect(controlTemplate(lvl([ws, other]), 'z1', 'Hall').control!.toggle).toEqual([{ device: 'l', do: 'toggle' }]);
     });
-    it('a valid rule has no problems and never the inputs problem', () => {
+    it('controlActionsFor: on / off / toggle, close for a valve, else none', () => {
+      expect(controlActionsFor(dev('l', 'ceiling_light'))).toEqual(['on', 'off', 'toggle']);
+      expect(controlActionsFor(dev('e', 'equipment', 0, 0, { controllable: true }))).toEqual(['on', 'off', 'toggle']);
+      expect(controlActionsFor(dev('v', 'valve'))).toEqual(['close']);
+      expect(controlActionsFor(dev('m', 'motion_sensor'))).toEqual([]);
+      expect(controlActionsFor(dev('e', 'equipment'))).toEqual([]);
+    });
+    it('valid rules have no problems and never the inputs problem', () => {
       expect(probs(control())).toEqual([]);
-      expect(probs(control({}, { sources: ['s', 's2'], loads: ['l', 'l2'] }))).toEqual([]);
+      expect(probs(control({}, { sources: [{ source: { device: 'w' }, not: true }, { button: 'b' }], on: [{ device: 'l', do: 'on' }], off: [{ device: 'l', do: 'off' }, { device: 'l2', do: 'off' }], toggle: [{ device: 'l', do: 'toggle' }] }))).toEqual([]);
+      expect(probs(control({ gate: { source: { sun: true } } }))).toEqual([]);
+      expect(probs(control({}, { toggle: [], on: [{ device: 'v', do: 'close' }] }))).toEqual([]);
     });
-    it('shape', () => {
-      for (const c of [{ sources: [] }, { loads: [] }, { sources: ['s', 's'] }, { loads: ['l', 'l'] }, { loads: ['s'] }])
+    it('shape: control', () => {
+      for (const c of [{ sources: [] }, { toggle: [] }, { sources: [{ button: 'b' }, { button: 'b' }] },
+        { sources: [{ source: { device: 'w' }, not: true as const }, { not: true as const, source: { device: 'w' } }] },
+        { toggle: [{ device: 'l', do: 'toggle' as const }, { device: 'l', do: 'toggle' as const }] },
+        { on: [{ device: 'w', do: 'on' as const }], sources: [{ source: { device: 'w' } }] },
+        { toggle: [{ device: 'h', do: 'toggle' as const }], sources: [{ source: { held: { sources: [{ device: 'h' }], state: 'any' as const, seconds: 5 } } }] }])
         expect(probs(control({}, c)), JSON.stringify(c)).toEqual(['control']);
       for (const o of [{ inputs: [{ source: { device: 'x' } }] }, { combine: 'all' as const }, { onDelay: 5 }, { offDelay: 5 },
         { onTrue: [{ device: 'f', do: 'on' as const }] }, { onFalse: [{ device: 'f', do: 'off' as const }] },
-        { gate: { source: { sun: true as const } } },
         { vent: { sensor: 'a', than: 'b', above: 9, below: 5 } }, { boiler: { device: 'd', button: 'b' } }, { leak: { sensors: ['s'], valves: ['v'] } },
         { timed: { button: 'b', device: 'd', minutes: 5 } }, { outside: { light: 'l', sensor: 's', pause: 5 } },
         { beurer: { heater: 'h', source: 'p', above: 200, keep: 10, every: 30 } }])
         expect(probs(control(o)), JSON.stringify(o)).toContain('control');
     });
-    it('a missing or wrong-kind source or load is device-missing', () => {
-      expect(probs(control({}, { sources: ['s', 's2'] }), id => id !== 's2')).toEqual(['device-missing']);
-      expect(probs(control({}, { loads: ['l', 'l2'] }), undefined, id => id !== 'l2')).toEqual(['device-missing']);
+    it('a button source may be a target too', () => {
+      expect(probs(control({}, { sources: [{ button: 'l' }] }))).toEqual([]);
+    });
+    it('action: close only on a valve, on / off / toggle only on devices taking on and off, never open', () => {
+      const actionsOf = (id: string) => (id === 'v' ? ruleActionsFor(dev('v', 'valve')) : ruleActionsFor(dev('s', 'socket')));
+      expect(probs(control({}, { toggle: [{ device: 's', do: 'toggle' }] }), undefined, undefined, actionsOf)).toEqual([]);
+      expect(probs(control({}, { toggle: [], on: [{ device: 'v', do: 'close' }] }), undefined, undefined, actionsOf)).toEqual([]);
+      expect(probs(control({}, { on: [{ device: 's', do: 'close' as never }] }), undefined, undefined, actionsOf)).toEqual(['action']);
+      expect(probs(control({}, { toggle: [{ device: 'v', do: 'toggle' }] }), undefined, undefined, actionsOf)).toEqual(['action']);
+      expect(probs(control({}, { on: [{ device: 's', do: 'open' as never }] }))).toEqual(['action']);
+      expect(probs(control({}, { on: [{ device: 's', do: 'open' as never }] }), undefined, undefined, actionsOf)).toEqual(['action']);
+    });
+    it('device-missing: an unknown button, target or device inside a source; rule-missing: a rule source of a missing rule', () => {
+      expect(probs(control(), id => id !== 'b')).toEqual(['device-missing']);
+      expect(probs(control(), undefined, id => id !== 'l')).toEqual(['device-missing']);
+      const gone = control({}, { sources: [{ source: { held: { sources: [{ device: 'x' }], state: 'any', seconds: 5 } } }] });
+      expect(ruleProblems([gone], gone, id => id !== 'x')).toEqual(['device-missing']);
+      const rm = control({}, { sources: [{ source: { rule: 'nope' } }] });
+      expect(probs(rm)).toEqual(['rule-missing']);
+      expect(ruleRefs(rm)).toEqual(['nope']);
+    });
+    it('source parameters are checked as in the condition rule', () => {
+      expect(probs(control({}, { sources: [{ source: { daylight: 's', is: 'night' }, not: true }] }))).toEqual(['daylight']);
+      expect(probs(control({}, { sources: [{ source: { light: 's', below: 0, hysteresis: 1 } }] }))).toEqual(['light']);
+      expect(probs(control({}, { sources: [{ source: { time: { from: '08:00', to: '08:00' } } }] }))).toEqual(['time']);
+      expect(probs(control({}, { sources: [{ source: { held: { sources: [{ device: 's' }], state: 'any', seconds: 0 } } }] }))).toEqual(['held']);
+    });
+    it('a rule source takes part in the cycle check', () => {
+      const a = control({ id: 'a' }, { sources: [{ source: { rule: 'b' } }] });
+      const b = rule('b', { inputs: refs('a') });
+      expect(ruleProblems([a, b], a, exists)).toContain('cycle');
     });
     it('other kinds reject a control key', () => {
-      const c = { sources: ['s'], loads: ['l'] };
+      const c = ctl();
       expect(ruleProblems([], { ...newRule(null), id: 'v', name: 'V', vent: { sensor: 'a', than: 'b', above: 9, below: 5 }, onTrue: [{ device: 'f', do: 'on' }], onFalse: [{ device: 'f', do: 'off' }], control: c }, exists)).toContain('vent');
       expect(ruleProblems([], { ...newRule(null), id: 'k', name: 'K', boiler: { device: 'd', button: 'b' }, control: c }, exists)).toContain('boiler');
       expect(ruleProblems([], { ...leakRule(), control: c }, exists)).toContain('leak');
       expect(ruleProblems([], { ...newRule(null), id: 't', name: 'T', timed: { button: 'b', device: 'd', minutes: 5 }, control: c }, exists)).toContain('timed');
       expect(ruleProblems([], { ...newRule(null), id: 'o', name: 'O', outside: { light: 'l', sensor: 's', pause: 5 }, control: c }, exists)).toContain('outside');
       expect(ruleProblems([], { ...newRule(null), id: 'u', name: 'U', beurer: { heater: 'h', source: 'p', above: 200, keep: 10, every: 30 }, control: c }, exists)).toContain('beurer');
+    });
+    describe('migrateControl', () => {
+      const old = (sources: string[], loads: string[]): Rule => ({ ...newRule(null), id: 'c', name: 'C', control: { sources, loads } as unknown as Rule['control'] });
+      const kindOf = (id: string) => (id === 'btn' ? 'smart_button' : id === 'ws' ? 'wall_switch' : undefined);
+      it('converts the 0.20.0 shape', () => {
+        const r = migrateControl(old(['btn', 'ws'], ['l1', 'l2']), kindOf);
+        expect(r.control).toEqual({
+          sources: [{ button: 'btn' }, { source: { device: 'ws' } }],
+          on: [{ device: 'l1', do: 'on' }, { device: 'l2', do: 'on' }],
+          off: [{ device: 'l1', do: 'off' }, { device: 'l2', do: 'off' }],
+          toggle: [{ device: 'l1', do: 'toggle' }, { device: 'l2', do: 'toggle' }],
+        });
+        expect(r).toMatchObject({ id: 'c', name: 'C', inputs: [], onTrue: [] });
+      });
+      it('returns the same object for a new-shape and a non-control rule, and is idempotent', () => {
+        const fresh = control();
+        expect(migrateControl(fresh, kindOf)).toBe(fresh);
+        const plain = rule('a');
+        expect(migrateControl(plain, kindOf)).toBe(plain);
+        const once = migrateControl(old(['btn'], ['l1']), kindOf);
+        expect(migrateControl(once, kindOf)).toBe(once);
+      });
     });
   });
 
