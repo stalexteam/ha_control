@@ -104,7 +104,10 @@ class LiveRuntime:
     def _on_container(self, plan_id: str, device_id: str, event: dict) -> None:
         """Container intents (not status changes) are the boiler buttons' input."""
         if "action" in event and not self._stopped:
-            self.engine.on_intent(plan_id, device_id, event)
+            try:
+                self.engine.on_intent(plan_id, device_id, event)
+            except Exception:  # noqa: BLE001 - the runtime drops a listener that raises: a bug must not kill the buttons
+                _LOGGER.exception("boiler intent failed")
 
     @callback
     def _save_modes(self, modes: dict) -> None:
@@ -133,6 +136,10 @@ class LiveRuntime:
         if self._unstarted is not None:
             self._unstarted()
             self._unstarted = None
+        try:  # a pending mode save would be lost for an entry reload within its delay
+            await self._boiler_store.async_save(self.engine.modes())
+        except Exception:  # noqa: BLE001 - stopping must go on
+            _LOGGER.warning("could not save the boiler modes", exc_info=True)
         self.engine.load_plans([])  # cancels every rule timer
 
     @callback

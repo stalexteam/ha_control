@@ -102,6 +102,7 @@ class FakePlans:
 class FakeStore:
     contents: dict = {}  # storage key -> stored data (reset per test by the env fixture)
     saved: list = []  # (key, data) per async_delay_save
+    flushed: list = []  # (key, data) per async_save
 
     def __init__(self, hass, version, key):
         self.key = key
@@ -112,6 +113,10 @@ class FakeStore:
     async def async_remove(self):
         pass
 
+    async def async_save(self, data):
+        FakeStore.contents[self.key] = data
+        FakeStore.flushed.append((self.key, data))
+
     def async_delay_save(self, data_func, delay=0):
         FakeStore.saved.append((self.key, data_func()))
 
@@ -119,7 +124,7 @@ class FakeStore:
 @pytest.fixture
 def env(monkeypatch):
     tracked, later, cmds, started = [], [], {}, []
-    FakeStore.contents, FakeStore.saved = {}, []
+    FakeStore.contents, FakeStore.saved, FakeStore.flushed = {}, [], []
 
     def track(hass, ids, cb):
         entry = {"ids": list(ids), "cb": cb, "on": True}
@@ -848,5 +853,46 @@ def test_boiler_wall_switch_over_the_relay_is_a_set_and_a_double_toggle_is_auto(
         _boiler_event(env, hass, "switch.relay", "on", old="off")  # second press: intent auto first, then the state
         assert mode() == "auto"  # the state change is not a take-over of the auto it just started
         assert len(hass.services.calls) == 1
+
+    asyncio.run(go())
+
+
+def test_boiler_stop_flushes_the_current_modes(env):
+    async def go():
+        hass = FakeHass()
+        live = await _bstart(env, hass, _boiler_plan(), stored={"p1": {"r1": "auto"}})
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})  # manual, save still pending
+        await live.async_stop()
+        assert FakeStore.flushed == [(BOILER_KEY, {"p1": {"r1": "manual"}})]
+
+    asyncio.run(go())
+
+
+def test_boiler_a_raising_intent_does_not_escape(env):
+    async def go():
+        hass = FakeHass()
+        live = await _bstart(env, hass, _boiler_plan())
+
+        def boom(*a):
+            raise RuntimeError("bug")
+
+        live.engine.on_intent = boom
+        live._on_container("p1", "btn", {"action": "toggle"})  # must not raise
+
+    asyncio.run(go())
+
+
+def test_boiler_intent_reaches_the_engine_before_the_state_change(env):
+    """Three presses of a wall switch over the relay: the third is a repeated auto. Only with the intent first is
+    the state change behind it no take-over, so the mode is never reported manual a second time."""
+    async def go():
+        hass = FakeHass()
+        await _bstart(env, hass, _boiler_plan("wall_switch"), stored={"p1": {"r1": "auto"}})
+        await asyncio.gather(*hass.tasks)
+        _boiler_event(env, hass, "switch.relay", "on", ctx=hass.services.calls[-1][4], old="off")
+        _boiler_event(env, hass, "switch.relay", "off", old="on")  # set off -> manual
+        _boiler_event(env, hass, "switch.relay", "on", old="off")  # double toggle -> auto
+        _boiler_event(env, hass, "switch.relay", "off", old="on")  # within the window again -> auto (repeated)
+        assert [s[1]["p1"]["r1"] for s in _bsaves()] == ["manual", "auto"]
 
     asyncio.run(go())
