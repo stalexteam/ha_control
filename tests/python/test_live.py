@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import importlib
 import importlib.util
+import math
 import sys
 import types
 from pathlib import Path
@@ -576,6 +577,34 @@ def test_local_time_uses_the_configured_zone_and_last_changed_is_read(env):
         hass.states.changed["binary_sensor.leak"] = 1234.0
         assert live._changed_at("binary_sensor.leak") == 1234.0
         assert live._changed_at("sensor.none") is None
+
+    asyncio.run(go())
+
+
+def test_changed_at_is_long_ago_after_a_return_from_no_data(env):
+    async def go():
+        hass = FakeHass()
+        live = await _start(env, hass)
+        eid = "binary_sensor.leak"
+        hass.states.changed[eid] = 1234.0
+
+        def fire(old, new):
+            hass.states.d[eid] = new
+            env.tracked[-1]["cb"](types.SimpleNamespace(
+                data={"entity_id": eid, "old_state": None if old is None else types.SimpleNamespace(
+                    state=old, attributes={}, last_changed=None), "new_state": hass.states.get(eid)},
+                context=Context(),
+            ))
+
+        assert live._changed_at(eid) == 1234.0  # no return seen
+        fire("unavailable", "on")
+        assert live._changed_at(eid) == -math.inf
+        hass.states.changed[eid] = 2000.0
+        fire("on", "off")  # a real change: its time counts again
+        assert live._changed_at(eid) == 2000.0
+        hass.states.changed[eid] = 3000.0
+        fire("unknown", "off")
+        assert live._changed_at(eid) == -math.inf
 
     asyncio.run(go())
 

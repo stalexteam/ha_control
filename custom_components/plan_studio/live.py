@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
@@ -49,6 +50,8 @@ class LiveRuntime:
         self._untrack: CALLBACK_TYPE | None = None
         self._stopped = False
         self._loaded = False
+        # entity id -> last_changed of the state it returned to from no data (unavailable, unknown, none)
+        self._returned: dict[str, object] = {}
         self._power_store: Store = Store(hass, 1, POWER_STORAGE_KEY)
         # rule actions fired before HA has started (a sensor known at boot), sent in order once it has
         self._deferred: list[tuple[str, str, str, Callable[..., None], Callable[[], bool]]] = []
@@ -112,7 +115,11 @@ class LiveRuntime:
 
     def _changed_at(self, entity_id: str) -> float | None:
         st = self._hass.states.get(entity_id)
-        return st.last_changed.timestamp() if st is not None else None
+        if st is None:
+            return None
+        if self._returned.get(entity_id) == st.last_changed:
+            return -math.inf  # a return from no data counts as changed long ago
+        return st.last_changed.timestamp()
 
     def _lookup(self, entity_id: str) -> tuple[str, dict] | None:
         return _pair(self._hass.states.get(entity_id))
@@ -120,6 +127,12 @@ class LiveRuntime:
     @callback
     def _on_state(self, event: Event[EventStateChangedData]) -> None:
         data = event.data
+        old, new = data["old_state"], data["new_state"]
+        if new is not None and new.state not in ("unavailable", "unknown"):
+            if old is None or old.state in ("unavailable", "unknown"):
+                self._returned[data["entity_id"]] = new.last_changed
+            else:
+                self._returned.pop(data["entity_id"], None)
         self.runtime.handle_state(
             data["entity_id"],
             _pair(data["old_state"]),

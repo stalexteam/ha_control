@@ -3,6 +3,8 @@
 import itertools
 from datetime import datetime, timedelta, timezone, tzinfo
 
+import math
+
 import pytest
 
 from rules import RuleEngine
@@ -1153,6 +1155,48 @@ def test_held_source_unavailable_for_a_moment_keeps_the_time(two):
     assert trace(w)["verdict"] is False
     w.advance(2800)
     assert trace(w)["verdict"] is True
+
+
+def test_held_return_from_no_data_in_another_state_does_not_restart():
+    w = World(binary_sensor__m="on")
+    saved(w, [plan([HALL], [rule("r", [held("m")])])])
+    w.t = 1500
+    w.set("binary_sensor.m", "unavailable")
+    w.t = 1510
+    w.set("binary_sensor.m", "off")  # back from no data with another value: not a change
+    assert trace(w)["inputs"][0]["detail"].startswith("unchanged")
+    w.advance(2799.9)
+    assert trace(w)["verdict"] is False
+    w.advance(2800)
+    assert trace(w)["verdict"] is True
+
+
+def test_held_known_to_known_change_next_to_a_return_restarts():
+    w = World(binary_sensor__m="on", binary_sensor__m2="unavailable")
+    saved(w, [plan([HALL, HALL2], [rule("r", [held("m", "m2")])])])
+    w.t = 1500
+    w.set("binary_sensor.m", "off")  # known -> known; the combined state changes
+    w.set("binary_sensor.m2", "off")
+    assert [t[0] for t in w.pending()] == [3300.0]
+
+
+def test_held_sources_unknown_at_the_start_count_as_held_long_ago_when_known():
+    w = World(binary_sensor__m="unavailable")
+    saved(w, [plan([HALL], [rule("r", [held("m")])])])
+    assert trace(w)["verdict"] is None
+    w.t = 1010
+    w.set("binary_sensor.m", "on")
+    assert trace(w)["verdict"] is True and w.pending() == []
+
+
+def test_held_long_ago_last_changed_counts_as_held_and_the_latest_other_one_wins():
+    w = World(binary_sensor__m="off", binary_sensor__m2="off")
+    w.changed["binary_sensor.m"] = -math.inf
+    saved(w, [plan([HALL], [rule("r", [held("m")])])])
+    assert trace(w)["verdict"] is True and w.pending() == []
+    w.changed["binary_sensor.m2"] = 900.0
+    saved(w, [plan([HALL, HALL2], [rule("q", [held("m", "m2")])])])
+    assert [t[0] for t in w.pending()] == [2700.0]
 
 
 def test_held_change_time_survives_an_unchanged_reload_and_a_changed_one_restarts():

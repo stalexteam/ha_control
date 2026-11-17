@@ -174,6 +174,7 @@ class _Input:
         self.timer: "tuple[float, Callable[[], None]] | None" = None  # time / held: (due epoch, cancel)
         self.prev: bool | None = None  # light: the value kept between the thresholds
         self.mem: list[bool | None] = []  # held: the last known value of each source
+        self.was: list[bool] = []  # held: whether each source had data at the previous evaluation
         self.known: bool | None = None  # held: the last known combined state
         self.since = 0.0  # held: when the known combined state last changed
         self.boot = False  # held: its first known state counts as held since long ago (loaded at HA start)
@@ -210,6 +211,7 @@ class _Input:
             self.seconds = h["seconds"] if type(h.get("seconds")) is int and h["seconds"] > 0 else 1
             self.label = ", ".join(s.label for s in self.sources)
             self.mem = [None] * len(self.sources)
+            self.was = [False] * len(self.sources)
             self.sig = ("held", tuple(s.sig for s in self.sources))
         else:
             self.type = "device"
@@ -229,6 +231,7 @@ class _Input:
     def take(self, old: "_Input") -> None:
         """Keep the runtime state of the same input of an unchanged rule (its timer is re-armed on evaluation)."""
         self.prev, self.mem, self.known, self.since, self.boot = old.prev, old.mem, old.known, old.since, old.boot
+        self.was = old.was
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -541,15 +544,21 @@ class RuleEngine:
 
     def _held(self, rule: _Rule, i: _Input, now: float) -> "tuple[bool | None, str, float | None]":
         """The sources (any active) held on / off / unchanged for the seconds; a source unknown for a while counts as
-        its last known value, so it does not restart the count."""
+        its last known value, so it does not restart the count. Only a known -> known change of a source restarts it;
+        a return from no data never does."""
         values = [self._value(rule, s, now)[0] for s in i.sources]
         if all(v is None for v in values):
+            if i.known is None:
+                i.boot = True  # no data at the start: held since long ago once it becomes known
+            i.was = [False] * len(values)
             return None, "unknown", None
+        moved = any(w and v is not None and v != m for v, m, w in zip(values, i.mem, i.was))
         i.mem = [m if v is None else v for v, m in zip(values, i.mem)]
+        i.was = [v is not None for v in values]
         combined = True in i.mem
         if i.known is None:
             i.since = -math.inf if i.boot else self._since(i, now)
-        elif combined != i.known:
+        elif combined != i.known and moved:
             i.since = now
         i.known = combined
         word = "on" if combined else "off"
@@ -567,7 +576,7 @@ class RuleEngine:
         stamps = []
         for s in i.sources:
             at = self._changed_at(s.eid) if s.rule is None and s.eid else None
-            stamps.append(now if at is None else min(at, now))
+            stamps.append(now if at is None else min(at, now))  # -inf (long ago) stays -inf
         return max(stamps)
 
     def _evaluate(self, rule: _Rule, due: "_Pending | None" = None) -> bool:
