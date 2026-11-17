@@ -273,7 +273,7 @@ describe('Automations menu', () => {
   it('one rail button replaces the purpose-built templates; the condition templates stay', async () => {
     const el = await open([]);
     const rail = [...el.shadowRoot!.querySelectorAll('.tools button[data-template]')].map(b => b.getAttribute('data-template'));
-    expect(rail).toEqual(['condition', 'timer']);
+    expect(rail).toEqual(['condition', 'timer', 'control']);
     expect(el.shadowRoot!.querySelector('button[data-template="vent"], button[data-template="boiler"]')).toBeNull();
     const btn = $<HTMLButtonElement>(el, '.tools button[data-action="automations"]');
     expect(btn.textContent).toContain('Automations');
@@ -285,8 +285,8 @@ describe('Automations menu', () => {
     const el = await open([]);
     await press(el, 'button[data-action="automations"]');
     expect($(el, 'button[data-action="automations"]').getAttribute('aria-expanded')).toBe('true');
-    expect(items(el).map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'control', 'outside', 'beurer']);
-    expect(items(el).map(i => i.textContent!.trim())).toEqual(['Wet zone ventilation', 'Cost effective boiler', 'Leak protection', 'Timed switch', 'Load control', 'Outside light', 'Beurer heater']);
+    expect(items(el).map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'outside', 'beurer']);
+    expect(items(el).map(i => i.textContent!.trim())).toEqual(['Wet zone ventilation', 'Cost effective boiler', 'Leak protection', 'Timed switch', 'Outside light', 'Beurer heater']);
     await el.updateComplete;
     expect(el.shadowRoot!.activeElement).toBe(items(el)[0]);
     const menu = $(el, '.amenu');
@@ -297,10 +297,9 @@ describe('Automations menu', () => {
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true }));
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true }));
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true }));
-    menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true }));
     expect(el.shadowRoot!.activeElement).toBe(items(el)[0]);
     menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, composed: true }));
-    expect(el.shadowRoot!.activeElement).toBe(items(el)[6]);
+    expect(el.shadowRoot!.activeElement).toBe(items(el)[5]);
     (el.shadowRoot!.activeElement as HTMLElement).blur();
     await press(el, 'button[data-action="automations"]');
     expect(el.shadowRoot!.querySelector('.amenu')).toBeNull();

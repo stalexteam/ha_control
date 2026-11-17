@@ -9,20 +9,20 @@ const ICONS: Record<RuleTemplate, string> = {
   timed: mdiTimerPlayOutline, beurer: mdiHeatingCoil, control: mdiLightSwitch,
 };
 
-/** Condition templates: one rail button each. */
-const CONDITION_TEMPLATES = ['condition', 'timer'] as const;
+/** Universal templates (the condition rule's and Load control): one rail button each. */
+const RAIL_TEMPLATES = ['condition', 'timer', 'control'] as const;
 /** Purpose-built automations, each with its own dialog: listed in the rail's "Automations" menu, in this order. */
-export const AUTOMATIONS: readonly RuleTemplate[] = ['vent', 'boiler', 'leak', 'timed', 'control', 'outside', 'beurer'];
+export const AUTOMATIONS: readonly RuleTemplate[] = ['vent', 'boiler', 'leak', 'timed', 'outside', 'beurer'];
 
 const icon = (d: string): TemplateResult => html`<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true">${svg`<path d=${d}></path>`}</svg>`;
 
 /**
- * The Automation rail's template buttons: each condition template opens the rule dialog pre-filled by it; the last
+ * The Automation rail's template buttons: each universal template opens its rule dialog pre-filled by it; the last
  * button, "Automations", opens the menu of purpose-built automations (`onMenu` gets the button to anchor it to).
  */
 export function ruleTemplateButtons(onPick: (tpl: RuleTemplate) => void, menuOpen: boolean, onMenu: (button: HTMLElement) => void): TemplateResult[] {
   return [
-    ...CONDITION_TEMPLATES.map(tpl => html`
+    ...RAIL_TEMPLATES.map(tpl => html`
       <button class="tool" data-template=${tpl} title=${t(`rules.template.${tpl}`)} @click=${() => onPick(tpl)}>
         ${icon(ICONS[tpl])}<span class="tlabel">${t(`rules.template.${tpl}`)}</span></button>`),
     html`

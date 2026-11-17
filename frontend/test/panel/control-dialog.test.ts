@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { $, mount, pickAutomation, press } from './helpers';
+import { $, mount, press } from './helpers';
 import { createMockHass, STORAGE_KEY } from '../../dev/mock-hass';
 import { SCENES } from '../../dev/scenes';
 import type { Plan, Rule } from '../../src/model/types';
@@ -42,19 +42,22 @@ async function edit(el: PlanStudioPanel): Promise<void> {
 async function openNew(el: PlanStudioPanel): Promise<void> {
   el.selection = null;
   await el.updateComplete;
-  await pickAutomation(el, 'control');
+  await press(el, 'button[data-template="control"]');
 }
 
 describe('Load control form', () => {
   beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
 
-  it('the Automations menu lists Load control after Timed switch; choosing it opens a control rule dialog', async () => {
+  it('Load control is a universal template: a rail button after Timer, not an Automations menu item; it opens a control rule dialog', async () => {
     const el = await open([]);
+    const rail = [...el.shadowRoot!.querySelectorAll('button[data-template]')].map(b => b.getAttribute('data-template'));
+    expect(rail).toEqual(['condition', 'timer', 'control']);
+    expect($(el, 'button[data-template="control"]').textContent).toContain('Load control');
     await press(el, 'button[data-action="automations"]');
     const items = [...el.shadowRoot!.querySelectorAll('.amenu [role="menuitem"]')];
-    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'control', 'outside', 'beurer']);
-    expect(items[4].textContent!.trim()).toBe('Load control');
-    await press(el, '.amenu [data-automation="control"]');
+    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'outside', 'beurer']);
+    await press(el, 'button[data-action="automations"]');
+    await press(el, 'button[data-template="control"]');
     expect(el.dialog).toEqual({ kind: 'rule' });
     expect(isControlRule(el.ruleDraft!.rule)).toBe(true);
     expect(q(el, 'h3').textContent).toBe('Load control');

@@ -52,14 +52,14 @@ async function check(el: PlanStudioPanel, sel: string, on: boolean): Promise<voi
 describe('Outside light form', () => {
   beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
 
-  it('the Automations menu lists Beurer heater last, after Outside light; the rail keeps only Condition and Timer', async () => {
+  it('the Automations menu lists Beurer heater last, after Outside light; the rail keeps the universal templates', async () => {
     const el = await open([]);
-    expect([...el.shadowRoot!.querySelectorAll('.tools button[data-template]')].map(b => b.getAttribute('data-template'))).toEqual(['condition', 'timer']);
+    expect([...el.shadowRoot!.querySelectorAll('.tools button[data-template]')].map(b => b.getAttribute('data-template'))).toEqual(['condition', 'timer', 'control']);
     await press(el, 'button[data-action="automations"]');
     const items = [...el.shadowRoot!.querySelectorAll('.amenu [role="menuitem"]')];
-    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'control', 'outside', 'beurer']);
-    expect(items[5].textContent!.trim()).toBe('Outside light');
-    expect(items[5].querySelector('svg.ticon')).toBeTruthy();
+    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'outside', 'beurer']);
+    expect(items[4].textContent!.trim()).toBe('Outside light');
+    expect(items[4].querySelector('svg.ticon')).toBeTruthy();
   });
 
   it('opens pre-filled with the zone\'s light and the plan\'s sensor, the night options on, pause 30; OK adds the rule', async () => {
