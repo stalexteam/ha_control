@@ -156,7 +156,7 @@ class LiveRuntime:
             await self._timed_store.async_save(self.engine.runs())
         except Exception:  # noqa: BLE001 - stopping must go on
             _LOGGER.warning("could not save the timed runs", exc_info=True)
-        self.engine.load_plans([], unload=True)  # cancels every rule timer; running timed devices are left as they are
+        self.engine.load_plans([], unload=True)  # cancels every rule timer; switches no boiler relay or timed device
 
     @callback
     def _save_positions(self) -> None:

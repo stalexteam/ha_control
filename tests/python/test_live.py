@@ -1041,6 +1041,21 @@ def test_timed_relay_as_the_button_switched_on_by_hand_runs_without_a_command(en
         _boiler_event(env, hass, "switch.relay", "off", old="on")  # switched off by hand: a stop, already off
         await asyncio.gather(*hass.tasks)
         trace = live.engine.snapshot("p1")["r1"]
-        assert hass.services.calls == [] and trace["timed"]["running"] is False and "last" not in trace
+        assert hass.services.calls == [] and trace["timed"]["running"] is False
+        assert trace["last"]["reason"] == "button stop" and trace["last"]["sent"] is False
+
+    asyncio.run(go())
+
+
+def test_boiler_stop_sends_no_relay_command(env):
+    async def go():
+        hass = FakeHass()
+        live = await _bstart(env, hass, _boiler_plan(), stored={"p1": {"r1": "auto"}})
+        await asyncio.gather(*hass.tasks)  # auto sent on
+        _boiler_event(env, hass, "switch.relay", "on", ctx=hass.services.calls[-1][4], old="off")
+        n = len(hass.services.calls)
+        await live.async_stop()
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == n
 
     asyncio.run(go())

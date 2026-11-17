@@ -706,3 +706,9 @@ def test_a_socket_boiler_needs_no_controllable_flag():
     w.engine.load_plans([boiler_plan(devices=[sock, BUTTON])], boot=False)
     w.press("auto")
     assert w.calls == [ON]
+
+
+def test_unload_sends_no_relay_command():
+    w = heating()
+    w.engine.load_plans([], unload=True)
+    assert w.calls == [] and not w.pending()

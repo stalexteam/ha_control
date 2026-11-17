@@ -123,7 +123,8 @@ def test_a_repeated_start_restarts_the_run_from_then():
     w.advance(1000 + 10 * MIN)
     w.start()
     assert w.calls == [ON] and w.tm()["until"] == (1000 + 25 * MIN) * 1000
-    assert w.tr()["last"]["reason"] == "button start"  # nothing sent on the restart
+    assert w.tr()["last"] == {"action": "on", "target": "Vent", "at": (1000 + 10 * MIN) * 1000,
+                              "reason": "button restart", "sent": False}  # nothing sent on the restart
     w.advance(1000 + 15 * MIN)
     assert w.calls == [ON]
     w.advance(1000 + 25 * MIN)
@@ -200,7 +201,7 @@ def test_switched_off_elsewhere_ends_the_run_and_sends_nothing_more():
     t = w.tr()
     assert t["verdict"] is False and t["timed"]["running"] is False and not w.pending()
     assert t["last"] == {"action": "off", "target": "Vent", "at": (1000 + 5 * MIN) * 1000,
-                         "reason": "ended: switched elsewhere"}
+                         "reason": "ended: switched elsewhere", "sent": False}
     w.advance(1000 + 60 * MIN)
     assert w.calls == []
 
@@ -307,7 +308,7 @@ def test_the_device_relay_as_the_button_is_an_auto_off_timer():
     w.engine.handle_state("light.l", own=False)
     t = w.tr()
     assert w.calls == [("light", "turn_off", "light.l")] and t["timed"]["running"] is False
-    assert t["last"]["reason"] == "time over"  # nothing sent by the stop
+    assert t["last"]["reason"] == "button stop" and t["last"]["sent"] is False  # nothing sent by the stop
     assert not w.pending()
 
 
@@ -552,3 +553,55 @@ def test_verdict_is_an_input_of_another_rule():
     assert ("light", "turn_on", "light.l") in w.calls and w.tr("r2")["verdict"] is True
     w.advance(1000 + 15 * MIN)
     assert w.calls[-1] == ("light", "turn_off", "light.l") and w.tr("r2")["verdict"] is False
+
+
+# --- fix round 1 ---------------------------------------------------------------------------
+
+def test_a_running_rule_whose_button_goes_missing_sends_the_final_command():
+    w = running()
+    w.engine.load_plans([timed_plan(devices=[VENT])])  # the button device was deleted
+    t = w.tr()
+    assert w.calls == [OFF] and t["timed"]["running"] is False and not w.pending()
+    assert t["status"] == "error" and t["reason"] == "device missing" and t["last"]["reason"] == "button missing"
+    assert w.saved[-1] == {}
+
+
+def test_a_running_rule_whose_button_is_no_container_any_more_sends_the_final_command():
+    w = running()
+    w.engine.load_plans([timed_plan(devices=[VENT, dev("btn", "socket", "Socket", control="switch.s")])])
+    assert w.calls == [OFF] and w.tm()["running"] is False
+
+
+def test_a_restored_run_with_a_missing_button_sends_the_final_command_after_start():
+    w = TWorld(fan__vent="on", t=1000.0 + 5 * MIN)
+    w.engine.load_plans([timed_plan(devices=[VENT])], boot=True, runs={"p": {"r": 1000 + 15 * MIN}})
+    assert w.calls == [] and w.tm()["running"] is True
+    w.engine.started()
+    assert w.calls == [OFF] and w.tm()["running"] is False and w.engine.runs() == {}
+
+
+def test_a_restored_run_with_a_missing_device_is_dropped():
+    w = loaded(devices=[BUTTON], runs={"p": {"r": 2000}})
+    assert w.calls == [] and w.tm()["running"] is False
+
+
+def test_a_start_without_a_command_still_sets_last():
+    w = loaded(fan__vent="on")
+    w.start()
+    assert w.calls == [] and w.tr()["last"] == {"action": "on", "target": "Vent", "at": 1000000,
+                                                "reason": "button start", "sent": False}
+
+
+def test_a_stop_without_a_command_still_sets_last():
+    w = running()
+    w.set("fan.vent", "off", own=True)
+    w.advance(1100)
+    w.stop()
+    assert w.calls == [] and w.tr()["last"] == {"action": "off", "target": "Vent", "at": 1100000,
+                                                "reason": "button stop", "sent": False}
+
+
+def test_a_sent_command_has_no_sent_field():
+    w = loaded()
+    w.start()
+    assert "sent" not in w.tr()["last"]

@@ -525,7 +525,8 @@ class RuleEngine:
         """boot: True when this load is the HA start; None keeps "the first call is the start".
         modes: the stored boiler modes {plan id: {rule id: 'auto' | 'manual'}}, used for boiler rules not loaded yet.
         runs: the stored timed runs {plan id: {rule id: until epoch s}}, restored for timed rules not loaded yet.
-        unload: the integration stops; timed runs that go away keep their device (they are restored on the next start)."""
+        unload: the integration stops: no device is switched (boiler relays and running timed devices stay as they are;
+        the modes and runs are restored on the next start)."""
         old = self._rules
         if modes is not None:
             self._modes = {
@@ -581,7 +582,7 @@ class RuleEngine:
         for key, prev in old.items():
             if key not in rules:
                 prev.stop()
-        released = self._released_relays(old, rules)
+        released = [] if unload else self._released_relays(old, rules)
         finished = [] if unload else self._released_runs(old, rules)
         self._rules = rules
         self._link()
@@ -669,8 +670,9 @@ class RuleEngine:
             return False
         t.seen = t.state(self._lookup)
         stored = self._runs.get(rule.key[0], {}).get(rule.key[1]) if prev is None and runs is not None else None
-        if stored is not None and rule.enabled and not t.missing:
-            t.restore(stored, t.seen)  # evaluated once the boot phase is over (started())
+        if stored is not None and rule.enabled and t.eid is not None:
+            # evaluated once the boot phase is over (started()); with its button gone it ends with the final command
+            t.restore(stored, t.seen)
         return False
 
     def _released_runs(self, old: "dict[Key, _Rule]", rules: "dict[Key, _Rule]") -> "list[Timed]":
@@ -1128,11 +1130,14 @@ class RuleEngine:
         t = rule.timed
         assert t is not None
         rule.open = True
-        if (not rule.enabled or t.missing) and t.running:
-            t.until, t.restored = None, False  # cannot run: nothing to switch or nothing to stop it
+        if (not rule.enabled or t.eid is None) and t.running:
+            t.until, t.restored = None, False  # cannot run: disabled (ended on load) or nothing to switch
         if t.running and not (self._booting and t.restored):
             t.restored = False
-            if t.until <= self._now():
+            if t.missing:  # the button is gone: nothing could stop the run, so it ends now
+                t.until = None
+                self._timed_send(rule, t.final, "button missing")
+            elif t.until <= self._now():
                 t.until = None
                 self._timed_send(rule, t.final, "time over")
         wake = t.until if t.running and not t.restored else None
@@ -1157,7 +1162,8 @@ class RuleEngine:
 
     def _timed_send(self, rule: _Rule, do: str, why: str) -> None:
         """Command the device to `do` through the action path (own context, waiting for the target); nothing is sent
-        when it reads `do` already. Either way the previous command's waiting is given up."""
+        when it reads `do` already (last then says so with sent: false). Either way the previous command's waiting is
+        given up."""
         t = rule.timed
         assert t is not None
         send = t.command(do, t.state(self._lookup))
@@ -1165,6 +1171,8 @@ class RuleEngine:
         rule.failed = None
         if send:
             self._fire(rule, [rule.timed_actions[do]], why)
+        else:
+            rule.last = {"action": do, "target": t.label, "at": int(self._now() * 1000), "reason": why, "sent": False}
 
     def _timed_device(self, rule: _Rule, own: bool) -> None:
         """A state change of a timed rule's device, before the evaluation: someone else switching it ends the run."""
@@ -1176,7 +1184,7 @@ class RuleEngine:
         self._new_firing(rule)  # a command still waiting for the device is given up
         rule.failed = None
         rule.last = {"action": state, "target": t.label, "at": int(self._now() * 1000),
-                     "reason": "ended: switched elsewhere"}
+                     "reason": "ended: switched elsewhere", "sent": False}
 
     def runs(self) -> "dict[str, dict[str, float]]":
         """The running timed switches {plan id: {rule id: until epoch s}} of every loaded rule."""
