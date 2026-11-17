@@ -19,9 +19,9 @@ L_ON, L_OFF = ("light", "turn_on", "light.l"), ("light", "turn_off", "light.l")
 R_ON, R_OFF = ("switch", "turn_on", "switch.relay"), ("switch", "turn_off", "switch.relay")
 
 
-def vent_rule(rid="vr", name="WC vent", fan="v", run_on=0, sensor="wc"):
+def vent_rule(rid="vr", name="WC vent", fan="v", run_on=0, sensor="wc", **extra):
     return rule(rid, [], name=name, on_true=[(fan, "on")], on_false=[(fan, "off")], off_delay=run_on,
-                vent={"sensor": sensor, "than": "main", "above": 9, "below": 5})
+                vent={"sensor": sensor, "than": "main", "above": 9, "below": 5}, **extra)
 
 
 def vent_timed(rid="r", name="Vent (10min)", minutes=10, **kw):
@@ -149,7 +149,7 @@ def test_a_timed_stop_while_vent_wants_on_ends_the_run_and_sends_no_off():
 
 def test_two_vent_rules_on_one_fan():
     w = world([vent_rule(), vent_rule("vr2", "Bath vent", sensor="wc2")])
-    assert w.calls == [OFF, OFF]  # each rule's own start applies its verdict both ways (nobody holds)
+    assert w.calls == [OFF]  # both start dry in one load: one off, the final state
     w.calls.clear()
     w.wet()
     w.set("fan.vent", "on", own=True)
@@ -377,15 +377,17 @@ def test_a_heating_boiler_holds_its_relay_against_a_pair_rule():
     assert w.calls == [R_OFF, R_ON] and w.last("cr")["reason"] == "kept on by Boiler"
 
 
-def test_a_boiler_off_is_kept_on_by_a_pair_rule_and_the_last_release_sends_off():
+def test_a_boiler_heating_done_off_is_kept_on_by_a_pair_rule_and_the_last_release_sends_off():
     w = boiler_world()
     w.engine.on_intent("p", "bb", {"action": "auto"})
     w.set("switch.relay", "on", own=True)
+    w.set("sensor.bp", "1380", W)
     w.set("binary_sensor.m", "on")
+    w.advance(w.t + 60)
     w.calls.clear()
-    w.set("sensor.grid", "unavailable")  # blackout: the boiler stops holding
+    w.set("sensor.bp", "0", W)  # heating done: the boiler stops holding
     assert w.calls == [] and w.last("b")["reason"] == "kept on by Motion light"
-    assert w.tr("b")["boiler"]["phase"] == "blackout"
+    assert w.tr("b")["boiler"]["phase"] == "done"
     w.set("binary_sensor.m", "off")
     assert w.calls == [R_OFF]
 
@@ -407,3 +409,177 @@ def test_deleting_an_auto_boiler_while_a_pair_rule_holds_sends_no_off():
     w.calls.clear()
     w.load([pair_rule(device="b")])
     assert w.calls == []
+
+
+# --- fix wave: send what the device actually needs ---------------------------------------
+
+def test_f1_a_start_after_a_human_off_switches_the_fan_on_although_vent_holds():
+    """B1: vent and run hold, a human switches off (the run ends); a new press must switch the fan on."""
+    w = world(wc=WET)
+    w.set("fan.vent", "on", own=True)
+    w.start()
+    w.set("fan.vent", "off")  # a human
+    w.calls.clear()
+    w.start()
+    assert w.calls == [ON] and "sent" not in w.last("r")
+
+
+def test_f1_only_the_vent_holds_and_the_fan_is_off():
+    w = world(wc=WET)
+    w.set("fan.vent", "on", own=True)
+    w.set("fan.vent", "off")  # a human
+    w.calls.clear()
+    w.start()
+    assert w.calls == [ON]
+
+
+def test_f1_an_on_on_its_way_is_not_sent_twice():
+    w = world()
+    w.calls.clear()
+    w.wet()  # on sent, the fan has not confirmed yet
+    w.start()
+    assert w.calls == [ON] and w.last("r")["reason"] == "already on by WC vent"
+
+
+def test_f1_restart_with_a_stored_run_and_the_fan_off_at_boot_switches_it_on():
+    """B2: a power cut: the fan reads off at boot, the run is restored and WC is wet."""
+    w = AWorld(wc=WET, fan__vent="off")
+    w.load([vent_rule(), vent_timed()], boot=True, runs={"p": {"r": 1000 + 5 * MIN}})
+    w.engine.started()
+    assert w.calls == [ON]
+
+
+def test_f1_restart_with_a_stored_run_and_the_fan_unavailable_at_boot_switches_it_on_when_back():
+    w = AWorld(wc=WET, fan__vent="unavailable")
+    w.hold = True  # calls before HA has started are held (live.py)
+    w.load([vent_rule(), vent_timed()], boot=True, runs={"p": {"r": 1000 + 3 * MIN}})
+    w.engine.started()
+    assert w.calls == [ON]
+    w.on_error("target unavailable", "target unavailable")  # live.py: the held call found the fan unavailable
+    w.hold = False
+    w.set("fan.vent", "off")
+    assert w.calls == [ON, ON]
+
+
+def test_f1_boiler_auto_switches_the_relay_on_although_a_pair_rule_holds():
+    w = boiler_world()
+    w.set("binary_sensor.m", "on")
+    w.set("switch.relay", "on", own=True)
+    w.set("switch.relay", "off")  # a human
+    w.calls.clear()
+    w.engine.on_intent("p", "bb", {"action": "auto"})
+    assert w.calls == [R_ON] and w.tr("b")["boiler"]["phase"] == "heating"
+
+
+@pytest.mark.parametrize("save", ["delete", "disable"])
+def test_f2_deleting_the_last_holder_pays_the_kept_off(save):
+    """B4: the run ended kept on by the vent; the vent rule goes away: the fan goes off."""
+    w = world()
+    w.start()
+    w.set("fan.vent", "on", own=True)
+    w.wet()
+    w.advance(1000 + 10 * MIN)
+    assert w.last("r")["reason"] == "kept on by WC vent"
+    w.calls.clear()
+    w.load([vent_timed()] if save == "delete" else [vent_rule(enabled=False), vent_timed()])
+    assert w.calls == [OFF]
+    assert w.last("r")["action"] == "off" and "sent" not in w.last("r")
+
+
+def gated_world(g="on"):
+    gate = dev("g", "motion_sensor", "Gate", motion="binary_sensor.g")
+    w = AWorld(binary_sensor__g=g)
+    p = {"id": "p", "rules": [pair_rule(gate={"source": {"device": "g"}}), vent_timed(device="l")],
+         "levels": [{"id": "l1", "devices": [LIGHT, MOTION, BUTTON, gate]}]}
+    w.engine.load_plans([p], boot=False)
+    return w
+
+
+def test_f2_a_gate_closing_on_the_last_holder_pays_the_kept_off():
+    """B3: the run ended kept on by the gated pair rule; its gate closes: the light goes off."""
+    w = gated_world()
+    w.set("binary_sensor.m", "on")
+    w.set("light.l", "on", own=True)
+    w.start()
+    w.advance(1000 + 10 * MIN)
+    assert w.last("r")["reason"] == "kept on by Motion light"
+    w.calls.clear()
+    w.set("binary_sensor.g", "off")
+    assert w.calls == [L_OFF]
+
+
+def test_f2_a_gate_closing_with_no_kept_off_sends_nothing():
+    """B3b: a closed gate means no actions."""
+    w = gated_world()
+    w.set("binary_sensor.m", "on")
+    w.set("light.l", "on", own=True)
+    w.calls.clear()
+    w.set("binary_sensor.g", "off")
+    w.set("binary_sensor.m", "off")
+    assert w.calls == []
+
+
+def test_f2_a_kept_off_is_paid_once_and_not_when_the_device_is_off_already():
+    w = world()
+    w.start()
+    w.set("fan.vent", "on", own=True)
+    w.wet()
+    w.advance(1000 + 10 * MIN)
+    w.set("fan.vent", "off")  # a human did it already
+    w.calls.clear()
+    w.load([vent_timed()])
+    assert w.calls == []
+
+
+def test_releases_at_load_run_after_the_new_rules_are_evaluated():
+    """B5: one Save deletes the running timed rule and edits the wet vent rule: no off-then-on."""
+    w = world(wc=WET)
+    w.set("fan.vent", "on", own=True)
+    w.start()
+    w.calls.clear()
+    w.load([vent_rule(run_on=60)])
+    assert OFF not in w.calls
+
+
+@pytest.mark.parametrize("bath,calls", [(DRY, [OFF]), (WET, [ON])])
+def test_two_participants_starting_in_one_load_send_only_the_final_state(bath, calls):
+    w = AWorld(fan__vent="on", sensor__b_h=(bath, P))
+    w.load([vent_rule(), vent_rule("vr2", "Bath vent", sensor="wc2")])
+    assert w.calls == calls
+    if bath == WET:
+        assert w.last("vr")["reason"] == "kept on by Bath vent" and w.last("vr")["sent"] is False
+
+
+def test_a_stored_auto_boiler_holds_during_the_boot_phase():
+    w = AWorld(switch__relay="on")
+    w.engine.load_plans([{"id": "p", "rules": [boiler_rule(GRID, rid="b", button="bb"), pair_rule(device="b")],
+                          "levels": [{"id": "l1", "devices": [BOILER, BTN, MOTION]}],
+                          "power": {"blocks": [{"id": "g", "kind": "grid", "power": "sensor.grid"}], "wires": []}}],
+                        boot=True, modes={"p": {"b": "auto"}})
+    assert w.calls == [] and w.last("cr")["reason"] == "kept on by Boiler"
+    w.engine.started()
+    assert w.calls == [] and w.tr("b")["boiler"]["phase"] == "heating"
+
+
+def test_a_boiler_blackout_off_is_a_safety_command_sent_although_a_pair_rule_holds():
+    w = boiler_world()
+    w.engine.on_intent("p", "bb", {"action": "auto"})
+    w.set("switch.relay", "on", own=True)
+    w.set("binary_sensor.m", "on")
+    w.calls.clear()
+    w.set("sensor.grid", "unavailable")
+    assert w.calls == [R_OFF] and w.last("b")["reason"] == "blackout" and "sent" not in w.last("b")
+    w.set("switch.relay", "off", own=True)
+    w.set("sensor.grid", "500", W)  # grid back: after the 15 s wait the boiler heats again
+    w.advance(w.t + 15)
+    assert w.calls == [R_OFF, R_ON]
+
+
+def test_a_boiler_limit_off_is_sent_although_a_pair_rule_holds():
+    w = boiler_world()
+    w.engine.on_intent("p", "bb", {"action": "auto"})
+    w.set("switch.relay", "on", own=True)
+    w.set("binary_sensor.m", "on")
+    w.calls.clear()
+    w.set("sensor.grid", "4000", W)
+    assert w.calls == [R_OFF] and w.tr("b")["boiler"]["phase"] == "limit"

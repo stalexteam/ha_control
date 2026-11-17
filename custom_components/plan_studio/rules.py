@@ -377,6 +377,9 @@ class _Hold:
         self.by: Key | None = None  # the rule whose trace shows its failure
         self.waiting: str | None = None  # "target unavailable" / "service failed"
         self.attempt = 0  # a late failure or a held call counts only for the latest attempt
+        self.confirmed = True  # the device has read `cmd` since it was sent (False: still on its way)
+        self.owed: Key | None = None  # an off of this rule was not sent because others kept the device on
+        self.label = ""  # the device name for an owed off
 
 
 class _Pending:
@@ -538,6 +541,8 @@ class RuleEngine:
         self._runs: dict[str, dict[str, float]] = {}  # the runs last reported (or loaded)
         self._booting = False  # a boot load happened and started() has not come yet: boiler auto waits
         self._holds: dict[str, _Hold] = {}  # shared device entity -> its arbitrated command
+        self._loading = False  # inside load_plans: arbitrated calls wait for the end of the load
+        self._deferred: list[str] = []  # the shared devices commanded in this load, called once at its end
 
     # --- loading -------------------------------------------------------------
 
@@ -614,16 +619,28 @@ class RuleEngine:
                 if eid is not None and eid not in rule.seen:
                     st = self._lookup(eid)
                     rule.seen[eid] = st[0] if st is not None else None
-        for rule in stopped:
-            self._boiler_auto(rule, rule.boiler.command("off", self._now()), "rule disabled")
-        for relay in released:
-            if not self._holders(relay):  # another automation keeps it on
-                self._release(relay)
-        for rule in ended:
-            self._timed_send(rule, rule.timed.final, "rule disabled")
-        for t in finished:
-            self._finish(t)
-        self._settle(set(rules))
+        # Within a load every shared device gets one command, its final state (no flick between rules starting at
+        # once); the releases come after the new rules were evaluated, so a rule that keeps the device on is known.
+        self._loading = True
+        try:
+            self._settle(set(rules))
+            for rule in stopped:
+                self._boiler_auto(rule, rule.boiler.command("off", self._now()), "rule disabled")
+            for relay in released:
+                if not self._holders(relay) and relay not in self._deferred:  # kept on, or commanded in this load
+                    self._release(relay)
+            for rule in ended:
+                self._timed_send(rule, rule.timed.final, "rule disabled")
+            for t in finished:
+                if t.eid not in self._deferred:
+                    self._finish(t)
+            self._pay_offs()
+        finally:
+            self._loading = False
+        deferred, self._deferred = self._deferred, []
+        for eid in deferred:
+            if eid in self._holds:
+                self._hold_call(eid, self._holds[eid])
         self._prune_holds()
         self._published = {key: self._trace(r) for key, r in rules.items()}
         for pid in list(self._subs):
@@ -1138,39 +1155,80 @@ class RuleEngine:
             return rule.timed.running
         if rule.boiler is not None:
             b = rule.boiler
-            return not b.missing and b.mode == "auto" and b.phase == "heating"
+            # a stored auto is not evaluated before HA has started: it keeps the relay as it is until then
+            return not b.missing and b.mode == "auto" and (b.phase == "heating" or (self._booting and b.phase is None))
         return rule.open and rule.verdict is True
+
+    def _device_on(self, eid: str) -> bool:
+        """The device reads on, or an on is on its way to it (sent or waiting, not confirmed yet)."""
+        st = self._lookup(eid)
+        hold = self._holds.get(eid)
+        return (st is not None and st[0] == "on") or (hold is not None and hold.cmd == "on" and not hold.confirmed)
 
     def _holders(self, eid: str, but: "Key | None" = None) -> "list[_Rule]":
         """The rules that keep the device on now, in rule order (always computed from their current state)."""
         return [r for r in self._rules.values() if r.key != but and self._wants_on(r, eid)]
 
     def _arbitrated(self, rule: _Rule, eid: str, do: str, entry: dict) -> None:
-        """An on / off command of a participant for a shared device: sent only when no other rule keeps the device
-        on (the holders turn from none to some or back); otherwise the entry says who keeps it on (sent: false)."""
+        """An on / off command of a participant for a shared device: an off is sent only when no other rule keeps the
+        device on (otherwise it is owed until they let go); an on is sent unless the device is on already (or an on is
+        on its way) while others keep it on. A command not sent says who keeps the device on (sent: false)."""
         others = self._holders(eid, rule.key)
-        if not others:
+        if not others or (do == "on" and not self._device_on(eid)):
             self._hold_send(eid, do, rule, entry)
             return
         entry["reason"] = f"{'already' if do == 'on' else 'kept'} on by {', '.join(r.name for r in others)}"
         entry["sent"] = False
-        hold = self._holds.get(eid)
-        if hold is not None and hold.waiting and hold.by == rule.key:
+        hold = self._holds.setdefault(eid, _Hold())
+        if do == "off":
+            hold.owed, hold.label = rule.key, entry["target"]
+        if hold.waiting and hold.by == rule.key:
             hold.by = others[0].key  # the waiting on is now kept by another rule: its trace shows the wait
 
-    def _hold_send(self, eid: str, do: str, rule: _Rule, entry: dict) -> None:
-        """Send the arbitrated command; it replaces a waiting older one (given up, as on a new firing)."""
+    def _hold_send(self, eid: str, do: str, rule: "_Rule | None", entry: dict) -> None:
+        """Send the arbitrated command; it replaces a waiting older one (given up, as on a new firing). Inside a load
+        the call waits for the end of the load: a later command of the same load replaces it unsent."""
         hold = self._holds.setdefault(eid, _Hold())
         if hold.waiting:
             hold.entry["error"] = hold.waiting
-        hold.cmd, hold.entry, hold.by, hold.waiting = do, entry, rule.key, None
+        if self._loading and eid in self._deferred and hold.cmd != do and rule is not None:
+            hold.entry["sent"] = False  # replaced unsent within this load
+            hold.entry["reason"] = f"kept on by {rule.name}" if do == "on" else f"replaced by {rule.name}"
+        hold.cmd, hold.entry, hold.by, hold.waiting = do, entry, rule.key if rule is not None else None, None
+        hold.owed = None
+        if self._loading:
+            hold.confirmed = False
+            if eid not in self._deferred:
+                self._deferred.append(eid)
+            return
         self._hold_call(eid, hold)
+
+    def _pay_offs(self) -> None:
+        """An off that was kept back because others kept the device on is sent once nobody keeps it on any more
+        (released, gate closed, disabled, deleted) while the device reads on; a device already off owes nothing."""
+        for eid, hold in list(self._holds.items()):
+            if hold.owed is None or self._holders(eid):
+                continue
+            st = self._lookup(eid)
+            if st is None or st[0] in ("unknown", "unavailable"):
+                continue  # paid when it returns reading on
+            if st[0] != "on":
+                hold.owed = None
+                continue
+            rule = self._rules.get(hold.owed)
+            entry = {"action": "off", "target": hold.label, "at": int(self._now() * 1000),
+                     "reason": "no longer kept on"}
+            if rule is not None:
+                rule.last, rule.entries, rule.failed = entry, [entry], None
+            self._hold_send(eid, "off", rule, entry)
 
     def _hold_call(self, eid: str, hold: _Hold) -> None:
         hold.attempt += 1
         attempt = hold.attempt
         hold.waiting = None
         hold.entry.pop("error", None)
+        st = self._lookup(eid)
+        hold.confirmed = st is not None and st[0] == hold.cmd
         try:
             held = self._call(
                 eid.split(".", 1)[0], f"turn_{hold.cmd}", eid,
@@ -1233,7 +1291,8 @@ class RuleEngine:
         if active and b.mode == "auto" and not self._booting:  # §9: auto is evaluated once HA has started
             do, why = b.auto(self._now(), grid, power, relay)
             if do is not None:
-                self._boiler_auto(rule, do, why)
+                # blackout / limit: a safety off (inverter protection), never kept back by other rules
+                self._boiler_auto(rule, do, why, safety=b.phase in ("blackout", "limit"))
         b.view = b.trace(grid, power, relay)
         wake = b.until if active else None
         if b.timer is not None and b.timer[0] != wake:
@@ -1348,14 +1407,18 @@ class RuleEngine:
         self._settle({key})
         self._flush()
 
-    def _boiler_auto(self, rule: _Rule, do: str, why: str) -> None:
-        """An auto (or disabling) command of a boiler: arbitrated with the other rules keeping the relay on."""
+    def _boiler_auto(self, rule: _Rule, do: str, why: str, safety: bool = False) -> None:
+        """An auto (or disabling) command of a boiler: arbitrated with the other rules keeping the relay on; a safety
+        off is sent regardless."""
         b = rule.boiler
         assert b is not None and b.relay is not None
         b.sends += 1  # an older button command's late failure no longer counts
         entry = {"action": do, "target": b.label, "at": int(self._now() * 1000), "reason": why}
         rule.last, rule.failed = entry, None
-        self._arbitrated(rule, b.relay, do, entry)
+        if safety:
+            self._hold_send(b.relay, do, rule, entry)
+        else:
+            self._arbitrated(rule, b.relay, do, entry)
 
     def _boiler_send(self, rule: _Rule, do: str, why: str) -> None:
         """Switch the boiler relay directly (a button command); an unavailable relay or a failed call waits until the
@@ -1478,6 +1541,10 @@ class RuleEngine:
         keys = self._readers.get(entity_id)
         if not keys and entity_id not in self._targets:
             return
+        hold = self._holds.get(entity_id)
+        st = self._lookup(entity_id)
+        if hold is not None and st is not None and st[0] == hold.cmd:
+            hold.confirmed = True
         for key in self._targets.get(entity_id, ()):
             self._reclose(self._rules[key], entity_id)
         for key in keys or ():
@@ -1535,6 +1602,7 @@ class RuleEngine:
         return {rid: self._trace(r) for (pid, rid), r in self._rules.items() if pid == plan_id}
 
     def _flush(self) -> None:
+        self._pay_offs()
         self._report_modes()
         self._report_runs()
         frames: dict[str, dict[str, dict]] = {}
