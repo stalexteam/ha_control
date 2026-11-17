@@ -428,7 +428,7 @@ describe('Rule dialog', () => {
     it('the flowchart of a saved stage-2 rule shows live values, the countdown and the held note', async () => {
       const el = await edit('rule-outside');
       expect(q(el, '[data-block="input-0"]').textContent).toContain('8 lx');
-      expect(q(el, '[data-block="gate-input"]').textContent).toMatch(/closed, opens in 1[23] min/);
+      expect(q(el, '[data-block="gate-input"]').textContent).toMatch(/closed, opens in 1[12]:[0-5][0-9]/);
       expect(q(el, '[data-note="held"]').textContent).toBe('Actions are held until the gate opens.');
     });
   });

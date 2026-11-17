@@ -3,7 +3,7 @@ import type { Rule, RuleDo, RuleInput, RuleSource } from '../model/types';
 import type { RuleTrace } from '../live/rules-feed';
 import { lastText } from '../panel/rules-panel';
 import { t } from '../i18n';
-import { FLOW_MAX_SCALE, FLOW_PAD as PAD, FLOW_VGAP as VGAP, FLOW_WIDTH, blockH, flowBlock } from './flow-block';
+import { FLOW_MAX_SCALE, FLOW_PAD as PAD, FLOW_VGAP as VGAP, FLOW_WIDTH, blockH, countdown, flowBlock } from './flow-block';
 
 export { FLOW_MAX_SCALE };
 
@@ -38,7 +38,7 @@ export interface RuleTraceOpts {
 export const WIDTH = FLOW_WIDTH;
 const CX = WIDTH / 2;
 /** Inputs: up to PER_ROW blocks a row on a grid centred on CX; the middle grid gap is at CX, so the trunk passes rows. */
-const IN_W = 230, IN_GAP = 26, PER_ROW = 4, ROW_GAP = 28, BH = blockH(2);
+const IN_W = 230, IN_GAP = 26, PER_ROW = 4, ROW_GAP = 36, BH = blockH(2);
 const GRID_X = (WIDTH - PER_ROW * IN_W - (PER_ROW - 1) * IN_GAP) / 2;
 /** The ANY / ALL block, the result and gate blocks, the two action columns (as the vent diagram's sensors). */
 const COMB_W = 200, MW = 460, SW = 330, SGAP = 40, ACT_GAP = 8, HEAD_H = 24;
@@ -54,7 +54,8 @@ export function durationText(sec: number): string {
   return m === 0 ? `${h} ${t('rules.unit.h')}` : `${h} ${t('rules.unit.h')} ${m} ${t('rules.unit.min')}`;
 }
 
-const remaining = (until: number, now: number): string => durationText(Math.max(1, Math.ceil((until - now) / 1000)));
+/** The live countdown to `until` (at least 1 s while it runs), as the vent diagram's run-on. */
+const remaining = (until: number, now: number): string => countdown(Math.max(1, Math.ceil((until - now) / 1000)));
 
 /** The second line of an input block before live values: its parameters in a few words. */
 export function paramText(s: RuleSource, not = false): string {
@@ -125,7 +126,7 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
     : `${t('rules.flow.closed')}${gt.detail ? `, ${gt.detail}` : ''}`;
   const delayText = t('rules.flow.delay').replace('{on}', secs(rule.onDelay)).replace('{off}', secs(rule.offDelay));
   const verdictLine = trace === undefined ? delayText
-    : `${word(verdict ?? null)}${pending ? `, ${t('rules.flow.pending').replace('{to}', word(pending.to)).replace('{n}', String(left))}` : ''}`;
+    : `${word(verdict ?? null)}${pending ? `, ${t('rules.flow.pending').replace('{to}', word(pending.to)).replace('{t}', countdown(left))}` : ''}`;
 
   // Geometry: the input rows, the chain of centred blocks, the two action columns.
   const n = rule.inputs.length, rows = Math.ceil(n / PER_ROW);

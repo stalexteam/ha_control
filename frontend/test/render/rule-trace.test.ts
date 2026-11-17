@@ -2,6 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render } from 'lit';
 import { renderRuleTrace, WIDTH, FLOW_MAX_SCALE, gateValue, fieldOf, type FocusTarget, type RuleTraceOpts } from '../../src/render/rule-trace';
+import { countdown } from '../../src/render/flow-block';
 import type { Rule } from '../../src/model/types';
 import type { RuleTrace } from '../../src/live/rules-feed';
 
@@ -90,7 +91,7 @@ describe('rule flowchart', () => {
     expect(text(host, '[data-block="input-1"]')).toBe('NOT Other rule unknown');
     expect(host.querySelector('[data-block="input-1"]')!.classList.contains('nodata')).toBe(true);
     expect(text(host, '[data-block="combine"]')).toBe('ALL no data'); // ALL with an unknown input
-    expect(text(host, '[data-block="delays"]')).toBe('Result false, true in 4 s');
+    expect(text(host, '[data-block="delays"]')).toBe('Result false, true in 0:04');
     expect(host.querySelector('.fc-warn')!.textContent).toBe('1 input without data');
     expect(host.querySelector('.fc-last')!.textContent).toBe('Last action: closed Water valve 21:43: service failed');
     expect(host.querySelector('.fc-note')).toBeNull();
@@ -102,6 +103,14 @@ describe('rule flowchart', () => {
     expect(text(host, '[data-block="input-0"]')).toBe('Leak sensor Device');
     expect(text(host, '[data-block="delays"]')).toBe('Result true');
     expect(host.querySelector('.fc-note')!.textContent).toBe('Saved version: your changes apply after Save');
+  });
+
+  it('live countdowns use the vent run-on format (m:ss, h:mm:ss); parameters keep their units', () => {
+    expect([countdown(4), countdown(45), countdown(232), countdown(3725)]).toEqual(['0:04', '0:45', '3:52', '1:02:05']);
+    const trace: RuleTrace = { status: 'ok', verdict: true, unknownInputs: 0, pending: { to: false, at: NOW + 232_000 }, inputs: [] };
+    const { host } = draw({ trace, rule: { ...rule, offDelay: 300 } });
+    expect(text(host, '[data-block="delays"]')).toBe('Result true, false in 3:52');
+    expect(text(draw({ rule: { ...rule, offDelay: 300 } }).host, '[data-block="delays"]')).toBe('Result delay on 0 s, off 300 s');
   });
 
   it('an invalid delay shows a question mark, not NaN', () => {
@@ -171,6 +180,7 @@ describe('rule flowchart', () => {
         for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) expect(overlaps(boxes[i], boxes[j])).toBe(false);
         const ins = Array.from({ length: n }, (_, k) => box(host, `input-${k}`));
         expect(new Set(ins.map(b => b.y)).size).toBe(Math.ceil(n / 4));
+        if (n > 4) expect(ins[4].y - bottom(ins[0])).toBeGreaterThanOrEqual(36); // room for the bus between rows
         expect(Math.max(...ins.map(bottom))).toBeLessThan(box(host, 'combine').y);
       }
     });
@@ -271,8 +281,8 @@ describe('rule flowchart', () => {
       };
       const { host } = draw({ rule: r2, inputName: nm, trace });
       expect(text(host, '[data-block="input-0"]')).toBe('Light sensor 8 lx');
-      expect(text(host, '[data-block="input-3"]')).toBe('Held: Light true in 18 min');
-      expect(text(host, '[data-block="gate-input"]')).toBe('Gate: Held: Light closed, opens in 2 min');
+      expect(text(host, '[data-block="input-3"]')).toBe('Held: Light true in 18:00');
+      expect(text(host, '[data-block="gate-input"]')).toBe('Gate: Held: Light closed, opens in 1:30');
       expect(host.querySelector('[data-block="gate-input"]')!.classList.contains('off')).toBe(true);
       expect(host.querySelector('[data-note="held"]')!.textContent).toBe('Actions are held until the gate opens.');
     });

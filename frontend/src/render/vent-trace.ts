@@ -1,10 +1,9 @@
 import { html, nothing, svg, type TemplateResult } from 'lit';
 import type { Id, Rule } from '../model/types';
 import type { RuleTrace, VentSensorTrace } from '../live/rules-feed';
-import { formatDuration } from '../live/device-live';
 import { clock } from '../panel/rules-panel';
 import { durationText, tone, word } from './rule-trace';
-import { FLOW_MAX_SCALE, FLOW_PAD as PAD, FLOW_VGAP as VGAP, FLOW_WIDTH, blockH, chars1, clip, flowBlock } from './flow-block';
+import { FLOW_MAX_SCALE, FLOW_PAD as PAD, FLOW_VGAP as VGAP, FLOW_WIDTH, blockH, chars1, clip, countdown, flowBlock } from './flow-block';
 import { t } from '../i18n';
 
 export interface VentTraceOpts {
@@ -32,8 +31,6 @@ const XA = (VENT_WIDTH - SW * 2 - SGAP) / 2, XB = XA + SW + SGAP, MX = (VENT_WID
 const f1 = (n: number): string => (Math.round(n * 10) / 10 || 0).toFixed(1);
 const shown = (n: number): string => (Number.isFinite(n) ? String(+n.toFixed(4)) : '?');
 const signed = (pct: number): string => `${pct > 0 ? '+' : ''}${pct} %`;
-/** m:ss (h:mm:ss from an hour) of whole seconds. */
-const mss = (sec: number): string => (sec < 60 ? `0:${String(sec).padStart(2, '0')}` : formatDuration(sec * 1000));
 
 /** A block of the diagram (see `flowBlock`); a click focuses its form field. */
 interface Blk { x: number; y: number; w: number; h: number; field: string; cls: string; lines: string[]; err?: string; tip?: string }
@@ -77,7 +74,7 @@ export function renderVentTrace(o: VentTraceOpts): TemplateResult {
   const runon = t('vent.flow.runon').replace('{t}', durationText(r.offDelay));
   const resultLines = [
     tr ? `${t('rules.flow.result')}: ${word(tr.verdict)}` : t('rules.flow.result'),
-    pending ? `${runon} (${t('vent.pending').replace('{to}', pending.to ? 'on' : 'off').replace('{t}', mss(left))})` : runon,
+    pending ? `${runon} (${t('vent.pending').replace('{to}', pending.to ? 'on' : 'off').replace('{t}', countdown(left))})` : runon,
   ];
   const last = tr?.last;
   const fanLines = [o.deviceName(fan), `${r.onTrue[0]?.do ?? '?'} / ${r.onFalse[0]?.do ?? '?'}`,

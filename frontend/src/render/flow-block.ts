@@ -1,4 +1,5 @@
 import { svg, type TemplateResult } from 'lit';
+import { formatDuration } from '../live/device-live';
 
 /**
  * Shared look of the rule diagrams (the condition flowchart and the wet zone ventilation diagram): one viewBox
@@ -14,6 +15,8 @@ export const clip = (s: string, n: number): string => (s.length > n ? `${s.slice
 /** Characters that fit a box of width w: 13 px medium first line, 12 px other lines (the clip box catches wide glyphs). */
 export const chars1 = (w: number): number => Math.floor((w - 20) / 6.6);
 export const chars2 = (w: number): number => Math.floor((w - 20) / 6);
+/** A live countdown of whole seconds in both diagrams: m:ss (0:45 under a minute), h:mm:ss from an hour. */
+export const countdown = (sec: number): string => (sec < 60 ? `0:${String(sec).padStart(2, '0')}` : formatDuration(sec * 1000));
 /** Height of a block of n text lines (first baseline 20, then every 18). */
 export const blockH = (n: number): number => 14 + 18 * n;
 

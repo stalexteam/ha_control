@@ -394,7 +394,7 @@ const en: Dict = {
   'rules.flow.title': 'Rule flowchart',
   'rules.flow.result': 'Result',
   'rules.flow.delay': 'delay on {on} s, off {off} s',
-  'rules.flow.pending': '{to} in {n} s',
+  'rules.flow.pending': '{to} in {t}',
   'rules.flow.last': 'Last action:',
   'rules.flow.new': 'Live state appears after Save',
   'rules.flow.edited': 'Saved version: your changes apply after Save',
