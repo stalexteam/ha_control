@@ -59,7 +59,7 @@ class BWorld(World):
 
 def loaded(rules=None, modes=None, **states):
     w = BWorld(**states)
-    w.engine.load_plans([boiler_plan(rules)], modes=modes)
+    w.engine.load_plans([boiler_plan(rules)], boot=False, modes=modes)
     return w
 
 
@@ -201,7 +201,7 @@ def test_limit_exactly_at_the_limit_is_allowed():
 @pytest.mark.parametrize("state,attrs,watts", [
     ("0.8", {"unit_of_measurement": "kW"}, 800.0), ("0.0005", {"unit_of_measurement": "MW"}, 500.0),
     ("500000", {"unit_of_measurement": "mW"}, 500.0), ("500", W, 500.0),
-    ("500", {"unit_of_measurement": "kWh"}, None), ("500", {}, None), ("abc", W, None), ("nan", W, None),
+    ("500", {"unit_of_measurement": "kWh"}, None), ("500", {}, 500.0), ("abc", W, None), ("nan", W, None),
     ("unknown", W, None),
 ])
 def test_power_units(state, attrs, watts):
@@ -431,15 +431,18 @@ def test_on_modes_after_heating_done_and_external_change():
     assert w.saved[-1] == {"p": {"r": "manual"}}
 
 
-def test_restored_auto_is_evaluated_at_load():
-    """Review focus 5: the calls are held until HA has started (live glue)."""
+def test_restored_auto_is_evaluated_once_ha_has_started():
+    """Review focus 5: a stored auto waits for the end of the boot phase, then is evaluated once."""
     w = BWorld(switch__relay="on", sensor__grid="unavailable")
-    w.hold = True
     w.engine.load_plans([boiler_plan()], boot=True, modes={"p": {"r": "auto"}})
-    assert w.calls == [OFF] and w.b()["mode"] == "auto" and w.b()["phase"] == "blackout"
-    assert w.current() is True
+    w.set("sensor.grid", "unknown")
+    assert w.calls == [] and w.b()["mode"] == "auto" and w.b()["phase"] is None
+    assert w.engine.snapshot("p")["r"]["verdict"] is True
     assert w.saved == []  # the stored modes are already current
-    w.hold = False
+    w.engine.started()
+    assert w.calls == [OFF] and w.b()["phase"] == "blackout"
+    w.engine.started()  # once
+    assert w.calls == [OFF]
     w.set("switch.relay", "off", own=True)
     w.set("sensor.grid", "500", W)
     assert w.b()["phase"] == "waiting"
@@ -526,7 +529,7 @@ def test_deleted_rule_is_dropped_and_its_timer_cancelled():
 ])
 def test_missing_devices_are_an_error_and_ignore_the_button(devices, blocks):
     w = BWorld()
-    w.engine.load_plans([boiler_plan(devices=devices, blocks=blocks)])
+    w.engine.load_plans([boiler_plan(devices=devices, blocks=blocks)], boot=False)
     w.press("auto")
     t = w.engine.snapshot("p")["r"]
     assert t["status"] == "error" and t["reason"] == "device missing" and w.calls == []
@@ -545,8 +548,82 @@ def test_verdict_is_an_input_of_another_rule():
     light = dev("l", "ceiling_light", "Light", control="light.l")
     other = rule("r2", [{"source": {"rule": "r"}}], on_true=[("l", "on")], on_false=[("l", "off")])
     w = BWorld(light__l="off")
-    w.engine.load_plans([boiler_plan([boiler_rule(), other], devices=[BOILER, BUTTON, light])])
+    w.engine.load_plans([boiler_plan([boiler_rule(), other], devices=[BOILER, BUTTON, light])], boot=False)
     assert ("light", "turn_off", "light.l") in w.calls
     w.press("auto")
     assert ("light", "turn_on", "light.l") in w.calls
     assert w.engine.snapshot("p")["r2"]["verdict"] is True
+
+
+# --- fix round 1 --------------------------------------------------------------------
+
+def test_auto_pressed_during_boot_waits_for_the_start():
+    w = BWorld()
+    w.engine.load_plans([boiler_plan()], boot=True)
+    w.press("auto")
+    assert w.calls == [] and w.b()["mode"] == "auto" and not w.pending()
+    w.engine.started()
+    assert w.calls == [ON] and w.b()["phase"] == "heating"
+
+
+def test_a_later_load_does_not_end_the_boot_phase():
+    w = BWorld()
+    w.engine.load_plans([boiler_plan()], boot=True, modes={"p": {"r": "auto"}})
+    w.engine.load_plans([boiler_plan([boiler_rule(name="Renamed")])], boot=False)
+    assert w.calls == []
+    w.engine.started()
+    assert w.calls == [ON]
+
+
+def test_buttons_still_switch_during_boot():
+    w = BWorld()
+    w.engine.load_plans([boiler_plan()], boot=True)
+    w.press("toggle")
+    assert w.calls == [ON] and w.b()["mode"] == "manual"
+
+
+def test_slow_relay_confirming_the_rules_command_without_context_is_not_a_take_over():
+    w = loaded()
+    w.press("auto")
+    assert w.calls == [ON]
+    w.advance(1006)
+    w.set("switch.relay", "on")  # HA no longer carries the call's context
+    assert w.b()["mode"] == "auto" and w.calls == [ON]
+
+
+def test_a_change_away_from_the_command_without_context_is_a_take_over():
+    w = loaded()
+    w.press("auto")
+    w.set("switch.relay", "on", own=True)
+    w.set("switch.relay", "off")
+    assert w.b()["mode"] == "manual"
+
+
+def test_disabling_an_auto_rule_goes_manual_and_switches_the_relay_off():
+    w = heating()
+    w.engine.load_plans([boiler_plan([boiler_rule(enabled=False)])])
+    t = w.engine.snapshot("p")["r"]
+    assert w.calls == [OFF] and t["boiler"]["mode"] == "manual" and t["status"] == "disabled"
+    assert t["last"]["reason"] == "rule disabled" and w.saved[-1] == {"p": {"r": "manual"}}
+    assert not w.pending()
+
+
+def test_disabling_an_auto_rule_whose_last_command_was_off_sends_nothing():
+    w = heating()
+    w.set("sensor.grid", "unavailable")  # blackout: off sent
+    w.set("switch.relay", "off", own=True)
+    w.calls.clear()
+    w.engine.load_plans([boiler_plan([boiler_rule(enabled=False)])])
+    assert w.calls == [] and w.b()["mode"] == "manual"
+
+
+def test_disabling_a_manual_rule_sends_nothing():
+    w = loaded(switch__relay="on")
+    w.press("set", "on")
+    w.engine.load_plans([boiler_plan([boiler_rule(enabled=False)])])
+    assert w.calls == []
+
+
+def test_a_disabled_rule_is_not_restored_to_auto():
+    w = loaded([boiler_rule(enabled=False)], modes={"p": {"r": "auto"}})
+    assert w.b()["mode"] == "manual" and w.calls == []

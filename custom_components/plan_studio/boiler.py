@@ -7,13 +7,16 @@ runtime state and the decisions."""
 
 from __future__ import annotations
 
-import math
 from typing import Callable
+
+try:
+    from .power import _read
+except ImportError:  # pytest: module dir on sys.path
+    from power import _read
 
 # entity id -> (state, attributes); None when the entity is missing
 Lookup = Callable[[str], "tuple[str, dict] | None"]
 
-WATTS = {"W": 1.0, "kW": 1e3, "MW": 1e6, "mW": 1e-3}  # as power.py; any other unit (or none) reads as unknown
 OFF_WAIT = 15  # s after the rule's last off before it may switch on again
 ON_WAIT = 60  # s after an on before "heating done" may be concluded
 IDLE_W = 1.0  # a boiler drawing no more than this is done heating
@@ -22,16 +25,9 @@ RELAY_DOMAINS = ("light", "switch", "fan")  # entities with turn_on / turn_off
 MODES = ("auto", "manual")
 
 
-def watts(st: "tuple[str, dict] | None") -> float | None:
-    """A power reading in W; None for no data, a non-number or a unit outside WATTS."""
-    if st is None:
-        return None
-    try:
-        v = float(st[0])
-    except (TypeError, ValueError):
-        return None
-    factor = WATTS.get((st[1] or {}).get("unit_of_measurement")) if isinstance(st[1], dict) else None
-    return v * factor if factor is not None and math.isfinite(v) else None
+def watts(lookup: Lookup, eid: str) -> float | None:
+    """A power reading in W as the Power step reads it (W, kW, MW, mW; no unit = W); None for no data."""
+    return _read(lookup, eid, "power")
 
 
 def _w(v: float | None) -> float | None:
@@ -77,6 +73,7 @@ class Boiler:
         self.last_off: float | None = None  # epoch s of the rule's last off, held at now while an off reason lasts
         self.holding = False  # blackout / limit at the last auto evaluation
         self.cmd: str | None = None  # the last command sent, until the relay moves away from it
+        self.last_do: str | None = None  # the last command sent, kept
         self.seen: str | None = None  # the relay's last on / off reading (None after no data)
         self.sends = 0  # send counter: a late failure or a held call counts only for the latest send
         # derived on every evaluation
@@ -87,6 +84,7 @@ class Boiler:
     def take(self, old: "Boiler") -> None:
         self.mode, self.phase, self.last_on, self.last_off = old.mode, old.phase, old.last_on, old.last_off
         self.holding, self.cmd, self.seen, self.sends = old.holding, old.cmd, old.seen, old.sends
+        self.last_do = old.last_do
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -99,8 +97,8 @@ class Boiler:
 
     def readings(self, lookup: Lookup) -> "tuple[float | None, float | None, str | None]":
         """(grid W, boiler W, relay on / off) with None for no data; the grid only with a power limit."""
-        grid = watts(lookup(self.grid)) if self.limited and self.grid else None
-        power = watts(lookup(self.power)) if self.power else None
+        grid = watts(lookup, self.grid) if self.limited and self.grid else None
+        power = watts(lookup, self.power) if self.power else None
         return grid, power, self.relay_state(lookup)
 
     # --- mode -----------------------------------------------------------------
@@ -116,8 +114,12 @@ class Boiler:
 
     def relay_changed(self, relay: str | None, own: bool, active: bool) -> bool:
         """A state change of the relay; True when a human took over (an on <-> off change not caused by Plan Studio
-        while auto): the mode becomes manual. A return from no data is never a take-over."""
-        human = active and self.mode == "auto" and not own and None not in (self.seen, relay) and relay != self.seen
+        while auto): the mode becomes manual. A return from no data is never a take-over, nor is a change to the
+        rule's outstanding command (HA keeps a call's context only ~5 s; a slow relay confirms later without it).
+        own: any Plan Studio context, so another rule switching the relay is not a take-over either (that is a
+        configuration conflict, not a human)."""
+        human = active and self.mode == "auto" and not own and None not in (self.seen, relay) \
+            and relay != self.seen and relay != self.cmd
         self.seen = relay
         if human:
             self.manual()
@@ -127,7 +129,7 @@ class Boiler:
 
     def command(self, do: str, now: float) -> str:
         """Stamp a command that is being sent."""
-        self.cmd = do
+        self.cmd = self.last_do = do
         if do == "on":
             self.last_on = now
         else:

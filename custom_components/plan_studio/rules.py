@@ -466,6 +466,7 @@ class RuleEngine:
         self._subs: dict[str, list[Callback]] = {}
         self._on_modes = on_modes  # the boiler modes {plan id: {rule id: mode}} after any of them changed
         self._modes: dict[str, dict[str, str]] = {}  # the modes last reported (or loaded)
+        self._booting = False  # a boot load happened and started() has not come yet: boiler auto waits
 
     # --- loading -------------------------------------------------------------
 
@@ -483,6 +484,9 @@ class RuleEngine:
         first, self._started = not self._started, True
         if boot is None:
             boot = first
+        if boot:
+            self._booting = True
+        stopped: list[_Rule] = []  # boiler rules disabled while auto whose last command was on
         rules: dict[Key, _Rule] = {}
         for plan in plans:
             pid = plan.get("id") if isinstance(plan, dict) else None
@@ -511,23 +515,26 @@ class RuleEngine:
                         prev.stop()
                     for i in rule.all_inputs:
                         i.boot = boot
-                if rule.boiler is not None:
-                    self._load_boiler(rule, prev, modes)
+                if rule.boiler is not None and self._load_boiler(rule, prev, modes):
+                    stopped.append(rule)
                 rules[rule.key] = rule
         for key, prev in old.items():
             if key not in rules:
                 prev.stop()
         self._rules = rules
         self._link()
+        for rule in stopped:
+            self._boiler_send(rule, rule.boiler.command("off", self._now()), "rule disabled")
         self._settle(set(rules))
         self._published = {key: self._trace(r) for key, r in rules.items()}
         for pid in list(self._subs):
             self._notify(pid, True, self.snapshot(pid))
         self._report_modes()
 
-    def _load_boiler(self, rule: _Rule, prev: "_Rule | None", modes: "dict | None") -> None:
+    def _load_boiler(self, rule: _Rule, prev: "_Rule | None", modes: "dict | None") -> bool:
         """Keep the state of the same boiler (device, button and grid block unchanged); a boiler not loaded yet takes
-        its stored mode; any other one starts manual."""
+        its stored mode; any other one starts manual. True when the rule was disabled while auto and its last command
+        was on: the relay must go off (no inverter protection without the rule)."""
         b = rule.boiler
         assert b is not None
         old = prev.boiler if prev is not None else None
@@ -535,11 +542,15 @@ class RuleEngine:
             old.stop()
             b.take(old)
             rule.last, rule.failed = prev.last, prev.failed
-            return
+            if prev.enabled and not rule.enabled and b.mode == "auto":
+                b.manual()
+                return b.last_do == "on" and b.relay is not None and b.relay_state(self._lookup) != "off"
+            return False
         b.seen = b.relay_state(self._lookup)
         stored = self._modes.get(rule.key[0], {}).get(rule.key[1]) if prev is None and modes is not None else None
-        if stored == "auto":
-            b.enter_auto(self._now(), b.seen)  # evaluated by the settle of this load (held until HA has started)
+        if stored == "auto" and rule.enabled:
+            b.enter_auto(self._now(), b.seen)  # evaluated once the boot phase is over (started())
+        return False
 
     def _link(self) -> None:
         """Order rules so references come first; a reference closing a cycle is marked and ignored."""
@@ -914,7 +925,7 @@ class RuleEngine:
         grid, power, relay = b.readings(self._lookup)
         b.until = None
         active = rule.enabled and not b.missing
-        if active and b.mode == "auto":
+        if active and b.mode == "auto" and not self._booting:  # §9: auto is evaluated once HA has started
             do, why = b.auto(self._now(), grid, power, relay)
             if do is not None:
                 self._boiler_send(rule, do, why)
@@ -930,6 +941,14 @@ class RuleEngine:
         changed = verdict != rule.verdict
         rule.verdict = verdict
         return changed
+
+    def started(self) -> None:
+        """HA has started: end the boot phase and evaluate the boiler rules in auto once."""
+        if not self._booting:
+            return
+        self._booting = False
+        self._settle({key for key, rule in self._rules.items() if rule.boiler is not None})
+        self._flush()
 
     def _boiler_wake(self, key: Key, b: Boiler) -> None:
         rule = self._rules.get(key)
@@ -1041,7 +1060,8 @@ class RuleEngine:
     # --- state changes -------------------------------------------------------
 
     def handle_state(self, entity_id: str, own: bool = False) -> None:
-        """own: the change carries a Plan Studio context (a rule's own call)."""
+        """own: the change carries any Plan Studio context (a call of any rule). So another rule switching a boiler
+        relay is not a take-over of that boiler (a configuration conflict, not a human)."""
         keys = self._readers.get(entity_id)
         if not keys and entity_id not in self._targets:
             return
