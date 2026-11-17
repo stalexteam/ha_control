@@ -627,3 +627,11 @@ def test_disabling_a_manual_rule_sends_nothing():
 def test_a_disabled_rule_is_not_restored_to_auto():
     w = loaded([boiler_rule(enabled=False)], modes={"p": {"r": "auto"}})
     assert w.b()["mode"] == "manual" and w.calls == []
+
+
+def test_disabling_an_auto_rule_after_a_restart_switches_a_running_relay_off():
+    w = loaded([boiler_rule()], modes={"p": {"r": "auto"}}, switch__relay="on")
+    w.engine.started()
+    w.calls.clear()
+    w.engine.load_plans([boiler_plan([boiler_rule(enabled=False)])])
+    assert w.calls == [OFF] and w.b()["mode"] == "manual"

@@ -17,7 +17,7 @@ from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import POWER_STORAGE_KEY, RUNTIME_STORAGE_KEY
+from .const import BOILER_STORAGE_KEY, POWER_STORAGE_KEY, RUNTIME_STORAGE_KEY
 from .power import PowerHub
 from .rules import RuleEngine
 from .runtime import Runtime
@@ -53,6 +53,9 @@ class LiveRuntime:
         # entity id -> last_changed of the state it returned to from no data (unavailable, unknown, none)
         self._returned: dict[str, object] = {}
         self._power_store: Store = Store(hass, 1, POWER_STORAGE_KEY)
+        self._boiler_store: Store = Store(hass, 1, BOILER_STORAGE_KEY)
+        self._modes: dict | None = None  # stored boiler modes, handed to the first engine load only
+        self._engine_start: CALLBACK_TYPE | None = None  # waits for HA to start after a boot load
         # rule actions fired before HA has started (a sensor known at boot), sent in order once it has
         self._deferred: list[tuple[str, str, str, Callable[..., None], Callable[[], bool]]] = []
         self._unstarted: CALLBACK_TYPE | None = None
@@ -67,10 +70,14 @@ class LiveRuntime:
         positions = data.get("positions") if isinstance(data, dict) else None
         self.power = PowerHub(self._lookup, positions if isinstance(positions, dict) else None, self._save_positions)
         self.runtime = Runtime(self._lookup, time.monotonic, _clock)
+        self.runtime.add_listener(self._on_container)
+        stored = await self._boiler_store.async_load()
+        self._modes = stored if isinstance(stored, dict) else {}
         self.engine = RuleEngine(
             self._lookup, time.time, self._call, self._schedule,
             local=lambda ts: dt_util.as_local(dt_util.utc_from_timestamp(ts)),  # the real zone: DST-safe
             changed_at=self._changed_at,
+            on_modes=self._save_modes,
         )
         self.reload()
 
@@ -81,8 +88,29 @@ class LiveRuntime:
         # only the first load while HA is still starting is the HA start; an entry reload is not
         boot = not self._loaded and self._hass.state is not CoreState.running
         self._loaded = True
-        self.engine.load_plans(plans, boot=boot)
+        modes, self._modes = self._modes, None
+        self.engine.load_plans(plans, boot=boot, modes=modes)
+        if boot and self._engine_start is None:  # a restored auto waits for HA to have started
+            self._engine_start = async_at_started(self._hass, self._engine_started)
         self.retrack()
+
+    @callback
+    def _engine_started(self, _hass: HomeAssistant) -> None:
+        self._engine_start = None
+        if not self._stopped:
+            self.engine.started()
+
+    @callback
+    def _on_container(self, plan_id: str, device_id: str, event: dict) -> None:
+        """Container intents (not status changes) are the boiler buttons' input."""
+        if "action" in event and not self._stopped:
+            self.engine.on_intent(plan_id, device_id, event)
+
+    @callback
+    def _save_modes(self, modes: dict) -> None:
+        if self._stopped:  # stop reloads no plans: that report must not wipe the store
+            return
+        self._boiler_store.async_delay_save(lambda: modes, 1)
 
     @callback
     def retrack(self) -> None:
@@ -99,6 +127,9 @@ class LiveRuntime:
         self._stopped = True
         self._untrack_all()
         self._deferred.clear()
+        if self._engine_start is not None:
+            self._engine_start()
+            self._engine_start = None
         if self._unstarted is not None:
             self._unstarted()
             self._unstarted = None
@@ -135,14 +166,11 @@ class LiveRuntime:
                 self._returned[data["entity_id"]] = new.last_changed
             else:
                 self._returned.pop(data["entity_id"], None)
-        self.runtime.handle_state(
-            data["entity_id"],
-            _pair(data["old_state"]),
-            _pair(data["new_state"]),
-            (event.context.id, event.context.parent_id),
-        )
+        context = (event.context.id, event.context.parent_id)
+        # intents first (runtime listeners are synchronous): the engine must know them before the state change
+        self.runtime.handle_state(data["entity_id"], _pair(data["old_state"]), _pair(data["new_state"]), context)
         self.power.handle_state(data["entity_id"])
-        self.engine.handle_state(data["entity_id"])
+        self.engine.handle_state(data["entity_id"], own=self.runtime.is_own(context))
 
     def _call(
         self,

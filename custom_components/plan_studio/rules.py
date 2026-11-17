@@ -544,7 +544,7 @@ class RuleEngine:
             rule.last, rule.failed = prev.last, prev.failed
             if prev.enabled and not rule.enabled and b.mode == "auto":
                 b.manual()
-                return b.last_do == "on" and b.relay is not None and b.relay_state(self._lookup) != "off"
+                return b.relay is not None and b.relay_state(self._lookup) == "on"
             return False
         b.seen = b.relay_state(self._lookup)
         stored = self._modes.get(rule.key[0], {}).get(rule.key[1]) if prev is None and modes is not None else None

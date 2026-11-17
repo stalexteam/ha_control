@@ -100,22 +100,26 @@ class FakePlans:
 
 
 class FakeStore:
-    def __init__(self, *a, **kw):
-        pass
+    contents: dict = {}  # storage key -> stored data (reset per test by the env fixture)
+    saved: list = []  # (key, data) per async_delay_save
+
+    def __init__(self, hass, version, key):
+        self.key = key
 
     async def async_load(self):
-        return None
+        return FakeStore.contents.get(self.key)
 
     async def async_remove(self):
         pass
 
-    def async_delay_save(self, *a):
-        pass
+    def async_delay_save(self, data_func, delay=0):
+        FakeStore.saved.append((self.key, data_func()))
 
 
 @pytest.fixture
 def env(monkeypatch):
     tracked, later, cmds, started = [], [], {}, []
+    FakeStore.contents, FakeStore.saved = {}, []
 
     def track(hass, ids, cb):
         entry = {"ids": list(ids), "cb": cb, "on": True}
@@ -385,7 +389,7 @@ def test_calls_before_start_are_sent_once_after_start_in_order_with_own_contexts
         live.runtime.ignore_context = lambda cid: (ignored.append(cid), orig(cid))[1]
         assert hass.tasks == [] and hass.services.calls == []
         assert live.engine.snapshot("p1")["r1"]["status"] == "ok"
-        assert len([e for e in env.started if e["on"]]) == 1  # one start listener for all deferred calls
+        assert len([e for e in env.started if e["on"] and e["cb"].__name__ == "_started"]) == 1  # one for all deferred calls
         hass.services.known.add(("switch", "turn_off"))
         _fire_started(env, hass)
         await asyncio.gather(*hass.tasks)
@@ -649,5 +653,200 @@ def test_time_input_timer_is_scheduled_on_the_loop_as_a_callback(env):
         await _start(env, hass, p)
         timers = [t for t in env.later if t["on"]]
         assert len(timers) == 1 and getattr(timers[0]["action"], "_hass_callback", False)
+
+    asyncio.run(go())
+
+
+# --- boiler rule ----------------------------------------------------------------
+
+W = {"unit_of_measurement": "W"}
+BOILER_KEY = "plan_studio.boiler"
+
+
+def _boiler_plan(button_kind="smart_button"):
+    def dev(i, kind, bindings, props=None):
+        return {"id": i, "name": i, "props": {"kind": kind, **(props or {})}, "bindings": bindings}
+
+    button = (
+        dev("btn", "wall_switch", {"state": "switch.relay"}, {"autoByDoubleToggle": True})
+        if button_kind == "wall_switch"
+        else dev("btn", "smart_button", {"on": "sensor.act"})
+    )
+    return {
+        "id": "p1",
+        "levels": [
+            {
+                "devices": [
+                    dev("b", "equipment", {"control": "switch.relay", "power": "sensor.bp"}, {"controllable": True}),
+                    button,
+                ]
+            }
+        ],
+        "power": {"blocks": [{"id": "g", "kind": "grid", "power": "sensor.grid"}], "wires": []},
+        "rules": [
+            {
+                "id": "r1", "name": "Boiler", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+                "inputs": [], "onTrue": [], "onFalse": [],
+                "boiler": {"device": "b", "button": "btn", "grid": {"block": "g", "limit": 3000, "nominal": 1400}},
+            }
+        ],
+    }
+
+
+async def _bstart(env, hass, plan, stored=None):
+    if stored is not None:
+        FakeStore.contents[BOILER_KEY] = stored
+    hass.services.known |= {("switch", "turn_on"), ("switch", "turn_off")}
+    hass.states.d.update({"switch.relay": "off", "sensor.grid": "500", "sensor.bp": "0", "sensor.act": ""})
+    live = env.live.LiveRuntime(hass, FakePlans([plan]))
+    await live.async_start()
+    return live
+
+
+def _boiler_event(env, hass, eid, state, ctx=None, old="x"):
+    hass.states.d[eid] = state
+    new = hass.states.get(eid)
+    new.attributes = W if eid in ("sensor.grid", "sensor.bp") else {}
+    prev = types.SimpleNamespace(state=old, attributes={}, last_changed=new.last_changed)
+    ev = types.SimpleNamespace(
+        data={"entity_id": eid, "old_state": prev, "new_state": new}, context=ctx or Context()
+    )
+    env.tracked[-1]["cb"](ev)
+
+
+def _bsaves():
+    return [s for s in FakeStore.saved if s[0] == BOILER_KEY]
+
+
+def test_boiler_entities_are_tracked(env):
+    async def go():
+        hass = FakeHass()
+        await _bstart(env, hass, _boiler_plan())
+        assert {"sensor.grid", "sensor.bp", "switch.relay"} <= set(env.tracked[-1]["ids"])
+
+    asyncio.run(go())
+
+
+def test_boiler_modes_load_before_the_first_load_and_save_on_change(env):
+    async def go():
+        hass = FakeHass()
+        live = await _bstart(env, hass, _boiler_plan(), stored={"p1": {"r1": "auto"}})
+        assert live.engine.modes() == {"p1": {"r1": "auto"}}
+        assert _bsaves() == []  # same as stored: nothing to save
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})  # -> manual
+        assert _bsaves()[-1] == (BOILER_KEY, {"p1": {"r1": "manual"}})
+
+    asyncio.run(go())
+
+
+def test_boiler_stop_does_not_wipe_the_store(env):
+    async def go():
+        hass = FakeHass()
+        live = await _bstart(env, hass, _boiler_plan(), stored={"p1": {"r1": "auto"}})
+        n = len(_bsaves())
+        await live.async_stop()
+        assert len(_bsaves()) == n
+
+    asyncio.run(go())
+
+
+def test_boiler_prunes_a_deleted_rule_in_the_store(env):
+    async def go():
+        hass = FakeHass()
+        live = await _bstart(env, hass, _boiler_plan(), stored={"p1": {"r1": "auto", "gone": "auto"}})
+        assert _bsaves()[-1] == (BOILER_KEY, {"p1": {"r1": "auto"}})
+        assert live.engine.modes() == {"p1": {"r1": "auto"}}
+
+    asyncio.run(go())
+
+
+def test_boiler_restored_auto_runs_only_after_ha_started(env):
+    async def go():
+        hass = FakeHass()
+        hass.state = CoreState.not_running
+        live = await _bstart(env, hass, _boiler_plan(), stored={"p1": {"r1": "auto"}})
+        assert live.engine.snapshot("p1")["r1"]["boiler"]["phase"] is None
+        assert hass.services.calls == []
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        assert live.engine.snapshot("p1")["r1"]["boiler"]["phase"] == "heating"
+        assert [c[:3] for c in hass.services.calls] == [("switch", "turn_on", {"entity_id": "switch.relay"})]
+
+    asyncio.run(go())
+
+
+def test_boiler_no_start_wait_when_ha_already_runs(env):
+    async def go():
+        hass = FakeHass()
+        live = await _bstart(env, hass, _boiler_plan(), stored={"p1": {"r1": "auto"}})
+        await asyncio.gather(*hass.tasks)
+        assert live.engine.snapshot("p1")["r1"]["boiler"]["phase"] == "heating"
+
+    asyncio.run(go())
+
+
+def test_boiler_stop_cancels_the_start_wait(env):
+    async def go():
+        hass = FakeHass()
+        hass.state = CoreState.not_running
+        live = await _bstart(env, hass, _boiler_plan())
+        await live.async_stop()
+        assert not [e for e in env.started if e["on"]]
+
+    asyncio.run(go())
+
+
+def test_boiler_button_intent_reaches_the_engine(env):
+    async def go():
+        hass = FakeHass()
+        await _bstart(env, hass, _boiler_plan())
+        _boiler_event(env, hass, "sensor.act", "single")
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_on"]  # toggle: relay off -> on, manual
+
+    asyncio.run(go())
+
+
+def test_boiler_status_events_are_not_intents(env):
+    async def go():
+        hass = FakeHass()
+        live = await _bstart(env, hass, _boiler_plan())
+        seen = []
+        live.engine.on_intent = lambda *a: seen.append(a)
+        live._on_container("p1", "btn", {"status": "ok"})
+        live._on_container("p1", "btn", {"action": "toggle"})
+        assert len(seen) == 1
+
+    asyncio.run(go())
+
+
+def test_boiler_own_context_relay_change_is_not_a_take_over(env):
+    async def go():
+        hass = FakeHass()
+        live = await _bstart(env, hass, _boiler_plan(), stored={"p1": {"r1": "auto"}})
+        await asyncio.gather(*hass.tasks)  # auto sent on
+        ctx = hass.services.calls[-1][4]
+        _boiler_event(env, hass, "switch.relay", "off", old="off")
+        _boiler_event(env, hass, "switch.relay", "on", ctx=ctx, old="off")
+        assert live.engine.snapshot("p1")["r1"]["boiler"]["mode"] == "auto"
+        _boiler_event(env, hass, "switch.relay", "off", old="on")  # a human
+        assert live.engine.snapshot("p1")["r1"]["boiler"]["mode"] == "manual"
+
+    asyncio.run(go())
+
+
+def test_boiler_wall_switch_over_the_relay_is_a_set_and_a_double_toggle_is_auto(env):
+    async def go():
+        hass = FakeHass()
+        live = await _bstart(env, hass, _boiler_plan("wall_switch"), stored={"p1": {"r1": "auto"}})
+        await asyncio.gather(*hass.tasks)
+        ctx = hass.services.calls[-1][4]
+        _boiler_event(env, hass, "switch.relay", "on", ctx=ctx, old="off")
+        mode = lambda: live.engine.snapshot("p1")["r1"]["boiler"]["mode"]  # noqa: E731
+        _boiler_event(env, hass, "switch.relay", "off", old="on")  # physical press: intent set off, manual
+        assert mode() == "manual"
+        _boiler_event(env, hass, "switch.relay", "on", old="off")  # second press: intent auto first, then the state
+        assert mode() == "auto"  # the state change is not a take-over of the auto it just started
+        assert len(hass.services.calls) == 1
 
     asyncio.run(go())

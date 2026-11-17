@@ -73,7 +73,7 @@ class Runtime:
         self, entity_id: str, old, new, context: "tuple[str | None, str | None]" = (None, None)
     ) -> None:
         """One state change; context is (context.id, context.parent_id) of the change."""
-        own = any(c is not None and c in self._own for c in context or ())
+        own = self.is_own(context)
         now = self._now()
         stamp: str | None = None
         events: list[tuple[Key, dict]] = []
@@ -152,6 +152,10 @@ class Runtime:
                 _LOGGER.exception("container listener failed; dropping it")
                 if cb in self._listeners:
                     self._listeners.remove(cb)
+
+    def is_own(self, context: "tuple[str | None, str | None]") -> bool:
+        """True when the context id or its parent id belongs to an own command."""
+        return any(c is not None and c in self._own for c in context or ())
 
     def ignore_context(self, context_id: str) -> None:
         """Register the HA context id of an own command: changes it causes are not presses for a wall switch."""

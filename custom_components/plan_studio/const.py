@@ -10,3 +10,5 @@ STORAGE_VERSION = 1
 RUNTIME_STORAGE_KEY = "plan_studio.runtime"
 # Transfer positions: {"positions": {plan_id: {block_id: "A" | "0" | "B"}}}, version 1.
 POWER_STORAGE_KEY = "plan_studio.power"
+# Boiler rule modes: {plan_id: {rule_id: "auto" | "manual"}}, version 1.
+BOILER_STORAGE_KEY = "plan_studio.boiler"
