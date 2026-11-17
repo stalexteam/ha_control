@@ -1,9 +1,9 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import type { Device, Id, Rule, RuleAction, RuleDo, RuleInput } from '../model/types';
+import type { Device, Id, Rule, RuleAction, RuleDo, RuleInput, RuleSource } from '../model/types';
 import type { RuleProblem } from '../model/rules';
 import { ruleActionsFor, RULE_DELAY_MAX } from '../model/rules';
 import type { RuleTrace } from '../live/rules-feed';
-import { renderRuleTrace, fieldOf, type FocusTarget } from '../render/rule-trace';
+import { renderRuleTrace, fieldOf, paramText, type FocusTarget } from '../render/rule-trace';
 import { t } from '../i18n';
 
 /** The rule being edited and the dialog's own UI state; the panel keeps it while the dialog is open. */
@@ -12,12 +12,26 @@ export interface RuleDraft {
   isNew: boolean;
   /** `data-field` last focused (highlighted). */
   focused: string | null;
+  /** Duration unit chosen per Held row (by `data-field`); until chosen it follows the value. */
+  units?: Record<string, DurationUnit>;
+}
+
+export type DurationUnit = 's' | 'min' | 'h';
+const UNIT_SECONDS: Record<DurationUnit, number> = { s: 1, min: 60, h: 3600 };
+const UNITS: DurationUnit[] = ['s', 'min', 'h'];
+
+/** The biggest unit that shows the seconds as a whole number. */
+function naturalUnit(sec: number): DurationUnit {
+  return Number.isInteger(sec) && sec > 0 && sec % 3600 === 0 ? 'h' : Number.isInteger(sec) && sec > 0 && sec % 60 === 0 ? 'min' : 's';
 }
 
 export interface RuleDialogOpts {
   draft: RuleDraft;
   /** Plan devices that can be inputs / action targets, and every device (for names and existence). */
   inputDevices: Device[];
+  /** Illuminance sensors (Light level inputs) and the unit their bound entity reports (undefined = unknown). */
+  lightSensors: Device[];
+  lightUnit(deviceId: Id): string | undefined;
   actionDevices: Device[];
   deviceById(id: Id): Device | undefined;
   /** Other rules that can be inputs (the edited rule excluded) and every rule (for names). */
@@ -31,6 +45,7 @@ export interface RuleDialogOpts {
   now: number;
   onChange(rule: Rule): void;
   onFocus(field: string): void;
+  onUnit(field: string, unit: DurationUnit): void;
   onOk(): void;
   onCancel(): void;
 }
@@ -42,10 +57,58 @@ function seconds(v: string): number {
   return v.trim() === '' ? NaN : Number(v);
 }
 
+const sourceName = (o: RuleDialogOpts, s: { device: Id } | { rule: Id }): string =>
+  'device' in s ? o.deviceById(s.device)?.name ?? t('rules.missingDevice') : o.ruleName(s.rule) ?? t('rules.missingRule');
+
 function inputName(o: RuleDialogOpts, i: RuleInput): string {
-  if ('device' in i.source) return o.deviceById(i.source.device)?.name ?? t('rules.missingDevice');
-  if (!('rule' in i.source)) return '';
-  return o.ruleName(i.source.rule) ?? t('rules.missingRule');
+  const s = i.source;
+  if ('device' in s || 'rule' in s) return sourceName(o, s);
+  if ('light' in s) return o.deviceById(s.light)?.name ?? t('rules.light.noSensor');
+  if ('sun' in s) return t('rules.src.sun');
+  if ('time' in s) return t('rules.src.time');
+  return s.held.sources.length === 0 ? t('rules.src.held') : `${t('rules.src.held')}: ${s.held.sources.map(x => sourceName(o, x)).join(', ')}`;
+}
+
+const sourceMissing = (o: RuleDialogOpts, s: { device: Id } | { rule: Id }): boolean =>
+  'device' in s ? !o.deviceById(s.device) : o.ruleName(s.rule) === undefined;
+
+function isMissing(o: RuleDialogOpts, s: RuleSource): boolean {
+  if ('device' in s || 'rule' in s) return sourceMissing(o, s);
+  if ('light' in s) return s.light !== '' && !o.deviceById(s.light);
+  if ('held' in s) return s.held.sources.some(x => sourceMissing(o, x));
+  return false;
+}
+
+/** The new source for an "Add input..." / "Set gate..." choice: `d:<id>`, `r:<id>` or a type word. */
+function newSource(o: RuleDialogOpts, v: string): RuleSource | null {
+  if (v.startsWith('r:')) return { rule: v.slice(2) };
+  if (v.startsWith('d:')) return { device: v.slice(2) };
+  if (v === 'light') return { light: o.lightSensors[0]?.id ?? '', below: 10, hysteresis: 5 };
+  if (v === 'sun') return { sun: true };
+  if (v === 'time') return { time: { from: '17:00', to: '01:00' } };
+  if (v === 'held') return { held: { sources: [], state: 'any', seconds: 1800 } };
+  return null;
+}
+
+/** The device and rule options of a select (a Held source or an input). */
+function deviceRuleOptions(o: RuleDialogOpts): TemplateResult {
+  return html`
+    <optgroup label=${t('rules.groupDevices')}>
+      ${o.inputDevices.map(d => html`<option value=${`d:${d.id}`}>${d.name}</option>`)}
+    </optgroup>
+    ${o.otherRules.length > 0 ? html`<optgroup label=${t('rules.groupRules')}>
+      ${o.otherRules.map(x => html`<option value=${`r:${x.id}`}>${x.name}</option>`)}
+    </optgroup>` : nothing}`;
+}
+
+/** The options of an add-input / set-gate select: devices, rules, then the four condition types. */
+function sourceOptions(o: RuleDialogOpts, placeholder: string): TemplateResult {
+  return html`
+    <option value="">${placeholder}</option>
+    ${deviceRuleOptions(o)}
+    <optgroup label=${t('rules.groupConditions')}>
+      ${(['light', 'sun', 'time', 'held'] as const).map(k => html`<option value=${k}>${t(`rules.src.${k}`)}</option>`)}
+    </optgroup>`;
 }
 
 function actionRow(o: RuleDialogOpts, side: 'true' | 'false', k: number, a: RuleAction): TemplateResult {
@@ -96,35 +159,110 @@ function actionList(o: RuleDialogOpts, side: 'true' | 'false'): TemplateResult {
     </div>`;
 }
 
-function inputRow(o: RuleDialogOpts, i: RuleInput, k: number): TemplateResult {
-  const r = o.draft.rule;
-  const missing = 'device' in i.source ? !o.deviceById(i.source.device) : 'rule' in i.source && o.ruleName(i.source.rule) === undefined;
+const num = (v: string): number => (v.trim() === '' ? NaN : Number(v));
+
+/** The parameter fields of a Light / Time / Held input; `set` replaces the source. */
+function params(o: RuleDialogOpts, field: string, s: RuleSource, set: (s: RuleSource) => void): TemplateResult | typeof nothing {
+  if ('light' in s) {
+    const unit = s.light === '' ? undefined : o.lightUnit(s.light);
+    return html`
+      <div class="rparams">
+        <label class="grow">${t('rules.light.sensor')}
+          <select data-part="light" data-value=${s.light}
+            @change=${(e: Event) => set({ ...s, light: (e.target as HTMLSelectElement).value })}>
+            ${o.lightSensors.some(d => d.id === s.light) ? nothing : html`<option value=${s.light}>${o.deviceById(s.light)?.name ?? t('rules.light.noSensor')}</option>`}
+            ${o.lightSensors.map(d => html`<option value=${d.id}>${d.name}</option>`)}
+          </select></label>
+        <label>${t('rules.light.below')}
+          <input class="num" data-part="below" type="number" min="0" step="any" .value=${NAN_SAFE(s.below)}
+            @input=${(e: Event) => set({ ...s, below: num((e.target as HTMLInputElement).value) })} /> lx</label>
+        <label>${t('rules.light.hysteresis')}
+          <input class="num" data-part="hysteresis" type="number" min="0" step="any" .value=${NAN_SAFE(s.hysteresis)}
+            @input=${(e: Event) => set({ ...s, hysteresis: num((e.target as HTMLInputElement).value) })} /> lx</label>
+        ${unit !== undefined && unit !== 'lx' ? html`<p class="rwarn" data-warn="light-unit">${t('rules.light.unit').replace('{unit}', unit)}</p>` : nothing}
+      </div>`;
+  }
+  if ('time' in s) {
+    return html`
+      <div class="rparams">
+        <label>${t('rules.time.from')}
+          <input data-part="from" type="time" .value=${s.time.from}
+            @input=${(e: Event) => set({ time: { ...s.time, from: (e.target as HTMLInputElement).value } })} /></label>
+        <label>${t('rules.time.to')}
+          <input data-part="to" type="time" .value=${s.time.to}
+            @input=${(e: Event) => set({ time: { ...s.time, to: (e.target as HTMLInputElement).value } })} /></label>
+      </div>`;
+  }
+  if ('held' in s) {
+    const h = s.held;
+    const unit = o.draft.units?.[field] ?? naturalUnit(h.seconds);
+    const shown = Number.isFinite(h.seconds) ? String(+(h.seconds / UNIT_SECONDS[unit]).toFixed(4)) : '';
+    const setHeld = (p: Partial<typeof h>) => set({ held: { ...h, ...p } });
+    return html`
+      <div class="rparams">
+        <div class="rsources">
+          ${h.sources.length === 0 ? html`<span class="muted">${t('rules.held.noSources')}</span>` : nothing}
+          ${h.sources.map((x, j) => html`
+            <span class="rchip${sourceMissing(o, x) ? ' bad' : ''}" data-part="source">${sourceName(o, x)}
+              <button class="btn" data-action="remove-source" title=${t('rules.held.removeSource')}
+                @click=${() => setHeld({ sources: h.sources.filter((_, m) => m !== j) })}>&times;</button></span>`)}
+          <select class="radd" data-part="add-source" .value=${''}
+            @change=${(e: Event) => {
+              const sel = e.target as HTMLSelectElement;
+              const x = newSource(o, sel.value);
+              sel.value = '';
+              if (x && ('device' in x || 'rule' in x)) setHeld({ sources: [...h.sources, x] });
+            }}>
+            <option value="">${t('rules.held.addSource')}</option>
+            ${deviceRuleOptions(o)}
+          </select>
+        </div>
+        <label>${t('rules.held.state')}
+          <select data-part="state" data-value=${h.state}
+            @change=${(e: Event) => setHeld({ state: (e.target as HTMLSelectElement).value as 'on' | 'off' | 'any' })}>
+            ${(['on', 'off', 'any'] as const).map(v => html`<option value=${v}>${t(`rules.held.${v}`)}</option>`)}
+          </select></label>
+        <label>${t('rules.held.for')}
+          <input class="num" data-part="duration" type="number" min="0" step="any" .value=${shown}
+            @input=${(e: Event) => setHeld({ seconds: Math.round(num((e.target as HTMLInputElement).value) * UNIT_SECONDS[unit]) })} />
+          <select data-part="unit" data-value=${unit} @change=${(e: Event) => o.onUnit(field, (e.target as HTMLSelectElement).value as DurationUnit)}>
+            ${UNITS.map(u => html`<option value=${u}>${t(`rules.unit.${u}`)}</option>`)}
+          </select></label>
+      </div>`;
+  }
+  return nothing;
+}
+
+/** One input row (also the gate's): its name or type, NOT, remove, and the fields of its type. `set(null)` removes it. */
+function inputRow(o: RuleDialogOpts, i: RuleInput, field: string, set: (i: RuleInput | null) => void): TemplateResult {
+  const s = i.source;
+  const typed = 'light' in s || 'sun' in s || 'time' in s || 'held' in s;
+  const type = 'light' in s ? 'light' : 'sun' in s ? 'sun' : 'time' in s ? 'time' : 'held';
   return html`
-    <div class="rline${missing ? ' bad' : ''}" data-field=${fieldOf({ input: k })} tabindex="-1">
-      <span class="grow">${inputName(o, i)}</span>
+    <div class="rline${isMissing(o, s) ? ' bad' : ''}" data-field=${field} tabindex="-1">
+      <span class="grow">${typed ? t(`rules.src.${type}`) : inputName(o, i)}${'sun' in s ? html` <span class="muted">${paramText(s)}</span>` : nothing}</span>
       <label class="rnot"><input type="checkbox" data-part="not" .checked=${i.not === true}
         @change=${(e: Event) => {
           const on = (e.target as HTMLInputElement).checked;
-          o.onChange({ ...r, inputs: r.inputs.map((x, j) => {
-            if (j !== k) return x;
-            const { not: _n, ...rest } = x;
-            return on ? { ...rest, not: true as const } : rest;
-          }) });
+          const { not: _n, ...rest } = i;
+          set(on ? { ...rest, not: true as const } : rest);
         }} /> ${t('rules.not')}</label>
-      <button class="btn" data-action="remove-input" title=${t('rules.remove')}
-        @click=${() => o.onChange({ ...r, inputs: r.inputs.filter((_, j) => j !== k) })}>&times;</button>
+      <button class="btn" data-action="remove-input" title=${t('rules.remove')} @click=${() => set(null)}>&times;</button>
+      ${params(o, field, s, src => set({ ...i, source: src }))}
     </div>`;
 }
 
 function settings(o: RuleDialogOpts): TemplateResult {
   const r = o.draft.rule;
-  const add = (e: Event) => {
+  const picker = (apply: (source: RuleSource) => void) => (e: Event) => {
     const sel = e.target as HTMLSelectElement;
-    const v = sel.value;
+    const source = sel.value ? newSource(o, sel.value) : null;
     sel.value = '';
-    if (!v) return;
-    const source = v.startsWith('r:') ? { rule: v.slice(2) } : { device: v.slice(2) };
-    o.onChange({ ...r, inputs: [...r.inputs, { source }] });
+    if (source) apply(source);
+  };
+  const setGate = (i: RuleInput | null) => {
+    const { gate: _g, ...rest } = r;
+    o.onChange(i ? { ...rest, gate: i } : rest);
   };
   return html`
     <div class="rsettings">
@@ -141,15 +279,10 @@ function settings(o: RuleDialogOpts): TemplateResult {
 
       <div class="rgroup">
         <div class="rlabel">${t('rules.inputs')}</div>
-        ${r.inputs.length === 0 ? html`<p class="muted">${t('rules.noInputs')}</p>` : r.inputs.map((i, k) => inputRow(o, i, k))}
-        <select class="radd" data-action="add-input" .value=${''} @change=${add}>
-          <option value="">${t('rules.addInput')}</option>
-          <optgroup label=${t('rules.groupDevices')}>
-            ${o.inputDevices.map(d => html`<option value=${`d:${d.id}`}>${d.name}</option>`)}
-          </optgroup>
-          ${o.otherRules.length > 0 ? html`<optgroup label=${t('rules.groupRules')}>
-            ${o.otherRules.map(x => html`<option value=${`r:${x.id}`}>${x.name}</option>`)}
-          </optgroup>` : nothing}
+        ${r.inputs.length === 0 ? html`<p class="muted">${t('rules.noInputs')}</p>` : r.inputs.map((i, k) => inputRow(o, i, fieldOf({ input: k }),
+          next => o.onChange({ ...r, inputs: next ? r.inputs.map((x, j) => (j === k ? next : x)) : r.inputs.filter((_, j) => j !== k) })))}
+        <select class="radd" data-action="add-input" .value=${''} @change=${picker(source => o.onChange({ ...r, inputs: [...r.inputs, { source }] }))}>
+          ${sourceOptions(o, t('rules.addInput'))}
         </select>
       </div>
 
@@ -163,6 +296,16 @@ function settings(o: RuleDialogOpts): TemplateResult {
             <input class="num" data-part="off-delay" type="number" min="0" max=${RULE_DELAY_MAX} step="1" .value=${NAN_SAFE(r.offDelay)}
               @input=${(e: Event) => o.onChange({ ...r, offDelay: seconds((e.target as HTMLInputElement).value) })} /></label>
         </div>
+      </div>
+
+      <div class="rgroup">
+        <div class="rlabel">${t('rules.gate')}</div>
+        <p class="muted">${t('rules.gate.hint')}</p>
+        ${r.gate
+          ? inputRow(o, r.gate, fieldOf('gate-input'), setGate)
+          : html`<select class="radd" data-action="set-gate" .value=${''} @change=${picker(source => setGate({ source }))}>
+            ${sourceOptions(o, t('rules.gate.set'))}
+          </select>`}
       </div>
 
       ${actionList(o, 'true')}

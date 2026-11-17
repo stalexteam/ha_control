@@ -243,4 +243,149 @@ describe('Rule dialog', () => {
     await el.updateComplete;
     expect(q(el, '.fc-note').textContent).toBe('Live state appears after Save');
   });
+
+  describe('stage 2 inputs, gate and templates', () => {
+    const rule = (el: PlanStudioPanel, id: string): Rule => el.rules.find(r => r.id === id)!;
+    const edit = async (id: string): Promise<PlanStudioPanel> => {
+      const el = await open();
+      el.openRuleDialog('condition', id);
+      await el.updateComplete;
+      return el;
+    };
+
+    it('"Add input..." offers devices, rules and the four condition types', async () => {
+      const el = await edit('rule-leak');
+      const sel = q<HTMLSelectElement>(el, 'select[data-action="add-input"]');
+      const opts = [...sel.options].map(o => o.value).filter(Boolean);
+      expect(opts).toEqual(expect.arrayContaining(['d:d-leak', 'r:rule-motion', 'light', 'sun', 'time', 'held']));
+      expect([...sel.options].filter(o => ['light', 'sun', 'time', 'held'].includes(o.value)).map(o => o.textContent!.trim()))
+        .toEqual(['Light level', 'Sun', 'Time window', 'Held']);
+    });
+
+    it('a Light input edits sensor, below and hysteresis; a non-lx unit shows the warning', async () => {
+      const el = await edit('rule-outside');
+      expect(q<HTMLSelectElement>(el, '[data-field="input-0"] [data-part="light"]').value).toBe('d-lux');
+      expect([...q<HTMLSelectElement>(el, '[data-field="input-0"] [data-part="light"]').options].map(o => o.value)).toEqual(['d-lux']);
+      expect(el.shadowRoot!.querySelector('.rule-backdrop [data-warn="light-unit"]')).toBeNull();
+      await type(el, '[data-field="input-0"] [data-part="below"]', '20');
+      await type(el, '[data-field="input-0"] [data-part="hysteresis"]', '3');
+      await press(el, 'button[data-action="rule-ok"]');
+      expect(rule(el, 'rule-outside').inputs[0].source).toEqual({ light: 'd-lux', below: 20, hysteresis: 3 });
+      (el.hass as unknown as { states: unknown }).states = { 'sensor.hall_lux': { state: '1', attributes: { unit_of_measurement: 'klx' } } };
+      el.openRuleDialog('condition', 'rule-outside');
+      await el.updateComplete;
+      expect(q(el, '[data-warn="light-unit"]').textContent).toContain('klx');
+    });
+
+    it('a Light input with a bad threshold blocks OK', async () => {
+      const el = await edit('rule-outside');
+      await type(el, '[data-field="input-0"] [data-part="below"]', '0');
+      expect(names(el, '.rproblems li')).toEqual(['Light level: below must be above 0 and hysteresis 0 or more.']);
+      expect(okBtn(el).disabled).toBe(true);
+    });
+
+    it('a Time input edits from and to; equal times block OK', async () => {
+      const el = await edit('rule-outside');
+      expect(q<HTMLInputElement>(el, '[data-field="input-2"] [data-part="from"]').value).toBe('17:00');
+      await type(el, '[data-field="input-2"] [data-part="to"]', '17:00');
+      expect(names(el, '.rproblems li')).toEqual(['Time window: both times set and different.']);
+      await type(el, '[data-field="input-2"] [data-part="to"]', '23:30');
+      expect(okBtn(el).disabled).toBe(false);
+      await press(el, 'button[data-action="rule-ok"]');
+      expect(rule(el, 'rule-outside').inputs[2].source).toEqual({ time: { from: '17:00', to: '23:30' } });
+    });
+
+    it('adds Sun, Light, Time and Held inputs with defaults', async () => {
+      const el = await edit('rule-leak');
+      for (const v of ['sun', 'light', 'time', 'held']) await choose(el, 'select[data-action="add-input"]', v);
+      await choose(el, '[data-field="input-4"] [data-part="add-source"]', 'd:d-socket');
+      await type(el, '[data-field="input-4"] [data-part="duration"]', '10');
+      await choose(el, '[data-field="input-4"] [data-part="unit"]', 'min');
+      await choose(el, '[data-field="input-4"] [data-part="state"]', 'on');
+      await press(el, 'button[data-action="rule-ok"]');
+      expect(rule(el, 'rule-leak').inputs.slice(1).map(i => i.source)).toEqual([
+        { sun: true },
+        { light: 'd-lux', below: 10, hysteresis: 5 },
+        { time: { from: '17:00', to: '01:00' } },
+        { held: { sources: [{ device: 'd-socket' }], state: 'on', seconds: 600 } },
+      ]);
+    });
+
+    it('a Held row: duration keeps its unit while typing, sources are removable, no sources blocks OK', async () => {
+      const el = await edit('rule-outside');
+      await choose(el, 'select[data-action="add-input"]', 'held');
+      expect(names(el, '.rproblems li')).toEqual(['Held: pick at least one source and a time of 1 s to 24 h.']);
+      const field = '[data-field="input-3"]';
+      expect(q<HTMLSelectElement>(el, `${field} [data-part="unit"]`).value).toBe('min'); // 1800 s
+      expect(q<HTMLInputElement>(el, `${field} [data-part="duration"]`).value).toBe('30');
+      await choose(el, `${field} [data-part="unit"]`, 'h');
+      expect(q<HTMLInputElement>(el, `${field} [data-part="duration"]`).value).toBe('0.5');
+      await type(el, `${field} [data-part="duration"]`, '60');
+      expect(q<HTMLSelectElement>(el, `${field} [data-part="unit"]`).value).toBe('h'); // not snapped to another unit
+      await choose(el, `${field} [data-part="add-source"]`, 'r:rule-leak');
+      expect(el.ruleDraft!.rule.inputs[3].source).toMatchObject({ held: { sources: [{ rule: 'rule-leak' }], seconds: 216000 } });
+      expect(names(el, '.rproblems li')).toEqual(['Held: pick at least one source and a time of 1 s to 24 h.']); // 60 h too long
+      await type(el, `${field} [data-part="duration"]`, '2');
+      expect(el.shadowRoot!.querySelector('.rule-backdrop .rproblems')).toBeNull();
+      await press(el, `${field} [data-action="remove-source"]`);
+      expect(names(el, '.rproblems li')).toHaveLength(1);
+    });
+
+    it('the gate section sets, edits and removes one row', async () => {
+      const el = await edit('rule-leak');
+      expect(el.shadowRoot!.querySelector('.rule-backdrop [data-field="gate-input"]')).toBeNull();
+      await choose(el, 'select[data-action="set-gate"]', 'sun');
+      expect(el.shadowRoot!.querySelector('.rule-backdrop select[data-action="set-gate"]')).toBeNull(); // one gate only
+      expect(q(el, '[data-block="gate-input"]').textContent).toContain('Sun');
+      await press(el, '[data-field="gate-input"] input[data-part="not"]');
+      await press(el, 'button[data-action="rule-ok"]');
+      expect(rule(el, 'rule-leak').gate).toEqual({ source: { sun: true }, not: true });
+      el.openRuleDialog('condition', 'rule-leak');
+      await el.updateComplete;
+      await press(el, '[data-field="gate-input"] [data-action="remove-input"]');
+      await press(el, 'button[data-action="rule-ok"]');
+      expect('gate' in rule(el, 'rule-leak')).toBe(false);
+    });
+
+    it('a gate with a bad parameter blocks OK', async () => {
+      const el = await edit('rule-leak');
+      await choose(el, 'select[data-action="set-gate"]', 'time');
+      await type(el, '[data-field="gate-input"] [data-part="from"]', '01:00');
+      expect(names(el, '.rproblems li')).toEqual(['Time window: both times set and different.']);
+    });
+
+    it('a click on the gate block focuses the gate row', async () => {
+      const el = await edit('rule-outside');
+      q(el, '[data-block="gate-input"]').dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+      await el.updateComplete;
+      expect(el.ruleDraft!.focused).toBe('gate-input');
+    });
+
+    it('Timer and Outside light templates follow the model shapes', async () => {
+      const el = await open([]);
+      click(el, 300, 300); // Main
+      await el.updateComplete;
+      await press(el, 'button[data-template="outside"]');
+      expect(q<HTMLInputElement>(el, '[data-field="name"]').value).toBe('Outside light Main');
+      expect(q<HTMLSelectElement>(el, '[data-field="combine"]').value).toBe('all');
+      expect(q<HTMLSelectElement>(el, '[data-field="input-0"] [data-part="light"]').value).toBe('d-lux');
+      expect(el.ruleDraft!.rule.gate).toEqual({ source: { held: { sources: [], state: 'any', seconds: 1800 } } });
+      await press(el, 'button[data-action="rule-cancel"]');
+      await press(el, 'button[data-template="timer"]');
+      expect(q<HTMLInputElement>(el, '[data-field="name"]').value).toBe('Unchanged 30 min');
+      expect(el.ruleDraft!.rule.inputs).toEqual([{ source: { held: { sources: [], state: 'any', seconds: 1800 } } }]);
+      await press(el, 'button[data-action="rule-cancel"]');
+      el.selection = { kind: 'device', id: 'd-light' };
+      await press(el, 'button[data-template="timer"]');
+      expect(q<HTMLInputElement>(el, '[data-field="name"]').value).toBe('Ceiling light unchanged 30 min');
+      expect(el.ruleDraft!.rule.inputs[0].source).toEqual({ held: { sources: [{ device: 'd-light' }], state: 'any', seconds: 1800 } });
+    });
+
+    it('the flowchart of a saved stage-2 rule shows live values, the countdown and the held note', async () => {
+      const el = await edit('rule-outside');
+      expect(q(el, '[data-block="input-0"]').textContent).toContain('8 lx');
+      expect(q(el, '[data-block="gate-input"]').textContent).toMatch(/closed, opens in 1[23] min/);
+      expect(q(el, '[data-note="held"]').textContent).toBe('Actions are held until the gate opens.');
+    });
+  });
 });

@@ -277,6 +277,13 @@ export const panelStyles = css`
   .rline { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 6px; outline: none;
     border: 1px solid transparent; }
   .rline:focus-within, .rgroup[data-field]:focus-within { border-color: var(--ch-primary); background: var(--ch-tint); }
+  .rline { flex-wrap: wrap; }
+  .rparams { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-left: 4px; }
+  .rparams label { display: inline-flex; align-items: center; gap: 4px; color: var(--ch-muted); font-size: 12px; }
+  .rsources { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+  .rchip { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 8px; border: 1px solid var(--ch-divider); border-radius: 10px; font-size: 12px; }
+  .rchip.bad { border-color: var(--ch-error); }
+  .rwarn { flex-basis: 100%; margin: 0; color: #f59e0b; font-size: 12px; }
   .rline.bad { border-color: var(--ch-error); }
   .rline .grow, .rsettings .grow { flex: 1; min-width: 0; }
   .rline .btn { padding: 1px 8px; }

@@ -1,15 +1,16 @@
 import { html, nothing, svg, type TemplateResult } from 'lit';
-import type { Rule, RuleDo, RuleInput } from '../model/types';
+import type { Rule, RuleDo, RuleInput, RuleSource } from '../model/types';
 import type { RuleTrace } from '../live/rules-feed';
 import { lastText } from '../panel/rules-panel';
 import { t } from '../i18n';
 
 /** What a click on a flowchart block asks the dialog to focus. */
-export type FocusTarget = { input: number } | 'gate' | 'delays' | { action: 'true' | 'false'; index: number };
+export type FocusTarget = { input: number } | 'gate' | 'gate-input' | 'delays' | { action: 'true' | 'false'; index: number };
 
 /** The `data-field` of the dialog's form field a target points at. */
 export function fieldOf(target: FocusTarget): string {
   if (target === 'gate') return 'combine';
+  if (target === 'gate-input') return 'gate-input';
   if (target === 'delays') return 'delays';
   return 'input' in target ? `input-${target.input}` : `action-${target.action}-${target.index}`;
 }
@@ -30,10 +31,31 @@ export interface RuleTraceOpts {
   onFocus(target: FocusTarget): void;
 }
 
-const IN_W = 210, IN_H = 50, GATE_W = 90, VERDICT_W = 150, ACT_W = 230, ACT_H = 44, HEAD_H = 26, GAP = 44, PAD = 10;
-const X_GATE = PAD + IN_W + GAP, X_VERDICT = X_GATE + GATE_W + GAP, X_ACT = X_VERDICT + VERDICT_W + GAP;
+const IN_W = 210, IN_H = 50, GATE_W = 90, VERDICT_W = 150, GBLK_W = 170, ACT_W = 230, ACT_H = 44, HEAD_H = 26, GAP = 44, PAD = 10;
+const X_GATE = PAD + IN_W + GAP, X_VERDICT = X_GATE + GATE_W + GAP, X_GBLK = X_VERDICT + VERDICT_W + GAP, X_ACT = X_GBLK + GBLK_W + GAP;
 export const FLOW_MAX_SCALE = 1.25;
 export const WIDTH = X_ACT + ACT_W + PAD;
+
+/** "45 s", "30 min", "1 h", "1 h 30 min": a duration in whole seconds, the biggest exact units. */
+export function durationText(sec: number): string {
+  if (!Number.isFinite(sec)) return '?';
+  const s = Math.round(sec);
+  if (s < 60) return `${s} ${t('rules.unit.s')}`;
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  if (h === 0) return `${m} ${t('rules.unit.min')}`;
+  return m === 0 ? `${h} ${t('rules.unit.h')}` : `${h} ${t('rules.unit.h')} ${m} ${t('rules.unit.min')}`;
+}
+
+const remaining = (until: number, now: number): string => durationText(Math.max(1, Math.ceil((until - now) / 1000)));
+
+/** The second line of an input block before live values: its parameters in a few words. */
+export function paramText(s: RuleSource): string {
+  if ('light' in s) return `${t('rules.light.below').toLowerCase()} ${s.below} lx (+${s.hysteresis})`;
+  if ('sun' in s) return t('rules.sun.below');
+  if ('time' in s) return `${s.time.from}-${s.time.to}`;
+  if ('held' in s) return `${t(`rules.held.${s.held.state}`)} ${durationText(s.held.seconds)}`;
+  return 'rule' in s ? t('rules.src.rule') : t('rules.src.device');
+}
 
 const secs = (n: number): string => (Number.isFinite(n) ? String(n) : '?');
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -43,6 +65,11 @@ export function gateValue(combine: 'all' | 'any', values: (boolean | null)[]): b
   if (values.length === 0) return null;
   if (combine === 'all') return values.includes(false) ? false : values.includes(null) ? null : true;
   return values.includes(true) ? true : values.some(v => v !== null) ? false : null;
+}
+
+/** A Held input counts down by its `until`: the server's text is stale between evaluations. */
+function liveDetail(tr: { value: boolean | null; detail: string; until?: number }, now: number): string {
+  return tr.until !== undefined && tr.until > now && tr.value !== true ? t('rules.flow.trueIn').replace('{t}', remaining(tr.until, now)) : tr.detail;
 }
 
 const word = (v: boolean | null): string => t(`rules.val.${v === null ? 'unknown' : v}`);
@@ -94,6 +121,13 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
   const left = pending ? Math.max(0, Math.ceil((pending.at - o.now) / 1000)) : 0;
   const unknown = trace?.unknownInputs ?? 0;
 
+  const gt = rule.gate ? trace?.gate : undefined;
+  const gateLine = !rule.gate ? '' : !gt ? paramText(rule.gate.source)
+    : gt.value === true ? t('rules.flow.open')
+    : gt.value === null ? `${t('rules.flow.closed')}, ${t('rules.val.unknown')}`
+    : gt.until !== undefined && gt.until > o.now ? `${t('rules.flow.closed')}, ${t('rules.flow.opensIn').replace('{t}', remaining(gt.until, o.now))}`
+    : `${t('rules.flow.closed')}${gt.detail ? `, ${gt.detail}` : ''}`;
+
   const sides = [
     { side: 'true' as const, y0: actY0, list: rule.onTrue, head: t('rules.whenTrue') },
     { side: 'false' as const, y0: falseY0, list: rule.onFalse, head: t('rules.whenFalse') },
@@ -107,13 +141,15 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
       <svg class="fc" style=${`max-width:${WIDTH * FLOW_MAX_SCALE}px`} viewBox=${`0 0 ${WIDTH} ${H}`} xmlns="http://www.w3.org/2000/svg" role="img" aria-label=${t('rules.flow.title')}>
         ${rule.inputs.map((_, k) => link(PAD + IN_W, inY0 + k * (IN_H + 12) + IN_H / 2, X_GATE, mid))}
         ${svg`<path class="fc-link" d=${`M${X_GATE + GATE_W} ${mid} H${X_VERDICT}`}></path>`}
-        ${sides.map(s => link(X_VERDICT + VERDICT_W, mid, X_ACT, s.y0 + HEAD_H / 2))}
+        ${svg`<path class="fc-link" d=${`M${X_VERDICT + VERDICT_W} ${mid} H${X_GBLK}`}></path>`}
+        ${rule.gate ? nothing : svg`<path class="fc-link" d=${`M${X_GBLK} ${mid} H${X_GBLK + GBLK_W}`}></path>`}
+        ${sides.map(s => link(X_GBLK + GBLK_W, mid, X_ACT, s.y0 + HEAD_H / 2))}
         ${rule.inputs.map((i, k) => {
           const tr = live?.[k];
           return block({
             x: PAD, y: inY0 + k * (IN_H + 12), w: IN_W, h: IN_H, field: `input-${k}`, target: { input: k }, opts: o, chars: 26,
             cls: tr ? tone(tr.value) : '',
-            lines: [`${i.not ? 'NOT ' : ''}${o.inputName(i)}`, tr ? tr.detail : srcWord(i)],
+            lines: [`${i.not ? 'NOT ' : ''}${o.inputName(i)}`, tr ? liveDetail(tr, o.now) : paramText(i.source)],
           });
         })}
         ${block({
@@ -125,6 +161,11 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
           x: X_VERDICT, y: mid - 28, w: VERDICT_W, h: 56, field: 'delays', target: 'delays', opts: o, chars: 19,
           cls: verdict === undefined ? '' : tone(verdict ?? null), lines: [t('rules.flow.result'), verdictLine],
         })}
+        ${rule.gate ? block({
+          x: X_GBLK, y: mid - 28, w: GBLK_W, h: 56, field: 'gate-input', target: 'gate-input', opts: o, chars: 23,
+          cls: gt ? tone(gt.value) : '',
+          lines: [`${t('rules.flow.gate')}: ${rule.gate.not ? 'NOT ' : ''}${o.inputName(rule.gate)}`, gateLine],
+        }) : nothing}
         ${sides.map(s => svg`
           <text class="fc-head" x=${X_ACT + 8} y=${s.y0 + HEAD_H - 8}>${s.head}</text>
           ${s.list.length === 0
@@ -135,6 +176,7 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
             }))}`)}
       </svg>
       ${unknown > 0 ? html`<p class="fc-warn">${unknown === 1 ? t('rules.unknown1') : t('rules.unknownN').replace('{n}', String(unknown))}</p>` : nothing}
+      ${trace?.held ? html`<p class="fc-warn" data-note="held">${t('rules.flow.heldNote')}</p>` : nothing}
       ${trace?.last ? html`<p class="fc-last">${t('rules.flow.last')} ${lastText(trace.last)}</p>` : nothing}
       ${o.note ? html`<p class="fc-note">${o.note}</p>` : nothing}
     </div>`;
@@ -142,4 +184,4 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
 
 const actText = (d: RuleDo): string => t(`rules.act.${d}`);
 
-const srcWord = (i: RuleInput): string => ('rule' in i.source ? t('rules.src.rule') : t('rules.src.device'));
+

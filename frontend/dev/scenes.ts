@@ -45,6 +45,11 @@ function room(): Plan {
       props: { kind: 'leak_sensor' },
     },
     {
+      id: 'd-lux', name: 'Light sensor', invalid: false, bindings: { illuminance: 'sensor.hall_lux' },
+      placement: { mode: 'free', x: 1500, y: 700, rotation: 0 },
+      props: { kind: 'illuminance_sensor' },
+    },
+    {
       id: 'd-motion', name: 'Motion sensor', invalid: false, bindings: { motion: 'binary_sensor.hall_motion' },
       placement: { mode: 'free', x: 3000, y: 2400, rotation: 225 },
       props: { kind: 'motion_sensor', zoneAngle: 110, zoneRange: 3000 },
@@ -76,6 +81,16 @@ function room(): Plan {
       inputs: [{ source: { device: 'd-motion' } }, { source: { device: 'd-socket' }, not: true }],
       onDelay: 0, offDelay: 120, onTrue: [{ device: 'd-light', do: 'on' }], onFalse: [{ device: 'd-light', do: 'off' }],
     },
+    {
+      id: 'rule-outside', name: 'Outside light Main', zoneId: 'r0', combine: 'all',
+      inputs: [
+        { source: { light: 'd-lux', below: 10, hysteresis: 5 } },
+        { source: { sun: true } },
+        { source: { time: { from: '17:00', to: '01:00' } } },
+      ],
+      gate: { source: { held: { sources: [{ device: 'd-light' }], state: 'any', seconds: 1800 } } },
+      onDelay: 0, offDelay: 0, onTrue: [{ device: 'd-light', do: 'on' }], onFalse: [{ device: 'd-light', do: 'off' }],
+    },
   ];
   return { id: 'room', name: 'Room', schemaVersion: 2, revision: 1, levels: [level], rules };
 }
@@ -91,6 +106,18 @@ const ROOM_RULES: Record<string, RuleTrace> = {
     inputs: [{ label: 'Motion sensor', value: true, detail: 'motion' }, { label: 'Socket', value: null, detail: 'unavailable' }],
   },
 };
+
+/** Mock trace of the Outside light rule: dark and after sunset, but the gate is closed for another 12 minutes. */
+const OUTSIDE_TRACE: RuleTrace = {
+  status: 'ok', verdict: true, held: true, unknownInputs: 0,
+  inputs: [
+    { label: 'Light sensor', value: true, detail: '8 lx' },
+    { label: 'Sun', value: true, detail: 'below horizon' },
+    { label: 'Time window', value: true, detail: 'in window until 01:00' },
+  ],
+  gate: { value: false, detail: 'unchanged 18 / 30 min', until: Date.now() + 12 * 60_000 },
+};
+ROOM_RULES['rule-outside'] = OUTSIDE_TRACE;
 
 const equipment = (id: string, name: string, placement: Device['placement'], bindings: Device['bindings'],
   flags: { inverter?: true; controllable?: true } = {}): Device => ({

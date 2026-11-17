@@ -93,4 +93,70 @@ describe('rule flowchart', () => {
     expect(gateValue('all', [true, true])).toBe(true);
     expect(gateValue('all', [])).toBeNull();
   });
+
+  describe('stage 2', () => {
+    const nm = (i: { source: object }): string => {
+      const s = i.source as Record<string, unknown>;
+      return 'light' in s ? 'Light sensor' : 'sun' in s ? 'Sun' : 'time' in s ? 'Time window' : 'held' in s ? 'Held: Light' : 'x';
+    };
+    const r2: Rule = {
+      ...rule, combine: 'all', offDelay: 0,
+      inputs: [
+        { source: { light: 'l', below: 10, hysteresis: 5 } }, { source: { sun: true } },
+        { source: { time: { from: '17:00', to: '01:00' } } }, { source: { held: { sources: [{ device: 'light' }], state: 'any', seconds: 1800 } } },
+      ],
+      gate: { source: { held: { sources: [{ device: 'light' }], state: 'any', seconds: 1800 } } },
+    };
+
+    it('draws per-type input blocks and the gate block between the result and the actions', () => {
+      const { host } = draw({ rule: r2, inputName: nm });
+      expect(text(host, '[data-block="input-0"]')).toBe('Light sensor below 10 lx (+5)');
+      expect(text(host, '[data-block="input-1"]')).toBe('Sun below horizon');
+      expect(text(host, '[data-block="input-2"]')).toBe('Time window 17:00-01:00');
+      expect(text(host, '[data-block="input-3"]')).toBe('Held: Light any (unchanged) 30 min');
+      expect(text(host, '[data-block="gate-input"]')).toContain('Gate: Held: Light');
+      const x = (b: string) => Number(/translate\(([\d.]+)/.exec(host.querySelector(`[data-block="${b}"]`)!.getAttribute('transform')!)![1]);
+      expect(x('delays')).toBeLessThan(x('gate-input'));
+      expect(x('gate-input')).toBeLessThan(x('action-true-0'));
+    });
+
+    it('draws no gate block without a gate', () => {
+      const { host } = draw();
+      expect(host.querySelector('[data-block="gate-input"]')).toBeNull();
+    });
+
+    it('overlays live details; a Held input and the gate count down by `until`, not by the stale detail', () => {
+      const trace: RuleTrace = {
+        status: 'ok', verdict: true, held: true, unknownInputs: 0,
+        inputs: [
+          { label: 'a', value: true, detail: '8 lx' }, { label: 'b', value: true, detail: 'below horizon' },
+          { label: 'c', value: true, detail: 'in window until 01:00' }, { label: 'd', value: false, detail: 'unchanged 12 / 30 min', until: NOW + 18 * 60_000 },
+        ],
+        gate: { value: false, detail: 'unchanged 12 / 30 min', until: NOW + 90_000 },
+      };
+      const { host } = draw({ rule: r2, inputName: nm, trace });
+      expect(text(host, '[data-block="input-0"]')).toBe('Light sensor 8 lx');
+      expect(text(host, '[data-block="input-3"]')).toBe('Held: Light true in 18 min');
+      expect(text(host, '[data-block="gate-input"]')).toBe('Gate: Held: Light closed, opens in 2 min');
+      expect(host.querySelector('[data-block="gate-input"]')!.classList.contains('off')).toBe(true);
+      expect(host.querySelector('[data-note="held"]')!.textContent).toBe('Actions are held until the gate opens.');
+    });
+
+    it('an open gate says open; an unknown gate says closed, no data', () => {
+      const base: RuleTrace = { status: 'ok', verdict: true, unknownInputs: 0, inputs: r2.inputs.map(() => ({ label: '', value: true, detail: 'd' })) };
+      const open = draw({ rule: r2, inputName: nm, trace: { ...base, gate: { value: true, detail: 'unchanged 31 / 30 min' } } });
+      expect(text(open.host, '[data-block="gate-input"]')).toBe('Gate: Held: Light open');
+      expect(open.host.querySelector('[data-block="gate-input"]')!.classList.contains('on')).toBe(true);
+      const no = draw({ rule: r2, inputName: nm, trace: { ...base, gate: { value: null, detail: '' } } });
+      expect(text(no.host, '[data-block="gate-input"]')).toBe('Gate: Held: Light closed, no data');
+      expect(no.host.querySelector('[data-note="held"]')).toBeNull();
+    });
+
+    it('a click on the gate block reports gate-input', () => {
+      const { host, onFocus } = draw({ rule: r2, inputName: nm });
+      host.querySelector('[data-block="gate-input"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(onFocus.mock.calls[0][0]).toBe('gate-input');
+      expect(fieldOf('gate-input')).toBe('gate-input');
+    });
+  });
 });

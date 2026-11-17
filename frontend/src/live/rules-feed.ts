@@ -3,7 +3,14 @@ import { messageOf } from '../errors';
 import { t } from '../i18n';
 
 /** One input of a rule as the server reports it: `value` null = no data, `detail` a short word such as "wet". */
-export interface RuleInputTrace { label: string; value: boolean | null; detail: string }
+export interface RuleInputTrace {
+  label: string; value: boolean | null; detail: string;
+  /** Held input only: epoch ms when it turns true (the detail text is stale between evaluations). */
+  until?: number;
+}
+
+/** The gate as the server reports it: `value` is after NOT (true = open); `until` = epoch ms when a Held gate opens. */
+export interface RuleGateTrace { value: boolean | null; detail: string; until?: number }
 
 /** The last firing of a rule: `action` is on / off / open / close, `target` a device name, `at` epoch ms. */
 export interface RuleLast { action: 'on' | 'off' | 'open' | 'close'; target: string; at: number; reason: string; error?: string }
@@ -17,6 +24,9 @@ export interface RuleTrace {
   /** A debounce is running: the verdict is about to become `to` at epoch ms `at`. */
   pending?: { to: boolean; at: number };
   inputs: RuleInputTrace[];
+  gate?: RuleGateTrace;
+  /** The closed gate holds the rule's actions back. */
+  held?: boolean;
   /** How many inputs have no data (a warning when > 0). */
   unknownInputs: number;
   last?: RuleLast;

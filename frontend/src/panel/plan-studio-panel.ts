@@ -42,7 +42,7 @@ import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { RulesFeed } from '../live/rules-feed';
-import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakTemplate, newRule, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
+import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakTemplate, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import type { RuleTemplate } from './rule-templates';
 import { renderRuleDialog, type RuleDraft } from './rule-dialog';
 import { PowerFeed, powerPayload } from '../live/power-feed';
@@ -251,7 +251,8 @@ export class PlanStudioPanel extends LitElement {
     const need = this.isConnected && (this.mode === 'binding' || this.mode === 'automation') && !!level && !!this.hass && level.devices.some(d =>
       deviceLive(d, this.hass!.states).timerSince !== undefined || this.events.event(d.id, now) !== null
       || this.events.leaving(d.id, now).length > 0);
-    const countdown = this.modal && !!this.ruleDraft && !!this.rulesFeed.trace(this.ruleDraft.rule.id)?.pending;
+    const tr = this.modal && this.ruleDraft ? this.rulesFeed.trace(this.ruleDraft.rule.id) : undefined;
+    const countdown = !!tr && (!!tr.pending || tr.inputs.some(i => i.until !== undefined && i.until > now) || (tr.gate?.until ?? 0) > now);
     if ((need || countdown) && !this.ticker) this.ticker = setInterval(() => this.requestUpdate(), 1000);
     else if (!need && !countdown) this.stopTicker();
   }
@@ -341,7 +342,12 @@ export class PlanStudioPanel extends LitElement {
       const levels = this.planLevels();
       const zoneId = this.selection?.kind === 'zone' ? this.selection.id : null;
       const zone = levels.flatMap(l => l.zones).find(z => z.id === zoneId);
-      const rule = template === 'leak' ? leakTemplate({ levels }, zone?.id ?? null, zone?.name ?? null) : newRule(zone?.id ?? null);
+      const dev = this.selection?.kind === 'device' ? levels.flatMap(l => l.devices).find(x => x.id === (this.selection as { id: Id }).id) : undefined;
+      const zid = zone?.id ?? null;
+      const rule = template === 'leak' ? leakTemplate({ levels }, zid, zone?.name ?? null)
+        : template === 'timer' ? timerTemplate({ levels }, zid, dev?.id ?? null, dev?.name ?? '')
+        : template === 'outside' ? outsideLightTemplate({ levels }, zid, zone?.name ?? null)
+        : newRule(zid);
       draft = { rule, isNew: true, focused: null };
     }
     this.ruleDraft = draft;
@@ -387,6 +393,12 @@ export class PlanStudioPanel extends LitElement {
     return renderRuleDialog({
       draft: d,
       inputDevices: devices.filter(isRuleInputDevice),
+      lightSensors: devices.filter(x => x.props.kind === 'illuminance_sensor'),
+      lightUnit: id => {
+        const eid = devices.find(x => x.id === id)?.bindings?.illuminance;
+        const st = eid ? (this.hass?.states as Record<string, { attributes?: { unit_of_measurement?: string } }> | undefined)?.[eid] : undefined;
+        return st?.attributes?.unit_of_measurement;
+      },
       actionDevices: devices.filter(x => ruleActionsFor(x).length > 0),
       deviceById: id => devices.find(x => x.id === id),
       otherRules: this.rules.filter(r => r.id !== rule.id),
@@ -398,6 +410,7 @@ export class PlanStudioPanel extends LitElement {
       trace, note, now: Date.now(),
       onChange: r => { this.ruleDraft = { ...d, rule: r }; },
       onFocus: f => this.focusRuleField(f),
+      onUnit: (field, unit) => { this.ruleDraft = { ...d, units: { ...d.units, [field]: unit } }; },
       onOk: () => this.commitRuleDraft(),
       onCancel: () => { this.dialog = null; this.ruleDraft = null; },
     });
