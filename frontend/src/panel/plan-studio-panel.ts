@@ -42,9 +42,9 @@ import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { RulesFeed, type RuleTrace } from '../live/rules-feed';
-import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakProtectionTemplate, ventTemplate, isVentRule, isLeakRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isTimedRule, timedTemplate, newRule, isOutsideRule, outsideTemplate, isBeurerRule, beurerTemplate, isControlRule, controlTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
+import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakProtectionTemplate, ventTemplate, isVentRule, isLeakRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isTimedRule, timedTemplate, newRule, isOutsideRule, outsideTemplate, isBeurerRule, beurerTemplate, isControlRule, controlTemplate, controlActionsFor, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import { renderAutomationsMenu, type RuleTemplate } from './rule-templates';
-import { renderRuleDialog, type RuleDraft } from './rule-dialog';
+import { renderRuleDialog, type RuleDialogOpts, type RuleDraft } from './rule-dialog';
 import { renderVentDialog } from './vent-dialog';
 import { renderBoilerDialog } from './boiler-dialog';
 import { renderLeakDialog } from './leak-dialog';
@@ -54,16 +54,13 @@ import { OUTSIDE_FOCUS } from '../render/outside-trace';
 import { renderBeurerDialog } from './beurer-dialog';
 import { BEURER_FOCUS } from '../render/beurer-trace';
 import { renderControlDialog } from './control-dialog';
-import { controlFocus } from '../render/control-trace';
+import { controlFlowFocus } from '../render/control-flow';
 import { leakFocus } from '../render/leak-trace';
 import { BOILER_FOCUS } from '../render/boiler-trace';
 import { PowerFeed, powerPayload } from '../live/power-feed';
 import { deviceLive, liveBubbles } from '../live/device-live';
 import { DeviceEventTracker, eventSources } from '../live/device-events';
 import { EntityFeed } from '../live/entity-feed';
-
-/** A device a load control rule can take as a source: a wall switch, a smart button or a motion sensor. */
-const isControlSource = (d: Device): boolean => d.props.kind === 'wall_switch' || d.props.kind === 'smart_button' || d.props.kind === 'motion_sensor';
 
 export class PlanStudioPanel extends LitElement {
   static styles = panelStyles;
@@ -464,8 +461,8 @@ export class PlanStudioPanel extends LitElement {
       id => devices.some(x => x.id === id && ruleActionsFor(x).includes('on')),
       id => devices.some(x => x.id === id && ruleActionsFor(x).includes('on')),
       id => devices.some(x => x.id === id && !!x.bindings?.power),
-      id => devices.some(x => x.id === id && isControlSource(x)),
-      id => devices.some(x => x.id === id && ruleActionsFor(x).includes('on') && ruleActionsFor(x).includes('off')));
+      id => devices.some(x => x.id === id && x.props.kind === 'smart_button'),
+      id => devices.some(x => x.id === id && controlActionsFor(x).length > 0));
     if (isBoilerRule(rule)) {
       return renderBoilerDialog({
         draft: d,
@@ -519,19 +516,6 @@ export class PlanStudioPanel extends LitElement {
         onCancel: () => { this.dialog = null; this.ruleDraft = null; },
       });
     }
-    if (isControlRule(rule)) {
-      return renderControlDialog({
-        draft: d,
-        sources: devices.filter(isControlSource),
-        loads: devices.filter(x => ruleActionsFor(x).includes('on') && ruleActionsFor(x).includes('off')),
-        deviceById: id => devices.find(x => x.id === id),
-        zones, problems, trace, note, now: Date.now(),
-        onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
-        onFocus: f => this.focusRuleField(f, controlFocus(f)),
-        onOk: () => this.commitRuleDraft(),
-        onCancel: () => { this.dialog = null; this.ruleDraft = null; },
-      });
-    }
     if (isBeurerRule(rule)) {
       return renderBeurerDialog({
         draft: d,
@@ -558,7 +542,7 @@ export class PlanStudioPanel extends LitElement {
         onCancel: () => { this.dialog = null; this.ruleDraft = null; },
       });
     }
-    return renderRuleDialog({
+    const opts: RuleDialogOpts = {
       draft: d,
       inputDevices: devices.filter(isRuleInputDevice),
       lightSensors: devices.filter(x => x.props.kind === 'illuminance_sensor'),
@@ -578,7 +562,17 @@ export class PlanStudioPanel extends LitElement {
       onUnit: (field, unit) => { const cur = this.ruleDraft ?? d; this.ruleDraft = { ...cur, units: { ...cur.units, [field]: unit } }; },
       onOk: () => this.commitRuleDraft(),
       onCancel: () => { this.dialog = null; this.ruleDraft = null; },
-    });
+    };
+    // Load control is the event twin of the condition rule: the same dialog pieces, its own action devices and buttons.
+    if (isControlRule(rule)) {
+      return renderControlDialog({
+        ...opts,
+        actionDevices: devices.filter(x => controlActionsFor(x).length > 0),
+        buttons: devices.filter(x => x.props.kind === 'smart_button'),
+        onFocus: f => this.focusRuleField(f, controlFlowFocus(f)),
+      });
+    }
+    return renderRuleDialog(opts);
   }
 
   /** Deletes the rule a 'delete-rule' dialog asked about (undoable until the plan is saved). */

@@ -102,12 +102,6 @@ export interface ControlTrace {
   devices: { id: Id; name: string; state: 'on' | 'off' | 'open' | 'closed' | null }[];
 }
 
-/** The 0.20.0 compact load control UI's trace shape: each source's kind and state and each load's state. Removed with that UI. */
-export interface LegacyControlTrace {
-  sources: { id: Id; name: string; kind: string | null; state: 'on' | 'off' | null }[];
-  loads: { id: Id; name: string; state: 'on' | 'off' | null }[];
-}
-
 /** A timed switch rule's run: `until` = epoch ms of its end (only while running); `device` null = no data. */
 export interface TimedTrace { running: boolean; until?: number; device: 'on' | 'off' | null }
 

@@ -20,6 +20,8 @@ export interface ControlFlowOpts {
   /** The block id last focused from the chart or the form, highlighted. */
   focused: string | null;
   onFocus(block: string): void;
+  /** The note under the chart ("Live state appears after Save" ...), or null. */
+  note?: string | null;
 }
 
 /** The form field a block id (`source:<k>`, `event`, `gate`, `on:<k>`, `off:<k>`, `toggle:<k>`, `<list>:empty`) points at. */
@@ -31,7 +33,7 @@ export function controlFlowFocus(block: string): string {
 /** Three equal action columns hanging from one bus. */
 const COL_GAP = 20, CW = (WIDTH - 2 * PAD - 2 * COL_GAP) / 3;
 const LISTS = ['on', 'off', 'toggle'] as const;
-const HEADS = { on: 'control.flow.whenOn', off: 'control.flow.whenOff', toggle: 'control.flow.whenToggle' } as const;
+const HEADS = { on: 'control.whenOn', off: 'control.whenOff', toggle: 'control.whenToggle' } as const;
 
 /** The last action written on a device block: "last: turned on 21:43", or in words when nothing was sent. */
 const lastLine = (l: RuleLast): string => (keptOn(l) || l.sent !== false ? lastFlowLine(l) : lastText(l));
@@ -89,7 +91,7 @@ export function renderControlFlow(o: ControlFlowOpts): TemplateResult {
     const head = svg`<text class="fc-head" text-anchor="middle" x=${x + CW / 2} y=${yHead + 14}>${t(HEADS[list])}</text>`;
     if (items.length === 0) {
       const h = blockH(1);
-      return { bottom: yAct + h, body: svg`${head}${block({ x, y: yAct, w: CW, h, field: `${list}:empty`, cls: '', lines: [t('control.flow.nothing')] })}` };
+      return { bottom: yAct + h, body: svg`${head}${block({ x, y: yAct, w: CW, h, field: `${list}:empty`, cls: ' muted', lines: [t('control.flow.nothing')] })}` };
     }
     let y = yAct;
     const blocks = items.map((a, k) => { const b = actionBlock(list, a, k, x, y); y += b.h + ACT_GAP; return b.svg; });
@@ -104,7 +106,7 @@ export function renderControlFlow(o: ControlFlowOpts): TemplateResult {
         ${c.sources.map((s, k) => {
           const tr = live?.[k];
           const detail = tr && tr.detail !== '' && 'source' in s ? liveDetail(tr, o.now, s.source) : tr?.detail;
-          const gives = t('control.flow.gives').replace('{what}', tr?.gives ?? o.gives(s));
+          const gives = t('control.gives').replace('{what}', tr?.gives ?? o.gives(s));
           return block({
             x: grid.xs[k], y: grid.inY(k), w: IN_W, h: bh, field: `source:${k}`, cls: tr && !isButtonSource(s) ? tone(tr.value) : '',
             lines: [tr?.label ?? o.sourceLabel(s), ...(detail ? [detail] : []), gives],
@@ -119,5 +121,6 @@ export function renderControlFlow(o: ControlFlowOpts): TemplateResult {
         }) : nothing}
         ${columns.map(col => col.body)}
       </svg>
+      ${o.note ? html`<p class="fc-note">${o.note}</p>` : nothing}
     </div>`;
 }

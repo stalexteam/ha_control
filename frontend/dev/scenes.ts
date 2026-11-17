@@ -1,5 +1,5 @@
 import type { Device, DeviceProps, Plan, Rule, Zone } from '../src/model/types';
-import type { BeurerTrace, LegacyControlTrace, OutsideTrace, RuleTrace } from '../src/live/rules-feed';
+import type { BeurerTrace, OutsideTrace, RuleTrace } from '../src/live/rules-feed';
 import { fitWallMount } from '../src/geometry/devices';
 import type { PowerFrame, PowerSchema } from '../src/model/power';
 import { rectRoomLevel } from '../test/fixtures';
@@ -564,51 +564,52 @@ function beurerPlan(): Plan {
 }
 
 /**
- * Scene `control`: the `timed` room with a load control rule `rule-control` "Load control Main": sources Switch hall
- * (wall switch), Button vent (smart button, On / Off) and Motion sensor, loads Ceiling light, Vent and Socket. Live: the
- * switch on, the motion clear, the light on and the socket without data; the last entry a repeat of the switch.
- * Scene `control-error`: the last command failed (target unavailable). Scene `control-many`: five loads (two rows).
+ * Scene `control`: the `timed` room plus the smart button "Button hall" (toggle) and a load control rule `rule-control`
+ * "Load control Main": sources Button hall (gives toggle), Switch hall (a wall switch input) and Held motion; gate
+ * Daylight dark; When on: Ceiling light, Vent; When off: Ceiling light, Vent, Water valve close; When toggle: Socket.
+ * Live: the latest event Button hall toggle, whose action on Socket failed (target unavailable).
  */
-function controlPlan(extraLoads = false): Plan {
+function controlPlan(): Plan {
   const p = timedPlan();
-  if (extraLoads) {
-    p.levels[0].devices.push({
-      id: 'd-heater', name: 'Bathroom heater', invalid: false, bindings: { control: 'switch.heater' }, placement: { mode: 'free', x: 3000, y: 1800, rotation: 0 },
-      props: { kind: 'equipment', shape: 'rect', width: 400, depth: 300, diameter: 400, icon: 'mdi:radiator', label: '', controllable: true },
-    });
-  }
+  p.levels[0].devices.push({
+    id: 'd-button-hall', name: 'Button hall', invalid: false, bindings: { on: 'sensor.button_hall_action' },
+    placement: { mode: 'wall', wallId: 'w3', side: 'right', offset: 2200 },
+    props: {
+      kind: 'smart_button', separateOff: false, autoEnabled: false,
+      on: { slot: 0, event: 'single' }, off: { slot: 0, event: 'double' }, auto: { slot: 0, event: 'hold' },
+    },
+  });
   p.rules = p.rules!.filter(r => r.timed === undefined);
   p.rules.push({
     id: 'rule-control', name: 'Load control Main', zoneId: 'r0', combine: 'any', inputs: [], onDelay: 0, offDelay: 0, onTrue: [], onFalse: [],
-    control: (() => {
-      const loads = ['d-light', 'd-vent', 'd-socket', ...(extraLoads ? ['d-fan', 'd-heater'] : [])];
-      return {
-        sources: [{ source: { device: 'd-switch-hall' } }, { button: 'd-button-vent' }, { source: { device: 'd-motion' } }],
-        on: loads.map(device => ({ device, do: 'on' as const })), off: loads.map(device => ({ device, do: 'off' as const })), toggle: loads.map(device => ({ device, do: 'toggle' as const })),
-      };
-    })(),
+    gate: { source: { daylight: 'd-lux', is: 'dark' } },
+    control: {
+      sources: [{ button: 'd-button-hall' }, { source: { device: 'd-switch-hall' } }, { source: { held: { sources: [{ device: 'd-motion' }], state: 'off', seconds: 300 } } }],
+      on: [{ device: 'd-light', do: 'on' }, { device: 'd-vent', do: 'on' }],
+      off: [{ device: 'd-light', do: 'off' }, { device: 'd-vent', do: 'off' }, { device: 'd-valve', do: 'close' }],
+      toggle: [{ device: 'd-socket', do: 'toggle' }],
+    },
   });
   return p;
 }
 
-const controlTrace = (over: Partial<RuleTrace> = {}, c: Partial<LegacyControlTrace> = {}): RuleTrace => ({
-  status: 'ok', verdict: null, unknownInputs: 0, inputs: [],
+const CONTROL_TRACE: RuleTrace = {
+  status: 'error', reason: 'target unavailable', verdict: null, unknownInputs: 0,
+  inputs: [
+    { label: 'Button hall', value: null, detail: '', gives: 'toggle' },
+    { label: 'Switch hall', value: true, detail: 'on', gives: 'on / off' },
+    { label: 'Held: Motion sensor', value: false, detail: 'off 2 / 5 min', until: Date.now() + 180_000, gives: 'on / off' },
+  ],
+  gate: { value: true, detail: 'night, 4 lx' },
   control: {
-    sources: [
-      { id: 'd-switch-hall', name: 'Switch hall', kind: 'wall_switch', state: 'on' },
-      { id: 'd-button-vent', name: 'Button vent', kind: 'smart_button', state: null },
-      { id: 'd-motion', name: 'Motion sensor', kind: 'motion_sensor', state: 'off' },
+    event: { source: 'Button hall', what: 'toggle', at: at(21, 43) },
+    devices: [
+      { id: 'd-light', name: 'Ceiling light', state: 'on' }, { id: 'd-vent', name: 'Vent', state: 'off' },
+      { id: 'd-valve', name: 'Water valve', state: 'open' }, { id: 'd-socket', name: 'Socket', state: null },
     ],
-    loads: [
-      { id: 'd-light', name: 'Ceiling light', state: 'on' },
-      { id: 'd-vent', name: 'Vent', state: 'off' },
-      { id: 'd-socket', name: 'Socket', state: null },
-    ],
-    ...c,
-  } as unknown as RuleTrace['control'],
-  last: { action: 'on', target: 'Socket', at: at(21, 43), reason: 'Switch hall: on' },
-  ...over,
-});
+  },
+  last: { action: 'on', target: 'Socket', at: at(21, 43), reason: 'Button hall: toggle', error: 'target unavailable' },
+};
 
 const beurerTrace = (b: Partial<BeurerTrace>, over: Partial<RuleTrace> = {}): RuleTrace => ({
   status: 'ok', verdict: true, unknownInputs: 0, inputs: [],
@@ -789,15 +790,7 @@ export const SCENES: Record<string, Scene> = {
   'outside-paused': { plans: [outsidePlan()], rulesFrame: OUTSIDE_PAUSED },
   'outside-day': { plans: [outsidePlan()], rulesFrame: OUTSIDE_DAY },
   'outside-window': { plans: [outsidePlan()], rulesFrame: OUTSIDE_WINDOW },
-  control: { plans: [controlPlan()], rulesFrame: { ...ROOM_RULES, 'rule-control': controlTrace() } },
-  'control-error': { plans: [controlPlan()], rulesFrame: { ...ROOM_RULES, 'rule-control': controlTrace({ status: 'error', reason: 'target unavailable', last: { action: 'on', target: 'Socket', at: at(21, 43), reason: 'Button vent: toggle', error: 'target unavailable' } }) } },
-  'control-many': {
-    plans: [controlPlan(true)],
-    rulesFrame: { ...ROOM_RULES, 'rule-control': controlTrace({}, { loads: [
-      { id: 'd-light', name: 'Ceiling light', state: 'on' }, { id: 'd-vent', name: 'Vent', state: 'off' }, { id: 'd-socket', name: 'Socket', state: null },
-      { id: 'd-fan', name: 'WC fan', state: 'on' }, { id: 'd-heater', name: 'Bathroom heater', state: 'off' },
-    ] }) },
-  },
+  control: { plans: [controlPlan()], rulesFrame: { ...ROOM_RULES, 'rule-control': CONTROL_TRACE } },
   beurer: { plans: [beurerPlan()], rulesFrame: BEURER_RULES },
   'beurer-cycle': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ cycleAt: undefined, pausedUntil: Date.now() + 3_000, heater: 'off' }) } },
   'beurer-kept': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ watts: null, detail: 'no data, kept', keptUntil: Date.now() + 252_000 }, { pending: { to: false, at: Date.now() + 45_000 } }) } },

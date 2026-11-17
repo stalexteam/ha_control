@@ -318,6 +318,8 @@ export const panelStyles = css`
   .fc-blk.hl .fc-box { stroke: var(--ch-primary); stroke-width: 2.5; fill: var(--ch-tint); }
   .fc-blk.on .fc-box { stroke: #22c55e; }
   .fc-blk.nodata .fc-box { stroke: #f59e0b; stroke-dasharray: 5 3; }
+  .fc-blk.muted .fc-box { fill: none; stroke-dasharray: 4 4; }
+  .fc-blk.muted .fc-t1 { fill: var(--ch-muted); font-weight: 400; }
   .fc-t1 { fill: var(--ch-text); font-size: 13px; font-weight: 500; }
   .fc-t2, .fc-head { fill: var(--ch-muted); font-size: 12px; }
   .fc-err { fill: var(--ch-error); font-size: 12px; }
