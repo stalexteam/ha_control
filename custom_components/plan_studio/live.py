@@ -48,6 +48,7 @@ class LiveRuntime:
         self._plans = plans
         self._untrack: CALLBACK_TYPE | None = None
         self._stopped = False
+        self._loaded = False
         self._power_store: Store = Store(hass, 1, POWER_STORAGE_KEY)
         # rule actions fired before HA has started (a sensor known at boot), sent in order once it has
         self._deferred: list[tuple[str, str, str, Callable[..., None], Callable[[], bool]]] = []
@@ -63,14 +64,21 @@ class LiveRuntime:
         positions = data.get("positions") if isinstance(data, dict) else None
         self.power = PowerHub(self._lookup, positions if isinstance(positions, dict) else None, self._save_positions)
         self.runtime = Runtime(self._lookup, time.monotonic, _clock)
-        self.engine = RuleEngine(self._lookup, time.time, self._call, self._schedule)
+        self.engine = RuleEngine(
+            self._lookup, time.time, self._call, self._schedule,
+            local=lambda ts: dt_util.as_local(dt_util.utc_from_timestamp(ts)),  # the real zone: DST-safe
+            changed_at=self._changed_at,
+        )
         self.reload()
 
     @callback
     def reload(self) -> None:
         plans = self._plans.plans()
         self.runtime.load_plans(plans)
-        self.engine.load_plans(plans)
+        # only the first load while HA is still starting is the HA start; an entry reload is not
+        boot = not self._loaded and self._hass.state is not CoreState.running
+        self._loaded = True
+        self.engine.load_plans(plans, boot=boot)
         self.retrack()
 
     @callback
@@ -101,6 +109,10 @@ class LiveRuntime:
         if self._untrack is not None:
             self._untrack()
             self._untrack = None
+
+    def _changed_at(self, entity_id: str) -> float | None:
+        st = self._hass.states.get(entity_id)
+        return st.last_changed.timestamp() if st is not None else None
 
     def _lookup(self, entity_id: str) -> tuple[str, dict] | None:
         return _pair(self._hass.states.get(entity_id))

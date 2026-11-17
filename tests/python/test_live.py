@@ -20,6 +20,9 @@ def _module(name, **attrs):
     return mod
 
 
+ZONE = datetime.timezone(datetime.timedelta(hours=2), "TEST")  # stands for HA's configured zone
+
+
 def _mark(f):
     f._hass_callback = True
     return f
@@ -37,10 +40,16 @@ class Context:
 class FakeStates:
     def __init__(self):
         self.d = {}
+        self.changed = {}
 
     def get(self, eid):
         v = self.d.get(eid)
-        return None if v is None else types.SimpleNamespace(state=v, attributes={})
+        if v is None:
+            return None
+        at = self.changed.get(eid, 0.0)
+        return types.SimpleNamespace(
+            state=v, attributes={}, last_changed=datetime.datetime.fromtimestamp(at, datetime.timezone.utc)
+        )
 
 
 class FakeServices:
@@ -155,7 +164,10 @@ def env(monkeypatch):
         "homeassistant.helpers.storage": _module("homeassistant.helpers.storage", Store=FakeStore),
         "homeassistant.util": _module("homeassistant.util"),
         "homeassistant.util.dt": _module(
-            "homeassistant.util.dt", utcnow=lambda: datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+            "homeassistant.util.dt",
+            utcnow=lambda: datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
+            utc_from_timestamp=lambda ts: datetime.datetime.fromtimestamp(ts, datetime.timezone.utc),
+            as_local=lambda d: d.astimezone(ZONE),
         ),
         f"{NAME}.store": _module(f"{NAME}.store", PlanStore=object),
     }
@@ -538,5 +550,75 @@ def test_a_late_failure_is_resent_when_the_target_reports(env):
         await asyncio.gather(*hass.tasks, return_exceptions=True)
         assert len(hass.services.calls) == 2
         assert live.engine.snapshot("p1")["r1"]["status"] == "ok"
+
+    asyncio.run(go())
+
+
+def _held_plan():
+    p = _plan()
+    p["rules"][0]["inputs"] = [
+        {"source": {"held": {"sources": [{"device": "leak"}], "state": "off", "seconds": 300}}}
+    ]
+    p["rules"][0]["onTrue"] = [{"device": "sw", "do": "off"}]
+    return p
+
+
+def _held_detail(live):
+    return live.engine.snapshot("p1")["r1"]["inputs"][0]["detail"]
+
+
+def test_local_time_uses_the_configured_zone_and_last_changed_is_read(env):
+    async def go():
+        hass = FakeHass()
+        live = await _start(env, hass)
+        assert live.engine._local(0).utcoffset() == datetime.timedelta(hours=2)
+        assert live.engine._local(0).tzinfo is ZONE
+        hass.states.changed["binary_sensor.leak"] = 1234.0
+        assert live._changed_at("binary_sensor.leak") == 1234.0
+        assert live._changed_at("sensor.none") is None
+
+    asyncio.run(go())
+
+
+def test_held_at_ha_start_counts_as_held_long_ago(env):
+    async def go():
+        hass = FakeHass()
+        hass.state = CoreState.starting
+        hass.states.changed["binary_sensor.leak"] = datetime.datetime.now().timestamp()
+        live = await _start(env, hass, _held_plan())
+        assert _held_detail(live) == "off 5 / 5 min"
+
+    asyncio.run(go())
+
+
+def test_first_load_after_ha_runs_and_an_entry_reload_use_last_changed(env):
+    async def go():
+        hass = FakeHass()
+        hass.states.changed["binary_sensor.leak"] = datetime.datetime.now().timestamp()
+        live = await _start(env, hass, _held_plan())  # first load while running: not a start
+        assert _held_detail(live) != "off 5 / 5 min"
+        hass2 = FakeHass()
+        hass2.state = CoreState.starting
+        hass2.states.changed["binary_sensor.leak"] = datetime.datetime.now().timestamp()
+        live2 = await _start(env, hass2, _held_plan())
+        hass2.state = CoreState.running
+        live2._plans = FakePlans([_held_plan(), {"id": "p2", "levels": [], "rules": []}])
+        live2.reload()  # an entry reload after the start is not a start; the unchanged rule keeps its state
+        assert _held_detail(live2) == "off 5 / 5 min"
+        live2.engine.load_plans([])
+        live2.reload()  # changed rules are read again from last_changed
+        assert _held_detail(live2) != "off 5 / 5 min"
+
+    asyncio.run(go())
+
+
+def test_time_input_timer_is_scheduled_on_the_loop_as_a_callback(env):
+    async def go():
+        hass = FakeHass()
+        p = _plan()
+        p["rules"][0]["inputs"] = [{"source": {"time": {"from": "08:00", "to": "09:30"}}}]
+        await _start(env, hass, p)
+        timers = [t for t in env.later if t["on"]]
+        assert len(timers) == 1 and getattr(timers[0]["action"], "_hass_callback", False)
 
     asyncio.run(go())

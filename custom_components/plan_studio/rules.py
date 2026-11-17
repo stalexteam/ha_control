@@ -358,9 +358,12 @@ class RuleEngine:
 
     # --- loading -------------------------------------------------------------
 
-    def load_plans(self, plans: "list[dict]") -> None:
+    def load_plans(self, plans: "list[dict]", *, boot: "bool | None" = None) -> None:
+        """boot: True when this load is the HA start; None keeps "the first call is the start"."""
         old = self._rules
-        boot, self._started = not self._started, True
+        first, self._started = not self._started, True
+        if boot is None:
+            boot = first
         rules: dict[Key, _Rule] = {}
         for plan in plans:
             pid = plan.get("id") if isinstance(plan, dict) else None

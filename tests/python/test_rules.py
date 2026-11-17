@@ -877,6 +877,33 @@ def test_light_needs_an_illuminance_sensor():
     assert "sensor.lux" not in w.engine.entity_ids()
 
 
+def test_light_hysteresis_state_survives_an_unchanged_reload():
+    w = World(sensor__lux=lux(5))
+    p = plan([LUX], [rule("r", [light_in()])])
+    w.engine.load_plans([p])
+    w.set("sensor.lux", "12")  # between: keeps true
+    assert trace(w)["verdict"] is True
+    w.engine.load_plans([plan([LUX], [rule("r", [light_in()])])])
+    assert trace(w)["verdict"] is True  # not reset to false
+
+
+def test_first_load_with_boot_false_is_not_an_ha_start():
+    w = World(binary_sensor__m="off", switch__ext="off")
+    w.changed["binary_sensor.m"] = 900.0
+    w.engine.load_plans(
+        [plan([HALL, EXT], [rule("r", [held("m", state="off", seconds=300)], on_true=(("ext", "on"),))])], boot=False
+    )
+    assert trace(w)["inputs"][0]["detail"] == "off 1 / 5 min"
+    assert [t[0] for t in w.pending()] == [1200.0]
+
+
+def test_explicit_boot_true_on_a_later_load():
+    w = World(binary_sensor__m="off", switch__ext="off")
+    w.engine.load_plans([])
+    w.engine.load_plans([plan([HALL, EXT], [rule("r", [held("m", state="off")], on_true=(("ext", "on"),))])], boot=True)
+    assert trace(w)["inputs"][0]["detail"] == "off 30 / 30 min"
+
+
 # --- sun ----------------------------------------------------------------------
 
 @pytest.mark.parametrize("state,value,detail", [
@@ -944,6 +971,24 @@ def test_time_window_in_the_repeated_autumn_hour_fires_once():
     w.engine.load_plans([plan([EXT], [rule("r", [window("03:30", "05:00")], **EXT_BOTH)])])
     _walk(w, [kyiv(2026, 10, 25, 3, 30), kyiv(2026, 10, 25, 5)], 1)  # the second 03:00-04:00 stays in the window
     assert w.calls == [OFF, ON, OFF]
+
+
+def test_time_window_ending_in_the_repeated_autumn_hour_ends_once_at_the_first_occurrence():
+    w = World(tz=KYIV, t=kyiv(2026, 10, 25, 2), switch__ext="off")
+    w.engine.load_plans([plan([EXT], [rule("r", [window("01:00", "03:30")], **EXT_BOTH)])])
+    assert w.calls == [ON]
+    _walk(w, [kyiv(2026, 10, 25, 3, 30)], 1)
+    assert w.calls == [ON, OFF]
+    w.advance(kyiv(2026, 10, 25, 3, 30, fold=1) + 60)  # the second 03:30 changes nothing
+    assert w.calls == [ON, OFF]
+
+
+def test_time_window_ending_in_the_spring_gap_ends_at_the_jump():
+    w = World(tz=KYIV, t=kyiv(2026, 3, 29, 2), switch__ext="off")
+    w.engine.load_plans([plan([EXT], [rule("r", [window("01:00", "03:30")], **EXT_BOTH)])])
+    assert w.calls == [ON]
+    _walk(w, [utc(2026, 3, 29, 1)], 1)
+    assert w.calls == [ON, OFF]
 
 
 def test_time_window_within_a_day_defaults_to_utc():
