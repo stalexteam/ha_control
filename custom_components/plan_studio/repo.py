@@ -199,7 +199,8 @@ def _validate_control(r: dict, c: object) -> None:
             raise vol.Invalid(f"rule control {key} needs at least one distinct device id")
     if set(c["sources"]) & set(c["loads"]):
         raise vol.Invalid("rule control needs a device in only one of sources and loads")
-    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "outside" in r or "beurer" in r or r["combine"] != "any"             or r["onDelay"] != 0 or r["offDelay"] != 0 or r["onTrue"] or r["onFalse"]:
+    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "outside" in r or "beurer" in r or r["combine"] != "any" \
+            or r["onDelay"] != 0 or r["offDelay"] != 0 or r["onTrue"] or r["onFalse"]:
         raise vol.Invalid("rule control needs no inputs, gate, other kinds or actions, combine any and no delays")
 
 

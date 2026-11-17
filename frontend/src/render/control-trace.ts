@@ -1,9 +1,9 @@
 import { html, nothing, svg, type TemplateResult } from 'lit';
 import type { Id, Rule } from '../model/types';
-import type { RuleTrace } from '../live/rules-feed';
+import type { RuleLast, RuleTrace } from '../live/rules-feed';
+import { clock } from '../panel/rules-panel';
 import { tone } from './rule-trace';
 import { FLOW_PAD as PAD, FLOW_VGAP as VGAP, PURPOSE_WIDTH, blockH, flowBlock } from './flow-block';
-import { lastLine } from './outside-trace';
 import { t } from '../i18n';
 
 export interface ControlTraceOpts {
@@ -26,8 +26,8 @@ export interface ControlTraceOpts {
 }
 
 export const CONTROL_WIDTH = PURPOSE_WIDTH;
-/** Source and load blocks: up to 4 per row on a grid whose middle gap is at CX (the trunk runs there), rows RGAP apart with a bus in each gap. */
-const PER_ROW = 4, GAP = 10, RGAP = 24;
+/** Source and load blocks: up to 3 per row (a block holds about 19 characters) on a grid, rows RGAP apart with a bus in each gap. */
+const PER_ROW = 3, GAP = 10, RGAP = 24;
 const BW = (CONTROL_WIDTH - 2 * PAD - (PER_ROW - 1) * GAP) / PER_ROW;
 const CX = CONTROL_WIDTH / 2, FULL = CONTROL_WIDTH - 2 * PAD;
 
@@ -40,13 +40,20 @@ export function controlFocus(block: string): string {
 interface Item { field: string; cls: string; lines: string[]; wide?: true }
 interface Blk extends Item { x: number; y: number; w: number; h: number; err?: string }
 
-/** Left edge of block i of n: a single row (n <= 4) centred, otherwise the grid columns. */
+/** The last action, naming the load: "last: Lamp 1 turned on 21:43 (Switch A: on)" or, sent nothing, "last: Lamp 2 already off 21:43 (Button: toggle)". */
+function controlLast(l: RuleLast): string {
+  const line = l.sent === false ? t('control.flow.already').replace('{s}', l.action) : t('control.flow.last').replace('{did}', t(`rules.did.${l.action}`));
+  return line.replace('{target}', l.target).replace('{at}', clock(l.at)).replace('{reason}', l.reason);
+}
+
+/** Left edge of block i of n: a single row (n <= 3) centred, otherwise the grid columns. */
 const blockX = (n: number, i: number): number => (n <= PER_ROW ? CX - (n * BW + (n - 1) * GAP) / 2 + i * (BW + GAP) : PAD + (i % PER_ROW) * (BW + GAP));
 
 /**
  * Blocks of one group in rows from y0 (`above` the Sets block: a bus below each row, else above each row). Returns the
- * blocks, the y below them and the link path: a stub from each block to its row's bus, the bus to CX and the trunk at CX
- * between the outermost bus and `edge` (the Sets block's top or bottom).
+ * blocks, the y below them and the link path: a stub from each block to its row's bus, the bus to the trunk and the trunk
+ * between the outermost bus and `edge` (the Sets block's top or bottom): at CX for one row, else in the column gap left of
+ * the middle column (CX is that column's centre, the trunk would run behind its blocks).
  */
 function group(y0: number, items: Item[], above: boolean, edge: number): { blocks: Blk[]; bottom: number; links: string } {
   const h = blockH(Math.max(...items.map(b => b.lines.length)));
@@ -54,14 +61,15 @@ function group(y0: number, items: Item[], above: boolean, edge: number): { block
   const top = (r: number) => y0 + r * (h + RGAP);
   const blocks = items.map((b, i) => ({ ...b, x: b.wide ? PAD : blockX(items.length, i), y: top(Math.floor(i / PER_ROW)), w: b.wide ? FULL : BW, h }));
   const bus = (r: number) => (above ? top(r) + h + (r === rows - 1 ? VGAP : RGAP) / 2 : top(r) - (r === 0 ? VGAP : RGAP) / 2);
+  const tx = rows > 1 ? CX - (BW + GAP) / 2 : CX;
   const parts: string[] = [];
   for (let r = 0; r < rows; r++) {
     const row = blocks.slice(r * PER_ROW, (r + 1) * PER_ROW);
     for (const b of row) parts.push(`M${b.x + b.w / 2} ${above ? b.y + h : b.y} V${bus(r)}`);
-    const xs = [CX, ...row.map(b => b.x + b.w / 2)];
+    const xs = [tx, ...row.map(b => b.x + b.w / 2)];
     if (Math.max(...xs) > Math.min(...xs)) parts.push(`M${Math.min(...xs)} ${bus(r)} H${Math.max(...xs)}`);
   }
-  parts.push(above ? `M${CX} ${bus(0)} V${edge}` : `M${CX} ${edge} V${bus(rows - 1)}`);
+  parts.push(above ? `M${tx} ${bus(0)} V${edge}` : `M${tx} ${edge} V${bus(rows - 1)}`);
   return { blocks, bottom: top(rows - 1) + h, links: parts.join(' ') };
 }
 
@@ -82,8 +90,9 @@ export function renderControlTrace(o: ControlTraceOpts): TemplateResult {
     ? [{ field: 'control-sources', cls: '', lines: [t('control.problem.sources')], wide: true }]
     : c.sources.map(id => {
       const live = ct?.sources.find(s => s.id === id);
-      const kind = live?.kind ?? o.deviceKind(id);
+      const kind = live ? live.kind : o.deviceKind(id);
       const name = o.deviceName(id);
+      if (kind !== 'smart_button' && kind !== 'wall_switch' && kind !== 'motion_sensor') return { field: `control-source:${id}`, cls: '', lines: [name] };
       if (kind === 'smart_button') return { field: `control-source:${id}`, cls: '', lines: [name, t(o.separateOff(id) ? 'control.flow.onOff' : 'control.flow.toggle')] };
       const word = kind === 'motion_sensor' ? state(live?.state, t('control.flow.motion'), t('control.flow.clear')) : state(live?.state, 'on', 'off');
       return { field: `control-source:${id}`, cls: toneOf(live?.state), lines: [name, ...(ct ? [word] : []), t('control.flow.repeat')] };
@@ -104,7 +113,7 @@ export function renderControlTrace(o: ControlTraceOpts): TemplateResult {
 
   const last = tr?.last;
   const lastBlk: Blk | undefined = last
-    ? { x: PAD, y: bottom.bottom + VGAP / 2, w: FULL, h: blockH(1 + (last.error ? 1 : 0)), field: 'control-last', cls: '', lines: [lastLine(last)], err: last.error }
+    ? { x: PAD, y: bottom.bottom + VGAP / 2, w: FULL, h: blockH(1 + (last.error ? 1 : 0)), field: 'control-last', cls: '', lines: [controlLast(last)], err: last.error }
     : undefined;
   const H = (lastBlk ? lastBlk.y + lastBlk.h : bottom.bottom) + PAD;
   const links = `${top.links} ${bottom.links}`;

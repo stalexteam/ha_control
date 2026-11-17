@@ -1818,7 +1818,7 @@ class RuleEngine:
             if eid is None or state is None:
                 entry["error"] = "target unavailable"
             elif state == do:
-                entry["reason"], entry["sent"] = f"{reason}: already {do}", False
+                entry["sent"] = False
             else:
                 self._control_call(rule, seq, eid, do, entry)
         self._control_refresh(rule)
@@ -1851,16 +1851,19 @@ class RuleEngine:
         self._echoes.setdefault(eid, []).append(echo)
 
     def _control_refresh(self, rule: _Rule) -> None:
-        """Last entry (the first with an error) and failure of the latest event."""
+        """Last entry (the first with an error, else the last one sent, else the last one) and failure of the latest
+        event."""
         errors = {e.get("error") for e in rule.entries}
         rule.failed = next((r for r in ("service failed", "target unavailable") if r in errors), None)
         if rule.entries:
-            rule.last = next((e for e in rule.entries if "error" in e), rule.entries[-1])
+            sent = next((e for e in reversed(rule.entries) if e.get("sent", True)), rule.entries[-1])
+            rule.last = next((e for e in rule.entries if "error" in e), sent)
 
     def _control_source(self, keys: "list[Key]", eid: str, st: "tuple[str, dict] | None") -> None:
         """A state of a load control state source (whoever made it): every rule reading it remembers it; a change
-        between known states sets their loads, unless it is a load control command arriving (checked once). Without
-        such a change the state may still be the arrival of the entity's oldest expected change."""
+        between known states sets their loads, unless it is a load control command arriving (checked once) or HA is
+        still starting (only remembered). Without such a change the state may still be the arrival of the entity's
+        oldest expected change."""
         changes: list[tuple[_Rule, str, str]] = []
         for key in keys:
             rule = self._rules[key]
@@ -1868,7 +1871,7 @@ class RuleEngine:
             if c is None or eid not in c.switches():
                 continue
             do = c.source_changed(eid, st[0] if st is not None else None)
-            if do is not None and rule.enabled and not c.missing:
+            if do is not None and rule.enabled and not c.missing and not self._booting:
                 changes.append((rule, do, c.switches()[eid]))
         if not changes:
             self._echo_arrived(eid, st)
@@ -2006,14 +2009,14 @@ class RuleEngine:
     def on_intent(self, plan_id: str, container_id: str, intent: dict) -> None:
         """A container intent ({"action": "toggle"}, {"action": "set", "value": "on" | "off"}, {"action": "auto"}); a
         boiler or timed rule whose button it is takes it, and so does every load control rule with that smart button
-        among its sources. Status events and other actions are ignored."""
+        among its sources (not while HA is starting). Status events and other actions are ignored."""
         if not isinstance(intent, dict):
             return
         dirty: set[Key] = set()
         for key, rule in self._rules.items():
             c = rule.control
             if c is not None:  # a smart button source; a wall switch source is read from its entity (handle_state)
-                if key[0] != plan_id or not rule.enabled or c.missing or container_id not in c.buttons():
+                if key[0] != plan_id or not rule.enabled or c.missing or self._booting or container_id not in c.buttons():
                     continue
                 what = c.press(intent)
                 if what is not None:

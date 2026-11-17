@@ -82,21 +82,63 @@ describe('load control diagram', () => {
     expect(text(two, 'control-source:sw')).toBe('Switch hall | no data | repeated');
   });
 
-  it('five loads and five sources sit in two rows of at most four', () => {
+  it('five loads and five sources sit in two rows of at most three', () => {
     const ids = ['a', 'b', 'c', 'd', 'e'];
     const { host } = draw(rule(ids, ids));
     expect(rowCount(host, ids.map(i => `control-source:${i}`))).toBe(2);
     expect(rowCount(host, ids.map(i => `control-load:${i}`))).toBe(2);
-    expect(rowCount(host, ids.slice(0, 4).map(i => `control-load:${i}`))).toBe(1);
+    expect(rowCount(host, ids.slice(0, 3).map(i => `control-load:${i}`))).toBe(1);
+  });
+
+  it('no link runs through a block (the trunk of several rows runs in a column gap)', () => {
+    const ids = ['a', 'b', 'c', 'd', 'e'];
+    for (const r of [rule(ids, ids), rule(['sw', 'btn', 'pir', 'a'], ['b', 'c']), rule(['sw'], ['a', 'b', 'c'])]) {
+      const { host } = draw(r);
+      const boxes = [...host.querySelectorAll('[data-block]')].map(g => {
+        const [x, y] = g.getAttribute('transform')!.slice(10, -1).split(' ').map(Number);
+        const rect = g.querySelector('rect')!;
+        return { x, y, w: Number(rect.getAttribute('width')), h: Number(rect.getAttribute('height')) };
+      });
+      const d = host.querySelector('.fc-link')!.getAttribute('d')!;
+      for (const [, x, y1, y2] of [...d.matchAll(/M([\d.]+) ([\d.]+) V([\d.]+)/g)].map(m => m.map(Number))) {
+        const crossed = boxes.filter(b => x > b.x && x < b.x + b.w && Math.min(y1, y2) < b.y + b.h - 0.5 && Math.max(y1, y2) > b.y + 0.5);
+        expect(crossed, `M${x} ${y1} V${y2}`).toEqual([]);
+      }
+    }
+  });
+
+  it('four sources take two rows; a name of 19 characters is not clipped', () => {
+    const ids = ['sw', 'btn', 'pir', 'a'];
+    const { host } = draw(rule(ids, ['b']), { deviceName: id => (id === 'a' ? 'Bathroom heater 123' : names[id]) });
+    expect(rowCount(host, ids.map(i => `control-source:${i}`))).toBe(2);
+    expect(rowCount(host, ids.slice(0, 3).map(i => `control-source:${i}`))).toBe(1);
+    expect(text(host, 'control-source:a')).toBe('Bathroom heater 123');
+  });
+
+  it('a source of an unknown or no kind shows its name only', () => {
+    const r = rule(['x', 'y'], ['a']);
+    expect(text(draw(r, { deviceKind: () => undefined }).host, 'control-source:x')).toBe('x');
+    const t2 = live({ sources: [{ id: 'x', name: 'x', kind: null, state: null }, { id: 'y', name: 'x', kind: 'socket', state: 'on' }] });
+    const { host } = draw(r, { trace: t2, deviceKind: () => 'wall_switch' });
+    expect(text(host, 'control-source:x')).toBe('x');
+    expect(text(host, 'control-source:y')).toBe('x');
   });
 
   it('shows the last action; an error goes in the block line and the status shows under the diagram', () => {
     const last = { action: 'on' as const, target: 'Light', at: NOW, reason: 'Button vent: toggle', error: 'target unavailable' };
     const { host } = draw(rule(['btn'], ['a']), { trace: live({ loads: [{ id: 'a', name: 'Light', state: null }] }, { last, status: 'error', reason: 'target unavailable' }) });
     const lastBlock = text(host, 'control-last');
-    expect(lastBlock).toContain('20:00');
-    expect(lastBlock).toContain('target unavailable');
+    expect(lastBlock).toBe('last: Light turned on 20:00 (Button vent: toggle) | target unavailable');
     expect(host.querySelector('[data-note="status"]')!.textContent).toBe('Error: target unavailable');
+  });
+
+  it('the last line names the load; one that was in that state already says so once', () => {
+    const at = new Date(2026, 10, 17, 21, 43).getTime();
+    const tr = (last: NonNullable<RuleTrace['last']>) => live({ loads: [{ id: 'a', name: 'Light', state: 'off' }] }, { last });
+    const sent = draw(rule(['sw'], ['a']), { trace: tr({ action: 'off', target: 'Light', at, reason: 'Switch hall: off' }) }).host;
+    expect(text(sent, 'control-last')).toBe('last: Light turned off 21:43 (Switch hall: off)');
+    const already = draw(rule(['sw'], ['a']), { trace: tr({ action: 'off', target: 'Lamp 2', at, reason: 'Switch A: off', sent: false }) }).host;
+    expect(text(already, 'control-last')).toBe('last: Lamp 2 already off 21:43 (Switch A: off)');
   });
 
   it('has no last line without an entry and shows the note when given', () => {

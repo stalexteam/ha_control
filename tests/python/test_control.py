@@ -137,8 +137,21 @@ def test_toggle_with_mixed_loads_turns_all_off():
     w = loaded(switch__l1="on")
     w.press("btn", TOGGLE)
     assert w.calls == [off("switch.l1")]
-    assert w.tr()["last"] == {"action": "off", "target": "Lamp 2", "at": 1000000,
-                              "reason": "Button: toggle: already off", "sent": False}
+    assert w.tr()["last"] == {"action": "off", "target": "Lamp 1", "at": 1000000, "reason": "Button: toggle"}
+
+
+def test_last_prefers_the_load_that_was_switched():
+    """The last line shows the load that was switched, not a later one that was in that state already."""
+    w = loaded(switch__l1="on", switch__l2="off")
+    w.press("btn", TOGGLE)
+    last = w.tr()["last"]
+    assert w.calls == [off("switch.l1")]
+    assert last["target"] == "Lamp 1" and "sent" not in last and "error" not in last
+    # nothing sent at all: the last entry, sent: False
+    w.set("switch.l1", "off", own=True)
+    w.press("btn", SET_OFF)
+    assert w.calls == [off("switch.l1")]
+    assert w.tr()["last"] == {"action": "off", "target": "Lamp 2", "at": 1000000, "reason": "Button: off", "sent": False}
 
 
 def test_button_set_on_and_off():
@@ -244,8 +257,7 @@ def test_load_already_in_state_is_not_commanded():
     w = loaded([control_rule(sources=["ws"])], switch__l2="on")
     w.set("switch.a", "on")
     assert w.calls == [on("switch.l1")]
-    assert w.tr()["last"] == {"action": "on", "target": "Lamp 2", "at": 1000000,
-                              "reason": "Switch A: on: already on", "sent": False}
+    assert w.tr()["last"] == {"action": "on", "target": "Lamp 1", "at": 1000000, "reason": "Switch A: on"}
     assert w.tr()["status"] == "ok"
 
 
@@ -298,7 +310,8 @@ def test_late_failure_marks_its_own_event_only():
     assert t["last"]["error"] == "service failed"
     w.press("btn", SET_OFF)  # Lamp 1 counts as on (its command is on its way); Lamp 2's failed on is not
     older = w.on_error
-    assert w.calls[-1] == off("switch.l1") and w.tr()["last"]["reason"] == "Button: off: already off"
+    assert w.calls[2:] == [off("switch.l1")]
+    assert w.tr()["last"] == {"action": "off", "target": "Lamp 1", "at": 1000000, "reason": "Button: off"}
     w.press("btn", SET_ON)
     assert w.calls[-1] == on("switch.l2")
     older("boom")  # the older event's failure does not mark the newer one
@@ -318,7 +331,8 @@ def test_nothing_sent_at_load_boot_or_save():
     w.load([control_rule(sources=["ws"])])
     assert w.calls == []
     w.set("switch.a", "off")
-    assert w.calls == [] and w.tr()["last"]["reason"] == "Switch A: off: already off"  # the loads are off already
+    assert w.calls == [] and w.tr()["last"]["reason"] == "Switch A: off"  # the loads are off already
+    assert w.tr()["last"]["sent"] is False
     w.states["switch.a"] = ("on", {})  # changed while the rule is saved again, unchanged
     w.load([control_rule(sources=["ws"], name="Renamed")])
     assert w.calls == []
@@ -341,7 +355,7 @@ def test_a_rebound_source_is_read_at_save():
     w.load([control_rule(sources=["ws"])], [BTN, rebound, L1, L2])
     assert w.calls == []
     w.set("switch.b", "off")
-    assert w.calls == [] and w.tr()["last"]["reason"] == "Switch A: off: already off"
+    assert w.calls == [] and w.tr()["last"]["reason"] == "Switch A: off" and w.tr()["last"]["sent"] is False
 
 
 def test_rebound_source_is_read_fresh():
@@ -354,7 +368,7 @@ def test_rebound_source_is_read_fresh():
     w.set("switch.a", "on", {"x": 1})  # an attribute-only update: still on
     assert w.calls == []
     w.set("switch.a", "off")
-    assert w.tr()["last"]["reason"] == "Switch A: off: already off"
+    assert w.calls == [] and w.tr()["last"]["reason"] == "Switch A: off" and w.tr()["last"]["sent"] is False
     w.set("switch.a", "on")
     assert w.calls == [on("switch.l1"), on("switch.l2")]
 
@@ -369,7 +383,7 @@ def test_disabled_rule_ignores_everything():
     w.load([control_rule(sources=["btn", "ws"])])
     assert w.calls == []
     w.set("switch.a", "off")
-    assert w.calls == [] and w.tr()["last"]["reason"] == "Switch A: off: already off"
+    assert w.calls == [] and w.tr()["last"]["reason"] == "Switch A: off" and w.tr()["last"]["sent"] is False
 
 
 def test_deleting_the_rule_sends_nothing():
@@ -378,6 +392,25 @@ def test_deleting_the_rule_sends_nothing():
     w.calls.clear()
     w.load([])
     assert w.calls == [] and not w.pending()
+
+
+def test_nothing_is_switched_while_booting():
+    """A retained button action replayed at start or a source settling while HA starts switches nothing; the reading
+    remembered during the boot is the starting point after started()."""
+    w = loaded([control_rule(sources=["btn", "ws"])], boot=True, switch__l1="on", switch__l2="on")
+    w.press("btn", TOGGLE)
+    w.press("btn", SET_OFF)
+    w.set("switch.a", "on")
+    w.set("switch.a", "off")
+    w.set("switch.a", "on")
+    assert w.calls == [] and "last" not in w.tr()
+    w.engine.started()
+    assert w.calls == []
+    w.set("switch.a", "off")  # against "on" remembered during the boot
+    assert w.calls == [off("switch.l1"), off("switch.l2")]
+    w.calls.clear()
+    w.press("btn", TOGGLE)
+    assert w.calls == [on("switch.l1"), on("switch.l2")]  # the echoes of the offs: all off
 
 
 # --- echoes --------------------------------------------------------------------------------

@@ -237,7 +237,7 @@ function controlProblem(r: Rule, c: NonNullable<Rule['control']>): boolean {
 
 export const isControlRule = (r: Rule): boolean => r.control !== undefined;
 
-/** The "Load control" template: the zone's single participating wall switch / smart button and single on/off device (else empty); motion sensors are never pre-picked. */
+/** The "Load control" template: the zone's single participating wall switch / smart button and single on/off device (else empty; no load when it is the wall switch's own relay); motion sensors are never pre-picked. */
 export function controlTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
   const rule = newRule(zoneId);
   rule.name = zoneId !== null && zoneName ? `Load control ${zoneName}` : 'Load control';
@@ -245,7 +245,10 @@ export function controlTemplate(plan: { levels: Level[] }, zoneId: Id | null, zo
   const members = level ? zoneMembers(level, zoneId as Id).filter(m => m.participates).map(m => m.device) : [];
   const buttons = members.filter(d => d.props.kind === 'wall_switch' || d.props.kind === 'smart_button');
   const loads = members.filter(d => { const a = ruleActionsFor(d); return a.includes('on') && a.includes('off'); });
-  rule.control = { sources: buttons.length === 1 ? [buttons[0].id] : [], loads: loads.length === 1 ? [loads[0].id] : [] };
+  const source = buttons.length === 1 ? buttons[0] : undefined;
+  const load = loads.length === 1 ? loads[0] : undefined;
+  const sameRelay = source?.props.kind === 'wall_switch' && !!source.bindings?.state && source.bindings.state === load?.bindings?.control;
+  rule.control = { sources: source ? [source.id] : [], loads: load && !sameRelay ? [load.id] : [] };
   return rule;
 }
 

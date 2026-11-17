@@ -120,7 +120,7 @@ class LiveRuntime:
 
     @callback
     def _on_container(self, plan_id: str, device_id: str, event: dict) -> None:
-        """Container intents (not status changes) are the boiler and timed switch buttons' input."""
+        """Container intents (not status changes) are the boiler, timed switch and load control buttons' input."""
         if "action" in event and not self._stopped:
             try:
                 self.engine.on_intent(plan_id, device_id, event)

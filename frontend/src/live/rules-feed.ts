@@ -93,7 +93,7 @@ export interface BeurerTrace {
 
 /** A load control rule's devices: each source's kind and state (null = no data; a smart button's is always null) and each load's state. */
 export interface ControlTrace {
-  sources: { id: Id; name: string; kind: 'wall_switch' | 'smart_button' | 'motion_sensor'; state: 'on' | 'off' | null }[];
+  sources: { id: Id; name: string; kind: string | null; state: 'on' | 'off' | null }[];
   loads: { id: Id; name: string; state: 'on' | 'off' | null }[];
 }
 

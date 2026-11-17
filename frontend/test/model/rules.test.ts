@@ -267,6 +267,13 @@ describe('rules model', () => {
       expect(g.name).toBe('Load control');
       expect(g.control).toEqual({ sources: [], loads: [] });
     });
+    it('template leaves the loads empty when the wall switch and the load are the same relay', () => {
+      const ws = { ...dev('b', 'wall_switch', 100, 100), bindings: { state: 'switch.hall' } };
+      const same = { ...dev('l', 'ceiling_light', 250, 250), bindings: { control: 'switch.hall' } };
+      expect(controlTemplate(lvl([ws, same]), 'z1', 'Hall').control).toEqual({ sources: ['b'], loads: [] });
+      const other = { ...same, bindings: { control: 'switch.lamp' } };
+      expect(controlTemplate(lvl([ws, other]), 'z1', 'Hall').control).toEqual({ sources: ['b'], loads: ['l'] });
+    });
     it('a valid rule has no problems and never the inputs problem', () => {
       expect(probs(control())).toEqual([]);
       expect(probs(control({}, { sources: ['s', 's2'], loads: ['l', 'l2'] }))).toEqual([]);
