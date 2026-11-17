@@ -128,7 +128,9 @@ class LiveRuntime:
     def _on_state(self, event: Event[EventStateChangedData]) -> None:
         data = event.data
         old, new = data["old_state"], data["new_state"]
-        if new is not None and new.state not in ("unavailable", "unknown"):
+        if new is None:
+            self._returned.pop(data["entity_id"], None)
+        elif new.state not in ("unavailable", "unknown"):
             if old is None or old.state in ("unavailable", "unknown"):
                 self._returned[data["entity_id"]] = new.last_changed
             else:

@@ -574,8 +574,10 @@ class RuleEngine:
         """Start of a held input of a saved rule: the latest last_changed of its device sources (now for a rule
         source or when HA does not know it)."""
         stamps = []
-        for s in i.sources:
+        for s, m in zip(i.sources, i.mem):
             at = self._changed_at(s.eid) if s.rule is None and s.eid else None
+            if m is None and at is not None:
+                continue  # no data now: its last_changed is the outage, which never counts
             stamps.append(now if at is None else min(at, now))  # -inf (long ago) stays -inf
         return max(stamps)
 

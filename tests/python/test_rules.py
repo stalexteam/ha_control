@@ -1199,6 +1199,25 @@ def test_held_long_ago_last_changed_counts_as_held_and_the_latest_other_one_wins
     assert [t[0] for t in w.pending()] == [2700.0]
 
 
+def test_held_save_skips_sources_without_data():
+    w = World(binary_sensor__m="unavailable", binary_sensor__m2="off")
+    w.t = 5000
+    w.changed.update({"binary_sensor.m": 4990.0, "binary_sensor.m2": 100.0})
+    saved(w, [plan([HALL, HALL2], [rule("r", [held("m", "m2")])])])
+    assert trace(w)["verdict"] is True and w.pending() == []
+
+
+def test_held_unchanged_reload_keeps_the_no_data_memory():
+    w = World(binary_sensor__m="on")
+    saved(w, [plan([HALL], [rule("r", [held("m")])])])
+    w.t = 1500
+    w.set("binary_sensor.m", "unavailable")
+    w.engine.load_plans([plan([HALL], [rule("r", [held("m")], name="Renamed")])])
+    w.t = 1510
+    w.set("binary_sensor.m", "off")
+    assert [t[0] for t in w.pending()] == [2800.0]
+
+
 def test_held_change_time_survives_an_unchanged_reload_and_a_changed_one_restarts():
     w = World(binary_sensor__m="off")
     saved(w, [plan([HALL], [rule("r", [held("m")])])])
