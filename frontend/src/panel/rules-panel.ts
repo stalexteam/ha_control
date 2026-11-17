@@ -1,7 +1,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import type { Id, Level, Rule } from '../model/types';
 import type { Selection } from '../editor/tools/types';
-import { keptOn, switchedElsewhere, type RuleLast, type RuleTrace } from '../live/rules-feed';
+import { keptOn, motionModeLast, switchedElsewhere, type RuleLast, type RuleTrace } from '../live/rules-feed';
 import { ruleEqual, rulesFor } from '../model/rules';
 import { t } from '../i18n';
 
@@ -31,7 +31,9 @@ export function clock(at: number): string {
  * switch's `sent: false`) is never worded as a command: "Vent switched off elsewhere 21:46" / "Vent already on 21:50" /
  * "Vent kept on by WC vent 21:52".
  */
-export function lastText(l: RuleLast): string {
+export function lastText(l: RuleLast, motionLight = false): string {
+  const mode = motionLight ? motionModeLast(l) : undefined;
+  if (mode) return t(`motionLight.row.${mode}`).replace('{target}', l.target).replace('{s}', l.action).replace('{at}', clock(l.at)).trim();
   if (keptOn(l)) return t('rules.last.kept').replace('{target}', l.target).replace('{reason}', l.reason).replace('{at}', clock(l.at)).trim();
   if (l.sent === false) {
     return t(switchedElsewhere(l) ? 'rules.last.elsewhere' : 'rules.last.already')
@@ -68,7 +70,7 @@ function row(r: Rule, orphan: boolean, o: RulesPanelOpts): TemplateResult {
         <span class="rstatus ${tr?.status ?? ''}">${statusText(r, tr, o)}</span>
         ${changed ? html`<span class="runsaved">${t('rules.unsavedChanges')}</span>` : nothing}
         ${unknown > 0 ? html`<span class="rwarn">${unknown === 1 ? t('rules.unknown1') : t('rules.unknownN').replace('{n}', String(unknown))}</span>` : nothing}
-        ${tr?.last ? html`<span class="rlast">${lastText(tr.last)}</span>` : nothing}
+        ${tr?.last ? html`<span class="rlast">${lastText(tr.last, !!tr.motionLight)}</span>` : nothing}
       </div>
       <div class="ractions">
         <button class="btn" data-action="rule-edit" @click=${() => o.onEdit(r.id)}>${t('rules.edit')}</button>

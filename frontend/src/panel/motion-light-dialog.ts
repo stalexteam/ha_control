@@ -1,6 +1,6 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import type { Device, Id, Rule } from '../model/types';
-import { RULE_DELAY_MAX, type RuleProblem } from '../model/rules';
+import { RULE_DELAY_MAX, buttonHasAuto, type RuleProblem } from '../model/rules';
 import { fieldValue } from './field-value';
 import type { RuleTrace } from '../live/rules-feed';
 import type { RuleDraft } from './rule-dialog';
@@ -69,6 +69,8 @@ export function renderMotionLightDialog(o: MotionLightDialogOpts): TemplateResul
           @input=${(e: Event) => onInput(num((e.target as HTMLInputElement).value))} /></label>
       ${note ? html`<span class="muted">${note}</span>` : nothing}
     </div>`;
+  // No way back to auto: no button with an Auto action and no "Auto again after".
+  const noAuto = c.autoAfter === 0 && !c.buttons.some(id => { const b = o.buttons.find(x => x.id === id); return !!b && buttonHasAuto(b); });
   const d = c.daylight;
   const known = !d || o.daylightSensors.some(x => x.id === d.sensor);
   return renderPurposeDialog({
@@ -106,7 +108,8 @@ export function renderMotionLightDialog(o: MotionLightDialogOpts): TemplateResul
 
       <label class="rlabel">${t('motionLight.buttons')}</label>
       ${chips(o, 'motionlight-buttons', 'motionlight-button', c.buttons, o.buttons.filter(x => x.id !== c.light), t('motionLight.addButton'), ids => set({ ...c, buttons: ids }))}
-      ${field('autoafter', t('motionLight.autoAfter'), c.autoAfter, 0, 1440, n => set({ ...c, autoAfter: n }), t('motionLight.autoAfterNote'))}`,
+      ${field('autoafter', t('motionLight.autoAfter'), c.autoAfter, 0, 1440, n => set({ ...c, autoAfter: n }), t('motionLight.autoAfterNote'))}
+      ${noAuto ? html`<p class="muted" data-note="motionlight-noauto">${t('motionLight.noAutoNote')}</p>` : nothing}`,
     diagram: renderMotionLightTrace({
       rule: r, deviceName: name,
       trace: o.trace, note: o.note, now: o.now, focused: o.draft.focused, onFocus: o.onFocus,

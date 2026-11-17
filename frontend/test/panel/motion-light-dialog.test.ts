@@ -211,4 +211,59 @@ describe('Light motion control form', () => {
     expect(el.shadowRoot!.querySelector('.rule-backdrop .rchip[data-id="d-motion"]')!.classList).toContain('hl');
     (el.shadowRoot!.activeElement as HTMLElement).blur(); // happy-dom keeps a stale focus across tests
   });
+  it('a note says when nothing returns the rule to auto: no Auto button and "Auto again after" 0; OK stays enabled', async () => {
+    const note = (el: PlanStudioPanel) => el.shadowRoot!.querySelector('.rule-backdrop [data-note="motionlight-noauto"]');
+    const text = 'Nothing returns this rule to auto: no button with an Auto action (or a wall switch with double toggle) and "Auto again after" is 0. After a manual switch it stays silent until the rule is changed.';
+    const el = await open([]);
+    await selectZone(el, null);
+    await pickAutomation(el, 'motionLight');
+    expect(note(el)!.textContent).toBe(text); // no buttons, 0
+    await set(el, '[data-field="motionlight-light"]', 'd-light', 'change');
+    await set(el, '[data-field="motionlight-sensors"]', 'd-motion', 'change');
+    await set(el, '[data-field="motionlight-buttons"]', 'd-button-ml', 'change'); // smart button without Auto
+    expect(note(el)!.textContent).toBe(text);
+    expect(okBtn(el).disabled).toBe(false);
+    await set(el, '[data-field="motionlight-autoafter"]', '10');
+    expect(note(el)).toBeNull();
+    await set(el, '[data-field="motionlight-autoafter"]', '0');
+    expect(note(el)).not.toBeNull();
+    await set(el, '[data-field="motionlight-buttons"]', 'd-switch-ml', 'change'); // still no Auto
+    expect(note(el)).not.toBeNull();
+  });
+
+  it('the note is absent with a button that has an Auto action', async () => {
+    const el = await open([], p => {
+      const b = p.levels[0].devices.find(d => d.id === 'd-button-ml')!;
+      if (b.props.kind === 'smart_button') b.props.autoEnabled = true;
+    });
+    await selectZone(el, null);
+    await pickAutomation(el, 'motionLight');
+    await set(el, '[data-field="motionlight-buttons"]', 'd-button-ml', 'change');
+    expect(el.shadowRoot!.querySelector('.rule-backdrop [data-note="motionlight-noauto"]')).toBeNull();
+  });
+
+  it('the rules list row words the mode changes plainly; a plain command still reads as before', async () => {
+    const base = SCENES.motionlight.rulesFrame!['rule-ml'];
+    const T = new Date(2026, 10, 17, 21, 46).getTime();
+    const rows: [Record<string, unknown>, RegExp][] = [
+      [{ action: 'auto', reason: 'button: auto', sent: false }, /^Ceiling light back to auto .*21.46.* \(button\)$/],
+      [{ action: 'auto', reason: 'auto again', sent: false }, /^Ceiling light back to auto .*21.46.* \(no motion\)$/],
+      [{ action: 'on', reason: 'button: manual' }, /^Ceiling light manual .*21.46.* \(button\)$/],
+      [{ action: 'off', reason: 'button: manual', sent: false }, /^Ceiling light manual .*21.46.* \(button\)$/],
+      [{ action: 'off', reason: 'switched elsewhere: manual', sent: false }, /^Ceiling light manual .*21.46.* \(switched off elsewhere\)$/],
+      [{ action: 'on', reason: 'found on', sent: false }, /^Ceiling light found on .*21.46/],
+      [{ action: 'on', reason: 'motion', sent: false }, /^Ceiling light already on .*21.46/],
+    ];
+    for (const [last, re] of rows) {
+      document.body.innerHTML = ''; localStorage.clear();
+      const plan: Plan = structuredClone(SCENES.motionlight.plans[0]);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { [plan.id]: plan } }));
+      const frame = { ...SCENES.motionlight.rulesFrame, 'rule-ml': { ...base, last: { target: 'Ceiling light', at: T, ...last } } } as never;
+      const el = await mount(createMockHass({ rulesFrame: frame }));
+      el.setMode('automation');
+      await vi.waitFor(() => expect(el.rulesFeed.ready).toBe(true));
+      await selectZone(el, 'r0');
+      expect(el.shadowRoot!.querySelector('.rrow[data-id="rule-ml"] .rlast')!.textContent).toMatch(re);
+    }
+  });
 });

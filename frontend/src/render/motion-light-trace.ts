@@ -1,6 +1,6 @@
 import { html, nothing, svg, type TemplateResult } from 'lit';
 import type { Id, Rule } from '../model/types';
-import type { RuleLast, RuleTrace } from '../live/rules-feed';
+import { motionModeLast, type RuleLast, type RuleTrace } from '../live/rules-feed';
 import { tone, word } from './rule-trace';
 import { FLOW_PAD as PAD, FLOW_VGAP as VGAP, PURPOSE_WIDTH, blockH, countdown, flowBlock } from './flow-block';
 import { lastLine } from './outside-trace';
@@ -37,13 +37,10 @@ const MW = MOTION_LIGHT_WIDTH - 2 * PAD, CX = MOTION_LIGHT_WIDTH / 2;
 const GAP = 12, PER_ROW = 3;
 
 /** The mode changes of this kind are worded as what they are; every other entry goes through the shared wording. */
-const MODE_LAST: Record<string, string> = {
-  'button: auto': 'lastAuto', 'auto again': 'lastAutoAgain', 'button: manual': 'lastManualButton',
-  'switched elsewhere: manual': 'lastManualElsewhere', 'found on': 'lastFound',
-};
+const MODE_LAST = { auto: 'lastAuto', autoAgain: 'lastAutoAgain', manualButton: 'lastManualButton', manualElsewhere: 'lastManualElsewhere', found: 'lastFound' };
 const motionLast = (l: RuleLast): string => {
-  const key = MODE_LAST[l.reason];
-  return key ? t(`motionLight.flow.${key}`).replace('{at}', clock(l.at)).replace('{s}', l.action) : lastLine(l);
+  const mode = motionModeLast(l);
+  return mode ? t(`motionLight.flow.${MODE_LAST[mode]}`).replace('{at}', clock(l.at)).replace('{s}', l.action) : lastLine(l);
 };
 
 const left = (until: number, now: number): string => countdown(Math.max(0, Math.ceil((until - now) / 1000)));

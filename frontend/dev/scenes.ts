@@ -578,7 +578,7 @@ function motionLightPlan(): Plan {
       props: { kind: 'motion_sensor', zoneAngle: 110, zoneRange: 3000 },
     },
     {
-      id: 'd-switch-ml', name: 'Switch hall', invalid: false, bindings: { state: 'switch.wallswitch_hall' },
+      id: 'd-switch-ml', name: 'Switch hall', invalid: false, bindings: { state: 'light.kitchen_ceiling' },
       placement: { mode: 'wall', wallId: 'w3', side: 'right', offset: 1500 },
       props: { kind: 'wall_switch', autoByDoubleToggle: false, windowSec: 3 },
     },

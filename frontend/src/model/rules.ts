@@ -359,12 +359,14 @@ export function motionLightTemplate(plan: { levels: Level[] }, zoneId: Id | null
   const members = level ? zoneMembers(level, zoneId as Id).filter(m => m.participates).map(m => m.device) : [];
   const lights = members.filter(d => (d.props.kind === 'ceiling_light' || d.props.kind === 'wall_light') && ruleActionsFor(d).includes('on') && ruleActionsFor(d).includes('off'));
   const lux = plan.levels.flatMap(l => l.devices).filter(d => d.props.kind === 'illuminance_sensor');
+  const light = lights.length === 1 ? lights[0] : undefined;
   rule.motionLight = {
-    light: lights.length === 1 ? lights[0].id : '',
+    light: light ? light.id : '',
     sensors: members.filter(d => d.props.kind === 'motion_sensor').map(d => d.id),
     ...(lux.length === 1 ? { daylight: { sensor: lux[0].id, is: MOTION_LIGHT_DEFAULTS.is } } : {}),
     minOn: MOTION_LIGHT_DEFAULTS.minOn,
-    buttons: members.filter(d => d.props.kind === 'smart_button' || d.props.kind === 'wall_switch').map(d => d.id),
+    // A wall switch over another relay would drive this light, so only one over the light's own entity is pre-filled.
+    buttons: members.filter(d => d.props.kind === 'smart_button' || (d.props.kind === 'wall_switch' && !!light?.bindings?.control && d.bindings?.state === light.bindings.control)).map(d => d.id),
     autoAfter: MOTION_LIGHT_DEFAULTS.autoAfter,
   };
   return rule;

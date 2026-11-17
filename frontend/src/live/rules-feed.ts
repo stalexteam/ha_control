@@ -52,6 +52,17 @@ export function keptOn(l: RuleLast): boolean {
   return l.sent === false && /^(kept|already) on by /.test(l.reason);
 }
 
+/** The mode changes of a light motion control rule by their exact `RuleLast.reason`; the row and the diagram word them from this one list. */
+export const MOTION_MODE_REASONS: Record<string, 'auto' | 'autoAgain' | 'manualButton' | 'manualElsewhere' | 'found'> = {
+  'button: auto': 'auto', 'auto again': 'autoAgain', 'button: manual': 'manualButton',
+  'switched elsewhere: manual': 'manualElsewhere', 'found on': 'found',
+};
+
+/** Which mode change an entry of a light motion control rule is (undefined = a plain command or other entry). */
+export function motionModeLast(l: RuleLast): 'auto' | 'autoAgain' | 'manualButton' | 'manualElsewhere' | 'found' | undefined {
+  return MOTION_MODE_REASONS[l.reason];
+}
+
 /**
  * An entry of someone else switching the device (`sent: false`): a timed switch run that ended
  * (`ended: switched elsewhere`) or an outside light rule that pauses (`switched elsewhere: paused 30 min`).

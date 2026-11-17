@@ -209,7 +209,8 @@ def _validate_motion_light(r: dict, m: object) -> None:
     for key, top, unit in (("minOn", 3600, "seconds"), ("autoAfter", 1440, "minutes")):
         if type(m[key]) is not int or not 0 <= m[key] <= top:
             raise vol.Invalid(f"rule motionLight {key} must be a whole number of {unit} 0..{top}")
-    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "outside" in r or "beurer" in r or "control" in r or r["combine"] != "any"             or r["onDelay"] != 0 or r["onTrue"] or r["onFalse"]:
+    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "outside" in r or "beurer" in r or "control" in r or r["combine"] != "any" \
+            or r["onDelay"] != 0 or r["onTrue"] or r["onFalse"]:
         raise vol.Invalid("rule motionLight needs no inputs, gate, other kinds or actions, combine any and onDelay 0")
 
 

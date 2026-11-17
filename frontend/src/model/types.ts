@@ -181,9 +181,9 @@ export interface Rule {
   outside?: { light: Id; sensor: Id; noDataNight?: true; afterSunset?: true; window?: { from: string; to: string }; pause: number };
   /** Beurer heater: a heating pad (heater) is kept on while a power source draws above `above` W, off `offDelay` s after it stops, re-powered every `every` min (0 = never) and kept at least `keep` min (0 = none); inputs/actions stay empty. */
   beurer?: { heater: Id; source: Id; above: number; keep: number; every: number };
-  /** Load control, the event twin of the condition rule: each source gives events (a button its intents, a condition input its on / off edges) and the event runs its action list; `gate` is "Act only when"; inputs/actions stay empty and there are no delays. */
   /** Light motion control: motion sensors switch one light (on / off after `offDelay` s without motion, at least `minOn` s on), optionally only while the daylight sensor reads night / dark; buttons set manual / auto, `autoAfter` min (0 = never) returns to auto; inputs/actions stay empty. */
   motionLight?: { light: Id; sensors: Id[]; daylight?: { sensor: Id; is: 'night' | 'dark' }; minOn: number; buttons: Id[]; autoAfter: number };
+  /** Load control, the event twin of the condition rule: each source gives events (a button its intents, a condition input its on / off edges) and the event runs its action list; `gate` is "Act only when"; inputs/actions stay empty and there are no delays. */
   control?: { sources: ControlSource[]; on: ControlAction[]; off: ControlAction[]; toggle: ControlAction[] };
 }
 
