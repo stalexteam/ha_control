@@ -173,6 +173,8 @@ export interface Rule {
   leak?: { sensors: Id[]; valves: Id[] };
   /** Timed switch: a button container starts a timed run of a device (invert: off for the duration, then on); inputs/actions stay empty. */
   timed?: { button: Id; device: Id; minutes: number; invert?: true };
+  /** Outside light: on at night (daylight sensor, optionally after sunset and inside a time window), paused `pause` min after a manual switch; inputs/actions stay empty. */
+  outside?: { light: Id; sensor: Id; noDataNight?: true; afterSunset?: true; window?: { from: string; to: string }; pause: number };
 }
 
 export const WALL_PRESETS: Record<WallType, number> = {

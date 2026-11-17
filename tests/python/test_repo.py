@@ -313,3 +313,40 @@ def test_boiler_validator_rejects_a_timed_key_on_its_own():
 
     with pytest.raises(vol.Invalid, match="rule boiler"):
         repo._validate_boiler({**boiler_rule(), "timed": {}}, boiler_rule()["boiler"])
+
+
+def outside_rule(rid="o1", outside=None, **kw):
+    r = rule(rid, inputs=[], onTrue=[], outside={"light": "l", "sensor": "s", "pause": 30} if outside is None else outside)
+    r.update(kw)
+    return r
+
+
+def test_validate_plan_outside_rule():
+    validate_plan({**plan("p"), "rules": [outside_rule()]})
+    full = {"light": "l", "sensor": "s", "noDataNight": True, "afterSunset": True, "window": {"from": "18:00", "to": "06:00"}, "pause": 1440}
+    validate_plan({**plan("p"), "rules": [outside_rule(outside=full)]})
+    validate_plan({**plan("p"), "rules": [outside_rule(outside={"light": "l", "sensor": "s", "pause": 0})]})
+    base = {"light": "l", "sensor": "s", "pause": 30}
+    bad = [
+        "x", [], {}, {"light": "l", "sensor": "s"}, {"sensor": "s", "pause": 5}, {**base, "x": 1},
+        {**base, "light": ""}, {**base, "sensor": 3}, {**base, "sensor": "l"},
+        {**base, "pause": -1}, {**base, "pause": 1441}, {**base, "pause": 1.5}, {**base, "pause": True}, {**base, "pause": "5"},
+        {**base, "noDataNight": False}, {**base, "afterSunset": 1},
+        {**base, "window": "x"}, {**base, "window": {"from": "18:00"}}, {**base, "window": {"from": "18:00", "to": "18:00"}},
+        {**base, "window": {"from": "24:00", "to": "06:00"}}, {**base, "window": {"from": "1:00", "to": "06:00"}},
+        {**base, "window": {"from": "18:00", "to": "06:00", "x": 1}},
+    ]
+    for b in bad:
+        with pytest.raises(vol.Invalid, match="rule outside"):
+            validate_plan({**plan("p"), "rules": [outside_rule(outside=b)]})
+    for kw in (
+        {"inputs": ref("x")}, {"combine": "all"}, {"onDelay": 5}, {"offDelay": 5}, {"gate": {"source": {"sun": True}}},
+        {"onTrue": [{"device": "d", "do": "on"}]}, {"onFalse": [{"device": "d", "do": "off"}]},
+        {"timed": {"button": "b", "device": "d", "minutes": 5}}, {"leak": {"sensors": ["s"], "valves": ["v"]}},
+    ):
+        with pytest.raises(vol.Invalid, match="rule (outside|timed|leak)"):
+            validate_plan({**plan("p"), "rules": [outside_rule(**kw)]})
+    # the other kinds reject an outside key too
+    for other in (vent_rule(), boiler_rule(), leak_rule(), timed_rule()):
+        with pytest.raises(vol.Invalid, match="rule (timed|vent|boiler|leak)"):
+            validate_plan({**plan("p"), "rules": [{**other, "outside": {"light": "l", "sensor": "s", "pause": 30}}]})

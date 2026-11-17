@@ -65,7 +65,7 @@ export function ruleCycle(rules: Rule[], candidate: Rule): Id[] | null {
   return null;
 }
 
-export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'daylight' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto' | 'leak' | 'timed';
+export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'daylight' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto' | 'leak' | 'timed' | 'outside';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
@@ -100,7 +100,8 @@ const delayOk = (n: unknown): boolean => Number.isInteger(n) && (n as number) >=
  * Auto action ('boiler-auto' otherwise; not checked for a missing device). `leakSensorExists` / `valveExists`
  * (optional) tell whether an id is a leak_sensor / valve device (leak rules); default = any existing device.
  * `timedButtonExists` / `timedDeviceExists` (optional) tell whether an id is a button container / a device taking 'on'
- * (timed rules); default = any existing device.
+ * (timed rules); default = any existing device. `outsideLightExists` (optional) tells whether an id is a device taking
+ * 'on' (outside light rules; the sensor is checked with `lightSensorExists`); default = any existing device.
  */
 export function ruleProblems(
   rules: Rule[], r: Rule, deviceExists: (id: Id) => boolean, actionsOf?: (id: Id) => RuleDo[] | undefined,
@@ -114,10 +115,11 @@ export function ruleProblems(
   valveExists?: (id: Id) => boolean,
   timedButtonExists?: (id: Id) => boolean,
   timedDeviceExists?: (id: Id) => boolean,
+  outsideLightExists?: (id: Id) => boolean,
 ): RuleProblem[] {
   const out: RuleProblem[] = [];
   if (!r.name.trim()) out.push('name');
-  if (r.inputs.length === 0 && !r.vent && !r.boiler && !r.leak && !r.timed) out.push('inputs');
+  if (r.inputs.length === 0 && !r.vent && !r.boiler && !r.leak && !r.timed && !r.outside) out.push('inputs');
   const all = [...r.inputs, ...(r.gate ? [r.gate] : [])];
   const devices = [...all.flatMap(inputDevices), ...r.onTrue.map(a => a.device), ...r.onFalse.map(a => a.device)];
   const lights = all.flatMap(i => ('light' in i.source ? [i.source.light] : 'daylight' in i.source ? [i.source.daylight] : []));
@@ -126,7 +128,8 @@ export function ruleProblems(
     || (r.boiler && (!(boilerDeviceExists ?? deviceExists)(r.boiler.device) || !(buttonExists ?? deviceExists)(r.boiler.button)
       || (r.boiler.grid && gridBlockExists && !gridBlockExists(r.boiler.grid.block))))
     || (r.leak && (r.leak.sensors.some(id => !(leakSensorExists ?? deviceExists)(id)) || r.leak.valves.some(id => !(valveExists ?? deviceExists)(id))))
-    || (r.timed && (!(timedButtonExists ?? deviceExists)(r.timed.button) || !(timedDeviceExists ?? deviceExists)(r.timed.device)))) out.push('device-missing');
+    || (r.timed && (!(timedButtonExists ?? deviceExists)(r.timed.button) || !(timedDeviceExists ?? deviceExists)(r.timed.device)))
+    || (r.outside && (!(outsideLightExists ?? deviceExists)(r.outside.light) || !(lightSensorExists ?? deviceExists)(r.outside.sensor)))) out.push('device-missing');
   const known = new Set(rules.map(x => x.id));
   if (ruleRefs(r).some(id => id !== r.id && !known.has(id))) out.push('rule-missing');
   if (ruleCycle(rules, r)) out.push('cycle');
@@ -139,6 +142,7 @@ export function ruleProblems(
   if (r.boiler && boilerProblem(r, r.boiler)) out.push('boiler');
   if (r.leak && leakProblem(r, r.leak)) out.push('leak');
   if (r.timed && timedProblem(r, r.timed)) out.push('timed');
+  if (r.outside && outsideProblem(r, r.outside)) out.push('outside');
   if (r.boiler?.button && buttonAutoOk && !out.includes('device-missing') && !buttonAutoOk(r.boiler.button)) out.push('boiler-auto');
   if (actionsOf && [...r.onTrue, ...r.onFalse].some(a => { const ok = actionsOf(a.device); return ok !== undefined && !ok.includes(a.do); })) out.push('action');
   return out;
@@ -146,7 +150,7 @@ export function ruleProblems(
 
 /** A vent rule's fixed shape and data bounds; true = violated. */
 function ventProblem(r: Rule, v: NonNullable<Rule['vent']>): boolean {
-  if (r.inputs.length > 0 || r.gate || r.leak || r.timed || r.combine !== 'any' || r.onDelay !== 0) return true;
+  if (r.inputs.length > 0 || r.gate || r.leak || r.timed || r.outside || r.combine !== 'any' || r.onDelay !== 0) return true;
   if (!v.sensor || !v.than || v.sensor === v.than) return true;
   if (!isNum(v.above) || !isNum(v.below) || v.above <= 0 || v.below < 0 || v.below > v.above) return true;
   const [on, off] = [r.onTrue[0], r.onFalse[0]];
@@ -155,7 +159,7 @@ function ventProblem(r: Rule, v: NonNullable<Rule['vent']>): boolean {
 
 /** A leak rule's fixed shape and data bounds; true = violated. */
 function leakProblem(r: Rule, l: NonNullable<Rule['leak']>): boolean {
-  if (r.vent || r.boiler || r.timed || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.vent || r.boiler || r.timed || r.outside || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
   const list = (ids: unknown): boolean => Array.isArray(ids) && ids.length >= 1 && ids.every(id => typeof id === 'string' && id !== '') && new Set(ids).size === ids.length;
   return !list(l.sensors) || !list(l.valves);
@@ -177,7 +181,7 @@ export const TIMED_DEFAULT_MINUTES = 15;
 
 /** A timed switch rule's fixed shape and data bounds; true = violated. */
 function timedProblem(r: Rule, t: NonNullable<Rule['timed']>): boolean {
-  if (r.vent || r.boiler || r.leak || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.vent || r.boiler || r.leak || r.outside || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
   if (!t.button || !t.device || t.button === t.device) return true;
   if (!Number.isInteger(t.minutes) || t.minutes < 1 || t.minutes > 1440) return true;
@@ -185,6 +189,35 @@ function timedProblem(r: Rule, t: NonNullable<Rule['timed']>): boolean {
 }
 
 export const isTimedRule = (r: Rule): boolean => r.timed !== undefined;
+
+export const OUTSIDE_DEFAULT_PAUSE = 30;
+
+/** An outside light rule's fixed shape and data bounds; true = violated. */
+function outsideProblem(r: Rule, o: NonNullable<Rule['outside']>): boolean {
+  if (r.vent || r.boiler || r.leak || r.timed || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
+  if (!o.light || !o.sensor || o.light === o.sensor) return true;
+  if (o.noDataNight !== undefined && o.noDataNight !== true) return true;
+  if (o.afterSunset !== undefined && o.afterSunset !== true) return true;
+  if (!Number.isInteger(o.pause) || o.pause < 0 || o.pause > 1440) return true;
+  if (o.window === undefined) return false;
+  const { from, to } = o.window;
+  return !(typeof from === 'string' && typeof to === 'string' && TIME_RE.test(from) && TIME_RE.test(to) && from !== to);
+}
+
+export const isOutsideRule = (r: Rule): boolean => r.outside !== undefined;
+
+/** The "Outside light" template: the zone's single participating on/off light and the plan's single illuminance sensor (else empty), pause 30. */
+export function outsideTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
+  const rule = newRule(zoneId);
+  rule.name = zoneId !== null && zoneName ? `Outside light ${zoneName}` : 'Outside light';
+  const level = zoneId === null ? undefined : plan.levels.find(l => l.zones.some(z => z.id === zoneId));
+  const members = level ? zoneMembers(level, zoneId as Id).filter(m => m.participates).map(m => m.device) : [];
+  const lights = members.filter(d => (d.props.kind === 'ceiling_light' || d.props.kind === 'wall_light') && ruleActionsFor(d).includes('on'));
+  const sensors = plan.levels.flatMap(l => l.devices).filter(d => d.props.kind === 'illuminance_sensor');
+  rule.outside = { light: lights.length === 1 ? lights[0].id : '', sensor: sensors.length === 1 ? sensors[0].id : '', noDataNight: true, afterSunset: true, pause: OUTSIDE_DEFAULT_PAUSE };
+  return rule;
+}
 
 /** The "Timed switch" template: the zone's single button container and single on/off device (else empty), 15 min. */
 export function timedTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
@@ -200,7 +233,7 @@ export function timedTemplate(plan: { levels: Level[] }, zoneId: Id | null, zone
 
 /** A boiler rule's fixed shape and data bounds; true = violated. */
 function boilerProblem(r: Rule, b: NonNullable<Rule['boiler']>): boolean {
-  if (r.vent || r.leak || r.timed || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.vent || r.leak || r.timed || r.outside || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
   if (!b.device || !b.button || b.device === b.button) return true;
   if (b.grid === undefined) return false;

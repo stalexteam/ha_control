@@ -448,6 +448,7 @@ export class PlanStudioPanel extends LitElement {
       id => devices.some(x => x.id === id && x.props.kind === 'leak_sensor'),
       id => devices.some(x => x.id === id && x.props.kind === 'valve'),
       id => devices.some(x => x.id === id && (x.props.kind === 'wall_switch' || x.props.kind === 'smart_button')),
+      id => devices.some(x => x.id === id && ruleActionsFor(x).includes('on')),
       id => devices.some(x => x.id === id && ruleActionsFor(x).includes('on')));
     if (isBoilerRule(rule)) {
       return renderBoilerDialog({

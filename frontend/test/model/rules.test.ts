@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isTimedRule, timedTemplate, isRuleInputDevice, leakProtectionTemplate, newRule, outsideLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
+  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isTimedRule, timedTemplate, isRuleInputDevice, leakProtectionTemplate, newRule, outsideLightTemplate, isOutsideRule, outsideTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
   rulesFor, ruleUsers, updateRule,
 } from '../../src/model/rules';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Rule, type Zone } from '../../src/model/types';
@@ -129,6 +129,60 @@ describe('rules model', () => {
     it('an old condition rule from the former template stays valid', () => {
       const old = rule('o', { inputs: [{ source: { device: 'd' } }], onTrue: [{ device: 'v', do: 'close' }] });
       expect(ruleProblems([old], old, exists)).toEqual([]);
+    });
+  });
+
+  describe('outside light', () => {
+    const zone: Zone = {
+      id: 'z1', name: 'Yard', invalid: false,
+      shape: { kind: 'polygon', vertices: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
+    };
+    const lvl = (devices: Device[]) => ({ levels: [{ ...emptyLevel('L'), zones: [zone], devices }] });
+    const outside = (over: Partial<Rule> = {}, o: Partial<NonNullable<Rule['outside']>> = {}): Rule => ({
+      ...newRule(null), id: 'o', name: 'O', inputs: [], outside: { light: 'l', sensor: 's', pause: 30, ...o }, ...over,
+    });
+    const probs = (r: Rule, ...p: (((id: string) => boolean) | undefined)[]) => ruleProblems([r], r, exists, undefined, ...p);
+
+    it('template: the zone single light and the plan single illuminance sensor, pause 30', () => {
+      const r = outsideTemplate(lvl([dev('l', 'ceiling_light', 100, 100), dev('s', 'illuminance_sensor', 5000, 5000), dev('m', 'motion_sensor', 300, 300)]), 'z1', 'Yard');
+      expect(r.name).toBe('Outside light Yard');
+      expect(r.outside).toEqual({ light: 'l', sensor: 's', noDataNight: true, afterSunset: true, pause: 30 });
+      expect(r).toMatchObject({ zoneId: 'z1', inputs: [], onTrue: [], onFalse: [] });
+      expect(isOutsideRule(r)).toBe(true);
+      expect(isOutsideRule(rule('a'))).toBe(false);
+    });
+    it('template leaves ambiguous or missing picks empty', () => {
+      const r = outsideTemplate(lvl([dev('l', 'ceiling_light', 100, 100), dev('w', 'wall_light', 200, 200), dev('s', 'illuminance_sensor', 5000, 5000), dev('s2', 'illuminance_sensor', 6000, 6000)]), 'z1', 'Yard');
+      expect(r.outside).toMatchObject({ light: '', sensor: '', pause: 30 });
+      const g = outsideTemplate(lvl([dev('l', 'ceiling_light', 100, 100)]), null, null);
+      expect(g.name).toBe('Outside light');
+      expect(g.outside).toMatchObject({ light: '', sensor: '' });
+    });
+    it('valid rule and bounds', () => {
+      expect(probs(outside())).toEqual([]);
+      expect(probs(outside({}, { pause: 0 }))).toEqual([]);
+      expect(probs(outside({}, { pause: 1440, noDataNight: true, afterSunset: true, window: { from: '18:00', to: '06:00' } }))).toEqual([]);
+    });
+    it('shape and bounds', () => {
+      for (const o of [{ pause: -1 }, { pause: 1441 }, { pause: 1.5 }, { pause: NaN }, { light: '' }, { sensor: '' }, { sensor: 'l' },
+        { noDataNight: false as unknown as true }, { afterSunset: false as unknown as true },
+        { window: { from: '18:00', to: '18:00' } }, { window: { from: '24:00', to: '06:00' } }, { window: { from: '1:00', to: '06:00' } }])
+        expect(probs(outside({}, o)), JSON.stringify(o)).toEqual(['outside']);
+      for (const o of [{ inputs: [{ source: { device: 'x' } }] }, { combine: 'all' as const }, { onDelay: 1 }, { offDelay: 1 },
+        { gate: { source: { sun: true as const } } }, { onTrue: [{ device: 'f', do: 'on' as const }] }, { onFalse: [{ device: 'f', do: 'off' as const }] },
+        { vent: { sensor: 'a', than: 'b', above: 9, below: 5 } }, { boiler: { device: 'd', button: 'b' } }, { leak: { sensors: ['s'], valves: ['v'] } },
+        { timed: { button: 'b', device: 'd', minutes: 5 } }])
+        expect(probs(outside(o)), JSON.stringify(o)).toContain('outside');
+    });
+    it('a light or sensor that is not one, or is missing, is device-missing', () => {
+      expect(probs(outside(), id => id !== 's')).toEqual(['device-missing']);
+      expect(probs(outside(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, id => id !== 'l')).toEqual(['device-missing']);
+      expect(ruleProblems([outside()], outside(), id => id !== 'l')).toEqual(['device-missing']);
+    });
+    it('other kinds reject an outside key', () => {
+      const o = { light: 'l', sensor: 's', pause: 5 };
+      expect(ruleProblems([], { ...leakRule(), outside: o }, exists)).toContain('leak');
+      expect(ruleProblems([], { ...newRule(null), id: 't', name: 'T', inputs: [], timed: { button: 'b', device: 'd', minutes: 5 }, outside: o }, exists)).toContain('timed');
     });
   });
 
