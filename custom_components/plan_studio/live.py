@@ -1,6 +1,6 @@
 """Runs the container runtime and the power hub inside Home Assistant: state lookup, state tracking and clock.
 
-Only the transfer positions are persisted."""
+The transfer positions, the boiler modes and the running timed switches are persisted."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import BOILER_STORAGE_KEY, POWER_STORAGE_KEY, RUNTIME_STORAGE_KEY
+from .const import BOILER_STORAGE_KEY, POWER_STORAGE_KEY, RUNTIME_STORAGE_KEY, TIMED_STORAGE_KEY
 from .power import PowerHub
 from .rules import RuleEngine
 from .runtime import Runtime
@@ -55,6 +55,8 @@ class LiveRuntime:
         self._power_store: Store = Store(hass, 1, POWER_STORAGE_KEY)
         self._boiler_store: Store = Store(hass, 1, BOILER_STORAGE_KEY)
         self._modes: dict | None = None  # stored boiler modes, handed to the first engine load only
+        self._timed_store: Store = Store(hass, 1, TIMED_STORAGE_KEY)
+        self._runs: dict | None = None  # stored timed runs, handed to the first engine load only
         self._engine_start: CALLBACK_TYPE | None = None  # waits for HA to start after a boot load
         # rule actions fired before HA has started (a sensor known at boot), sent in order once it has
         self._deferred: list[tuple[str, str, str, Callable[..., None], Callable[[], bool]]] = []
@@ -73,11 +75,14 @@ class LiveRuntime:
         self.runtime.add_listener(self._on_container)
         stored = await self._boiler_store.async_load()
         self._modes = stored if isinstance(stored, dict) else {}
+        runs = await self._timed_store.async_load()
+        self._runs = runs if isinstance(runs, dict) else {}
         self.engine = RuleEngine(
             self._lookup, time.time, self._call, self._schedule,
             local=lambda ts: dt_util.as_local(dt_util.utc_from_timestamp(ts)),  # the real zone: DST-safe
             changed_at=self._changed_at,
             on_modes=self._save_modes,
+            on_runs=self._save_runs,
         )
         self.reload()
 
@@ -89,8 +94,9 @@ class LiveRuntime:
         boot = not self._loaded and self._hass.state is not CoreState.running
         self._loaded = True
         modes, self._modes = self._modes, None
-        self.engine.load_plans(plans, boot=boot, modes=modes)
-        if boot and self._engine_start is None:  # a restored auto waits for HA to have started
+        runs, self._runs = self._runs, None
+        self.engine.load_plans(plans, boot=boot, modes=modes, runs=runs)
+        if boot and self._engine_start is None:  # a restored auto or timed run waits for HA to have started
             self._engine_start = async_at_started(self._hass, self._engine_started)
         self.retrack()
 
@@ -102,18 +108,24 @@ class LiveRuntime:
 
     @callback
     def _on_container(self, plan_id: str, device_id: str, event: dict) -> None:
-        """Container intents (not status changes) are the boiler buttons' input."""
+        """Container intents (not status changes) are the boiler and timed switch buttons' input."""
         if "action" in event and not self._stopped:
             try:
                 self.engine.on_intent(plan_id, device_id, event)
             except Exception:  # noqa: BLE001 - the runtime drops a listener that raises: a bug must not kill the buttons
-                _LOGGER.exception("boiler intent failed")
+                _LOGGER.exception("rule intent failed")
 
     @callback
     def _save_modes(self, modes: dict) -> None:
         if self._stopped:  # stop reloads no plans: that report must not wipe the store
             return
         self._boiler_store.async_delay_save(lambda: modes, 1)
+
+    @callback
+    def _save_runs(self, runs: dict) -> None:
+        if self._stopped:  # stop reloads no plans: that report must not wipe the store
+            return
+        self._timed_store.async_delay_save(lambda: runs, 1)
 
     @callback
     def retrack(self) -> None:
@@ -140,7 +152,11 @@ class LiveRuntime:
             await self._boiler_store.async_save(self.engine.modes())
         except Exception:  # noqa: BLE001 - stopping must go on
             _LOGGER.warning("could not save the boiler modes", exc_info=True)
-        self.engine.load_plans([])  # cancels every rule timer
+        try:  # likewise the running timed switches, restored on the next start
+            await self._timed_store.async_save(self.engine.runs())
+        except Exception:  # noqa: BLE001 - stopping must go on
+            _LOGGER.warning("could not save the timed runs", exc_info=True)
+        self.engine.load_plans([], unload=True)  # cancels every rule timer; running timed devices are left as they are
 
     @callback
     def _save_positions(self) -> None:

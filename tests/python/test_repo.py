@@ -298,3 +298,10 @@ def test_validate_plan_timed_rule():
     for other in (vent_rule(), boiler_rule(), leak_rule()):
         with pytest.raises(vol.Invalid, match="rule (timed|vent|boiler|leak)"):
             validate_plan({**plan("p"), "rules": [{**other, "timed": {"button": "b", "device": "d", "minutes": 5}}]})
+
+
+def test_boiler_validator_rejects_a_timed_key_on_its_own():
+    import repo
+
+    with pytest.raises(vol.Invalid, match="rule boiler"):
+        repo._validate_boiler({**boiler_rule(), "timed": {}}, boiler_rule()["boiler"])

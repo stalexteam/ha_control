@@ -12,3 +12,5 @@ RUNTIME_STORAGE_KEY = "plan_studio.runtime"
 POWER_STORAGE_KEY = "plan_studio.power"
 # Boiler rule modes: {plan_id: {rule_id: "auto" | "manual"}}, version 1.
 BOILER_STORAGE_KEY = "plan_studio.boiler"
+# Running timed switches: {plan_id: {rule_id: until epoch seconds}}, version 1.
+TIMED_STORAGE_KEY = "plan_studio.timed"

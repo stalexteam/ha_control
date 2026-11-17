@@ -6,6 +6,7 @@ import importlib
 import importlib.util
 import math
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -863,7 +864,7 @@ def test_boiler_stop_flushes_the_current_modes(env):
         live = await _bstart(env, hass, _boiler_plan(), stored={"p1": {"r1": "auto"}})
         live.engine.on_intent("p1", "btn", {"action": "toggle"})  # manual, save still pending
         await live.async_stop()
-        assert FakeStore.flushed == [(BOILER_KEY, {"p1": {"r1": "manual"}})]
+        assert [f for f in FakeStore.flushed if f[0] == BOILER_KEY] == [(BOILER_KEY, {"p1": {"r1": "manual"}})]
 
     asyncio.run(go())
 
@@ -894,5 +895,152 @@ def test_boiler_intent_reaches_the_engine_before_the_state_change(env):
         _boiler_event(env, hass, "switch.relay", "on", old="off")  # double toggle -> auto
         _boiler_event(env, hass, "switch.relay", "off", old="on")  # within the window again -> auto (repeated)
         assert [s[1]["p1"]["r1"] for s in _bsaves()] == ["manual", "auto"]
+
+    asyncio.run(go())
+
+
+# --- timed switch rule ----------------------------------------------------------
+
+TIMED_KEY = "plan_studio.timed"
+
+
+def _timed_plan(button_kind="smart_button"):
+    def dev(i, kind, bindings, props=None):
+        return {"id": i, "name": i, "props": {"kind": kind, **(props or {})}, "bindings": bindings}
+
+    button = (
+        dev("btn", "wall_switch", {"state": "switch.relay"})
+        if button_kind == "wall_switch"
+        else dev("btn", "smart_button", {"on": "sensor.act"})
+    )
+    return {
+        "id": "p1",
+        "levels": [{"devices": [dev("v", "socket", {"control": "switch.relay"}), button]}],
+        "rules": [
+            {
+                "id": "r1", "name": "Vent", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+                "inputs": [], "onTrue": [], "onFalse": [],
+                "timed": {"button": "btn", "device": "v", "minutes": 15},
+            }
+        ],
+    }
+
+
+async def _tstart(env, hass, plan, stored=None, relay="off"):
+    if stored is not None:
+        FakeStore.contents[TIMED_KEY] = stored
+    hass.services.known |= {("switch", "turn_on"), ("switch", "turn_off")}
+    hass.states.d.update({"switch.relay": relay, "sensor.act": ""})
+    live = env.live.LiveRuntime(hass, FakePlans([plan]))
+    await live.async_start()
+    return live
+
+
+def _tsaves():
+    return [s for s in FakeStore.saved if s[0] == TIMED_KEY]
+
+
+def _tcalls(hass):
+    return [c[1] for c in hass.services.calls]
+
+
+def test_timed_runs_load_before_the_first_load_and_save_on_change(env):
+    async def go():
+        hass = FakeHass()
+        until = time.time() + 600
+        live = await _tstart(env, hass, _timed_plan(), stored={"p1": {"r1": until}}, relay="on")
+        assert live.engine.runs() == {"p1": {"r1": until}}
+        assert _tsaves() == []  # same as stored: nothing to save
+        assert [e for e in env.later if e["on"]]  # re-armed at once: HA already runs
+        live.engine.on_intent("p1", "btn", {"action": "set", "value": "off"})  # stop
+        await asyncio.gather(*hass.tasks)
+        assert _tsaves()[-1] == (TIMED_KEY, {}) and _tcalls(hass) == ["turn_off"]
+
+    asyncio.run(go())
+
+
+def test_timed_button_intent_starts_a_run_and_saves_it(env):
+    async def go():
+        hass = FakeHass()
+        live = await _tstart(env, hass, _timed_plan())
+        _boiler_event(env, hass, "sensor.act", "single")  # toggle = start
+        await asyncio.gather(*hass.tasks)
+        assert _tcalls(hass) == ["turn_on"]
+        assert list(_tsaves()[-1][1]["p1"]) == ["r1"] and live.engine.snapshot("p1")["r1"]["verdict"] is True
+
+    asyncio.run(go())
+
+
+def test_timed_stop_flushes_the_runs_ignores_later_reports_and_keeps_the_device(env):
+    async def go():
+        hass = FakeHass()
+        live = await _tstart(env, hass, _timed_plan())
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})
+        await asyncio.gather(*hass.tasks)
+        runs = live.engine.runs()
+        n = len(_tsaves())
+        await live.async_stop()
+        await asyncio.gather(*hass.tasks)
+        assert (TIMED_KEY, runs) in FakeStore.flushed and FakeStore.contents[TIMED_KEY] == runs
+        assert len(_tsaves()) == n  # the stop's own load is not saved
+        assert _tcalls(hass) == ["turn_on"]  # no final command at stop
+        assert not [e for e in env.later if e["on"]]
+
+    asyncio.run(go())
+
+
+def test_timed_entry_reload_restores_the_run(env):
+    async def go():
+        hass = FakeHass()
+        live = await _tstart(env, hass, _timed_plan())
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})
+        await live.async_stop()
+        live2 = env.live.LiveRuntime(hass, FakePlans([_timed_plan()]))
+        await live2.async_start()
+        assert live2.engine.runs() == FakeStore.contents[TIMED_KEY] and live2.engine.runs()
+
+    asyncio.run(go())
+
+
+def test_timed_restored_expired_run_ends_only_after_ha_started(env):
+    async def go():
+        hass = FakeHass()
+        hass.state = CoreState.not_running
+        live = await _tstart(env, hass, _timed_plan(), stored={"p1": {"r1": 1.0}}, relay="on")
+        assert live.engine.snapshot("p1")["r1"]["verdict"] is True and hass.services.calls == []
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        assert _tcalls(hass) == ["turn_off"] and live.engine.runs() == {}
+        assert _tsaves()[-1] == (TIMED_KEY, {})
+
+    asyncio.run(go())
+
+
+def test_timed_restored_live_run_rearms_after_ha_started(env):
+    async def go():
+        hass = FakeHass()
+        hass.state = CoreState.not_running
+        await _tstart(env, hass, _timed_plan(), stored={"p1": {"r1": time.time() + 300}}, relay="on")
+        assert not [e for e in env.later if e["on"]]
+        _fire_started(env, hass)
+        timers = [e for e in env.later if e["on"]]
+        assert len(timers) == 1 and 290 < timers[0]["delay"] <= 300 and hass.services.calls == []
+
+    asyncio.run(go())
+
+
+def test_timed_relay_as_the_button_switched_on_by_hand_runs_without_a_command(env):
+    """Spec 8: the intent reaches the engine before the device change of the same event."""
+    async def go():
+        hass = FakeHass()
+        live = await _tstart(env, hass, _timed_plan("wall_switch"))
+        _boiler_event(env, hass, "switch.relay", "on", old="off")  # the person switches the light on
+        await asyncio.gather(*hass.tasks)
+        trace = live.engine.snapshot("p1")["r1"]
+        assert hass.services.calls == [] and trace["timed"]["running"] is True
+        _boiler_event(env, hass, "switch.relay", "off", old="on")  # switched off by hand: a stop, already off
+        await asyncio.gather(*hass.tasks)
+        trace = live.engine.snapshot("p1")["r1"]
+        assert hass.services.calls == [] and trace["timed"]["running"] is False and "last" not in trace
 
     asyncio.run(go())

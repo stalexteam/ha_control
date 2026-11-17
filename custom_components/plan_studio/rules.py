@@ -11,8 +11,10 @@ from typing import Callable
 
 try:
     from .boiler import MODES, Boiler
+    from .timed import Timed
 except ImportError:  # pytest: module dir on sys.path
     from boiler import MODES, Boiler
+    from timed import Timed
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -381,6 +383,14 @@ class _Rule:
         self.vent = isinstance(vent, dict)
         boiler = raw.get("boiler")
         self.boiler = Boiler(boiler, devices, blocks or {}) if isinstance(boiler, dict) else None
+        timed = raw.get("timed")
+        self.timed: Timed | None = None
+        self.timed_actions: dict[str, _Action] = {}  # timed: the device's "on" and "off" actions
+        if isinstance(timed, dict):
+            did = timed.get("device") if isinstance(timed.get("device"), str) else ""
+            self.timed_actions = {do: _Action({"device": did, "do": do}, devices) for do in ("on", "off")}
+            call = self.timed_actions["on"].call
+            self.timed = Timed(timed, devices, call[2] if call is not None else None)
         leak = raw.get("leak")
         sensors = [x for x in leak.get("sensors") or [] if isinstance(x, str)] if isinstance(leak, dict) else []
         valves = [x for x in leak.get("valves") or [] if isinstance(x, str)] if isinstance(leak, dict) else []
@@ -418,7 +428,7 @@ class _Rule:
         self.failed: str | None = None  # "service failed" / "target unavailable" for the last firing
         self.entries: list[dict] = []  # the trace entries of the last firing
         self.sent: list[_Sent] = []  # its actions with a target, while that firing is the latest one
-        self.open = False  # the gate (always open without one) as of the last evaluation
+        self.open = self.timed is not None  # the gate (always open without one) as of the last evaluation
         # derived on every evaluation
         self.raw: bool | None = None
         self.trace_inputs: list[dict] = []
@@ -438,12 +448,14 @@ class _Rule:
             self.pending = None
 
     def stop(self) -> None:
-        """Cancel every timer: the debounce, the time / held inputs and the boiler's."""
+        """Cancel every timer: the debounce, the time / held inputs, the boiler's and the timed run's."""
         self.cancel()
         for i in self.all_inputs:
             i.stop()
         if self.boiler is not None:
             self.boiler.stop()
+        if self.timed is not None:
+            self.timed.stop()
 
     def actions(self) -> "list[_Action]":
         """The actions of the current verdict."""
@@ -458,13 +470,17 @@ class _Rule:
                 found.add("rule missing" if i.rule is not None else "device missing")
         if any(a.call is None for a in self.on_true + self.on_false):
             found.add("target missing")
-        if self.boiler is not None and self.boiler.missing:
+        if (self.boiler is not None and self.boiler.missing) or (self.timed is not None and self.timed.missing):
             found.add("device missing")
         return next((r for r in STATIC_REASONS if r in found), None)
 
 
 def _delay(v: object) -> int:
     return v if type(v) is int and v > 0 else 0
+
+
+def _epoch(v: object) -> bool:
+    return type(v) in (int, float) and math.isfinite(v)
 
 
 class RuleEngine:
@@ -478,6 +494,7 @@ class RuleEngine:
         local: "Callable[[float], datetime]" = lambda t: datetime.fromtimestamp(t, timezone.utc),
         changed_at: "Callable[[str], float | None]" = lambda eid: None,
         on_modes: "Callable[[dict[str, dict[str, str]]], None]" = lambda modes: None,
+        on_runs: "Callable[[dict[str, dict[str, float]]], None]" = lambda runs: None,
     ) -> None:
         self._lookup = lookup
         self._now = now  # epoch seconds
@@ -495,27 +512,39 @@ class RuleEngine:
         self._subs: dict[str, list[Callback]] = {}
         self._on_modes = on_modes  # the boiler modes {plan id: {rule id: mode}} after any of them changed
         self._modes: dict[str, dict[str, str]] = {}  # the modes last reported (or loaded)
+        self._on_runs = on_runs  # the timed runs {plan id: {rule id: until epoch s}} after any of them changed
+        self._runs: dict[str, dict[str, float]] = {}  # the runs last reported (or loaded)
         self._booting = False  # a boot load happened and started() has not come yet: boiler auto waits
 
     # --- loading -------------------------------------------------------------
 
     def load_plans(
-        self, plans: "list[dict]", *, boot: "bool | None" = None, modes: "dict | None" = None
+        self, plans: "list[dict]", *, boot: "bool | None" = None, modes: "dict | None" = None,
+        runs: "dict | None" = None, unload: bool = False,
     ) -> None:
         """boot: True when this load is the HA start; None keeps "the first call is the start".
-        modes: the stored boiler modes {plan id: {rule id: 'auto' | 'manual'}}, used for boiler rules not loaded yet."""
+        modes: the stored boiler modes {plan id: {rule id: 'auto' | 'manual'}}, used for boiler rules not loaded yet.
+        runs: the stored timed runs {plan id: {rule id: until epoch s}}, restored for timed rules not loaded yet.
+        unload: the integration stops; timed runs that go away keep their device (they are restored on the next start)."""
         old = self._rules
         if modes is not None:
             self._modes = {
                 pid: {rid: m for rid, m in ms.items() if m in MODES}
                 for pid, ms in modes.items() if isinstance(ms, dict)
             } if isinstance(modes, dict) else {}
+        if runs is not None:
+            kept = {
+                pid: {rid: float(u) for rid, u in rs.items() if _epoch(u)}
+                for pid, rs in runs.items() if isinstance(rs, dict)
+            } if isinstance(runs, dict) else {}
+            self._runs = {pid: rs for pid, rs in kept.items() if rs}
         first, self._started = not self._started, True
         if boot is None:
             boot = first
         if boot:
             self._booting = True
         stopped: list[_Rule] = []  # boiler rules disabled while auto whose last command was on
+        ended: list[_Rule] = []  # timed rules disabled while running
         rules: dict[Key, _Rule] = {}
         for plan in plans:
             pid = plan.get("id") if isinstance(plan, dict) else None
@@ -546,11 +575,14 @@ class RuleEngine:
                         i.boot = boot
                 if rule.boiler is not None and self._load_boiler(rule, prev, modes):
                     stopped.append(rule)
+                if rule.timed is not None and self._load_timed(rule, prev, runs):
+                    ended.append(rule)
                 rules[rule.key] = rule
         for key, prev in old.items():
             if key not in rules:
                 prev.stop()
         released = self._released_relays(old, rules)
+        finished = [] if unload else self._released_runs(old, rules)
         self._rules = rules
         self._link()
         for rule in rules.values():
@@ -562,11 +594,16 @@ class RuleEngine:
             self._boiler_send(rule, rule.boiler.command("off", self._now()), "rule disabled")
         for relay in released:
             self._release(relay)
+        for rule in ended:
+            self._timed_send(rule, rule.timed.final, "rule disabled")
+        for t in finished:
+            self._finish(t)
         self._settle(set(rules))
         self._published = {key: self._trace(r) for key, r in rules.items()}
         for pid in list(self._subs):
             self._notify(pid, True, self.snapshot(pid))
         self._report_modes()
+        self._report_runs()
 
     def _released_relays(self, old: "dict[Key, _Rule]", rules: "dict[Key, _Rule]") -> "list[str]":
         """Relays of boiler rules that were auto and lose their state in this load (rule deleted, no longer a boiler,
@@ -615,6 +652,56 @@ class RuleEngine:
             b.enter_auto(self._now(), b.seen)  # evaluated once the boot phase is over (started())
         return False
 
+    def _load_timed(self, rule: _Rule, prev: "_Rule | None", runs: "dict | None") -> bool:
+        """Keep the run of the same timed switch (button, device and invert unchanged); a timed rule not loaded yet
+        takes its stored run. True when the rule was disabled while running: its final command is sent."""
+        t = rule.timed
+        assert t is not None
+        old = prev.timed if prev is not None else None
+        if old is not None and old.ident == t.ident:
+            old.stop()
+            t.take(old)
+            rule.last, rule.failed = prev.last, prev.failed
+            rule.seq, rule.entries, rule.sent = prev.seq, prev.entries, prev.sent
+            if prev.enabled and not rule.enabled and t.running:
+                t.until, t.restored = None, False
+                return True
+            return False
+        t.seen = t.state(self._lookup)
+        stored = self._runs.get(rule.key[0], {}).get(rule.key[1]) if prev is None and runs is not None else None
+        if stored is not None and rule.enabled and not t.missing:
+            t.restore(stored, t.seen)  # evaluated once the boot phase is over (started())
+        return False
+
+    def _released_runs(self, old: "dict[Key, _Rule]", rules: "dict[Key, _Rule]") -> "list[Timed]":
+        """Running timed switches that lose their run in this load (rule deleted, no longer timed, or its button,
+        device or invert changed): their old device gets the final command."""
+        out: list[Timed] = []
+        for key, prev in old.items():
+            t = prev.timed
+            if t is None or not t.running or not prev.enabled or t.eid is None:
+                continue
+            now = rules.get(key)
+            if now is not None and now.timed is not None and now.timed.ident == t.ident:
+                continue  # run carried over
+            out.append(t)
+        return out
+
+    def _finish(self, t: Timed) -> None:
+        """Send the final command of a run whose rule went away to its old device; a failure is only logged."""
+        assert t.eid is not None
+        t.until = None
+        if not t.command(t.final, t.state(self._lookup)):
+            return
+
+        def on_error(err: str, why: str = "service failed") -> None:
+            _LOGGER.warning("timed switch %s: turn_%s failed: %s", t.eid, t.final, err)
+
+        try:
+            self._call(t.eid.split(".", 1)[0], f"turn_{t.final}", t.eid, on_error=on_error, current=lambda: True)
+        except Exception as err:  # noqa: BLE001 - a failing device must not stop the engine
+            _LOGGER.warning("timed switch %s: turn_%s failed: %s", t.eid, t.final, err)
+
     def _link(self) -> None:
         """Order rules so references come first; a reference closing a cycle is marked and ignored."""
         self._order, self._consumers, self._readers, self._targets = {}, {}, {}, {}
@@ -640,10 +727,12 @@ class RuleEngine:
                 visit(key)
         for key, rule in self._rules.items():
             reads = [eid for top in rule.all_inputs for p in top.parts() for eid in p.reads]
-            for eid in reads + (rule.boiler.reads if rule.boiler is not None else []):
+            timed = [rule.timed.eid] if rule.timed is not None and rule.timed.eid else []
+            for eid in reads + (rule.boiler.reads if rule.boiler is not None else []) + timed:
                 if key not in self._readers.get(eid, []):
                     self._readers.setdefault(eid, []).append(key)
-            for a in rule.on_true + rule.on_false if rule.enabled else []:
+            actions = rule.on_true + rule.on_false + list(rule.timed_actions.values())
+            for a in actions if rule.enabled else []:
                 if a.call is not None and key not in self._targets.get(a.call[2], []):
                     self._targets.setdefault(a.call[2], []).append(key)
 
@@ -826,6 +915,8 @@ class RuleEngine:
         """Recompute the rule; True when its debounced verdict changed. An opening gate sends the current verdict."""
         if rule.boiler is not None:
             return self._boiler(rule)
+        if rule.timed is not None:
+            return self._timed(rule)
         self._compute(rule)
         if not rule.enabled:
             return False
@@ -1029,12 +1120,88 @@ class RuleEngine:
         rule.verdict = verdict
         return changed
 
+    # --- timed switch ----------------------------------------------------------
+
+    def _timed(self, rule: _Rule) -> bool:
+        """Evaluate a timed rule: a run past its end sends the final command; a running one keeps its timer. A run
+        restored from the store waits for the end of the boot phase. True when its verdict (running) changed."""
+        t = rule.timed
+        assert t is not None
+        rule.open = True
+        if (not rule.enabled or t.missing) and t.running:
+            t.until, t.restored = None, False  # cannot run: nothing to switch or nothing to stop it
+        if t.running and not (self._booting and t.restored):
+            t.restored = False
+            if t.until <= self._now():
+                t.until = None
+                self._timed_send(rule, t.final, "time over")
+        wake = t.until if t.running and not t.restored else None
+        if t.timer is not None and t.timer[0] != wake:
+            t.stop()
+        if wake is not None and t.timer is None:
+            key = rule.key
+            t.timer = (wake, self._schedule(max(0.0, wake - self._now()), lambda: self._timed_wake(key, t)))
+        verdict = t.running if rule.enabled else None
+        rule.raw = verdict
+        changed = verdict != rule.verdict
+        rule.verdict = verdict
+        return changed
+
+    def _timed_wake(self, key: Key, t: Timed) -> None:
+        rule = self._rules.get(key)
+        if rule is None or rule.timed is not t:
+            return
+        t.timer = None
+        self._settle({key})
+        self._flush()
+
+    def _timed_send(self, rule: _Rule, do: str, why: str) -> None:
+        """Command the device to `do` through the action path (own context, waiting for the target); nothing is sent
+        when it reads `do` already. Either way the previous command's waiting is given up."""
+        t = rule.timed
+        assert t is not None
+        send = t.command(do, t.state(self._lookup))
+        self._new_firing(rule)
+        rule.failed = None
+        if send:
+            self._fire(rule, [rule.timed_actions[do]], why)
+
+    def _timed_device(self, rule: _Rule, own: bool) -> None:
+        """A state change of a timed rule's device, before the evaluation: someone else switching it ends the run."""
+        t = rule.timed
+        assert t is not None
+        state = t.state(self._lookup)
+        if not t.device_changed(state, own, rule.enabled and not t.missing):
+            return
+        self._new_firing(rule)  # a command still waiting for the device is given up
+        rule.failed = None
+        rule.last = {"action": state, "target": t.label, "at": int(self._now() * 1000),
+                     "reason": "ended: switched elsewhere"}
+
+    def runs(self) -> "dict[str, dict[str, float]]":
+        """The running timed switches {plan id: {rule id: until epoch s}} of every loaded rule."""
+        out: dict[str, dict[str, float]] = {}
+        for (pid, rid), rule in self._rules.items():
+            if rule.timed is not None and rule.timed.until is not None:
+                out.setdefault(pid, {})[rid] = rule.timed.until
+        return out
+
+    def _report_runs(self) -> None:
+        runs = self.runs()
+        if runs == self._runs:
+            return
+        self._runs = runs
+        try:
+            self._on_runs(copy.deepcopy(runs))
+        except Exception:  # noqa: BLE001 - a failing store must not stop the engine
+            _LOGGER.exception("saving the timed runs failed")
+
     def started(self) -> None:
-        """HA has started: end the boot phase and evaluate the boiler rules in auto once."""
+        """HA has started: end the boot phase and evaluate the boiler rules in auto and the restored timed runs once."""
         if not self._booting:
             return
         self._booting = False
-        self._settle({key for key, rule in self._rules.items() if rule.boiler is not None})
+        self._settle({key for key, rule in self._rules.items() if rule.boiler is not None or rule.timed is not None})
         self._flush()
 
     def _boiler_wake(self, key: Key, b: Boiler) -> None:
@@ -1106,11 +1273,22 @@ class RuleEngine:
 
     def on_intent(self, plan_id: str, container_id: str, intent: dict) -> None:
         """A container intent ({"action": "toggle"}, {"action": "set", "value": "on" | "off"}, {"action": "auto"}); a
-        boiler rule whose button it is takes it. Status events and other actions are ignored."""
+        boiler or timed rule whose button it is takes it. Status events and other actions are ignored."""
         if not isinstance(intent, dict):
             return
         dirty: set[Key] = set()
         for key, rule in self._rules.items():
+            t = rule.timed
+            if t is not None:
+                if key[0] != plan_id or t.button != container_id or not rule.enabled or t.missing:
+                    continue
+                taken, do, why = t.press(intent, self._now())
+                if not taken:
+                    continue
+                t.seen = t.state(self._lookup)  # a wall switch over the device: the change behind this intent is ours
+                self._timed_send(rule, do, why)
+                dirty.add(key)
+                continue
             b = rule.boiler
             if key[0] != plan_id or b is None or b.button != container_id or not rule.enabled or b.missing:
                 continue
@@ -1158,6 +1336,8 @@ class RuleEngine:
             rule = self._rules[key]
             if rule.boiler is not None and rule.boiler.relay == entity_id:
                 self._boiler_relay(rule, own)
+            if rule.timed is not None and rule.timed.eid == entity_id:
+                self._timed_device(rule, own)
         if keys:
             self._settle(set(keys))
         self._resend(entity_id)  # after the inputs: a newer firing has already dropped stale waiting actions
@@ -1191,6 +1371,8 @@ class RuleEngine:
             out["last"] = dict(rule.last)
         if rule.boiler is not None:
             out["boiler"] = dict(rule.boiler.view)
+        if rule.timed is not None:
+            out["timed"] = rule.timed.trace(self._lookup)
         if rule.leak:
             out["leak"] = {"valves": [
                 {"id": v, "name": name, "state": None if eid is None else
@@ -1203,6 +1385,7 @@ class RuleEngine:
 
     def _flush(self) -> None:
         self._report_modes()
+        self._report_runs()
         frames: dict[str, dict[str, dict]] = {}
         for key, rule in self._rules.items():
             trace = self._trace(rule)
