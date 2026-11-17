@@ -42,7 +42,7 @@ import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { RulesFeed, type RuleTrace } from '../live/rules-feed';
-import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakTemplate, ventTemplate, isVentRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
+import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakProtectionTemplate, ventTemplate, isVentRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import { renderAutomationsMenu, type RuleTemplate } from './rule-templates';
 import { renderRuleDialog, type RuleDraft } from './rule-dialog';
 import { renderVentDialog } from './vent-dialog';
@@ -350,7 +350,7 @@ export class PlanStudioPanel extends LitElement {
       const zone = levels.flatMap(l => l.zones).find(z => z.id === zoneId);
       const dev = this.selection?.kind === 'device' ? levels.flatMap(l => l.devices).find(x => x.id === (this.selection as { id: Id }).id) : undefined;
       const zid = zone?.id ?? null;
-      const rule = template === 'leak' ? leakTemplate({ levels }, zid, zone?.name ?? null)
+      const rule = template === 'leak' ? leakProtectionTemplate({ levels }, zid, zone?.name ?? null)
         : template === 'timer' ? timerTemplate({ levels }, zid, dev && isRuleInputDevice(dev) ? dev.id : null, dev && isRuleInputDevice(dev) ? dev.name : '')
         : template === 'outside' ? outsideLightTemplate({ levels }, zid, zone?.name ?? null)
         : template === 'vent' ? ventTemplate({ levels }, zid, zone?.name ?? null)
@@ -440,7 +440,9 @@ export class PlanStudioPanel extends LitElement {
       id => devices.some(x => x.id === id && isBoilerDevice(x)),
       id => devices.some(x => x.id === id && (x.props.kind === 'wall_switch' || x.props.kind === 'smart_button')),
       id => this.boilerGridBlocks().some(b => b.id === id),
-      id => { const x = devices.find(v => v.id === id); return !x || buttonHasAuto(x); });
+      id => { const x = devices.find(v => v.id === id); return !x || buttonHasAuto(x); },
+      id => devices.some(x => x.id === id && x.props.kind === 'leak_sensor'),
+      id => devices.some(x => x.id === id && x.props.kind === 'valve'));
     if (isBoilerRule(rule)) {
       return renderBoilerDialog({
         draft: d,

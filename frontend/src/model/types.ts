@@ -165,6 +165,8 @@ export interface Rule {
   vent?: { sensor: Id; than: Id; above: number; below: number };
   /** Boiler: device (control + power), button container, optional grid power limit; inputs/actions stay empty. */
   boiler?: { device: Id; button: Id; grid?: { block: Id; limit: number; nominal: number } };
+  /** Leak protection: leak sensors (any wet) close the valves, and keep them closed while wet; inputs/actions stay empty. */
+  leak?: { sensors: Id[]; valves: Id[] };
 }
 
 export const WALL_PRESETS: Record<WallType, number> = {

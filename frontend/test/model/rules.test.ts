@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isRuleInputDevice, leakTemplate, newRule, outsideLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
+  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isRuleInputDevice, leakProtectionTemplate, newRule, outsideLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
   rulesFor, ruleUsers, updateRule,
 } from '../../src/model/rules';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Rule, type Zone } from '../../src/model/types';
@@ -63,39 +63,58 @@ describe('rules model', () => {
     expect(ruleProblems([], rule('a', { onDelay: 1.5 }), exists)).toContain('delay');
   });
 
-  it('leakTemplate in a zone and without', () => {
+  describe('leak protection', () => {
     const zone: Zone = {
       id: 'z1', name: 'Bath', invalid: false,
       shape: { kind: 'polygon', vertices: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
     };
-    const level = { ...emptyLevel('L'), zones: [zone], devices: [
-      dev('l1', 'leak_sensor', 100, 100), dev('l2', 'leak_sensor', 200, 200), dev('v1', 'valve', 300, 300),
-      dev('out', 'leak_sensor', 5000, 5000), dev('v2', 'valve', 6000, 6000),
-    ] };
-    const r = leakTemplate({ levels: [level] }, 'z1', 'Bath');
-    expect(r.name).toBe('Leak Bath -> valve');
-    expect(r.combine).toBe('any');
-    expect(r.zoneId).toBe('z1');
-    expect(r.inputs).toEqual([{ source: { device: 'l1' } }, { source: { device: 'l2' } }]);
-    expect(r.onTrue).toEqual([{ device: 'v1', do: 'close' }]);
-    const g = leakTemplate({ levels: [level] }, null, null);
-    expect(g.name).toBe('Leak -> valve');
-    expect(g.inputs).toEqual([]);
-    expect(g.onTrue).toEqual([]);
-  });
+    const lvl = (devices: Device[]) => ({ levels: [{ ...emptyLevel('L'), zones: [zone], devices }] });
+    const leak = (over: Partial<Rule> = {}, l: Partial<NonNullable<Rule['leak']>> = {}): Rule => ({
+      ...newRule(null), id: 'k', name: 'Leak', inputs: [], leak: { sensors: ['s1', 's2'], valves: ['v1'], ...l }, ...over,
+    });
+    const probs = (r: Rule, ...p: (((id: string) => boolean) | undefined)[]) => ruleProblems([r], r, exists, undefined, undefined, undefined, undefined, undefined, undefined, undefined, ...p);
 
-  it('leakTemplate skips devices that opted out of the zone (ruling A1)', () => {
-    const zone: Zone = {
-      id: 'z1', name: 'Bath', invalid: false,
-      shape: { kind: 'polygon', vertices: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
-    };
-    const out = { ...dev('l2', 'leak_sensor', 200, 200), zoneBlacklist: ['z1'] };
-    const level = { ...emptyLevel('L'), zones: [zone], devices: [
-      dev('l1', 'leak_sensor', 100, 100), out, dev('v1', 'valve', 300, 300), { ...dev('v2', 'valve', 400, 400), zoneBlacklist: ['z1'] },
-    ] };
-    const r = leakTemplate({ levels: [level] }, 'z1', 'Bath');
-    expect(r.inputs).toEqual([{ source: { device: 'l1' } }]);
-    expect(r.onTrue).toEqual([{ device: 'v1', do: 'close' }]);
+    it('template: the zone participating sensors and valves, named by zone', () => {
+      const r = leakProtectionTemplate(lvl([
+        dev('s1', 'leak_sensor', 100, 100), dev('s2', 'leak_sensor', 200, 200), dev('v1', 'valve', 300, 300), dev('v2', 'valve', 400, 400),
+        dev('out', 'leak_sensor', 5000, 5000), dev('vo', 'valve', 6000, 6000), dev('m', 'motion_sensor', 500, 500),
+      ]), 'z1', 'Bath');
+      expect(r.name).toBe('Leak protection Bath');
+      expect(r.zoneId).toBe('z1');
+      expect(r.leak).toEqual({ sensors: ['s1', 's2'], valves: ['v1', 'v2'] });
+      expect(r).toMatchObject({ inputs: [], combine: 'any', onDelay: 0, offDelay: 0, onTrue: [], onFalse: [] });
+      expect(isLeakRule(r)).toBe(true);
+      expect(isLeakRule(rule('a'))).toBe(false);
+    });
+    it('template skips devices that opted out of the zone; none or no zone gives empty lists', () => {
+      const out = { ...dev('s2', 'leak_sensor', 200, 200), zoneBlacklist: ['z1'] };
+      const r = leakProtectionTemplate(lvl([dev('s1', 'leak_sensor', 100, 100), out, { ...dev('v2', 'valve', 400, 400), zoneBlacklist: ['z1'] }]), 'z1', 'Bath');
+      expect(r.leak).toEqual({ sensors: ['s1'], valves: [] });
+      const g = leakProtectionTemplate(lvl([dev('s1', 'leak_sensor', 100, 100)]), null, null);
+      expect(g.name).toBe('Leak protection');
+      expect(g.leak).toEqual({ sensors: [], valves: [] });
+    });
+    it('valid rule', () => {
+      expect(probs(leak())).toEqual([]);
+      expect(probs(leak(), () => true, () => true)).toEqual([]);
+    });
+    it('shape and bounds', () => {
+      for (const l of [{ sensors: [] }, { valves: [] }, { sensors: ['s1', 's1'] }, { valves: ['v1', 'v1'] }, { sensors: [''] }, { valves: [''] }])
+        expect(probs(leak({}, l)), JSON.stringify(l)).toEqual(['leak']);
+      for (const o of [{ inputs: [{ source: { device: 'x' } }] }, { combine: 'all' as const }, { onDelay: 1 }, { offDelay: 1 },
+        { gate: { source: { sun: true as const } } }, { onTrue: [{ device: 'f', do: 'close' as const }] }, { onFalse: [{ device: 'f', do: 'open' as const }] },
+        { vent: { sensor: 'a', than: 'b', above: 9, below: 5 } }, { boiler: { device: 'd', button: 'b' } }])
+        expect(probs(leak(o)), JSON.stringify(o)).toContain('leak');
+    });
+    it('a sensor or valve that is not one, or is missing, is device-missing', () => {
+      expect(probs(leak(), id => id !== 's2')).toEqual(['device-missing']);
+      expect(probs(leak(), undefined, id => id !== 'v1')).toEqual(['device-missing']);
+      expect(ruleProblems([leak()], leak(), id => id !== 'v1')).toEqual(['device-missing']);
+    });
+    it('an old condition rule from the former template stays valid', () => {
+      const old = rule('o', { inputs: [{ source: { device: 'd' } }], onTrue: [{ device: 'v', do: 'close' }] });
+      expect(ruleProblems([old], old, exists)).toEqual([]);
+    });
   });
 
   it('an action its device cannot take is a problem', () => {

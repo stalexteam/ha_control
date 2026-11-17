@@ -46,7 +46,7 @@ describe('Automation step', () => {
     expect(el.toolId).toBe('zone-pick');
     expect($(el, 'button[data-tool="zone-pick"]').textContent).toContain('Select');
     expect($(el, 'button[data-template="condition"]').textContent).toContain('Condition');
-    expect($(el, 'button[data-template="leak"]').textContent).toContain('Leak -> valve');
+    expect(el.shadowRoot!.querySelector('button[data-template="leak"]')).toBeNull();
   });
 
   it('without a zone: "Rules without a zone", orphans marked "zone removed"', async () => {
@@ -131,8 +131,8 @@ describe('Automation step', () => {
     const spy = vi.spyOn(el, 'openRuleDialog').mockImplementation(() => undefined);
     await press(el, 'button[data-template="condition"]');
     expect(spy).toHaveBeenLastCalledWith('condition');
-    await press(el, 'button[data-template="leak"]');
-    expect(spy).toHaveBeenLastCalledWith('leak');
+    await press(el, 'button[data-template="timer"]');
+    expect(spy).toHaveBeenLastCalledWith('timer');
     await press(el, '.rrow[data-id="r-none"] button[data-action="rule-edit"]');
     expect(spy).toHaveBeenLastCalledWith('condition', 'r-none');
   });

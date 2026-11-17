@@ -273,7 +273,7 @@ describe('Automations menu', () => {
   it('one rail button replaces the purpose-built templates; the condition templates stay', async () => {
     const el = await open([]);
     const rail = [...el.shadowRoot!.querySelectorAll('.tools button[data-template]')].map(b => b.getAttribute('data-template'));
-    expect(rail).toEqual(['condition', 'leak', 'timer', 'outside']);
+    expect(rail).toEqual(['condition', 'timer', 'outside']);
     expect(el.shadowRoot!.querySelector('button[data-template="vent"], button[data-template="boiler"]')).toBeNull();
     const btn = $<HTMLButtonElement>(el, '.tools button[data-action="automations"]');
     expect(btn.textContent).toContain('Automations');

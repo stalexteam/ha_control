@@ -199,7 +199,7 @@ describe('Wet zone ventilation form', () => {
     expect(el.rules).toHaveLength(1);
     await undo(el);
     expect(el.rules).toEqual([]);
-    await press(el, 'button[data-template="leak"]');
+    await press(el, 'button[data-template="condition"]');
     expect(el.shadowRoot!.querySelector('.rule-backdrop svg.fc')).not.toBeNull();
     expect(el.shadowRoot!.querySelector('.rule-backdrop [data-field="vent-sensor"]')).toBeNull();
   });

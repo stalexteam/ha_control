@@ -65,7 +65,7 @@ export function ruleCycle(rules: Rule[], candidate: Rule): Id[] | null {
   return null;
 }
 
-export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto';
+export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto' | 'leak';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
@@ -96,7 +96,8 @@ const delayOk = (n: unknown): boolean => Number.isInteger(n) && (n as number) >=
  * `boilerDeviceExists` (optional) tells whether an id is a boiler device (`isBoilerDevice`), `buttonExists` a
  * wall_switch or smart_button, `gridBlockExists` a Power grid block with a power entity (boiler rules); defaults: any
  * existing device, any existing device, no check. `buttonAutoOk` (optional) tells whether the boiler's button has an
- * Auto action ('boiler-auto' otherwise; not checked for a missing device).
+ * Auto action ('boiler-auto' otherwise; not checked for a missing device). `leakSensorExists` / `valveExists`
+ * (optional) tell whether an id is a leak_sensor / valve device (leak rules); default = any existing device.
  */
 export function ruleProblems(
   rules: Rule[], r: Rule, deviceExists: (id: Id) => boolean, actionsOf?: (id: Id) => RuleDo[] | undefined,
@@ -106,17 +107,20 @@ export function ruleProblems(
   buttonExists?: (id: Id) => boolean,
   gridBlockExists?: (id: Id) => boolean,
   buttonAutoOk?: (id: Id) => boolean,
+  leakSensorExists?: (id: Id) => boolean,
+  valveExists?: (id: Id) => boolean,
 ): RuleProblem[] {
   const out: RuleProblem[] = [];
   if (!r.name.trim()) out.push('name');
-  if (r.inputs.length === 0 && !r.vent && !r.boiler) out.push('inputs');
+  if (r.inputs.length === 0 && !r.vent && !r.boiler && !r.leak) out.push('inputs');
   const all = [...r.inputs, ...(r.gate ? [r.gate] : [])];
   const devices = [...all.flatMap(inputDevices), ...r.onTrue.map(a => a.device), ...r.onFalse.map(a => a.device)];
   const lights = all.flatMap(i => ('light' in i.source ? [i.source.light] : []));
   if (devices.some(id => !deviceExists(id)) || lights.some(id => !(lightSensorExists ?? deviceExists)(id))
     || (r.vent && [r.vent.sensor, r.vent.than].some(id => !(climateSensorExists ?? deviceExists)(id)))
     || (r.boiler && (!(boilerDeviceExists ?? deviceExists)(r.boiler.device) || !(buttonExists ?? deviceExists)(r.boiler.button)
-      || (r.boiler.grid && gridBlockExists && !gridBlockExists(r.boiler.grid.block))))) out.push('device-missing');
+      || (r.boiler.grid && gridBlockExists && !gridBlockExists(r.boiler.grid.block))))
+    || (r.leak && (r.leak.sensors.some(id => !(leakSensorExists ?? deviceExists)(id)) || r.leak.valves.some(id => !(valveExists ?? deviceExists)(id))))) out.push('device-missing');
   const known = new Set(rules.map(x => x.id));
   if (ruleRefs(r).some(id => id !== r.id && !known.has(id))) out.push('rule-missing');
   if (ruleCycle(rules, r)) out.push('cycle');
@@ -127,6 +131,7 @@ export function ruleProblems(
   }
   if (r.vent && ventProblem(r, r.vent)) out.push('vent');
   if (r.boiler && boilerProblem(r, r.boiler)) out.push('boiler');
+  if (r.leak && leakProblem(r, r.leak)) out.push('leak');
   if (r.boiler?.button && buttonAutoOk && !out.includes('device-missing') && !buttonAutoOk(r.boiler.button)) out.push('boiler-auto');
   if (actionsOf && [...r.onTrue, ...r.onFalse].some(a => { const ok = actionsOf(a.device); return ok !== undefined && !ok.includes(a.do); })) out.push('action');
   return out;
@@ -134,16 +139,36 @@ export function ruleProblems(
 
 /** A vent rule's fixed shape and data bounds; true = violated. */
 function ventProblem(r: Rule, v: NonNullable<Rule['vent']>): boolean {
-  if (r.inputs.length > 0 || r.gate || r.combine !== 'any' || r.onDelay !== 0) return true;
+  if (r.inputs.length > 0 || r.gate || r.leak || r.combine !== 'any' || r.onDelay !== 0) return true;
   if (!v.sensor || !v.than || v.sensor === v.than) return true;
   if (!isNum(v.above) || !isNum(v.below) || v.above <= 0 || v.below < 0 || v.below > v.above) return true;
   const [on, off] = [r.onTrue[0], r.onFalse[0]];
   return r.onTrue.length !== 1 || r.onFalse.length !== 1 || on.do !== 'on' || off.do !== 'off' || !on.device || on.device !== off.device;
 }
 
+/** A leak rule's fixed shape and data bounds; true = violated. */
+function leakProblem(r: Rule, l: NonNullable<Rule['leak']>): boolean {
+  if (r.vent || r.boiler || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
+  const list = (ids: unknown): boolean => Array.isArray(ids) && ids.length >= 1 && ids.every(id => typeof id === 'string' && id !== '') && new Set(ids).size === ids.length;
+  return !list(l.sensors) || !list(l.valves);
+}
+
+export const isLeakRule = (r: Rule): boolean => r.leak !== undefined;
+
+/** The "Leak protection" template: the zone's participating leak sensors and valves (the lists may be empty; the owner completes them). */
+export function leakProtectionTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
+  const rule = newRule(zoneId);
+  rule.name = zoneId !== null && zoneName ? `Leak protection ${zoneName}` : 'Leak protection';
+  const level = zoneId === null ? undefined : plan.levels.find(l => l.zones.some(z => z.id === zoneId));
+  const members = level ? zoneMembers(level, zoneId as Id).filter(m => m.participates).map(m => m.device) : [];
+  rule.leak = { sensors: members.filter(d => d.props.kind === 'leak_sensor').map(d => d.id), valves: members.filter(d => d.props.kind === 'valve').map(d => d.id) };
+  return rule;
+}
+
 /** A boiler rule's fixed shape and data bounds; true = violated. */
 function boilerProblem(r: Rule, b: NonNullable<Rule['boiler']>): boolean {
-  if (r.vent || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.vent || r.leak || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
   if (!b.device || !b.button || b.device === b.button) return true;
   if (b.grid === undefined) return false;
@@ -199,20 +224,6 @@ export function ventTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneN
     rule.onTrue = [{ device: fans[0].id, do: 'on' }];
     rule.onFalse = [{ device: fans[0].id, do: 'off' }];
   }
-  return rule;
-}
-
-/** The "Leak -> valve" template: the zone's leak sensors, any, close the zone's valve when it has exactly one. */
-export function leakTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
-  const rule = newRule(zoneId);
-  rule.name = zoneId !== null && zoneName ? `Leak ${zoneName} -> valve` : 'Leak -> valve';
-  if (zoneId === null) return rule;
-  const level = plan.levels.find(l => l.zones.some(z => z.id === zoneId));
-  if (!level) return rule;
-  const members = zoneMembers(level, zoneId).filter(m => m.participates).map(m => m.device);
-  rule.inputs = members.filter(d => d.props.kind === 'leak_sensor').map(d => ({ source: { device: d.id } }));
-  const valves = members.filter(d => d.props.kind === 'valve');
-  if (valves.length === 1) rule.onTrue = [{ device: valves[0].id, do: 'close' }];
   return rule;
 }
 

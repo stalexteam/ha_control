@@ -235,3 +235,33 @@ def test_validate_plan_boiler_rule():
     ):
         with pytest.raises(vol.Invalid, match="rule (boiler|vent)"):
             validate_plan({**plan("p"), "rules": [boiler_rule(**kw)]})
+
+
+def leak_rule(rid="k1", leak=None, **kw):
+    r = rule(rid, inputs=[], onTrue=[], leak={"sensors": ["s1", "s2"], "valves": ["v1"]} if leak is None else leak)
+    r.update(kw)
+    return r
+
+
+def test_validate_plan_leak_rule():
+    validate_plan({**plan("p"), "rules": [leak_rule()]})
+    bad = [
+        "x", [], {}, {"sensors": ["s"]}, {"valves": ["v"]}, {"sensors": ["s"], "valves": ["v"], "x": 1},
+        {"sensors": [], "valves": ["v"]}, {"sensors": ["s"], "valves": []}, {"sensors": ["s", "s"], "valves": ["v"]},
+        {"sensors": ["s"], "valves": ["v", "v"]}, {"sensors": [""], "valves": ["v"]}, {"sensors": ["s"], "valves": [1]},
+        {"sensors": "s", "valves": ["v"]},
+    ]
+    for b in bad:
+        with pytest.raises(vol.Invalid, match="rule leak"):
+            validate_plan({**plan("p"), "rules": [leak_rule(leak=b)]})
+    for kw in (
+        {"inputs": ref("x")}, {"combine": "all"}, {"onDelay": 5}, {"offDelay": 5}, {"gate": {"source": {"sun": True}}},
+        {"onTrue": [{"device": "f", "do": "close"}]}, {"onFalse": [{"device": "f", "do": "open"}]},
+        {"vent": {"sensor": "a", "than": "b", "above": 9, "below": 5}}, {"boiler": {"device": "d", "button": "w"}},
+    ):
+        with pytest.raises(vol.Invalid, match="rule (leak|vent|boiler)"):
+            validate_plan({**plan("p"), "rules": [leak_rule(**kw)]})
+
+
+def test_validate_plan_old_leak_condition_rule_still_valid():
+    validate_plan({**plan("p"), "rules": [rule("o", inputs=ref("d"), onTrue=[{"device": "v", "do": "close"}])]})

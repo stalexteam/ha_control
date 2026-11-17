@@ -39,22 +39,6 @@ async function choose(el: PlanStudioPanel, sel: string, value: string): Promise<
 describe('Rule dialog', () => {
   beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
 
-  it('"Leak -> valve" in a zone opens pre-filled; Cancel adds nothing', async () => {
-    const el = await open([]);
-    click(el, 300, 300); // Main
-    await el.updateComplete;
-    await press(el, 'button[data-template="leak"]');
-    expect(el.dialog).toEqual({ kind: 'rule' });
-    expect(q<HTMLInputElement>(el, '[data-field="name"]').value).toBe('Leak Main -> valve');
-    expect(names(el, '[data-field="input-0"] .grow')).toEqual(['Leak sensor']);
-    expect(q<HTMLSelectElement>(el, '[data-field="action-true-0"] [data-part="device"]').value).toBe('d-valve');
-    expect(q<HTMLSelectElement>(el, '[data-field="action-true-0"] [data-part="do"]').value).toBe('close');
-    expect(q<HTMLSelectElement>(el, '[data-field="zone"]').value).toBe('r0');
-    await press(el, 'button[data-action="rule-cancel"]');
-    expect(el.dialog).toBeNull();
-    expect(el.rules).toEqual([]);
-  });
-
   it('OK adds one rule as one undo step; the plan is not saved by it', async () => {
     const el = await open([]);
     await press(el, 'button[data-template="condition"]');
@@ -87,7 +71,7 @@ describe('Rule dialog', () => {
   it('editing a saved rule changes it only on OK; Edit loads that rule whatever the template', async () => {
     const el = await open();
     const before = structuredClone(el.rules.find(r => r.id === 'rule-motion'));
-    el.openRuleDialog('leak', 'rule-motion');
+    el.openRuleDialog('condition', 'rule-motion');
     await el.updateComplete;
     expect(q<HTMLInputElement>(el, '[data-field="name"]').value).toBe('Light on motion');
     expect(q<HTMLSelectElement>(el, '[data-field="combine"]').value).toBe('all');
