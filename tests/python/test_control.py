@@ -296,9 +296,9 @@ def test_late_failure_marks_its_own_event_only():
     t = w.tr()
     assert t["reason"] == "service failed" and t["last"]["target"] == "Lamp 2"
     assert t["last"]["error"] == "service failed"
-    w.press("btn", SET_OFF)  # the loads count as on (the commands are on their way)
+    w.press("btn", SET_OFF)  # Lamp 1 counts as on (its command is on its way); Lamp 2's failed on is not
     older = w.on_error
-    assert w.calls[-1] == off("switch.l2")
+    assert w.calls[-1] == off("switch.l1") and w.tr()["last"]["reason"] == "Button: off: already off"
     w.press("btn", SET_ON)
     assert w.calls[-1] == on("switch.l2")
     older("boom")  # the older event's failure does not mark the newer one
@@ -342,6 +342,21 @@ def test_a_rebound_source_is_read_at_save():
     assert w.calls == []
     w.set("switch.b", "off")
     assert w.calls == [] and w.tr()["last"]["reason"] == "Switch A: off: already off"
+
+
+def test_rebound_source_is_read_fresh():
+    """A source entity that leaves the rule and returns is read anew, not compared with its old reading."""
+    w = loaded([control_rule(sources=["ws"])])
+    rebound = dev("ws", "wall_switch", "Switch A", state="switch.b")
+    w.load([control_rule(sources=["ws"])], [BTN, rebound, L1, L2])
+    w.set("switch.a", "on")
+    w.load([control_rule(sources=["ws"])])
+    w.set("switch.a", "on", {"x": 1})  # an attribute-only update: still on
+    assert w.calls == []
+    w.set("switch.a", "off")
+    assert w.tr()["last"]["reason"] == "Switch A: off: already off"
+    w.set("switch.a", "on")
+    assert w.calls == [on("switch.l1"), on("switch.l2")]
 
 
 def test_disabled_rule_ignores_everything():
@@ -418,6 +433,51 @@ def test_echo_is_the_effective_state_of_a_load():
     w.press("btn", TOGGLE)
     w.press("btn", TOGGLE)
     assert w.calls == [on("switch.l1"), on("switch.l2"), off("switch.l1"), off("switch.l2")]
+
+
+def test_hand_switch_after_arrival_decides_from_the_reading():
+    """An expected change ends when it arrives: a later hand switch of the load counts."""
+    w = loaded([control_rule(loads=["l1"])])
+    w.press("btn", TOGGLE)
+    assert w.calls == [on("switch.l1")]
+    w.set("switch.l1", "on", own=True)
+    w.advance(1003)
+    w.set("switch.l1", "off")  # by hand
+    w.press("btn", TOGGLE)
+    assert w.calls == [on("switch.l1"), on("switch.l1")]
+
+
+def test_unavailable_load_beats_a_pending_echo():
+    w = loaded([control_rule(loads=["l1"])])
+    w.press("btn", TOGGLE)
+    w.set("switch.l1", "unavailable")
+    w.press("btn", TOGGLE)
+    t = w.tr()
+    assert w.calls == [on("switch.l1")]
+    assert t["last"]["error"] == "target unavailable" and t["reason"] == "target unavailable"
+
+
+def test_attribute_update_does_not_drop_a_double_flip():
+    w = loaded([control_rule("a", ["ws"], ["lb"]), control_rule("b", ["b"], ["la"])])
+    w.set("switch.a", "on")
+    w.set("switch.b", "off", {"x": 1})  # attribute-only, between the two commands
+    w.advance(1001)
+    w.set("switch.a", "off")
+    w.set("switch.b", "off", {"x": 2})  # attribute-only, between the commands and the arrivals
+    assert w.calls == [on("switch.b"), off("switch.b")]
+    w.set("switch.b", "on", own=True)
+    w.set("switch.b", "off", own=True)
+    assert w.calls == [on("switch.b"), off("switch.b")]
+    assert w.states["switch.a"][0] == "off" and w.states["switch.b"][0] == "off"
+
+
+def test_failed_command_drops_its_echo():
+    """A command that failed late is not on its way: the load is decided from its reading."""
+    w = loaded()
+    w.press("btn", SET_ON)
+    w.on_error("boom")  # Lamp 2's call failed
+    w.press("btn", SET_ON)
+    assert w.calls == [on("switch.l1"), on("switch.l2"), on("switch.l2")]  # Lamp 1's on is still on its way
 
 
 def test_same_entity_as_source_and_load_is_harmless():

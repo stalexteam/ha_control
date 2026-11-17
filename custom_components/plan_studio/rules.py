@@ -734,6 +734,8 @@ class RuleEngine:
                     st = self._lookup(eid)
                     rule.seen[eid] = st[0] if st is not None else None
             c = rule.control
+            if c is not None:  # an entity that left the sources is forgotten: when it returns it is read anew
+                c.seen = {eid: s for eid, s in c.seen.items() if eid in c.switches()}
             for eid in c.switches() if c is not None else ():
                 if eid not in c.seen:  # a new (or changed) rule's starting point: remembered only, nothing is sent
                     st = self._lookup(eid)
@@ -1778,15 +1780,24 @@ class RuleEngine:
                 return True
         return False
 
-    def _control_state(self, eid: str) -> str | None:
-        """The effective state of a load: its newest command still on its way, else its reading ("unknown" is
-        commanded; None without data)."""
+    def _echo_arrived(self, eid: str, st: "tuple[str, dict] | None") -> None:
+        """A state of the entity no load control rule took as a source change: when it is the oldest expected change,
+        that one has arrived (only the oldest: an attribute update amid an on / off double flip drops nothing)."""
         live = self._echo_live(eid)
-        if live:
-            return live[-1][0]
+        if live and st is not None and st[0] == live[0][0]:
+            del live[0]
+            if not live:
+                self._echoes.pop(eid, None)
+
+    def _control_state(self, eid: str) -> str | None:
+        """The effective state of a load: None without data; else its newest command still on its way, else its
+        reading ("unknown" is commanded)."""
         st = self._lookup(eid)
         if st is None or st[0] == "unavailable":
             return None
+        live = self._echo_live(eid)
+        if live:
+            return live[-1][0]
         return st[0] if st[0] in ("on", "off") else "unknown"
 
     def _control_apply(self, rule: _Rule, what: str, source: str) -> None:
@@ -1813,8 +1824,16 @@ class RuleEngine:
         self._control_refresh(rule)
 
     def _control_call(self, rule: _Rule, seq: int, eid: str, do: str, entry: dict) -> None:
-        """One direct command; it is remembered as an expected change of the entity for ECHO s."""
+        """One direct command; it is remembered as an expected change of the entity for ECHO s (until it arrives or
+        the call fails)."""
+        echo = (do, self._now() + ECHO)
+
         def on_error(err: str, why: str = "service failed") -> None:
+            live = self._echoes.get(eid, [])
+            if why == "service failed" and any(e is echo for e in live):  # never arrives ("target unavailable": sent)
+                live[:] = [e for e in live if e is not echo]
+                if not live:
+                    self._echoes.pop(eid, None)
             now = self._current(rule, seq)
             if now is None:
                 return  # a newer event, a changed or a removed rule
@@ -1829,7 +1848,7 @@ class RuleEngine:
             entry["error"] = "service failed"
             return
         self._echo_live(eid)
-        self._echoes.setdefault(eid, []).append((do, self._now() + ECHO))
+        self._echoes.setdefault(eid, []).append(echo)
 
     def _control_refresh(self, rule: _Rule) -> None:
         """Last entry (the first with an error) and failure of the latest event."""
@@ -1840,7 +1859,8 @@ class RuleEngine:
 
     def _control_source(self, keys: "list[Key]", eid: str, st: "tuple[str, dict] | None") -> None:
         """A state of a load control state source (whoever made it): every rule reading it remembers it; a change
-        between known states sets their loads, unless it is a load control command arriving (checked once)."""
+        between known states sets their loads, unless it is a load control command arriving (checked once). Without
+        such a change the state may still be the arrival of the entity's oldest expected change."""
         changes: list[tuple[_Rule, str, str]] = []
         for key in keys:
             rule = self._rules[key]
@@ -1850,7 +1870,10 @@ class RuleEngine:
             do = c.source_changed(eid, st[0] if st is not None else None)
             if do is not None and rule.enabled and not c.missing:
                 changes.append((rule, do, c.switches()[eid]))
-        if not changes or self._echo_take(eid, changes[0][1]):
+        if not changes:
+            self._echo_arrived(eid, st)
+            return
+        if self._echo_take(eid, changes[0][1]):
             return
         for rule, do, source in changes:
             self._control_apply(rule, do, source)
@@ -1982,7 +2005,8 @@ class RuleEngine:
 
     def on_intent(self, plan_id: str, container_id: str, intent: dict) -> None:
         """A container intent ({"action": "toggle"}, {"action": "set", "value": "on" | "off"}, {"action": "auto"}); a
-        boiler or timed rule whose button it is takes it. Status events and other actions are ignored."""
+        boiler or timed rule whose button it is takes it, and so does every load control rule with that smart button
+        among its sources. Status events and other actions are ignored."""
         if not isinstance(intent, dict):
             return
         dirty: set[Key] = set()
