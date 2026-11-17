@@ -321,6 +321,7 @@ class _Rule:
         self.enabled = raw.get("enabled") is not False
         self.mode = raw.get("combine") if raw.get("combine") in ("all", "any") else "any"
         vent = raw.get("vent")
+        self.vent = isinstance(vent, dict)
         raw_inputs = [{"source": {"vent": vent}}] if isinstance(vent, dict) else raw.get("inputs") or []
         self.inputs = [_Input(i, devices, rule_names) for i in raw_inputs if isinstance(i, dict)]
         self.gate = _Input(raw["gate"], devices, rule_names) if isinstance(raw.get("gate"), dict) else None
@@ -574,7 +575,7 @@ class RuleEngine:
             i.prev = True
         elif r < 1 + i.below / 100 or i.prev is None:
             i.prev = False
-        return i.prev, f"{a:.1f} / {b:.1f} g/m³ ({(r - 1) * 100:+.0f} %)"
+        return i.prev, f"{a:.1f} / {b:.1f} g/m³ ({round((r - 1) * 100):+d} %)"
 
     def _light(self, i: _Input) -> "tuple[bool | None, str]":
         """Below the threshold: true; above it plus the hysteresis: false; in between: the previous value."""
@@ -671,6 +672,12 @@ class RuleEngine:
     def _step(self, rule: _Rule, due: "_Pending | None") -> bool:
         raw = rule.raw
         if raw is None:
+            if rule.vent and (due or rule.pending) is not None and not (due or rule.pending).to:
+                # a sensor dropping out must not strand the fan: the run-on finishes
+                if due is not None:
+                    self._commit(rule, False, "became false")
+                    return True
+                return False
             rule.cancel()
             return False
         if due is not None and raw == due.to:

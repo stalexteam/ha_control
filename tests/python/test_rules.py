@@ -1520,3 +1520,43 @@ def test_vent_source_that_is_not_a_dict_does_not_raise():
     w = World()
     w.engine.load_plans([plan([WC], [rule("r", [{"source": {"vent": "x"}}])])])
     assert trace(w)["status"] == "error"
+
+
+def test_vent_run_on_finishes_when_a_sensor_drops_out():
+    w = vent_world()
+    w.set("sensor.wc_h", "40")  # run-on starts at t=1000
+    w.advance(1300.0)
+    w.set("sensor.m_t", "unavailable")
+    assert trace(w)["pending"]["to"] is False
+    n = len(w.calls)
+    w.advance(1599.0)
+    assert len(w.calls) == n
+    w.advance(1600.0)
+    assert w.calls[-1] == ("switch", "turn_off", "switch.fan") and trace(w)["verdict"] is False
+    n = len(w.calls)
+    w.set("sensor.m_t", "22")
+    assert len(w.calls) == n and trace(w)["verdict"] is False
+
+
+def test_vent_unknown_starts_nothing_new():
+    w = vent_world(wc=(22, 40))
+    w.set("sensor.m_t", "unavailable")
+    assert "pending" not in trace(w)
+
+
+def test_condition_rule_pending_still_cancelled_by_unknown():
+    w = World(binary_sensor__m="on")
+    m = dev("m", "motion_sensor", "M", motion="binary_sensor.m")
+    lamp = dev("l", "wall_light", "L", control="light.l")
+    w.engine.load_plans([plan([m, lamp], [rule("r", ["m"], on_true=[("l", "on")], on_false=[("l", "off")], off_delay=600)])])
+    w.set("binary_sensor.m", "off")
+    assert trace(w)["pending"]["to"] is False
+    w.set("binary_sensor.m", "unavailable")
+    assert "pending" not in trace(w)
+
+
+def test_vent_detail_never_shows_minus_zero():
+    w = vent_world()
+    w.set("sensor.wc_t", "22")
+    w.set("sensor.wc_h", "49.8")
+    assert "-0" not in trace(w)["inputs"][0]["detail"]
