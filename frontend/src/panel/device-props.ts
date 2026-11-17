@@ -119,6 +119,8 @@ function kindFields(o: DevicePropsOpts, p: DeviceProps, pre: string, set: (patch
             const label = (e.target as HTMLInputElement).value.trim();
             if (label !== p.label) set({ label });
           }} />`)}`;
+    case 'illuminance_sensor':
+      return html`<p class="muted" data-note="daylight">${t('props.daylightInBinding')}</p>`;
     default:
       return html`<p class="muted">${t('props.noSettings')}</p>`;
   }

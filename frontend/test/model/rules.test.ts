@@ -289,7 +289,7 @@ describe('rules model', () => {
     expect(r.name).toBe('Outside light Yard');
     expect(r.combine).toBe('all');
     expect(r.inputs).toEqual([
-      { source: { light: 's2', below: 10, hysteresis: 5, unknownDark: true } },
+      { source: { daylight: 's2', is: 'night' } },
       { source: { sun: true } },
       { source: { time: { from: '17:00', to: '01:00' } } },
     ]);
@@ -297,7 +297,7 @@ describe('rules model', () => {
     expect(r.onTrue).toEqual([]);
     const e = outsideLightTemplate({ levels: [lvl] }, null, null);
     expect(e.name).toBe('Outside light');
-    expect(e.inputs[0].source).toEqual({ light: '', below: 10, hysteresis: 5, unknownDark: true });
+    expect(e.inputs[0].source).toEqual({ daylight: '', is: 'night' });
   });
 });
 

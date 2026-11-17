@@ -60,6 +60,7 @@ const remaining = (until: number, now: number): string => countdown(Math.max(1, 
 /** The second line of an input block before live values: its parameters in a few words. */
 export function paramText(s: RuleSource, not = false): string {
   if ('light' in s) return `${t('rules.light.below').toLowerCase()} ${s.below} lx (+${s.hysteresis})`;
+  if ('daylight' in s) return t(`rules.daylight.is.${s.is}`);
   if ('sun' in s) return t(not ? 'rules.sun.above' : 'rules.sun.below');
   if ('time' in s) return `${s.time.from}-${s.time.to}`;
   if ('held' in s) return `${t(`rules.held.${s.held.state}`)} ${durationText(s.held.seconds)}`;
@@ -75,10 +76,19 @@ export function gateValue(combine: 'all' | 'any', values: (boolean | null)[]): b
   return values.includes(true) ? true : values.some(v => v !== null) ? false : null;
 }
 
-/** A Held input counts down by its `until`: the server's text is stale between evaluations. */
-function liveDetail(tr: { value: boolean | null; detail: string; until?: number }, now: number): string {
+type LiveTrace = { value: boolean | null; detail: string; until?: number };
+
+/**
+ * A Held input counts down by its `until`: the server's text is stale between evaluations. A Daylight input's detail
+ * ends in its pending change ("night, 62 lx (day in 0:42)"), whose countdown ticks from `until` the same way.
+ */
+function liveDetail(tr: LiveTrace, now: number, s: RuleSource): string {
+  if ('daylight' in s) return daylightDetail(tr, now);
   return tr.until !== undefined && tr.until > now && tr.value !== true ? t('rules.flow.trueIn').replace('{t}', remaining(tr.until, now)) : tr.detail;
 }
+
+const daylightDetail = (tr: LiveTrace, now: number): string =>
+  tr.until === undefined ? tr.detail : tr.detail.replace(/ in [\d:]+\)$/, ` in ${remaining(tr.until, now)})`);
 
 export const word = (v: boolean | null): string => t(`rules.val.${v === null ? 'unknown' : v}`);
 export const tone = (v: boolean | null): string => (v === true ? ' on' : v === false ? ' off' : ' nodata');
@@ -120,6 +130,8 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
 
   const gt = rule.gate ? trace?.gate : undefined;
   const gateLine = !rule.gate ? '' : !gt ? paramText(rule.gate.source)
+    // A Daylight gate shows the sensor's state (and pending change) after open / closed.
+    : 'daylight' in rule.gate.source && gt.value !== null ? `${t(gt.value ? 'rules.flow.open' : 'rules.flow.closed')}, ${daylightDetail(gt, o.now)}`
     : gt.value === true ? t('rules.flow.open')
     : gt.value === null ? `${t('rules.flow.closed')}, ${t('rules.val.unknown')}`
     : gt.until !== undefined && gt.until > o.now ? `${t('rules.flow.closed')}, ${t('rules.flow.opensIn').replace('{t}', remaining(gt.until, o.now))}`
@@ -170,7 +182,7 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
           const tr = live?.[k];
           return block({
             x: xs[k], y: inY(k), w: IN_W, field: `input-${k}`, target: { input: k }, cls: tr ? tone(tr.value) : '',
-            lines: [`${i.not ? 'NOT ' : ''}${o.inputName(i)}`, tr ? liveDetail(tr, o.now) : paramText(i.source, i.not === true)],
+            lines: [`${i.not ? 'NOT ' : ''}${o.inputName(i)}`, tr ? liveDetail(tr, o.now, i.source) : paramText(i.source, i.not === true)],
           });
         })}
         ${block({

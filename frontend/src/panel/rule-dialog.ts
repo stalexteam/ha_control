@@ -29,7 +29,7 @@ export interface RuleDialogOpts {
   draft: RuleDraft;
   /** Plan devices that can be inputs / action targets, and every device (for names and existence). */
   inputDevices: Device[];
-  /** Illuminance sensors (Light level inputs) and the unit their bound entity reports (undefined = unknown). */
+  /** Illuminance sensors (Daylight and old Light level inputs) and the unit their bound entity reports (undefined = unknown). */
   lightSensors: Device[];
   lightUnit(deviceId: Id): string | undefined;
   actionDevices: Device[];
@@ -85,7 +85,7 @@ function isMissing(o: RuleDialogOpts, s: RuleSource): boolean {
 function newSource(o: RuleDialogOpts, v: string): RuleSource | null {
   if (v.startsWith('r:')) return { rule: v.slice(2) };
   if (v.startsWith('d:')) return { device: v.slice(2) };
-  if (v === 'light') return { light: o.lightSensors[0]?.id ?? '', below: 10, hysteresis: 5 };
+  if (v === 'daylight') return { daylight: o.lightSensors[0]?.id ?? '', is: 'night' };
   if (v === 'sun') return { sun: true };
   if (v === 'time') return { time: { from: '17:00', to: '01:00' } };
   if (v === 'held') return { held: { sources: [], state: 'any', seconds: 1800 } };
@@ -103,13 +103,16 @@ function deviceRuleOptions(o: RuleDialogOpts): TemplateResult {
     </optgroup>` : nothing}`;
 }
 
-/** The options of an add-input / set-gate select: devices, rules, then the four condition types. */
+/**
+ * The options of an add-input / set-gate select: devices, rules, then the four condition types. The old Light level is
+ * not offered (Daylight replaces it); existing Light level inputs still show and edit.
+ */
 function sourceOptions(o: RuleDialogOpts, placeholder: string): TemplateResult {
   return html`
     <option value="">${placeholder}</option>
     ${deviceRuleOptions(o)}
     <optgroup label=${t('rules.groupConditions')}>
-      ${(['light', 'sun', 'time', 'held'] as const).map(k => html`<option value=${k}>${t(`rules.src.${k}`)}</option>`)}
+      ${(['daylight', 'sun', 'time', 'held'] as const).map(k => html`<option value=${k}>${t(`rules.src.${k}`)}</option>`)}
     </optgroup>`;
 }
 
@@ -163,18 +166,34 @@ function actionList(o: RuleDialogOpts, side: 'true' | 'false'): TemplateResult {
 
 const num = (v: string): number => (v.trim() === '' ? NaN : Number(v));
 
-/** The parameter fields of a Light / Time / Held input; `set` replaces the source. */
+/** An illuminance sensor select (`part` names it); a sensor no longer among them shows as its name or "Pick a light sensor". */
+function sensorSelect(o: RuleDialogOpts, part: string, id: string, set: (id: string) => void): TemplateResult {
+  return html`<select data-part=${part} data-value=${id} @change=${(e: Event) => set((e.target as HTMLSelectElement).value)}>
+    ${o.lightSensors.some(d => d.id === id) ? nothing : html`<option value=${id}>${o.deviceById(id)?.name ?? t('rules.light.noSensor')}</option>`}
+    ${o.lightSensors.map(d => html`<option value=${d.id}>${d.name}</option>`)}
+  </select>`;
+}
+
+const DAYLIGHT_IS = ['night', 'dark', 'day'] as const;
+
+/** The parameter fields of a Daylight / Light / Time / Held input; `set` replaces the source. */
 function params(o: RuleDialogOpts, field: string, s: RuleSource, set: (s: RuleSource) => void): TemplateResult | typeof nothing {
+  if ('daylight' in s) {
+    return html`
+      <div class="rparams">
+        <label class="grow">${t('rules.daylight.sensor')} ${sensorSelect(o, 'daylight', s.daylight, id => set({ ...s, daylight: id }))}</label>
+        <select data-part="is" data-value=${s.is}
+          @change=${(e: Event) => set({ ...s, is: (e.target as HTMLSelectElement).value as typeof s.is })}>
+          ${DAYLIGHT_IS.map(v => html`<option value=${v}>${t(`rules.daylight.is.${v}`)}</option>`)}
+        </select>
+      </div>`;
+  }
   if ('light' in s) {
     const unit = s.light === '' ? undefined : o.lightUnit(s.light);
     return html`
       <div class="rparams">
         <label class="grow">${t('rules.light.sensor')}
-          <select data-part="light" data-value=${s.light}
-            @change=${(e: Event) => set({ ...s, light: (e.target as HTMLSelectElement).value })}>
-            ${o.lightSensors.some(d => d.id === s.light) ? nothing : html`<option value=${s.light}>${o.deviceById(s.light)?.name ?? t('rules.light.noSensor')}</option>`}
-            ${o.lightSensors.map(d => html`<option value=${d.id}>${d.name}</option>`)}
-          </select></label>
+          ${sensorSelect(o, 'light', s.light, id => set({ ...s, light: id }))}</label>
         <label>${t('rules.light.below')}
           <input class="num" data-part="below" type="number" min="0" step="any" .value=${NAN_SAFE(s.below)}
             @input=${(e: Event) => set({ ...s, below: num((e.target as HTMLInputElement).value) })} /> lx</label>
@@ -244,20 +263,23 @@ function params(o: RuleDialogOpts, field: string, s: RuleSource, set: (s: RuleSo
   return nothing;
 }
 
-/** One input row (also the gate's): its name or type, NOT, remove, and the fields of its type. `set(null)` removes it. */
+/**
+ * One input row (also the gate's): its name or type, NOT (not for Daylight: night / dark / day cover it), remove, and the
+ * fields of its type. `set(null)` removes it.
+ */
 function inputRow(o: RuleDialogOpts, i: RuleInput, field: string, set: (i: RuleInput | null) => void): TemplateResult {
   const s = i.source;
-  const typed = 'light' in s || 'sun' in s || 'time' in s || 'held' in s;
-  const type = 'light' in s ? 'light' : 'sun' in s ? 'sun' : 'time' in s ? 'time' : 'held';
+  const typed = !('device' in s || 'rule' in s);
+  const type = 'light' in s ? 'light' : 'daylight' in s ? 'daylight' : 'sun' in s ? 'sun' : 'time' in s ? 'time' : 'held';
   return html`
     <div class="rline${isMissing(o, s) ? ' bad' : ''}" data-field=${field} tabindex="-1">
       <span class="grow">${typed ? t(`rules.src.${type}`) : inputName(o, i)}${'sun' in s ? html` <span class="muted">${i.not ? t('rules.sun.above') : paramText(s)}</span>` : nothing}</span>
-      <label class="rnot"><input type="checkbox" data-part="not" .checked=${i.not === true}
+      ${'daylight' in s && !i.not ? nothing : html`<label class="rnot"><input type="checkbox" data-part="not" .checked=${i.not === true}
         @change=${(e: Event) => {
           const on = (e.target as HTMLInputElement).checked;
           const { not: _n, ...rest } = i;
           set(on ? { ...rest, not: true as const } : rest);
-        }} /> ${t('rules.not')}</label>
+        }} /> ${t('rules.not')}</label>`}
       <button class="btn" data-action="remove-input" title=${t('rules.remove')} @click=${() => set(null)}>&times;</button>
       ${params(o, field, s, src => set({ ...i, source: src }))}
     </div>`;

@@ -269,7 +269,7 @@ export function timerTemplate(_plan: { levels: Level[] }, zoneId: Id | null, dev
   return rule;
 }
 
-/** The "Outside light" template: dark (light + sun + time window), gated by the light unchanged for 30 min. The owner picks the light. */
+/** The "Outside light" template: night (daylight + sun + time window), gated by the light unchanged for 30 min. The owner picks the light. */
 export function outsideLightTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
   const rule = newRule(zoneId);
   rule.name = zoneId !== null && zoneName ? `Outside light ${zoneName}` : 'Outside light';
@@ -279,7 +279,7 @@ export function outsideLightTemplate(plan: { levels: Level[] }, zoneId: Id | nul
     ? zoneMembers(level, zoneId as Id).find(m => m.participates && m.device.props.kind === 'illuminance_sensor')?.device.id
     : undefined;
   rule.inputs = [
-    { source: { light: sensor ?? '', below: 10, hysteresis: 5, unknownDark: true } },
+    { source: { daylight: sensor ?? '', is: 'night' } },
     { source: { sun: true } },
     { source: { time: { from: '17:00', to: '01:00' } } },
   ];

@@ -10,6 +10,7 @@ import { setDeviceProps } from '../model/devices';
 import { deviceNameRow } from './device-props';
 import { deviceTitle } from './unplaced-devices';
 import { containerFields, containerFlags, triggerFields } from './container-fields';
+import { daylightFields } from './daylight-fields';
 import type { ContainerFeed, ContainerIntent, ContainerState } from '../live/container-feed';
 import { t } from '../i18n';
 
@@ -131,7 +132,7 @@ function roleField(o: BindingPropsOpts, d: Device, spec: RoleSpec): TemplateResu
 /**
  * Binding step properties: the selected device's name and kind, an input container's output line, one field
  * per active role and, for an input container, its checkboxes after the sections above them and
- * its settings after the roles; with nothing selected, an invitation to pick a device. The footer counts the devices
+ * its settings after the roles (an illuminance sensor: its daylight thresholds); with nothing selected, an invitation to pick a device. The footer counts the devices
  * not bound and offers Next unbound device.
  */
 export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
@@ -148,7 +149,8 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
       ${deviceNameRow(d, name => o.commit(setDeviceProps(o.level, d.id, {}, name)))}
       ${outputLine(o, d)}
       ${activeRoleSpecs(d).map(spec => html`${roleField(o, d, spec)}${containerFlags(o, d, spec.role)}`)}
-      ${containerFields(d)}`
+      ${containerFields(d)}
+      ${daylightFields(o, d)}`
     : html`<p class="muted">${t('binding.pick')}</p>`}
     <div class="bfoot">
       <span>${t('binding.notBound').replace('{n}', String(open))}</span>

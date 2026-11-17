@@ -51,12 +51,16 @@ function notConfiguredStates(plan: Plan | undefined): Record<string, ContainerSt
  * sample (dev harness); without it those commands are unknown, so tests bring their own HA data.
  */
 export function createMockHass(
-  opts: { darkMode?: boolean; storage?: Storage; demo?: boolean; powerFrame?: PowerFrame; rulesFrame?: Record<string, RuleTrace> } = {},
+  opts: {
+    darkMode?: boolean; storage?: Storage; demo?: boolean; powerFrame?: PowerFrame; rulesFrame?: Record<string, RuleTrace>;
+    /** With `demo`: states replacing the sample's (a scene's live values). */
+    states?: Record<string, unknown>;
+  } = {},
 ): HassLike {
   const storage = opts.storage ?? localStorage;
   return {
     themes: { darkMode: opts.darkMode ?? true },
-    ...(opts.demo ? { states: DEMO_STATES } : {}),
+    ...(opts.demo ? { states: { ...DEMO_STATES, ...opts.states } } : {}),
     connection: {
       sendMessagePromise<T>(msg: Record<string, unknown>): Promise<T> {
         if (opts.demo && String(msg.type) in DEMO_REGISTRY) return Promise.resolve(structuredClone(DEMO_REGISTRY[String(msg.type)]) as T);

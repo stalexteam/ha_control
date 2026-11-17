@@ -1,6 +1,8 @@
 import type { Device } from '../model/types';
 import { activeRoleSpecs } from '../model/bindings';
 import { formatWatts } from '../render/power-svg';
+import { daylightRaw } from '../model/daylight';
+import { t } from '../i18n';
 
 /** `hass.states` (entity id -> state object). */
 export type HassStates = Record<string, unknown> | undefined;
@@ -9,8 +11,11 @@ export type LiveLook = 'none' | 'on' | 'off' | 'no-data' | 'active';
 export type BubbleTone = 'device' | 'motion' | 'leak' | 'event';
 /** key: set on an action bubble (its time), so a replaced one is drawn anew and pops again. */
 export interface LiveBubble { text: string; tone: BubbleTone; key?: number }
-/** timerSince: epoch ms of last_changed when a timer applies; power: W > 0 when a power bubble applies. */
-export interface DeviceLive { look: LiveLook; timerSince?: number; power?: number }
+/**
+ * timerSince: epoch ms of last_changed when a timer applies; power: W > 0 when a power bubble applies; daylight: an
+ * illuminance sensor's raw daylight state and source ("night 8 lx", "twilight (sun)", "no data") while lux or sun is bound.
+ */
+export interface DeviceLive { look: LiveLook; timerSince?: number; power?: number; daylight?: string }
 
 interface HassState { state: string; last_changed?: string; attributes?: { unit_of_measurement?: string } }
 
@@ -84,10 +89,20 @@ export function deviceLive(d: Device, states: HassStates): DeviceLive {
   // Only an active power role (an inverter has Input / Output power instead); under 1 W after rounding is no bubble.
   const p = activeRoleSpecs(d).some(r => r.role === 'power') ? watts(states, b.power) : undefined;
   if (p !== undefined && Math.round(p) >= 1 && (look === 'on' || !hasControl)) out.power = p;
+  if (kind === 'illuminance_sensor' && (b.illuminance || b.sun)) out.daylight = daylightText(d, states);
   return out;
 }
 
-/** Timer bubble (tone by kind) then power bubble. */
+/** The raw daylight state (no debounce: the rules' debounced state shows in the rule diagrams) and its source. */
+function daylightText(d: Device, states: HassStates): string {
+  const raw = daylightRaw(d, states);
+  if (raw.state === null) return t('daylight.noData');
+  const word = t(`daylight.${raw.state}`);
+  // Six significant digits, as the server's reading.
+  return 'lux' in raw ? `${word} ${Number(raw.lux.toPrecision(6))} lx` : `${word} ${t('daylight.bySun')}`;
+}
+
+/** Timer bubble (tone by kind), power bubble, then the daylight bubble. */
 export function liveBubbles(live: DeviceLive, d: Device, now: number): LiveBubble[] {
   const out: LiveBubble[] = [];
   if (live.timerSince !== undefined) {
@@ -95,5 +110,6 @@ export function liveBubbles(live: DeviceLive, d: Device, now: number): LiveBubbl
     out.push({ text: formatDuration(now - live.timerSince), tone: k === 'motion_sensor' ? 'motion' : k === 'leak_sensor' ? 'leak' : 'device' });
   }
   if (live.power !== undefined) out.push({ text: formatWatts(live.power), tone: 'device' });
+  if (live.daylight !== undefined) out.push({ text: live.daylight, tone: 'device' });
   return out;
 }

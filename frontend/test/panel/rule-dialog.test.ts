@@ -255,13 +255,45 @@ describe('Rule dialog', () => {
       return el;
     };
 
-    it('"Add input..." offers devices, rules and the four condition types', async () => {
+    it('"Add input..." and "Set gate..." offer devices, rules and the four condition types (no Light level)', async () => {
       const el = await edit('rule-leak');
-      const sel = q<HTMLSelectElement>(el, 'select[data-action="add-input"]');
-      const opts = [...sel.options].map(o => o.value).filter(Boolean);
-      expect(opts).toEqual(expect.arrayContaining(['d:d-leak', 'r:rule-motion', 'light', 'sun', 'time', 'held']));
-      expect([...sel.options].filter(o => ['light', 'sun', 'time', 'held'].includes(o.value)).map(o => o.textContent!.trim()))
-        .toEqual(['Light level', 'Sun', 'Time window', 'Held']);
+      for (const action of ['add-input', 'set-gate']) {
+        const sel = q<HTMLSelectElement>(el, `select[data-action="${action}"]`);
+        const opts = [...sel.options].map(o => o.value).filter(Boolean);
+        expect(opts).toEqual(expect.arrayContaining(['d:d-leak', 'r:rule-motion', 'daylight', 'sun', 'time', 'held']));
+        expect(opts).not.toContain('light');
+        expect([...sel.options].filter(o => ['daylight', 'sun', 'time', 'held'].includes(o.value)).map(o => o.textContent!.trim()))
+          .toEqual(['Daylight', 'Sun', 'Time window', 'Held']);
+      }
+    });
+
+    it('a Daylight input picks an illuminance sensor and night / dark / day; it has no NOT', async () => {
+      const el = await edit('rule-leak');
+      await choose(el, 'select[data-action="add-input"]', 'daylight');
+      const row = '[data-field="input-1"]';
+      expect(el.ruleDraft!.rule.inputs[1]).toEqual({ source: { daylight: 'd-lux', is: 'night' } });
+      expect(q(el, row).textContent).toContain('Daylight');
+      expect(el.shadowRoot!.querySelector(`.rule-backdrop ${row} [data-part="not"]`)).toBeNull();
+      expect([...q<HTMLSelectElement>(el, `${row} [data-part="daylight"]`).options].map(o => o.value)).toEqual(['d-lux']);
+      expect([...q<HTMLSelectElement>(el, `${row} [data-part="is"]`).options].map(o => [o.value, o.textContent!.trim()]))
+        .toEqual([['night', 'is night'], ['dark', 'is dark'], ['day', 'is day']]);
+      await choose(el, `${row} [data-part="is"]`, 'dark');
+      expect(q(el, '[data-block="input-1"]').textContent).toContain('is dark');
+      await press(el, 'button[data-action="rule-ok"]');
+      expect(rule(el, 'rule-leak').inputs[1].source).toEqual({ daylight: 'd-lux', is: 'dark' });
+    });
+
+    it('a Daylight gate; a removed sensor blocks OK', async () => {
+      const el = await edit('rule-leak');
+      await choose(el, 'select[data-action="set-gate"]', 'daylight');
+      expect(q(el, '[data-block="gate-input"]').textContent).toContain('Gate: Light sensor');
+      await choose(el, '[data-field="gate-input"] [data-part="is"]', 'day');
+      expect(el.ruleDraft!.rule.gate).toEqual({ source: { daylight: 'd-lux', is: 'day' } });
+      el.ruleDraft = { ...el.ruleDraft!, rule: { ...el.ruleDraft!.rule, gate: { source: { daylight: 'gone', is: 'day' } } } };
+      await el.updateComplete;
+      expect(q<HTMLSelectElement>(el, '[data-field="gate-input"] [data-part="daylight"]').value).toBe('gone');
+      expect(q(el, '[data-field="gate-input"]').classList.contains('bad')).toBe(true);
+      expect(okBtn(el).disabled).toBe(true);
     });
 
     it('a Light input edits sensor, below and hysteresis; a non-lx unit shows the warning', async () => {
@@ -317,9 +349,9 @@ describe('Rule dialog', () => {
       expect(rule(el, 'rule-outside').inputs[2].source).toEqual({ time: { from: '17:00', to: '23:30' } });
     });
 
-    it('adds Sun, Light, Time and Held inputs with defaults', async () => {
+    it('adds Sun, Daylight, Time and Held inputs with defaults', async () => {
       const el = await edit('rule-leak');
-      for (const v of ['sun', 'light', 'time', 'held']) await choose(el, 'select[data-action="add-input"]', v);
+      for (const v of ['sun', 'daylight', 'time', 'held']) await choose(el, 'select[data-action="add-input"]', v);
       await choose(el, '[data-field="input-4"] [data-part="add-source"]', 'd:d-socket');
       await type(el, '[data-field="input-4"] [data-part="duration"]', '10');
       await choose(el, '[data-field="input-4"] [data-part="unit"]', 'min');
@@ -327,7 +359,7 @@ describe('Rule dialog', () => {
       await press(el, 'button[data-action="rule-ok"]');
       expect(rule(el, 'rule-leak').inputs.slice(1).map(i => i.source)).toEqual([
         { sun: true },
-        { light: 'd-lux', below: 10, hysteresis: 5 },
+        { daylight: 'd-lux', is: 'night' },
         { time: { from: '17:00', to: '01:00' } },
         { held: { sources: [{ device: 'd-socket' }], state: 'on', seconds: 600 } },
       ]);
@@ -390,7 +422,8 @@ describe('Rule dialog', () => {
       await press(el, 'button[data-template="outside"]');
       expect(q<HTMLInputElement>(el, '[data-field="name"]').value).toBe('Outside light Main');
       expect(q<HTMLSelectElement>(el, '[data-field="combine"]').value).toBe('all');
-      expect(q<HTMLSelectElement>(el, '[data-field="input-0"] [data-part="light"]').value).toBe('d-lux');
+      expect(q<HTMLSelectElement>(el, '[data-field="input-0"] [data-part="daylight"]').value).toBe('d-lux');
+      expect(q<HTMLSelectElement>(el, '[data-field="input-0"] [data-part="is"]').value).toBe('night');
       expect(el.ruleDraft!.rule.gate).toEqual({ source: { held: { sources: [], state: 'any', seconds: 1800 } } });
       await press(el, 'button[data-action="rule-cancel"]');
       await press(el, 'button[data-template="timer"]');

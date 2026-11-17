@@ -103,3 +103,30 @@ describe('liveBubbles', () => {
     expect(liveBubbles({ look: 'on', timerSince: now - 1000, power: 50 }, light, now).map((b) => b.text)).toEqual(['1', '50 W']);
   });
 });
+
+describe('illuminance sensor daylight bubble', () => {
+  const now = Date.parse(T);
+  const lux = (state: string) => ({ state, attributes: { unit_of_measurement: 'lx' } });
+  const sun = (elevation: number) => ({ state: 'below_horizon', attributes: { elevation } });
+  const sensor = (bindings?: Device['bindings'], extra: object = {}) => dev({ kind: 'illuminance_sensor', ...extra } as DeviceProps, bindings);
+  const text = (d: Device, states: Record<string, unknown>) => liveBubbles(deviceLive(d, states), d, now);
+
+  it('raw state and its source, no debounce', () => {
+    const s = sensor({ illuminance: 'sensor.lux', sun: 'sun.sun' });
+    expect(deviceLive(s, { 'sensor.lux': lux('8') })).toEqual({ look: 'none', daylight: 'night 8 lx' });
+    expect(text(s, { 'sensor.lux': lux('8') })).toEqual([{ text: 'night 8 lx', tone: 'device' }]);
+    expect(text(s, { 'sensor.lux': lux('320.25') })).toEqual([{ text: 'day 320.25 lx', tone: 'device' }]);
+    expect(text(s, { 'sensor.lux': lux('20') })).toEqual([{ text: 'twilight 20 lx', tone: 'device' }]);
+    expect(text(s, { 'sensor.lux': lux('unavailable'), 'sun.sun': sun(-3.2) })).toEqual([{ text: 'twilight (sun)', tone: 'device' }]);
+    expect(text(s, { 'sun.sun': sun(-12) })).toEqual([{ text: 'night (sun)', tone: 'device' }]);
+    expect(text(s, {})).toEqual([{ text: 'no data', tone: 'device' }]);
+  });
+  it('uses the sensor thresholds', () => {
+    const s = sensor({ illuminance: 'sensor.lux' }, { nightBelow: 30 });
+    expect(text(s, { 'sensor.lux': lux('20') })).toEqual([{ text: 'night 20 lx', tone: 'device' }]);
+  });
+  it('no bubble while nothing is bound', () => {
+    expect(deviceLive(sensor(), { 'sensor.lux': lux('8') })).toEqual({ look: 'none' });
+    expect(text(sensor({}), {})).toEqual([]);
+  });
+});

@@ -120,7 +120,7 @@ export function moveDevice(level: Level, id: Id, placement: DevicePlacement): Le
 }
 
 /**
- * The patch never changes the kind. Bindings of roles the new props disable (a smart button's off and auto)
+ * The patch never changes the kind; a patch field set to undefined removes it. Bindings of roles the new props disable (a smart button's off and auto)
  * are dropped.
  */
 export function setDeviceProps(level: Level, id: Id, patch: Partial<DeviceProps>, name?: string): Level {
@@ -129,6 +129,8 @@ export function setDeviceProps(level: Level, id: Id, patch: Partial<DeviceProps>
   return withDevices(level, devices.map(x => {
     if (x.id !== id) return x;
     const props = { ...x.props, ...patch, kind: x.props.kind } as DeviceProps;
+    // A patch field set to undefined removes it (an optional prop back to its default).
+    for (const [k, v] of Object.entries(patch)) if (v === undefined) delete (props as Record<string, unknown>)[k];
     return sanitizeBindings({ ...x, props, name: name ?? x.name });
   }));
 }

@@ -297,6 +297,48 @@ describe('rule flowchart', () => {
       expect(no.host.querySelector('[data-note="held"]')).toBeNull();
     });
 
+    describe('daylight', () => {
+      const r3: Rule = {
+        ...rule, combine: 'all', offDelay: 0,
+        inputs: [{ source: { daylight: 'lux', is: 'night' } }, { source: { daylight: 'lux', is: 'dark' } }],
+        gate: { source: { daylight: 'lux', is: 'day' } },
+      };
+      const nm3 = (): string => 'Porch';
+
+      it('blocks show the asked state before live values', () => {
+        const { host } = draw({ rule: r3, inputName: nm3 });
+        expect(text(host, '[data-block="input-0"]')).toBe('Porch is night');
+        expect(text(host, '[data-block="input-1"]')).toBe('Porch is dark');
+        expect(text(host, '[data-block="gate-input"]')).toBe('Gate: Porch is day');
+      });
+
+      it('a pending change ticks from `until`; the detail stays otherwise', () => {
+        const trace: RuleTrace = {
+          status: 'ok', verdict: true, unknownInputs: 0,
+          inputs: [
+            { label: 'Porch', value: true, detail: 'night, 62 lx (day in 0:42)', until: NOW + 42_000 },
+            { label: 'Porch', value: true, detail: 'twilight, sun -3.2°' },
+          ],
+          gate: { value: false, detail: 'night, 62 lx (day in 0:42)', until: NOW + 42_000 },
+        };
+        const at = (now: number) => draw({ rule: r3, inputName: nm3, trace, now }).host;
+        expect(text(at(NOW), '[data-block="input-0"]')).toBe('Porch night, 62 lx (day in 0:42)');
+        expect(text(at(NOW + 10_000), '[data-block="input-0"]')).toBe('Porch night, 62 lx (day in 0:32)');
+        expect(text(at(NOW + 10_000), '[data-block="input-1"]')).toBe('Porch twilight, sun -3.2°');
+        expect(text(at(NOW + 10_000), '[data-block="gate-input"]')).toBe('Gate: Porch closed, night, 62 lx (day in 0:32)');
+        // Past `until` before the next frame: the change is due, so the countdown stays at its last second.
+        expect(text(at(NOW + 60_000), '[data-block="input-0"]')).toBe('Porch night, 62 lx (day in 0:01)');
+      });
+
+      it('an open daylight gate shows its state too; no data stays closed, no data', () => {
+        const base: RuleTrace = { status: 'ok', verdict: true, unknownInputs: 0, inputs: r3.inputs.map(() => ({ label: '', value: true, detail: 'd' })) };
+        const open = draw({ rule: r3, inputName: nm3, trace: { ...base, gate: { value: true, detail: 'day, 320 lx' } } });
+        expect(text(open.host, '[data-block="gate-input"]')).toBe('Gate: Porch open, day, 320 lx');
+        const no = draw({ rule: r3, inputName: nm3, trace: { ...base, gate: { value: null, detail: 'no data' } } });
+        expect(text(no.host, '[data-block="gate-input"]')).toBe('Gate: Porch closed, no data');
+      });
+    });
+
     it('a click on the gate block reports gate-input', () => {
       const { host, onFocus } = draw({ rule: r2, inputName: nm });
       host.querySelector('[data-block="gate-input"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));

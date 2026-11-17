@@ -1,6 +1,8 @@
 /** A small Home Assistant sample for the dev harness: live states and the three registries, one HA device per kind. */
 
-interface DemoEntity { id: string; name: string; state: string; device?: string; cls?: string; unit?: string; category?: string }
+interface DemoEntity {
+  id: string; name: string; state: string; device?: string; cls?: string; unit?: string; category?: string; attrs?: Record<string, unknown>;
+}
 
 const AREAS = [
   { area_id: 'kitchen', name: 'Kitchen' },
@@ -39,7 +41,8 @@ const ENTITIES: DemoEntity[] = [
   { id: 'sensor.boiler_power', name: 'Boiler power', state: '1.8', device: 'boiler', cls: 'power', unit: 'kW' },
   { id: 'binary_sensor.bath_leak', name: 'Bath leak', state: 'on', device: 'bath_leak', cls: 'moisture' },
   { id: 'valve.water_valve', name: 'Water valve', state: 'open', device: 'water_valve' },
-  { id: 'sun.sun', name: 'Sun', state: 'above_horizon' },
+  { id: 'sun.sun', name: 'Sun', state: 'above_horizon', attrs: { elevation: 24.5 } },
+  { id: 'sensor.porch_lux', name: 'Porch illuminance', state: 'unavailable', cls: 'illuminance', unit: 'lx' },
   { id: 'sensor.boiler_voltage', name: 'Boiler voltage', state: '229', device: 'boiler', cls: 'voltage', unit: 'V' },
 ];
 
@@ -55,6 +58,7 @@ export const DEMO_STATES: Record<string, unknown> = Object.fromEntries(ENTITIES.
     friendly_name: e.name,
     ...(e.cls ? { device_class: e.cls } : {}),
     ...(e.unit ? { unit_of_measurement: e.unit } : {}),
+    ...e.attrs,
   },
 }]));
 

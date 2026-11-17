@@ -108,6 +108,11 @@ describe('setDeviceProps / deleteDevice', () => {
     expect(l.devices[0].props).toMatchObject({ kind: 'wall_light', coneAngle: 60 });
     expect(l.devices[0].name).toBe('New');
   });
+  it('a field patched to undefined is removed', () => {
+    const a = addDevice(room(), { kind: 'illuminance_sensor', nightBelow: 5, dayAbove: 80 }, free, 'Lux');
+    const l = setDeviceProps(a.level, a.deviceId!, { nightBelow: undefined });
+    expect(l.devices[0].props).toEqual({ kind: 'illuminance_sensor', dayAbove: 80 });
+  });
   it('deleteDevice removes', () => {
     const a = addDevice(room(), deviceDefaults('wall_switch', 'wall'), onWall('w0', 1000), 'S');
     expect(deleteDevice(a.level, a.deviceId!).devices).toHaveLength(0);

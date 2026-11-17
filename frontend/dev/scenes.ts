@@ -4,8 +4,11 @@ import { fitWallMount } from '../src/geometry/devices';
 import type { PowerFrame, PowerSchema } from '../src/model/power';
 import { rectRoomLevel } from '../test/fixtures';
 
-/** A named dev-harness state: the plans seeded into the mock store and the power frame the mock answers with. */
-export interface Scene { plans: Plan[]; powerFrame?: PowerFrame; rulesFrame?: Record<string, RuleTrace> }
+/**
+ * A named dev-harness state: the plans seeded into the mock store, the power and rules frames the mock answers with,
+ * and live states replacing the demo sample's.
+ */
+export interface Scene { plans: Plan[]; powerFrame?: PowerFrame; rulesFrame?: Record<string, RuleTrace>; states?: Record<string, unknown> }
 
 function room(): Plan {
   const level = rectRoomLevel(4000, 3000, 100);
@@ -138,6 +141,42 @@ const OUTSIDE_TRACE: RuleTrace = {
   gate: { value: false, detail: 'unchanged 18 / 30 min', until: Date.now() + 12 * 60_000 },
 };
 ROOM_RULES['rule-outside'] = OUTSIDE_TRACE;
+
+/**
+ * The room with daylight (scene `daylight`): the Light sensor (lux + sun) reads 8 lx, night; the Porch sensor's lux is
+ * unavailable, so the sun (-3.2 deg) gives twilight. Rule "Porch light": Porch night (pending: twilight in 0:42) and
+ * the time window, gated by the Light sensor being dark.
+ */
+function daylightPlan(): Plan {
+  const plan = room();
+  const level = plan.levels[0];
+  level.devices = level.devices.map(d => (d.id === 'd-lux' ? { ...d, bindings: { illuminance: 'sensor.hall_lux', sun: 'sun.sun' } } : d));
+  level.devices.push({
+    id: 'd-porch', name: 'Porch sensor', invalid: false, bindings: { illuminance: 'sensor.porch_lux', sun: 'sun.sun' },
+    placement: { mode: 'free', x: 3500, y: 1500, rotation: 0 }, props: { kind: 'illuminance_sensor', nightBelow: 5, debounce: 90 },
+  });
+  plan.rules = [...(plan.rules ?? []), {
+    id: 'rule-daylight', name: 'Porch light', zoneId: 'r0', combine: 'all',
+    inputs: [{ source: { daylight: 'd-porch', is: 'night' } }, { source: { time: { from: '17:00', to: '01:00' } } }],
+    gate: { source: { daylight: 'd-lux', is: 'dark' } },
+    onDelay: 0, offDelay: 0, onTrue: [{ device: 'd-light', do: 'on' }], onFalse: [{ device: 'd-light', do: 'off' }],
+  }];
+  return plan;
+}
+
+const DAYLIGHT_TRACE: RuleTrace = {
+  status: 'ok', verdict: true, unknownInputs: 0,
+  inputs: [
+    { label: 'Porch sensor', value: true, detail: 'night, sun -3.2° (twilight in 0:42)', until: Date.now() + 42_000 },
+    { label: 'Time window', value: true, detail: 'in window until 01:00' },
+  ],
+  gate: { value: true, detail: 'night, 8 lx' },
+};
+
+const DAYLIGHT_STATES: Record<string, unknown> = {
+  'sensor.hall_lux': { state: '8', last_changed: new Date().toISOString(), attributes: { friendly_name: 'Hall illuminance', device_class: 'illuminance', unit_of_measurement: 'lx' } },
+  'sun.sun': { state: 'below_horizon', last_changed: new Date().toISOString(), attributes: { friendly_name: 'Sun', elevation: -3.2 } },
+};
 ROOM_RULES['rule-vent'] = {
   status: 'ok', verdict: true, unknownInputs: 0, pending: { to: false, at: Date.now() + 7 * 60_000 },
   inputs: [{
@@ -597,6 +636,7 @@ const POWER_OFF_FRAME: PowerFrame = {
 
 export const SCENES: Record<string, Scene> = {
   room: { plans: [room()], rulesFrame: ROOM_RULES },
+  daylight: { plans: [daylightPlan()], rulesFrame: { ...ROOM_RULES, 'rule-daylight': DAYLIGHT_TRACE }, states: DAYLIGHT_STATES },
   'vent-na': { plans: [room()], rulesFrame: { ...ROOM_RULES, 'rule-vent': VENT_NA } },
   'vent-long': {
     plans: [ventLongPlan()],

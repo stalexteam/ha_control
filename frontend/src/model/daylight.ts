@@ -41,3 +41,32 @@ export function sunOk(night: unknown, day: unknown): boolean {
 
 /** Debounce: missing, or a whole number of seconds 0..3600. */
 export const debounceOk = (v: unknown): boolean => v === undefined || (Number.isInteger(v) && (v as number) >= 0 && (v as number) <= DEBOUNCE_MAX);
+
+export type DaylightState = 'night' | 'twilight' | 'day';
+/** A raw (not debounced) daylight state and what decided it: the lux reading, or the sun elevation (degrees). */
+export type DaylightRaw = { state: DaylightState; lux: number } | { state: DaylightState; elevation: number } | { state: null };
+
+interface RawSt { state?: unknown; attributes?: { unit_of_measurement?: unknown; elevation?: unknown } }
+
+const band = (v: number, night: number, day: number): DaylightState => (v < night ? 'night' : v > day ? 'day' : 'twilight');
+
+/**
+ * The raw daylight state from live states, as the server computes it: a numeric lux reading in `lx` decides; otherwise
+ * (lux unbound, unavailable, unknown, not a number, another unit) a bound sun with a numeric `elevation`; else no data.
+ */
+export function daylightRaw(d: Device, states: Record<string, unknown> | undefined): DaylightRaw {
+  const p = daylightProps(d);
+  const get = (eid: string | undefined): RawSt | undefined => {
+    const s = eid ? states?.[eid] : undefined;
+    return s && typeof s === 'object' ? (s as RawSt) : undefined;
+  };
+  const lx = get(d.bindings?.illuminance);
+  if (lx && lx.attributes?.unit_of_measurement === 'lx' && typeof lx.state === 'string' && lx.state.trim() !== '') {
+    const v = Number(lx.state);
+    if (Number.isFinite(v)) return { state: band(v, p.nightBelow, p.dayAbove), lux: v };
+  }
+  const sun = get(d.bindings?.sun);
+  const e = sun?.attributes?.elevation;
+  if (sun && sun.state !== 'unavailable' && sun.state !== 'unknown' && isNum(e)) return { state: band(e, p.sunNight, p.sunDay), elevation: e };
+  return { state: null };
+}
