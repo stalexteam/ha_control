@@ -47,6 +47,7 @@ VALVE_SERVICES = {
 # static error reasons, most important first
 STATIC_REASONS = ("cycle", "device missing", "rule missing", "target missing")
 WAITING = "waiting for target"
+ON_WAY = 10  # s an unconfirmed on of a shared device counts as on its way
 SUN = "sun.sun"
 SUN_STATES = {"below_horizon": (True, "below horizon"), "above_horizon": (False, "above horizon")}
 
@@ -378,6 +379,7 @@ class _Hold:
         self.waiting: str | None = None  # "target unavailable" / "service failed"
         self.attempt = 0  # a late failure or a held call counts only for the latest attempt
         self.confirmed = True  # the device has read `cmd` since it was sent (False: still on its way)
+        self.sent_at = 0.0  # epoch s of the latest send
         self.owed: Key | None = None  # an off of this rule was not sent because others kept the device on
         self.label = ""  # the device name for an owed off
 
@@ -1160,10 +1162,15 @@ class RuleEngine:
         return rule.open and rule.verdict is True
 
     def _device_on(self, eid: str) -> bool:
-        """The device reads on, or an on is on its way to it (sent or waiting, not confirmed yet)."""
+        """The device reads on, or an on is on its way to it: waiting for the device, or sent less than ON_WAY s ago
+        and not confirmed yet (an on HA accepted but the device never applied stops counting then)."""
         st = self._lookup(eid)
+        if st is not None and st[0] == "on":
+            return True
         hold = self._holds.get(eid)
-        return (st is not None and st[0] == "on") or (hold is not None and hold.cmd == "on" and not hold.confirmed)
+        if hold is None or hold.cmd != "on" or hold.confirmed:
+            return False
+        return bool(hold.waiting) or self._now() - hold.sent_at < ON_WAY
 
     def _holders(self, eid: str, but: "Key | None" = None) -> "list[_Rule]":
         """The rules that keep the device on now, in rule order (always computed from their current state)."""
@@ -1197,7 +1204,7 @@ class RuleEngine:
         hold.cmd, hold.entry, hold.by, hold.waiting = do, entry, rule.key if rule is not None else None, None
         hold.owed = None
         if self._loading:
-            hold.confirmed = False
+            hold.confirmed, hold.sent_at = False, self._now()
             if eid not in self._deferred:
                 self._deferred.append(eid)
             return
@@ -1228,7 +1235,7 @@ class RuleEngine:
         hold.waiting = None
         hold.entry.pop("error", None)
         st = self._lookup(eid)
-        hold.confirmed = st is not None and st[0] == hold.cmd
+        hold.confirmed, hold.sent_at = st is not None and st[0] == hold.cmd, self._now()
         try:
             held = self._call(
                 eid.split(".", 1)[0], f"turn_{hold.cmd}", eid,

@@ -583,3 +583,27 @@ def test_a_boiler_limit_off_is_sent_although_a_pair_rule_holds():
     w.calls.clear()
     w.set("sensor.grid", "4000", W)
     assert w.calls == [R_OFF] and w.tr("b")["boiler"]["phase"] == "limit"
+
+
+def test_r4_a_lost_on_counts_as_on_its_way_only_for_10_s():
+    """HA accepted the vent's on but the fan never applied it: within 10 s a press sends no duplicate; after 10 s the
+    fan's real state decides and the press sends on again."""
+    w = world()
+    w.calls.clear()
+    w.wet()  # on sent; the fan stays off
+    w.t = 1009.0
+    w.start()
+    assert w.calls == [ON] and w.last("r")["reason"] == "already on by WC vent"
+    w.stop()
+    w.t = 1010.0
+    w.start()
+    assert w.calls == [ON, ON] and "sent" not in w.last("r")
+
+
+def test_r4_an_on_waiting_for_its_target_stays_on_its_way_after_10_s():
+    w = world(fan__vent="unavailable")
+    w.calls.clear()
+    w.wet()
+    w.advance(1000 + 60)
+    w.start()
+    assert w.calls == [ON] and w.last("r")["reason"] == "already on by WC vent"
