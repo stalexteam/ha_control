@@ -223,6 +223,19 @@ def _target(device: dict | None, do: str) -> "tuple[str, str, str] | None":
     return None
 
 
+def _valve_entity(device: "dict | None") -> "str | None":
+    return _bound(device, "state") if device is not None and _kind(device) == "valve" else None
+
+
+def _valve_open(eid: str, st: "tuple[str, dict] | None") -> "bool | None":
+    """True when the valve is open or opening (on for a switch), False when closed or closing, None otherwise."""
+    if st is None:
+        return None
+    if eid.split(".", 1)[0] == "valve":
+        return True if st[0] in ("open", "opening") else False if st[0] in ("closed", "closing") else None
+    return True if st[0] == "on" else False if st[0] == "off" else None
+
+
 def combine(mode: str, values: "list[bool | None]") -> "bool | None":
     if mode == "all":
         if False in values:
@@ -368,11 +381,25 @@ class _Rule:
         self.vent = isinstance(vent, dict)
         boiler = raw.get("boiler")
         self.boiler = Boiler(boiler, devices, blocks or {}) if isinstance(boiler, dict) else None
-        raw_inputs = [{"source": {"vent": vent}}] if isinstance(vent, dict) else raw.get("inputs") or []
+        leak = raw.get("leak")
+        sensors = [x for x in leak.get("sensors") or [] if isinstance(x, str)] if isinstance(leak, dict) else []
+        valves = [x for x in leak.get("valves") or [] if isinstance(x, str)] if isinstance(leak, dict) else []
+        self.leak = isinstance(leak, dict)
+        if self.leak:
+            self.mode = "any"  # ruling A3: a dead sensor must not block a leak
+        # a leak rule is the same machinery over its own inputs and actions: the wet sensors close the valves
+        self.leak_valves = [(v, _label(devices.get(v), v), _valve_entity(devices.get(v))) for v in valves]
+        if self.leak:
+            raw_inputs = [{"source": {"device": s}} for s in sensors]
+        elif isinstance(vent, dict):
+            raw_inputs = [{"source": {"vent": vent}}]
+        else:
+            raw_inputs = raw.get("inputs") or []
         self.inputs = [_Input(i, devices, rule_names) for i in raw_inputs if isinstance(i, dict)]
         self.gate = _Input(raw["gate"], devices, rule_names) if isinstance(raw.get("gate"), dict) else None
         self.all_inputs = self.inputs + ([self.gate] if self.gate is not None else [])
-        self.on_true = [_Action(a, devices) for a in raw.get("onTrue") or [] if isinstance(a, dict)]
+        on_true = [{"device": v, "do": "close"} for v in valves] if self.leak else raw.get("onTrue") or []
+        self.on_true = [_Action(a, devices) for a in on_true if isinstance(a, dict)]
         self.on_false = [_Action(a, devices) for a in raw.get("onFalse") or [] if isinstance(a, dict)]
         self.on_delay = _delay(raw.get("onDelay"))
         self.off_delay = _delay(raw.get("offDelay"))
@@ -930,6 +957,22 @@ class RuleEngine:
         self._refresh(now)
         self._flush()
 
+    def _reclose(self, rule: _Rule, entity_id: str) -> None:
+        """Leak protection: a valve of the rule opens while the verdict is true (by anyone): close it again at once.
+        A close still waiting for the target is left to _resend. A close never produces an open, so this cannot loop."""
+        if not rule.leak or not rule.enabled or not rule.open or rule.verdict is not True:
+            return
+        if _valve_open(entity_id, self._lookup(entity_id)) is not True:
+            return
+        again = [s for s in rule.sent if s.action.call[2] == entity_id and not s.waiting]
+        for s in again:
+            s.entry["at"] = int(self._now() * 1000)
+            s.entry["reason"] = "re-closed: leak"
+            self._send(rule, s)
+        if again:
+            self._refresh(rule)
+            rule.last = again[-1].entry
+
     def _resend(self, entity_id: str) -> None:
         """The target came back: send its waiting actions again, once per such state change."""
         if not _available(self._lookup(entity_id)):
@@ -1094,6 +1137,8 @@ class RuleEngine:
         keys = self._readers.get(entity_id)
         if not keys and entity_id not in self._targets:
             return
+        for key in self._targets.get(entity_id, ()):
+            self._reclose(self._rules[key], entity_id)
         for key in keys or ():
             rule = self._rules[key]
             if rule.boiler is not None and rule.boiler.relay == entity_id:
@@ -1131,6 +1176,11 @@ class RuleEngine:
             out["last"] = dict(rule.last)
         if rule.boiler is not None:
             out["boiler"] = dict(rule.boiler.view)
+        if rule.leak:
+            out["leak"] = {"valves": [
+                {"id": v, "name": name, "state": None if eid is None else
+                 {True: "open", False: "closed", None: None}[_valve_open(eid, self._lookup(eid))]}
+                for v, name, eid in rule.leak_valves]}
         return out
 
     def snapshot(self, plan_id: str) -> "dict[str, dict]":
