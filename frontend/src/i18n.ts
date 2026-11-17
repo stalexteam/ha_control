@@ -341,6 +341,7 @@ const en: Dict = {
   'boiler.flow.done': 'done at ≤ 1 W',
   'rules.problem.boiler-auto': "This button has no Auto action: enable it in the button's properties",
   'rules.problem.boiler': 'Boiler: a boiler and a button; Limit and Boiler power above 0 W.',
+  'rules.problem.timed': 'Timed switch: pick a button and a different device that can be switched on, and a duration of 1 to 1440 minutes.',
   'rules.problem.leak': 'Leak protection: at least one leak sensor and one valve, each listed once.',
   'rules.problem.vent': 'Ventilation: two different climate sensors, a fan, On above > 0 and Off below from 0 to On above.',
   'rules.noZone': 'Rules without a zone',

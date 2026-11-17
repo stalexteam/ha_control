@@ -167,6 +167,8 @@ export interface Rule {
   boiler?: { device: Id; button: Id; grid?: { block: Id; limit: number; nominal: number } };
   /** Leak protection: leak sensors (any wet) close the valves, and keep them closed while wet; inputs/actions stay empty. */
   leak?: { sensors: Id[]; valves: Id[] };
+  /** Timed switch: a button container starts a timed run of a device (invert: off for the duration, then on); inputs/actions stay empty. */
+  timed?: { button: Id; device: Id; minutes: number; invert?: true };
 }
 
 export const WALL_PRESETS: Record<WallType, number> = {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isRuleInputDevice, leakProtectionTemplate, newRule, outsideLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
+  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isTimedRule, timedTemplate, isRuleInputDevice, leakProtectionTemplate, newRule, outsideLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
   rulesFor, ruleUsers, updateRule,
 } from '../../src/model/rules';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Rule, type Zone } from '../../src/model/types';
@@ -12,6 +12,7 @@ const dev = (id: string, kind: DeviceKind, x = 500, y = 500, extra: object = {})
 const rule = (id: string, over: Partial<Rule> = {}): Rule => ({ ...newRule(null), id, name: id, inputs: [{ source: { device: 'd' } }], ...over });
 const refs = (...ids: string[]) => ids.map(r => ({ source: { rule: r } }));
 const exists = () => true;
+const leakRule = (): Rule => ({ ...newRule(null), id: 'k', name: 'Leak', inputs: [], leak: { sensors: ['s1'], valves: ['v1'] } });
 
 describe('rules model', () => {
   it('newRule defaults', () => {
@@ -114,6 +115,57 @@ describe('rules model', () => {
     it('an old condition rule from the former template stays valid', () => {
       const old = rule('o', { inputs: [{ source: { device: 'd' } }], onTrue: [{ device: 'v', do: 'close' }] });
       expect(ruleProblems([old], old, exists)).toEqual([]);
+    });
+  });
+
+  describe('timed switch', () => {
+    const zone: Zone = {
+      id: 'z1', name: 'Hall', invalid: false,
+      shape: { kind: 'polygon', vertices: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
+    };
+    const lvl = (devices: Device[]) => ({ levels: [{ ...emptyLevel('L'), zones: [zone], devices }] });
+    const timed = (over: Partial<Rule> = {}, t: Partial<NonNullable<Rule['timed']>> = {}): Rule => ({
+      ...newRule(null), id: 't', name: 'T', inputs: [], timed: { button: 'b', device: 'd', minutes: 15, ...t }, ...over,
+    });
+    const probs = (r: Rule, ...p: (((id: string) => boolean) | undefined)[]) => ruleProblems([r], r, exists, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, ...p);
+
+    it('template: the single button and single on/off device of the zone, 15 min', () => {
+      const r = timedTemplate(lvl([dev('b', 'smart_button', 100, 100), dev('f', 'exhaust_fan', 200, 200), dev('m', 'motion_sensor', 300, 300)]), 'z1', 'Hall');
+      expect(r.name).toBe('Timed switch Hall');
+      expect(r.timed).toEqual({ button: 'b', device: 'f', minutes: 15 });
+      expect(r).toMatchObject({ zoneId: 'z1', inputs: [], onTrue: [], onFalse: [] });
+      expect(isTimedRule(r)).toBe(true);
+      expect(isTimedRule(rule('a'))).toBe(false);
+    });
+    it('template leaves ambiguous or missing picks empty', () => {
+      const r = timedTemplate(lvl([dev('b', 'wall_switch', 100, 100), dev('b2', 'smart_button', 150, 150), dev('f', 'exhaust_fan', 200, 200), dev('l', 'ceiling_light', 250, 250)]), 'z1', 'Hall');
+      expect(r.timed).toEqual({ button: '', device: '', minutes: 15 });
+      const g = timedTemplate(lvl([dev('b', 'wall_switch', 100, 100)]), null, null);
+      expect(g.name).toBe('Timed switch');
+      expect(g.timed).toEqual({ button: '', device: '', minutes: 15 });
+    });
+    it('valid rule, invert true allowed, bounds', () => {
+      expect(probs(timed())).toEqual([]);
+      expect(probs(timed({}, { invert: true }))).toEqual([]);
+      expect(probs(timed({}, { minutes: 1 }))).toEqual([]);
+      expect(probs(timed({}, { minutes: 1440 }))).toEqual([]);
+    });
+    it('shape and bounds', () => {
+      for (const t of [{ minutes: 0 }, { minutes: 1441 }, { minutes: 1.5 }, { minutes: NaN }, { button: '' }, { device: '' }, { device: 'b' }, { invert: false as unknown as true }])
+        expect(probs(timed({}, t)), JSON.stringify(t)).toEqual(['timed']);
+      for (const o of [{ inputs: [{ source: { device: 'x' } }] }, { combine: 'all' as const }, { onDelay: 1 }, { offDelay: 1 },
+        { gate: { source: { sun: true as const } } }, { onTrue: [{ device: 'f', do: 'on' as const }] }, { onFalse: [{ device: 'f', do: 'off' as const }] },
+        { vent: { sensor: 'a', than: 'b', above: 9, below: 5 } }, { boiler: { device: 'd', button: 'b' } }, { leak: { sensors: ['s'], valves: ['v'] } }])
+        expect(probs(timed(o)), JSON.stringify(o)).toContain('timed');
+    });
+    it('a button or device that is not one, or is missing, is device-missing', () => {
+      expect(probs(timed(), id => id !== 'b')).toEqual(['device-missing']);
+      expect(probs(timed(), undefined, id => id !== 'd')).toEqual(['device-missing']);
+      expect(ruleProblems([timed()], timed(), id => id !== 'd')).toEqual(['device-missing']);
+    });
+    it('other kinds reject a timed key', () => {
+      const t = { button: 'b', device: 'd', minutes: 5 };
+      expect(ruleProblems([], { ...leakRule(), timed: t }, exists)).toContain('leak');
     });
   });
 

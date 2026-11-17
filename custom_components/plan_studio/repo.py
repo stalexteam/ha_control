@@ -89,7 +89,7 @@ def _validate_vent(r: dict, v: object) -> None:
         raise vol.Invalid("rule vent needs two different sensor ids")
     if not _is_num(v["above"]) or not _is_num(v["below"]) or v["above"] <= 0 or not 0 <= v["below"] <= v["above"]:
         raise vol.Invalid("rule vent needs above > 0 and 0 <= below <= above")
-    if r["inputs"] or "gate" in r or "leak" in r or r["combine"] != "any" or r["onDelay"] != 0:
+    if r["inputs"] or "gate" in r or "leak" in r or "timed" in r or r["combine"] != "any" or r["onDelay"] != 0:
         raise vol.Invalid("rule vent needs no inputs or gate, combine any and onDelay 0")
     on, off = r["onTrue"], r["onFalse"]
     if len(on) != 1 or len(off) != 1 or on[0]["do"] != "on" or off[0]["do"] != "off" or on[0]["device"] != off[0]["device"]:
@@ -122,9 +122,23 @@ def _validate_leak(r: dict, lk: object) -> None:
         ids = lk[key]
         if not isinstance(ids, list) or not ids or not all(_is_id(i) for i in ids) or len(set(ids)) != len(ids):
             raise vol.Invalid(f"rule leak {key} needs at least one distinct device id")
-    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or r["combine"] != "any" or r["onDelay"] != 0 \
+    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "timed" in r or r["combine"] != "any" or r["onDelay"] != 0 \
             or r["offDelay"] != 0 or r["onTrue"] or r["onFalse"]:
         raise vol.Invalid("rule leak needs no inputs, gate, vent, boiler or actions, combine any and no delays")
+
+
+def _validate_timed(r: dict, tm: object) -> None:
+    """A timed switch rule: a button starts a timed run of a device; no inputs, gate, vent, boiler, leak or actions."""
+    if not isinstance(tm, dict) or not {"button", "device", "minutes"} <= set(tm) <= {"button", "device", "minutes", "invert"}:
+        raise vol.Invalid("rule timed needs button, device, minutes and optionally invert")
+    if not _is_id(tm["button"]) or not _is_id(tm["device"]) or tm["button"] == tm["device"]:
+        raise vol.Invalid("rule timed needs two different device ids")
+    if type(tm["minutes"]) is not int or not 1 <= tm["minutes"] <= 1440:
+        raise vol.Invalid("rule timed minutes must be a whole number 1..1440")
+    if "invert" in tm and tm["invert"] is not True:
+        raise vol.Invalid("rule timed invert may only be true")
+    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or r["combine"] != "any"             or r["onDelay"] != 0 or r["offDelay"] != 0 or r["onTrue"] or r["onFalse"]:
+        raise vol.Invalid("rule timed needs no inputs, gate, vent, boiler, leak or actions, combine any and no delays")
 
 
 def _validate_rules(rules: object) -> None:
@@ -170,6 +184,8 @@ def _validate_rules(rules: object) -> None:
             _validate_boiler(r, r["boiler"])
         if "leak" in r:
             _validate_leak(r, r["leak"])
+        if "timed" in r:
+            _validate_timed(r, r["timed"])
         graph[r["id"]] = refs
     state: dict[str, int] = {}
 

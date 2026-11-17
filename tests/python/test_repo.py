@@ -265,3 +265,36 @@ def test_validate_plan_leak_rule():
 
 def test_validate_plan_old_leak_condition_rule_still_valid():
     validate_plan({**plan("p"), "rules": [rule("o", inputs=ref("d"), onTrue=[{"device": "v", "do": "close"}])]})
+
+
+def timed_rule(rid="t1", timed=None, **kw):
+    r = rule(rid, inputs=[], onTrue=[], timed={"button": "b", "device": "d", "minutes": 15} if timed is None else timed)
+    r.update(kw)
+    return r
+
+
+def test_validate_plan_timed_rule():
+    validate_plan({**plan("p"), "rules": [timed_rule()]})
+    validate_plan({**plan("p"), "rules": [timed_rule(timed={"button": "b", "device": "d", "minutes": 1440, "invert": True})]})
+    base = {"button": "b", "device": "d", "minutes": 15}
+    bad = [
+        "x", [], {}, {"button": "b", "device": "d"}, {"device": "d", "minutes": 5}, {**base, "x": 1},
+        {**base, "button": ""}, {**base, "device": 3}, {**base, "minutes": 0}, {**base, "minutes": 1441},
+        {**base, "minutes": 1.5}, {**base, "minutes": True}, {**base, "minutes": "5"},
+        {**base, "invert": False}, {**base, "invert": 1}, {**base, "device": "b"},
+    ]
+    for b in bad:
+        with pytest.raises(vol.Invalid, match="rule timed"):
+            validate_plan({**plan("p"), "rules": [timed_rule(timed=b)]})
+    for kw in (
+        {"inputs": ref("x")}, {"combine": "all"}, {"onDelay": 5}, {"offDelay": 5}, {"gate": {"source": {"sun": True}}},
+        {"onTrue": [{"device": "f", "do": "on"}]}, {"onFalse": [{"device": "f", "do": "off"}]},
+        {"vent": {"sensor": "a", "than": "b", "above": 9, "below": 5}}, {"boiler": {"device": "d", "button": "w"}},
+        {"leak": {"sensors": ["s"], "valves": ["v"]}},
+    ):
+        with pytest.raises(vol.Invalid, match="rule (timed|vent|boiler|leak)"):
+            validate_plan({**plan("p"), "rules": [timed_rule(**kw)]})
+    # the other kinds reject a timed key too
+    for other in (vent_rule(), boiler_rule(), leak_rule()):
+        with pytest.raises(vol.Invalid, match="rule (timed|vent|boiler|leak)"):
+            validate_plan({**plan("p"), "rules": [{**other, "timed": {"button": "b", "device": "d", "minutes": 5}}]})
