@@ -1581,7 +1581,7 @@ def test_vent_trace_unavailable_sensor_has_a_reason_and_no_percent():
     w = vent_world()
     w.set("sensor.m_h", "unavailable")
     v = trace(w)["inputs"][0]["vent"]
-    assert v["b"] == {"t": None, "rh": None, "ah": None, "why": "unavailable"}
+    assert v["b"] == {"t": 22.0, "rh": None, "ah": None, "why": "unavailable"}
     assert v["a"]["why"] is None and v["a"]["ah"] is not None and v["pct"] is None
 
 
@@ -1591,7 +1591,7 @@ def test_vent_trace_missing_device_and_zero_reference():
     assert v["pct"] is None and v["b"]["why"] is None
     w.engine.load_plans([plan([WC, FAN], [vent_rule()])])
     v = trace(w)["inputs"][0]["vent"]
-    assert v["a"]["why"] == "no data" and v["b"]["why"] == "missing" and v["pct"] is None
+    assert v["b"]["why"] == "missing" and v["pct"] is None
 
 
 def test_non_vent_rules_have_no_vent_key():
@@ -1599,3 +1599,30 @@ def test_non_vent_rules_have_no_vent_key():
     x = dev("x", "motion_sensor", "X", motion="binary_sensor.x")
     w.engine.load_plans([plan([WC, MAIN, FAN, x], [vent_rule(), rule("q", [ref("r")])])])
     assert "vent" not in trace(w, "q")["inputs"][0]
+
+
+def test_vent_trace_sensor_keeps_readable_parts():
+    w = vent_world()
+    w.set("sensor.wc_h", "unavailable")
+    v = trace(w)["inputs"][0]["vent"]
+    assert v["a"] == {"t": 24.0, "rh": None, "ah": None, "why": "unavailable"}
+    w.set("sensor.wc_h", "80")
+    w.set("sensor.wc_t", "unavailable")
+    v = trace(w)["inputs"][0]["vent"]
+    assert v["a"] == {"t": None, "rh": 80.0, "ah": None, "why": "unavailable"}
+
+
+def test_vent_trace_temperature_reason_comes_first():
+    w = vent_world()
+    w.set("sensor.wc_t", "24", {"unit_of_measurement": "K"})
+    w.set("sensor.wc_h", "unknown")
+    v = trace(w)["inputs"][0]["vent"]["a"]
+    assert v["why"] == "not °C" and v["rh"] is None and v["t"] is None
+
+
+def test_vent_trace_missing_device_leaves_the_other_sensor_readable():
+    w = vent_world()
+    w.engine.load_plans([plan([WC, FAN], [vent_rule()])])
+    v = trace(w)["inputs"][0]["vent"]
+    assert v["b"]["why"] == "missing" and v["b"]["t"] is None
+    assert v["a"]["why"] is None and v["a"]["t"] == 24.0 and v["a"]["ah"] is not None and v["pct"] is None
