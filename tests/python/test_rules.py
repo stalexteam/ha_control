@@ -1507,3 +1507,16 @@ def test_vent_changed_params_restart_and_unchanged_keep_state():
     assert trace(w)["verdict"] is True and trace(w)["inputs"][0]["value"] is True  # kept the memory
     w.engine.load_plans([plan([WC, MAIN, FAN], [vent_rule(above=9, below=5.5)])])
     assert trace(w)["inputs"][0]["value"] is False  # restarted: between at start = false
+
+
+@pytest.mark.parametrize("t", ["-273.15", "-243.12", "150"])
+def test_vent_absurd_temperature_is_no_data(t):
+    w = vent_world()
+    w.set("sensor.wc_t", t, {"unit_of_measurement": "°C"})
+    assert trace(w)["inputs"][0]["value"] is None and trace(w)["inputs"][0]["detail"] == "no data"
+
+
+def test_vent_source_that_is_not_a_dict_does_not_raise():
+    w = World()
+    w.engine.load_plans([plan([WC], [rule("r", [{"source": {"vent": "x"}}])])])
+    assert trace(w)["status"] == "error"

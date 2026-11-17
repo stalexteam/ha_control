@@ -157,6 +157,8 @@ def _absolute_humidity(device: dict, lookup: Lookup) -> "tuple[float | None, str
         return None, "not %"
     if unit == "°F":
         t = (t - 32) * 5 / 9
+    if not -100 <= t <= 100:
+        return None, "no data"
     ps = 6.112 * math.exp(17.62 * t / (243.12 + t))
     return 216.7 * (rh / 100 * ps) / (273.15 + t), ""
 
@@ -216,7 +218,7 @@ class _Input:
             self.missing = self.rule not in rule_names
             self.label = rule_names.get(self.rule) or self.rule
             self.sig: tuple = ("rule", self.rule)
-        elif "vent" in src:
+        elif isinstance(src.get("vent"), dict):
             self.type = "vent"
             v = src["vent"]
             devs = [devices.get(v.get(k)) for k in ("sensor", "than")]
