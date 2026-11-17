@@ -140,8 +140,21 @@ const OUTSIDE_TRACE: RuleTrace = {
 ROOM_RULES['rule-outside'] = OUTSIDE_TRACE;
 ROOM_RULES['rule-vent'] = {
   status: 'ok', verdict: true, unknownInputs: 0, pending: { to: false, at: Date.now() + 7 * 60_000 },
-  inputs: [{ label: 'WC climate vs Main climate', value: true, detail: '17.4 / 9.7 g/m³ (+80 %)' }],
+  inputs: [{
+    label: 'WC climate vs Main climate', value: true, detail: '17.4 / 9.7 g/m³ (+79 %)',
+    vent: { a: { t: 24, rh: 80, ah: 17.365683782352708, why: null }, b: { t: 22, rh: 50, ah: 9.681989763300054, why: null }, pct: 79 },
+  }],
   last: { action: 'on', target: 'WC fan', at: new Date().setHours(21, 43, 0, 0), reason: 'vent' },
+};
+
+/** The vent rule while the humidity of the reference sensor is unavailable (scene `vent-na`). */
+const VENT_NA: RuleTrace = {
+  status: 'waiting', verdict: null, unknownInputs: 1,
+  inputs: [{
+    label: 'WC climate vs Main climate', value: null, detail: 'unavailable',
+    vent: { a: { t: 24, rh: 80, ah: 17.365683782352708, why: null }, b: { t: 22, rh: null, ah: null, why: 'unavailable' }, pct: null },
+  }],
+  last: { action: 'off', target: 'WC fan', at: new Date().setHours(5, 8, 0, 0), reason: 'vent' },
 };
 
 const equipment = (id: string, name: string, placement: Device['placement'], bindings: Device['bindings'],
@@ -290,6 +303,7 @@ const POWER_OFF_FRAME: PowerFrame = {
 
 export const SCENES: Record<string, Scene> = {
   room: { plans: [room()], rulesFrame: ROOM_RULES },
+  'vent-na': { plans: [room()], rulesFrame: { ...ROOM_RULES, 'rule-vent': VENT_NA } },
   power: { plans: [powerPlan()], powerFrame: POWER_FRAME },
   'power-off': { plans: [powerPlan()], powerFrame: POWER_OFF_FRAME },
   'power-nodata': { plans: [powerPlan()], powerFrame: { wires: {}, blocks: {} } },

@@ -7,7 +7,12 @@ export interface RuleInputTrace {
   label: string; value: boolean | null; detail: string;
   /** Held input only: epoch ms when it turns true (the detail text is stale between evaluations). */
   until?: number;
+  /** Wet zone ventilation rule only: the two sensors (a = wet zone, b = compare with) and the signed whole percent. */
+  vent?: { a: VentSensorTrace; b: VentSensorTrace; pct: number | null };
 }
+
+/** One climate sensor of a vent rule: unrounded values (t in °C) or null; `why` = the reason it has no data, else null. */
+export interface VentSensorTrace { t: number | null; rh: number | null; ah: number | null; why: string | null }
 
 /** The gate as the server reports it: `value` is after NOT (true = open); `until` = epoch ms when a Held gate opens. */
 export interface RuleGateTrace { value: boolean | null; detail: string; until?: number }

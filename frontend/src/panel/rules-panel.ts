@@ -22,7 +22,7 @@ export interface RulesPanelOpts {
 }
 
 /** 21:43 from epoch ms, in the viewer's locale. */
-function clock(at: number): string {
+export function clock(at: number): string {
   try { return new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); } catch { return ''; }
 }
 

@@ -110,16 +110,44 @@ describe('Wet zone ventilation form', () => {
     expect(okBtn(el).disabled).toBe(true);
   });
 
-  it('a saved unchanged rule shows the live detail, verdict, run-on countdown and last action; an edit hides them', async () => {
+  it('a saved unchanged rule shows the live diagram: values, percent, verdict, run-on countdown, last action; an edit hides them', async () => {
     const el = await open([ventRule()]);
     await edit(el);
-    const live = q<HTMLElement>(el, '.vent-live').textContent!;
-    expect(live).toContain('17.4 / 9.7 g/m³ (+80 %)');
-    expect(live).toContain('Condition true');
-    expect(live).toMatch(/off in \d+:\d\d/);
-    expect(live).toContain('WC fan');
+    const flow = () => q<HTMLElement>(el, '.flow').textContent!;
+    expect(flow()).toContain('24.0 °C 80.0 %');
+    expect(flow()).toContain('17.4 g/m³');
+    expect(flow()).toContain('+79 %');
+    expect(flow()).toContain('Result: true');
+    expect(flow()).toMatch(/off in \d+:\d\d/);
+    expect(flow()).toContain('last: turned on');
+    expect(el.tickerOn).toBe(true); // the run-on countdown ticks once a second
     await set(el, '[data-field="vent-above"]', '10');
-    expect(q<HTMLElement>(el, '.vent-live').textContent).not.toContain('17.4');
+    expect(flow()).not.toContain('24.0');
+    expect(flow()).not.toContain('+79');
+    expect(flow()).not.toContain('Result: true');
+    expect(flow()).toContain('on > 10 %, off < 5 %');
+    expect(q(el, '.fc-note').textContent).toBe('Saved version: your changes apply after Save');
+  });
+
+  it('shares the rule dialog frame: form column on the left, the diagram on the right, the same footer', async () => {
+    const el = await open([ventRule()]);
+    await edit(el);
+    expect(q(el, '.dialog.rdlg > .rcols > .rsettings [data-field="vent-sensor"]')).toBeTruthy();
+    expect(q(el, '.dialog.rdlg > .rcols > .flow svg.vt')).toBeTruthy();
+    expect(q(el, '.dialog.rdlg > .rfoot [data-field="zone"]')).toBeTruthy();
+  });
+
+  it('a click on a diagram block focuses its form field and highlights the block', async () => {
+    const el = await open([ventRule()]);
+    await edit(el);
+    for (const f of ['vent-sensor', 'vent-than', 'vent-above', 'vent-runon', 'vent-fan']) {
+      q(el, `[data-block="${f}"]`).dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+      await el.updateComplete;
+      await el.updateComplete;
+      expect(el.shadowRoot!.activeElement?.getAttribute('data-field')).toBe(f);
+      expect(q(el, `[data-block="${f}"]`).classList).toContain('hl');
+    }
+    (el.shadowRoot!.activeElement as HTMLElement).blur(); // happy-dom trips over a focused element of a removed panel
   });
 
   it('empty picks show pick hints, not the missing-device text', async () => {
@@ -144,14 +172,16 @@ describe('Wet zone ventilation form', () => {
     expect(okBtn(el).disabled).toBe(false);
   });
 
-  it('no live block at all for a saved rule the server has no trace of', async () => {
+  it('no live values for a saved rule the server has no trace of', async () => {
     const plan: Plan = structuredClone(SCENES.room.plans[0]);
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { [plan.id]: plan } }));
     const el = await mount(createMockHass({ rulesFrame: {} }));
     el.setMode('automation');
     await vi.waitFor(() => expect(el.rulesFeed.ready).toBe(true));
     await edit(el);
-    expect(el.shadowRoot!.querySelector('.rule-backdrop .vent-live')).toBeNull();
+    expect(q(el, '.flow').textContent).not.toContain('°C');
+    expect(q(el, '.flow').textContent).toContain('Wet zone sensor');
+    expect(el.shadowRoot!.querySelector('.rule-backdrop .flow .fc-blk.on, .rule-backdrop .flow .fc-blk.nodata')).toBeNull();
   });
 
   it('Cancel leaves rules untouched; one undo reverts an OK; a normal rule opens the rule dialog', async () => {

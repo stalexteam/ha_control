@@ -405,6 +405,7 @@ export class PlanStudioPanel extends LitElement {
         deviceById: id => devices.find(x => x.id === id),
         zones, problems, trace, note, now: Date.now(),
         onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
+        onFocus: f => this.focusRuleField(f),
         onOk: () => this.commitRuleDraft(),
         onCancel: () => { this.dialog = null; this.ruleDraft = null; },
       });

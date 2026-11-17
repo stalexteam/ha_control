@@ -58,7 +58,7 @@ export function paramText(s: RuleSource, not = false): string {
 }
 
 const secs = (n: number): string => (Number.isFinite(n) ? String(n) : '?');
-const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+export const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /** Three-valued gate of the inputs' values after NOT, as the server combines them (an ANY ignores unknown inputs). */
 export function gateValue(combine: 'all' | 'any', values: (boolean | null)[]): boolean | null {
@@ -72,8 +72,8 @@ function liveDetail(tr: { value: boolean | null; detail: string; until?: number 
   return tr.until !== undefined && tr.until > now && tr.value !== true ? t('rules.flow.trueIn').replace('{t}', remaining(tr.until, now)) : tr.detail;
 }
 
-const word = (v: boolean | null): string => t(`rules.val.${v === null ? 'unknown' : v}`);
-const tone = (v: boolean | null): string => (v === true ? ' on' : v === false ? ' off' : ' nodata');
+export const word = (v: boolean | null): string => t(`rules.val.${v === null ? 'unknown' : v}`);
+export const tone = (v: boolean | null): string => (v === true ? ' on' : v === false ? ' off' : ' nodata');
 
 interface BlockOpts { x: number; y: number; w: number; h: number; field: string; target: FocusTarget; cls?: string; lines: [string, string?]; opts: RuleTraceOpts; chars: number }
 
