@@ -1560,3 +1560,42 @@ def test_vent_detail_never_shows_minus_zero():
     w.set("sensor.wc_t", "22")
     w.set("sensor.wc_h", "49.8")
     assert "-0" not in trace(w)["inputs"][0]["detail"]
+
+
+def test_vent_trace_is_structured():
+    w = vent_world()
+    v = trace(w)["inputs"][0]["vent"]
+    assert v["a"]["t"] == 24 and v["a"]["rh"] == 80 and v["a"]["why"] is None
+    assert v["b"]["t"] == 22 and v["b"]["rh"] == 50 and v["b"]["why"] is None
+    assert math.isclose(v["a"]["ah"], 17.4, abs_tol=0.1) and math.isclose(v["b"]["ah"], 9.7, abs_tol=0.1)
+    assert isinstance(v["pct"], int) and trace(w)["inputs"][0]["detail"].endswith(f"({v['pct']:+d} %)")
+
+
+def test_vent_trace_fahrenheit_is_converted_to_celsius():
+    w = vent_world()
+    w.set("sensor.wc_t", str(24 * 9 / 5 + 32), {"unit_of_measurement": "°F"})
+    assert math.isclose(trace(w)["inputs"][0]["vent"]["a"]["t"], 24)
+
+
+def test_vent_trace_unavailable_sensor_has_a_reason_and_no_percent():
+    w = vent_world()
+    w.set("sensor.m_h", "unavailable")
+    v = trace(w)["inputs"][0]["vent"]
+    assert v["b"] == {"t": None, "rh": None, "ah": None, "why": "unavailable"}
+    assert v["a"]["why"] is None and v["a"]["ah"] is not None and v["pct"] is None
+
+
+def test_vent_trace_missing_device_and_zero_reference():
+    w = vent_world(main=(22, 0))
+    v = trace(w)["inputs"][0]["vent"]
+    assert v["pct"] is None and v["b"]["why"] is None
+    w.engine.load_plans([plan([WC, FAN], [vent_rule()])])
+    v = trace(w)["inputs"][0]["vent"]
+    assert v["a"]["why"] == "no data" and v["b"]["why"] == "missing" and v["pct"] is None
+
+
+def test_non_vent_rules_have_no_vent_key():
+    w = vent_world(binary_sensor__x="off")
+    x = dev("x", "motion_sensor", "X", motion="binary_sensor.x")
+    w.engine.load_plans([plan([WC, MAIN, FAN, x], [vent_rule(), rule("q", [ref("r")])])])
+    assert "vent" not in trace(w, "q")["inputs"][0]

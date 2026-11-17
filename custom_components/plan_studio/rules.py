@@ -130,37 +130,37 @@ def _span(elapsed: float, total: int) -> str:
     return f"{int(elapsed)} / {total} s"
 
 
-def _absolute_humidity(device: dict, lookup: Lookup) -> "tuple[float | None, str]":
-    """(g/m3, "") of a climate sensor, or (None, the cause) when its reading is unusable."""
+def _absolute_humidity(device: dict, lookup: Lookup) -> "tuple[float | None, str, float | None, float | None]":
+    """(g/m3, "", deg C, %) of a climate sensor, or (None, the cause, None, None) when its reading is unusable."""
     reads = []
     for role in ("temperature", "humidity"):
         eid = _bound(device, role)
         st = lookup(eid) if eid else None
         if st is None:
-            return None, "missing"
+            return None, "missing", None, None
         if st[0] in ("unknown", "unavailable"):
-            return None, st[0]
+            return None, st[0], None, None
         reads.append(st)
     (t_raw, t_attrs), (h_raw, h_attrs) = reads
     unit = (t_attrs or {}).get("unit_of_measurement")
     if unit not in ("°C", "°F"):
-        return None, "not °C"
+        return None, "not °C", None, None
     if (h_attrs or {}).get("unit_of_measurement") != "%":
-        return None, "not %"
+        return None, "not %", None, None
     try:
         t, rh = float(t_raw), float(h_raw)
     except ValueError:
-        return None, "no data"
+        return None, "no data", None, None
     if not (math.isfinite(t) and math.isfinite(rh)):
-        return None, "no data"
+        return None, "no data", None, None
     if not 0 <= rh <= 100:
-        return None, "not %"
+        return None, "not %", None, None
     if unit == "°F":
         t = (t - 32) * 5 / 9
     if not -100 <= t <= 100:
-        return None, "no data"
+        return None, "no data", None, None
     ps = 6.112 * math.exp(17.62 * t / (243.12 + t))
-    return 216.7 * (rh / 100 * ps) / (273.15 + t), ""
+    return 216.7 * (rh / 100 * ps) / (273.15 + t), "", t, rh
 
 
 def _target(device: dict | None, do: str) -> "tuple[str, str, str] | None":
@@ -205,6 +205,8 @@ class _Input:
         self.sources: list[_Input] = []  # held
         self.reads: list[str] = []  # the entities whose change re-evaluates the input
         self.pair: "tuple[dict, dict] | None" = None  # vent: the two climate sensors
+        self.gone = [False, False]  # vent: which sensor device is missing from the plan
+        self.vparts: "dict | None" = None  # vent: the last computed sensor values and percent
         # runtime state, kept across a reload that leaves the rule unchanged
         self.timer: "tuple[float, Callable[[], None]] | None" = None  # time / held: (due epoch, cancel)
         self.prev: bool | None = None  # light: the value kept between the thresholds
@@ -222,7 +224,8 @@ class _Input:
             self.type = "vent"
             v = src["vent"]
             devs = [devices.get(v.get(k)) for k in ("sensor", "than")]
-            self.missing = any(d is None or _kind(d) != "climate_sensor" for d in devs)
+            self.gone = [d is None or _kind(d) != "climate_sensor" for d in devs]
+            self.missing = any(self.gone)
             self.label = " vs ".join(_label(d, str(v.get(k))) for d, k in zip(devs, ("sensor", "than")))
             if not self.missing:
                 self.pair = (devs[0], devs[1])
@@ -524,12 +527,24 @@ class RuleEngine:
         out = {"label": i.label, "value": value, "detail": detail}
         if i.type == "held" and wake is not None:
             out["until"] = int(wake * 1000)
+        if i.type == "vent":
+            out["vent"] = self._vent_trace(i)
         if i.timer is not None and i.timer[0] != wake:
             i.stop()
         if wake is not None and i.timer is None:
             key = rule.key
             i.timer = (wake, self._schedule(max(0.0, wake - self._now()), lambda: self._wake(key, i)))
         return out
+
+    @staticmethod
+    def _vent_trace(i: _Input) -> dict:
+        """The structured vent trace: both sensors (deg C, %, g/m3, the reason it has no values) and the signed percent."""
+        if i.vparts is not None and not i.missing:
+            sensors, pct = i.vparts["sensors"], i.vparts["pct"]
+        else:  # a sensor device is missing from the plan: nothing was read
+            sensors = [{"t": None, "rh": None, "ah": None, "why": "missing" if g else "no data"} for g in i.gone]
+            pct = None
+        return {"a": dict(sensors[0]), "b": dict(sensors[1]), "pct": pct}
 
     def _wake(self, key: Key, i: _Input) -> None:
         """A time / held input reached its next transition."""
@@ -564,13 +579,15 @@ class RuleEngine:
         """The sensor's absolute humidity against the other's: above 1 + above %: true; below 1 + below %: false;
         in between: the previous value."""
         ah = [_absolute_humidity(d, self._lookup) for d in i.pair or ()]
-        for _, cause in ah:
+        i.vparts = {"sensors": [{"t": t, "rh": rh, "ah": v, "why": cause or None} for v, cause, t, rh in ah], "pct": None}
+        for _, cause, _, _ in ah:
             if cause:
                 return None, cause
         a, b = ah[0][0], ah[1][0]
         if b <= 0:
             return None, "no data"
         r = a / b
+        i.vparts["pct"] = round((r - 1) * 100)
         if r > 1 + i.above / 100:
             i.prev = True
         elif r < 1 + i.below / 100 or i.prev is None:
