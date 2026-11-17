@@ -367,6 +367,18 @@ class _Sent:
         self.attempt = 0  # a late failure counts only for the latest send of this action
 
 
+class _Hold:
+    """The arbitrated command of one shared on / off device (the latest one sent for it by any participant): sent
+    through the action path and waiting for the device while it is unavailable or the call failed."""
+
+    def __init__(self) -> None:
+        self.cmd = "off"
+        self.entry: dict = {}  # the trace entry of the rule that sent it
+        self.by: Key | None = None  # the rule whose trace shows its failure
+        self.waiting: str | None = None  # "target unavailable" / "service failed"
+        self.attempt = 0  # a late failure or a held call counts only for the latest attempt
+
+
 class _Pending:
     def __init__(self, to: bool, at: int) -> None:
         self.to, self.at = to, at
@@ -412,6 +424,16 @@ class _Rule:
         on_true = [{"device": v, "do": "close"} for v in valves] if self.leak else raw.get("onTrue") or []
         self.on_true = [_Action(a, devices) for a in on_true if isinstance(a, dict)]
         self.on_false = [_Action(a, devices) for a in raw.get("onFalse") or [] if isinstance(a, dict)]
+        # Shared devices (spec timed switch §10): the on / off devices this rule keeps on by its own state. A condition
+        # (or vent) rule holds a device it switches on when true and off when false while its verdict is true; a
+        # non-inverted timed switch holds its device while running; a boiler holds its relay while auto heats.
+        ons = {a.call[2] for a in self.on_true if a.call is not None and a.do == "on"}
+        offs = {a.call[2] for a in self.on_false if a.call is not None and a.do == "off"}
+        self.pairs: set[str] = set() if self.leak else ons & offs
+        if self.timed is not None and not self.timed.invert and self.timed.eid is not None:
+            self.pairs = {self.timed.eid}
+        if self.boiler is not None and self.boiler.relay is not None:
+            self.pairs = {self.boiler.relay}
         self.on_delay = _delay(raw.get("onDelay"))
         self.off_delay = _delay(raw.get("offDelay"))
         self.sig = (
@@ -515,6 +537,7 @@ class RuleEngine:
         self._on_runs = on_runs  # the timed runs {plan id: {rule id: until epoch s}} after any of them changed
         self._runs: dict[str, dict[str, float]] = {}  # the runs last reported (or loaded)
         self._booting = False  # a boot load happened and started() has not come yet: boiler auto waits
+        self._holds: dict[str, _Hold] = {}  # shared device entity -> its arbitrated command
 
     # --- loading -------------------------------------------------------------
 
@@ -592,14 +615,16 @@ class RuleEngine:
                     st = self._lookup(eid)
                     rule.seen[eid] = st[0] if st is not None else None
         for rule in stopped:
-            self._boiler_send(rule, rule.boiler.command("off", self._now()), "rule disabled")
+            self._boiler_auto(rule, rule.boiler.command("off", self._now()), "rule disabled")
         for relay in released:
-            self._release(relay)
+            if not self._holders(relay):  # another automation keeps it on
+                self._release(relay)
         for rule in ended:
             self._timed_send(rule, rule.timed.final, "rule disabled")
         for t in finished:
             self._finish(t)
         self._settle(set(rules))
+        self._prune_holds()
         self._published = {key: self._trace(r) for key, r in rules.items()}
         for pid in list(self._subs):
             self._notify(pid, True, self.snapshot(pid))
@@ -693,8 +718,8 @@ class RuleEngine:
         """Send the final command of a run whose rule went away to its old device; a failure is only logged."""
         assert t.eid is not None
         t.until = None
-        if not t.command(t.final, t.state(self._lookup)):
-            return
+        if not t.command(t.final, t.state(self._lookup)) or (not t.invert and self._holders(t.eid)):
+            return  # already there, or another automation keeps it on
 
         def on_error(err: str, why: str = "service failed") -> None:
             _LOGGER.warning("timed switch %s: turn_%s failed: %s", t.eid, t.final, err)
@@ -1004,6 +1029,8 @@ class RuleEngine:
             rule.entries.append(entry)
             if a.call is None:
                 entry["error"] = "target missing"
+            elif a.do in ("on", "off") and a.call[2] in rule.pairs:
+                self._arbitrated(rule, a.call[2], a.do, entry)
             else:
                 sent = _Sent(a, entry)
                 rule.sent.append(sent)
@@ -1095,6 +1122,104 @@ class RuleEngine:
                 self._send(rule, s)
             if waiting:
                 self._refresh(rule)
+        hold = self._holds.get(entity_id)
+        by = self._rules.get(hold.by) if hold is not None and hold.by is not None else None
+        if hold is not None and hold.waiting and by is not None and by.enabled and (by.gate is None or by.open):
+            hold.entry["at"] = int(self._now() * 1000)
+            self._hold_call(entity_id, hold)
+
+    # --- shared devices ------------------------------------------------------
+
+    def _wants_on(self, rule: _Rule, eid: str) -> bool:
+        """Whether the rule currently keeps the shared device on (spec timed switch §10)."""
+        if not rule.enabled or eid not in rule.pairs:
+            return False
+        if rule.timed is not None:
+            return rule.timed.running
+        if rule.boiler is not None:
+            b = rule.boiler
+            return not b.missing and b.mode == "auto" and b.phase == "heating"
+        return rule.open and rule.verdict is True
+
+    def _holders(self, eid: str, but: "Key | None" = None) -> "list[_Rule]":
+        """The rules that keep the device on now, in rule order (always computed from their current state)."""
+        return [r for r in self._rules.values() if r.key != but and self._wants_on(r, eid)]
+
+    def _arbitrated(self, rule: _Rule, eid: str, do: str, entry: dict) -> None:
+        """An on / off command of a participant for a shared device: sent only when no other rule keeps the device
+        on (the holders turn from none to some or back); otherwise the entry says who keeps it on (sent: false)."""
+        others = self._holders(eid, rule.key)
+        if not others:
+            self._hold_send(eid, do, rule, entry)
+            return
+        entry["reason"] = f"{'already' if do == 'on' else 'kept'} on by {', '.join(r.name for r in others)}"
+        entry["sent"] = False
+        hold = self._holds.get(eid)
+        if hold is not None and hold.waiting and hold.by == rule.key:
+            hold.by = others[0].key  # the waiting on is now kept by another rule: its trace shows the wait
+
+    def _hold_send(self, eid: str, do: str, rule: _Rule, entry: dict) -> None:
+        """Send the arbitrated command; it replaces a waiting older one (given up, as on a new firing)."""
+        hold = self._holds.setdefault(eid, _Hold())
+        if hold.waiting:
+            hold.entry["error"] = hold.waiting
+        hold.cmd, hold.entry, hold.by, hold.waiting = do, entry, rule.key, None
+        self._hold_call(eid, hold)
+
+    def _hold_call(self, eid: str, hold: _Hold) -> None:
+        hold.attempt += 1
+        attempt = hold.attempt
+        hold.waiting = None
+        hold.entry.pop("error", None)
+        try:
+            held = self._call(
+                eid.split(".", 1)[0], f"turn_{hold.cmd}", eid,
+                on_error=lambda err, why="service failed": self._hold_failed(eid, hold, attempt, why),
+                current=lambda: self._holds.get(eid) is hold and hold.attempt == attempt,
+            )
+        except Exception as err:  # noqa: BLE001 - one failing target must not stop the others
+            _LOGGER.warning("shared device %s: turn_%s failed: %s", eid, hold.cmd, err)
+            hold.waiting = "service failed"
+        else:
+            if held is not True and not _available(self._lookup(eid)):
+                hold.waiting = "target unavailable"
+        if hold.waiting:
+            hold.entry["error"] = WAITING
+
+    def _hold_failed(self, eid: str, hold: _Hold, attempt: int, why: str) -> None:
+        if self._holds.get(eid) is not hold or hold.attempt != attempt:
+            return
+        hold.waiting = "service failed" if "service failed" in (hold.waiting, why) else why
+        hold.entry["error"] = WAITING
+        self._flush()
+
+    def _give_up(self, eid: str, key: "Key | None" = None) -> None:
+        """Stop waiting for the device (only when the rule `key` shows the wait, when given): a human took over or
+        the command is stale; the entry keeps why it did not get through."""
+        hold = self._holds.get(eid)
+        if hold is None or not hold.waiting or (key is not None and hold.by != key):
+            return
+        hold.entry["error"] = hold.waiting
+        hold.waiting = None
+        hold.attempt += 1
+
+    def _prune_holds(self) -> None:
+        """After a load: a device nobody takes part in any more is forgotten; a waiting command that is no longer
+        what the holders want is given up; a waiting one is shown by a rule that still takes part."""
+        for eid, hold in list(self._holds.items()):
+            parts = [r for r in self._rules.values() if r.enabled and eid in r.pairs]
+            holders = [r for r in parts if self._wants_on(r, eid)]
+            if not parts or (hold.cmd == "on") != bool(holders):
+                self._give_up(eid)
+                if not parts:
+                    del self._holds[eid]
+                continue
+            if hold.waiting and hold.by not in {r.key for r in holders or parts}:
+                hold.by = (holders or parts)[0].key
+
+    def _hold_reason(self, key: Key) -> "str | None":
+        marks = {h.waiting for h in self._holds.values() if h.by == key}
+        return next((r for r in ("service failed", "target unavailable") if r in marks), None)
 
     # --- boiler --------------------------------------------------------------
 
@@ -1108,7 +1233,7 @@ class RuleEngine:
         if active and b.mode == "auto" and not self._booting:  # §9: auto is evaluated once HA has started
             do, why = b.auto(self._now(), grid, power, relay)
             if do is not None:
-                self._boiler_send(rule, do, why)
+                self._boiler_auto(rule, do, why)
         b.view = b.trace(grid, power, relay)
         wake = b.until if active else None
         if b.timer is not None and b.timer[0] != wake:
@@ -1166,11 +1291,13 @@ class RuleEngine:
         given up."""
         t = rule.timed
         assert t is not None
+        action = rule.timed_actions[do]
+        shared = action.call is not None and action.call[2] in rule.pairs and bool(self._holders(t.eid, rule.key))
         send = t.command(do, t.state(self._lookup))
         self._new_firing(rule)
         rule.failed = None
-        if send:
-            self._fire(rule, [rule.timed_actions[do]], why)
+        if send or shared:  # with another rule keeping the device on, the entry says so
+            self._fire(rule, [action], why)
         else:
             rule.last = {"action": do, "target": t.label, "at": int(self._now() * 1000), "reason": why, "sent": False}
 
@@ -1182,6 +1309,7 @@ class RuleEngine:
         if not t.device_changed(state, own, rule.enabled and not t.missing):
             return
         self._new_firing(rule)  # a command still waiting for the device is given up
+        self._give_up(t.eid, rule.key)
         rule.failed = None
         rule.last = {"action": state, "target": t.label, "at": int(self._now() * 1000),
                      "reason": "ended: switched elsewhere", "sent": False}
@@ -1220,10 +1348,21 @@ class RuleEngine:
         self._settle({key})
         self._flush()
 
-    def _boiler_send(self, rule: _Rule, do: str, why: str) -> None:
-        """Switch the boiler relay; an unavailable relay or a failed call waits until the relay comes back."""
+    def _boiler_auto(self, rule: _Rule, do: str, why: str) -> None:
+        """An auto (or disabling) command of a boiler: arbitrated with the other rules keeping the relay on."""
         b = rule.boiler
         assert b is not None and b.relay is not None
+        b.sends += 1  # an older button command's late failure no longer counts
+        entry = {"action": do, "target": b.label, "at": int(self._now() * 1000), "reason": why}
+        rule.last, rule.failed = entry, None
+        self._arbitrated(rule, b.relay, do, entry)
+
+    def _boiler_send(self, rule: _Rule, do: str, why: str) -> None:
+        """Switch the boiler relay directly (a button command); an unavailable relay or a failed call waits until the
+        relay comes back. It replaces a waiting arbitrated command of the relay."""
+        b = rule.boiler
+        assert b is not None and b.relay is not None
+        self._give_up(b.relay)
         b.sends += 1
         key, n, relay = rule.key, b.sends, b.relay
         entry = {"action": do, "target": b.label, "at": int(self._now() * 1000), "reason": why}
@@ -1262,6 +1401,7 @@ class RuleEngine:
         relay = b.relay_state(self._lookup)
         if b.relay_changed(relay, own, active):
             b.cmd = None
+            self._give_up(b.relay, rule.key)
             if rule.failed is not None and rule.last is not None:
                 rule.last["error"] = rule.failed  # given up: the human took over
             rule.failed = None
@@ -1361,7 +1501,7 @@ class RuleEngine:
         if not rule.enabled:
             status, reason = "disabled", None
         else:
-            reason = rule.static_reason() or rule.failed
+            reason = rule.static_reason() or rule.failed or self._hold_reason(rule.key)
             status = "error" if reason else "waiting" if rule.raw is None else "ok"
         out: dict = {"status": status}
         if reason:
@@ -1377,6 +1517,9 @@ class RuleEngine:
                 out["held"] = True  # the current verdict's actions wait for the gate
         if rule.last is not None:
             out["last"] = dict(rule.last)
+        holders = [r.name for r in self._rules.values() if any(self._wants_on(r, e) for e in rule.pairs)]
+        if rule.enabled and holders:
+            out["holders"] = holders  # the rules keeping its shared device on now
         if rule.boiler is not None:
             out["boiler"] = dict(rule.boiler.view)
         if rule.timed is not None:

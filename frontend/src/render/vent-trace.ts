@@ -1,7 +1,7 @@
 import { html, nothing, svg, type TemplateResult } from 'lit';
 import type { Id, Rule } from '../model/types';
 import type { RuleTrace, VentSensorTrace } from '../live/rules-feed';
-import { clock } from '../panel/rules-panel';
+import { lastFlowLine } from '../panel/rules-panel';
 import { durationText, tone, word } from './rule-trace';
 import { FLOW_PAD as PAD, FLOW_VGAP as VGAP, PURPOSE_WIDTH, blockH, chars1, clip, countdown, flowBlock } from './flow-block';
 import { t } from '../i18n';
@@ -78,7 +78,7 @@ export function renderVentTrace(o: VentTraceOpts): TemplateResult {
   ];
   const last = tr?.last;
   const fanLines = [o.deviceName(fan), `${r.onTrue[0]?.do ?? '?'} / ${r.onFalse[0]?.do ?? '?'}`,
-    ...(last ? [t('vent.flow.last').replace('{did}', t(`rules.did.${last.action}`)).replace('{at}', clock(last.at))] : [])];
+    ...(last ? [lastFlowLine(last)] : [])];
   const fanErr = last?.error;
   const fanH = blockH(fanLines.length + (fanErr ? 1 : 0));
 

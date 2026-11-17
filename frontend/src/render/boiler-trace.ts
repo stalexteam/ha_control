@@ -1,7 +1,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import type { Id, Rule } from '../model/types';
 import type { BoilerTrace, RuleTrace } from '../live/rules-feed';
-import { clock } from '../panel/rules-panel';
+import { lastFlowLine } from '../panel/rules-panel';
 import { tone, word } from './rule-trace';
 import { FLOW_PAD as PAD, FLOW_VGAP as VGAP, PURPOSE_WIDTH, blockH, countdown, flowBlock } from './flow-block';
 import { t } from '../i18n';
@@ -94,7 +94,7 @@ export function renderBoilerTrace(o: BoilerTraceOpts): TemplateResult {
     b ? `${t('boiler.flow.relay')}: ${b.relay ?? word(null)}` : t('boiler.flow.relay'),
     boilerName,
     ...(phase ? [phase] : []),
-    ...(last ? [t('vent.flow.last').replace('{did}', t(`rules.did.${last.action}`)).replace('{at}', clock(last.at))] : []),
+    ...(last ? [lastFlowLine(last)] : []),
   ], last?.error);
   const done = t('boiler.flow.done');
   add(g ? 'boiler-nominal' : 'boiler-power', b ? tone(b.boilerW === null ? null : b.boilerW > 1) : '', [

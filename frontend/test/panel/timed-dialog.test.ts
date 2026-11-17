@@ -191,4 +191,9 @@ describe('rules list: a last entry the rule did not send', () => {
     expect(lastText({ action: 'on', target: 'Vent', at, reason: 'button start', sent: false })).toMatch(/^Vent already on .*21.46/);
     expect(lastText({ action: 'off', target: 'Vent', at, reason: 'time over' })).toMatch(/^turned off Vent .*21.46/);
   });
+
+  it('kept on / already on by another automation names it, never "already off"', () => {
+    expect(lastText({ action: 'off', target: 'Vent', at, reason: 'kept on by WC vent', sent: false })).toMatch(/^Vent kept on by WC vent .*21.46/);
+    expect(lastText({ action: 'on', target: 'Vent', at, reason: 'already on by WC vent, Boiler', sent: false })).toMatch(/^Vent already on by WC vent, Boiler .*21.46/);
+  });
 });

@@ -144,4 +144,11 @@ describe('vent diagram', () => {
     expect(blk(host, 'vent-runon').classList).toContain('hl');
     expect(host.querySelectorAll('.fc-blk.hl')).toHaveLength(1);
   });
+
+  it('an off another automation kept from being sent says who keeps the fan on, not "turned off"', () => {
+    const at = new Date(2026, 10, 17, 21, 52).getTime();
+    const { host } = draw({ trace: { ...live, verdict: false, last: { action: 'off', target: 'WC fan', at, reason: 'kept on by Vent (10min)', sent: false } } });
+    expect(text(host, '[data-block="vent-fan"]')).toMatch(/last: kept on by Vent \(10min\) .*21.52/);
+    expect(text(host, '[data-block="vent-fan"]')).not.toContain('turned');
+  });
 });

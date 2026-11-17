@@ -1,7 +1,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import type { Id, Level, Rule } from '../model/types';
 import type { Selection } from '../editor/tools/types';
-import { SWITCHED_ELSEWHERE, type RuleLast, type RuleTrace } from '../live/rules-feed';
+import { SWITCHED_ELSEWHERE, keptOn, type RuleLast, type RuleTrace } from '../live/rules-feed';
 import { ruleEqual, rulesFor } from '../model/rules';
 import { t } from '../i18n';
 
@@ -28,15 +28,23 @@ export function clock(at: number): string {
 
 /**
  * "closed Water valve 21:43", with the failure after it when the call failed. An entry the rule did not send (a timed
- * switch's `sent: false`) is never worded as a command: "Vent switched off elsewhere 21:46" / "Vent already on 21:50".
+ * switch's `sent: false`) is never worded as a command: "Vent switched off elsewhere 21:46" / "Vent already on 21:50" /
+ * "Vent kept on by WC vent 21:52".
  */
 export function lastText(l: RuleLast): string {
+  if (keptOn(l)) return t('rules.last.kept').replace('{target}', l.target).replace('{reason}', l.reason).replace('{at}', clock(l.at)).trim();
   if (l.sent === false) {
     return t(l.reason === SWITCHED_ELSEWHERE ? 'rules.last.elsewhere' : 'rules.last.already')
       .replace('{target}', l.target).replace('{s}', l.action).replace('{at}', clock(l.at)).trim();
   }
   const base = `${t(`rules.did.${l.action}`)} ${l.target} ${clock(l.at)}`.trim();
   return l.error ? `${base}: ${l.error}` : base;
+}
+
+/** The last line of a purpose-built diagram's device block: "last: turned on 21:43" or "last: kept on by WC vent 21:52". */
+export function lastFlowLine(l: RuleLast): string {
+  if (keptOn(l)) return t('vent.flow.kept').replace('{reason}', l.reason).replace('{at}', clock(l.at));
+  return t('vent.flow.last').replace('{did}', t(`rules.did.${l.action}`)).replace('{at}', clock(l.at));
 }
 
 /** The status words of a row: "OK", "Waiting for data", "Error: device missing", "Disabled", or why there is no trace. */

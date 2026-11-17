@@ -35,13 +35,19 @@ export interface RuleGateTrace { value: boolean | null; detail: string; until?: 
 
 /**
  * The last firing of a rule: `action` is on / off / open / close, `target` a device name, `at` epoch ms. `sent: false`
- * (timed switch only) = the rule sent no command: the device already read `action`, or someone else switched it to
- * `action` (reason `ended: switched elsewhere`).
+ * = the rule sent no command: the device already read `action`, someone else switched it to `action` (reason
+ * `ended: switched elsewhere`), or another automation keeps the shared device on (reason "kept on by <rules>" /
+ * "already on by <rules>").
  */
 export interface RuleLast { action: 'on' | 'off' | 'open' | 'close'; target: string; at: number; reason: string; error?: string; sent?: false }
 
 /** The `RuleLast.reason` of a timed switch run that ended because someone else switched its device. */
 export const SWITCHED_ELSEWHERE = 'ended: switched elsewhere';
+
+/** An entry not sent because other automations keep the shared device on: its reason names them. */
+export function keptOn(l: RuleLast): boolean {
+  return l.sent === false && /^(kept|already) on by /.test(l.reason);
+}
 
 /** A timed switch rule's run: `until` = epoch ms of its end (only while running); `device` null = no data. */
 export interface TimedTrace { running: boolean; until?: number; device: 'on' | 'off' | null }
@@ -61,6 +67,8 @@ export interface RuleTrace {
   /** How many inputs have no data (a warning when > 0). */
   unknownInputs: number;
   last?: RuleLast;
+  /** The automations keeping this rule's shared device on now (vent, timed switch, boiler, on/off pair); absent = none. */
+  holders?: string[];
   /** Boiler rule only. */
   boiler?: BoilerTrace;
   /** Leak protection rule only: its valves (the sensors are the inputs). */

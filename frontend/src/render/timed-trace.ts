@@ -1,6 +1,6 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import type { Id, Rule } from '../model/types';
-import { SWITCHED_ELSEWHERE, type RuleLast, type RuleTrace } from '../live/rules-feed';
+import { SWITCHED_ELSEWHERE, keptOn, type RuleLast, type RuleTrace } from '../live/rules-feed';
 import { clock } from '../panel/rules-panel';
 import { durationText, tone, word } from './rule-trace';
 import { FLOW_PAD as PAD, FLOW_VGAP as VGAP, PURPOSE_WIDTH, blockH, countdown, flowBlock } from './flow-block';
@@ -34,6 +34,7 @@ const MW = TIMED_WIDTH - 2 * PAD, CX = TIMED_WIDTH / 2;
  */
 function lastLine(l: RuleLast): string {
   const at = clock(l.at);
+  if (keptOn(l)) return t('timed.flow.kept').replace('{reason}', l.reason).replace('{at}', at);
   if (l.sent === false) {
     return (l.reason === SWITCHED_ELSEWHERE ? t('timed.flow.elsewhere') : t('timed.flow.already').replace('{reason}', l.reason))
       .replace('{s}', l.action).replace('{at}', at);

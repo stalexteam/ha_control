@@ -94,6 +94,9 @@ describe('timed switch diagram', () => {
     const already = draw({ trace: live({ running: true, until: NOW + 60_000, device: 'on' }, { last: { action: 'on', target: 'Vent', at: at(21, 50), reason: 'button start', sent: false } }) });
     expect(text(already.host, 'timed-device')).toMatch(/^Vent \| state: on \| button start: already on .*21.50/);
     expect(text(already.host, 'timed-device')).not.toContain('turned');
+    const kept = draw({ trace: live({ running: false, device: 'on' }, { last: { action: 'off', target: 'Vent', at: at(21, 52), reason: 'kept on by WC vent', sent: false } }) });
+    expect(text(kept.host, 'timed-device')).toMatch(/^Vent \| state: on \| kept on by WC vent .*21.52/);
+    expect(text(kept.host, 'timed-device')).not.toContain('already off');
   });
 
   it('a failed command shows its error; a non-ok status is noted under the diagram', () => {

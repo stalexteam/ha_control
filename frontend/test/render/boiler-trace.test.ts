@@ -76,6 +76,9 @@ describe('boiler diagram', () => {
     expect(text(host, 'boiler-relay')).toMatch(/^Relay: on \| Boiler \| heating, power check in 0:45 \| last: turned on .+$/);
     expect(cls(host, 'boiler-relay')).toContain('on');
     expect(text(host, 'boiler-nominal')).toBe('Boiler power: 0 W | nominal 1400 W, done at ≤ 1 W');
+    const kept = draw({ trace: live({ phase: 'blackout' }, { last: { action: 'off', target: 'Boiler', at: new Date(2026, 10, 17, 21, 52).getTime(), reason: 'kept on by Motion light', sent: false } }) });
+    expect(text(kept.host, 'boiler-relay')).toMatch(/\| last: kept on by Motion light .*21.52/);
+    expect(text(kept.host, 'boiler-relay')).not.toContain('turned');
     expect(cls(host, 'boiler-nominal')).toContain('off');
   });
 
