@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RULE_DELAY_MAX, isVentRule, ventTemplate, addRule, deleteRule, isRuleInputDevice, leakTemplate, newRule, outsideLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
+  RULE_DELAY_MAX, boilerTemplate, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isRuleInputDevice, leakTemplate, newRule, outsideLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
   rulesFor, ruleUsers, updateRule,
 } from '../../src/model/rules';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Rule, type Zone } from '../../src/model/types';
@@ -116,7 +116,7 @@ describe('rules model', () => {
     for (const k of ['smart_button', 'climate_sensor', 'illuminance_sensor'] as const) expect(isRuleInputDevice(dev('d', k))).toBe(false);
     expect(ruleActionsFor(dev('d', 'ceiling_light'))).toEqual(['on', 'off']);
     expect(ruleActionsFor(dev('d', 'socket'))).toEqual(['on', 'off']);
-    expect(ruleActionsFor(dev('d', 'valve'))).toEqual(['open', 'close']);
+    expect(ruleActionsFor(dev('d', 'valve'))).toEqual(['close']);
     expect(ruleActionsFor(dev('d', 'equipment'))).toEqual([]);
     expect(ruleActionsFor(dev('d', 'equipment', 0, 0, { controllable: true }))).toEqual(['on', 'off']);
     expect(ruleActionsFor(dev('d', 'leak_sensor'))).toEqual([]);
@@ -291,5 +291,62 @@ describe('vent rule', () => {
     const r = ventTemplate(lvl([{ ...dev('c1', 'climate_sensor', 100, 100), zoneBlacklist: ['z1'] }, dev('c2', 'climate_sensor', 200, 200), out]), 'z1', 'WC');
     expect(r.vent?.sensor).toBe('c2');
     expect(r.onTrue).toEqual([]);
+  });
+});
+
+describe('boiler rule', () => {
+  const boiler = (over: Partial<Rule> = {}, b: Partial<NonNullable<Rule['boiler']>> = {}): Rule => ({
+    ...newRule(null), id: 'b', name: 'Boiler', inputs: [],
+    boiler: { device: 'd', button: 'btn', grid: { block: 'g', limit: 3000, nominal: 1400 }, ...b }, ...over,
+  });
+  const probs = (r: Rule, ...p: ((id: string) => boolean)[]) => ruleProblems([r], r, exists, undefined, undefined, undefined, ...p);
+
+  it('valid rule, with and without grid', () => {
+    expect(probs(boiler())).toEqual([]);
+    expect(isBoilerRule(boiler())).toBe(true);
+    expect(isBoilerRule(rule('a'))).toBe(false);
+    expect(probs(boiler({ boiler: { device: 'd', button: 'btn' } }))).toEqual([]);
+  });
+  it('shape and bounds', () => {
+    for (const b of [{ device: '' }, { button: '' }, { button: 'd' }, { grid: { block: '', limit: 1, nominal: 1 } },
+      { grid: { block: 'g', limit: 0, nominal: 1 } }, { grid: { block: 'g', limit: 1, nominal: 0 } }, { grid: { block: 'g', limit: NaN, nominal: 1 } }])
+      expect(probs(boiler({}, b)), JSON.stringify(b)).toEqual(['boiler']);
+    for (const o of [{ inputs: [{ source: { device: 'x' } }] }, { combine: 'all' as const }, { onDelay: 1 }, { offDelay: 1 },
+      { gate: { source: { sun: true as const } } }, { onTrue: [{ device: 'f', do: 'on' as const }] }, { onFalse: [{ device: 'f', do: 'off' as const }] }])
+      expect(probs(boiler(o)), JSON.stringify(o)).toContain('boiler');
+  });
+  it('lookups', () => {
+    expect(probs(boiler(), id => id !== 'd')).toEqual(['device-missing']);
+    expect(probs(boiler(), () => true, id => id !== 'btn')).toEqual(['device-missing']);
+    expect(probs(boiler(), () => true, () => true, id => id !== 'g')).toEqual(['device-missing']);
+    expect(probs(boiler({ boiler: { device: 'd', button: 'btn' } }), () => true, () => true, () => false)).toEqual([]);
+    expect(ruleProblems([boiler()], boiler(), id => id !== 'btn')).toEqual(['device-missing']);
+  });
+
+  const zone: Zone = {
+    id: 'z1', name: 'WC', invalid: false,
+    shape: { kind: 'polygon', vertices: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
+  };
+  const plan = (devices: Device[], grids = 1) => ({
+    levels: [{ ...emptyLevel('L'), zones: [zone], devices }],
+    power: { blocks: [...Array(grids).keys()].map(i => ({ id: `g${i}`, kind: 'grid' as const, x: 0, y: 0 })), wires: [] },
+  });
+  const heater = (id: string, x = 100): Device => ({ ...dev(id, 'equipment', x, 100), bindings: { control: 'switch.a', power: 'sensor.a' } });
+  it('template picks the single device, button and grid', () => {
+    const r = boilerTemplate(plan([heater('h'), dev('w', 'wall_switch', 200, 200), dev('c', 'climate_sensor', 300, 300)]), 'z1', 'WC');
+    expect(r.name).toBe('Boiler WC');
+    expect(r.boiler).toEqual({ device: 'h', button: 'w', grid: { block: 'g0', limit: 3000, nominal: 1400 } });
+    expect([r.inputs, r.onTrue, r.onFalse, r.offDelay]).toEqual([[], [], [], 0]);
+    expect(boilerTemplate(plan([dev('s', 'smart_button', 200, 200)]), 'z1', null).boiler?.button).toBe('s');
+  });
+  it('template leaves ambiguous picks empty and omits grid unless exactly one', () => {
+    const r = boilerTemplate(plan([heater('h1'), heater('h2', 200), dev('w1', 'wall_switch', 300, 300), dev('w2', 'smart_button', 400, 400)], 2), 'z1', 'WC');
+    expect(r.boiler).toEqual({ device: '', button: '' });
+    const none = boilerTemplate({ levels: plan([]).levels }, null, null);
+    expect(none.name).toBe('Boiler');
+    expect(none.boiler).toEqual({ device: '', button: '' });
+    const out = { ...heater('h'), zoneBlacklist: ['z1'] };
+    expect(boilerTemplate(plan([out]), 'z1', 'WC').boiler?.device).toBe('');
+    expect(probs(r)).toContain('boiler');
   });
 });

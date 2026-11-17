@@ -204,3 +204,34 @@ def test_validate_plan_vent_rule():
     with pytest.raises(vol.Invalid, match="offDelay"):
         validate_plan({**plan("p"), "rules": [vent_rule(offDelay=3601)]})
 
+
+
+def boiler_rule(rid="b1", boiler=None, **kw):
+    r = rule(rid, inputs=[], onTrue=[], boiler={"device": "d", "button": "w", "grid": {"block": "g", "limit": 3000, "nominal": 1400}}
+             if boiler is None else boiler)
+    r.update(kw)
+    return r
+
+
+def test_validate_plan_boiler_rule():
+    validate_plan({**plan("p"), "rules": [boiler_rule()]})
+    validate_plan({**plan("p"), "rules": [boiler_rule(boiler={"device": "d", "button": "w"})]})
+    validate_plan({**plan("p"), "rules": [boiler_rule(boiler={"device": "d", "button": "w", "grid": {"block": "g", "limit": 0.5, "nominal": 1}})]})
+    base = {"device": "d", "button": "w", "grid": {"block": "g", "limit": 3000, "nominal": 1400}}
+    g = base["grid"]
+    bad = [
+        {"device": "d"}, {"button": "w"}, {**base, "extra": 1}, "x", {**base, "button": "d"}, {**base, "device": ""}, {**base, "button": 3},
+        {**base, "grid": "x"}, {**base, "grid": {"block": "g", "limit": 1}}, {**base, "grid": {**g, "extra": 1}},
+        {**base, "grid": {**g, "block": ""}}, {**base, "grid": {**g, "limit": 0}}, {**base, "grid": {**g, "nominal": -1}},
+        {**base, "grid": {**g, "limit": True}}, {**base, "grid": {**g, "nominal": "5"}}, {**base, "grid": {**g, "limit": float("nan")}},
+    ]
+    for b in bad:
+        with pytest.raises(vol.Invalid, match="rule boiler"):
+            validate_plan({**plan("p"), "rules": [boiler_rule(boiler=b)]})
+    for kw in (
+        {"inputs": ref("x")}, {"combine": "all"}, {"onDelay": 5}, {"offDelay": 5}, {"gate": {"source": {"sun": True}}},
+        {"onTrue": [{"device": "f", "do": "on"}]}, {"onFalse": [{"device": "f", "do": "off"}]},
+        {"vent": {"sensor": "a", "than": "b", "above": 9, "below": 5}},
+    ):
+        with pytest.raises(vol.Invalid, match="rule (boiler|vent)"):
+            validate_plan({**plan("p"), "rules": [boiler_rule(**kw)]})

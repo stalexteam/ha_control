@@ -96,6 +96,22 @@ def _validate_vent(r: dict, v: object) -> None:
         raise vol.Invalid("rule vent needs one fan: on when true, off when false")
 
 
+def _validate_boiler(r: dict, b: object) -> None:
+    """A boiler rule: device, button and an optional grid limit; no inputs, gate, vent or actions."""
+    if not isinstance(b, dict) or not {"device", "button"} <= set(b) <= {"device", "button", "grid"}:
+        raise vol.Invalid("rule boiler needs device, button and optionally grid")
+    if not _is_id(b["device"]) or not _is_id(b["button"]) or b["device"] == b["button"]:
+        raise vol.Invalid("rule boiler needs two different device ids")
+    if "grid" in b:
+        g = b["grid"]
+        if not isinstance(g, dict) or set(g) != {"block", "limit", "nominal"} or not _is_id(g["block"]):
+            raise vol.Invalid("rule boiler grid needs block, limit and nominal")
+        if not _is_num(g["limit"]) or not _is_num(g["nominal"]) or g["limit"] <= 0 or g["nominal"] <= 0:
+            raise vol.Invalid("rule boiler grid needs limit > 0 and nominal > 0")
+    if r["inputs"] or "gate" in r or "vent" in r or r["combine"] != "any" or r["onDelay"] != 0 or r["offDelay"] != 0             or r["onTrue"] or r["onFalse"]:
+        raise vol.Invalid("rule boiler needs no inputs, gate, vent or actions, combine any and no delays")
+
+
 def _validate_rules(rules: object) -> None:
     if not isinstance(rules, list):
         raise vol.Invalid("rules must be a list")
@@ -135,6 +151,8 @@ def _validate_rules(rules: object) -> None:
                     raise vol.Invalid("rule action needs a device and do on/off/open/close")
         if "vent" in r:
             _validate_vent(r, r["vent"])
+        if "boiler" in r:
+            _validate_boiler(r, r["boiler"])
         graph[r["id"]] = refs
     state: dict[str, int] = {}
 

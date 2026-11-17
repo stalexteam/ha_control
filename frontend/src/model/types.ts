@@ -163,6 +163,8 @@ export interface Rule {
   inputs: RuleInput[]; onDelay: number; offDelay: number; onTrue: RuleAction[]; onFalse: RuleAction[];
   /** Wet zone ventilation: sensor vs than (climate sensors), % absolute-humidity margins; inputs stay empty, offDelay is the run-on. */
   vent?: { sensor: Id; than: Id; above: number; below: number };
+  /** Boiler: device (control + power), button container, optional grid power limit; inputs/actions stay empty. */
+  boiler?: { device: Id; button: Id; grid?: { block: Id; limit: number; nominal: number } };
 }
 
 export const WALL_PRESETS: Record<WallType, number> = {

@@ -67,7 +67,7 @@ describe('Rule dialog', () => {
     await press(el, 'button[data-action="rule-ok"]');
     expect(el.dialog).toBeNull();
     expect(el.rules).toHaveLength(1);
-    expect(el.rules[0]).toMatchObject({ name: 'Water', zoneId: null, combine: 'any', inputs: [{ source: { device: 'd-leak' } }], onTrue: [{ device: 'd-valve', do: 'open' }] });
+    expect(el.rules[0]).toMatchObject({ name: 'Water', zoneId: null, combine: 'any', inputs: [{ source: { device: 'd-leak' } }], onTrue: [{ device: 'd-valve', do: 'close' }] });
     expect(stored()[0].rules ?? []).toHaveLength(0);
     await undo(el);
     expect(el.rules).toEqual([]);
@@ -154,8 +154,8 @@ describe('Rule dialog', () => {
     expect(act).toContain('d-valve');
     expect(act).not.toContain('d-leak');
     expect(act).not.toContain('d-motion');
-    // a valve takes open / close only
-    expect([...q<HTMLSelectElement>(el, '[data-field="action-true-0"] [data-part="do"]').options].map(o => o.value)).toEqual(['open', 'close']);
+    // a valve is only closed by rules
+    expect([...q<HTMLSelectElement>(el, '[data-field="action-true-0"] [data-part="do"]').options].map(o => o.value)).toEqual(['close']);
   });
 
   it('keys, canvas clicks, steps and tools do nothing while open; Esc cancels', async () => {

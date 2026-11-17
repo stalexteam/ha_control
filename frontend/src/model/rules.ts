@@ -1,6 +1,7 @@
 /** Pure ops on condition rules (`Plan.rules`). Rules are plan-level: they reference devices and rules of any level. */
 import { zoneMembers } from '../geometry/zones';
 import { newId } from './ids';
+import type { PowerSchema } from './power';
 import type { Device, Id, Level, Rule, RuleDo, RuleInput } from './types';
 
 export const RULE_DELAY_MAX = 3600;
@@ -64,7 +65,7 @@ export function ruleCycle(rules: Rule[], candidate: Rule): Id[] | null {
   return null;
 }
 
-export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'time' | 'held' | 'vent';
+export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'time' | 'held' | 'vent' | 'boiler';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
@@ -92,20 +93,28 @@ const delayOk = (n: unknown): boolean => Number.isInteger(n) && (n as number) >=
  * `actionsOf` (optional) gives the actions a device takes; an action outside them is the 'action' problem.
  * `lightSensorExists` (optional) tells whether an id is an illuminance_sensor device; default = any existing device.
  * `climateSensorExists` (optional) the same for climate_sensor devices (vent rules).
+ * `boilerDeviceExists` (optional) tells whether an id is a device with control and power bindings, `buttonExists` a
+ * wall_switch or smart_button, `gridBlockExists` a Power grid block with a power entity (boiler rules); defaults: any
+ * existing device, any existing device, no check.
  */
 export function ruleProblems(
   rules: Rule[], r: Rule, deviceExists: (id: Id) => boolean, actionsOf?: (id: Id) => RuleDo[] | undefined,
   lightSensorExists?: (id: Id) => boolean,
   climateSensorExists?: (id: Id) => boolean,
+  boilerDeviceExists?: (id: Id) => boolean,
+  buttonExists?: (id: Id) => boolean,
+  gridBlockExists?: (id: Id) => boolean,
 ): RuleProblem[] {
   const out: RuleProblem[] = [];
   if (!r.name.trim()) out.push('name');
-  if (r.inputs.length === 0 && !r.vent) out.push('inputs');
+  if (r.inputs.length === 0 && !r.vent && !r.boiler) out.push('inputs');
   const all = [...r.inputs, ...(r.gate ? [r.gate] : [])];
   const devices = [...all.flatMap(inputDevices), ...r.onTrue.map(a => a.device), ...r.onFalse.map(a => a.device)];
   const lights = all.flatMap(i => ('light' in i.source ? [i.source.light] : []));
   if (devices.some(id => !deviceExists(id)) || lights.some(id => !(lightSensorExists ?? deviceExists)(id))
-    || (r.vent && [r.vent.sensor, r.vent.than].some(id => !(climateSensorExists ?? deviceExists)(id)))) out.push('device-missing');
+    || (r.vent && [r.vent.sensor, r.vent.than].some(id => !(climateSensorExists ?? deviceExists)(id)))
+    || (r.boiler && (!(boilerDeviceExists ?? deviceExists)(r.boiler.device) || !(buttonExists ?? deviceExists)(r.boiler.button)
+      || (r.boiler.grid && gridBlockExists && !gridBlockExists(r.boiler.grid.block))))) out.push('device-missing');
   const known = new Set(rules.map(x => x.id));
   if (ruleRefs(r).some(id => id !== r.id && !known.has(id))) out.push('rule-missing');
   if (ruleCycle(rules, r)) out.push('cycle');
@@ -115,6 +124,7 @@ export function ruleProblems(
     if (p && !out.includes(p)) out.push(p);
   }
   if (r.vent && ventProblem(r, r.vent)) out.push('vent');
+  if (r.boiler && boilerProblem(r, r.boiler)) out.push('boiler');
   if (actionsOf && [...r.onTrue, ...r.onFalse].some(a => { const ok = actionsOf(a.device); return ok !== undefined && !ok.includes(a.do); })) out.push('action');
   return out;
 }
@@ -126,6 +136,35 @@ function ventProblem(r: Rule, v: NonNullable<Rule['vent']>): boolean {
   if (!isNum(v.above) || !isNum(v.below) || v.above <= 0 || v.below < 0 || v.below > v.above) return true;
   const [on, off] = [r.onTrue[0], r.onFalse[0]];
   return r.onTrue.length !== 1 || r.onFalse.length !== 1 || on.do !== 'on' || off.do !== 'off' || !on.device || on.device !== off.device;
+}
+
+/** A boiler rule's fixed shape and data bounds; true = violated. */
+function boilerProblem(r: Rule, b: NonNullable<Rule['boiler']>): boolean {
+  if (r.vent || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
+  if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
+  if (!b.device || !b.button || b.device === b.button) return true;
+  if (b.grid === undefined) return false;
+  const g = b.grid;
+  return !g.block || !isNum(g.limit) || !isNum(g.nominal) || g.limit <= 0 || g.nominal <= 0;
+}
+
+export const isBoilerRule = (r: Rule): boolean => r.boiler !== undefined;
+
+export const BOILER_LIMIT = 3000;
+export const BOILER_NOMINAL = 1400;
+
+/** The "Boiler" template: the zone's single device with control and power, its single button container, the plan's single grid block. */
+export function boilerTemplate(plan: { levels: Level[]; power?: PowerSchema }, zoneId: Id | null, zoneName: string | null): Rule {
+  const rule = newRule(zoneId);
+  rule.name = zoneId !== null && zoneName ? `Boiler ${zoneName}` : 'Boiler';
+  const level = zoneId === null ? undefined : plan.levels.find(l => l.zones.some(z => z.id === zoneId));
+  const members = level ? zoneMembers(level, zoneId as Id).filter(m => m.participates).map(m => m.device) : [];
+  const devices = members.filter(d => !!d.bindings?.control && !!d.bindings?.power);
+  const buttons = members.filter(d => d.props.kind === 'wall_switch' || d.props.kind === 'smart_button');
+  rule.boiler = { device: devices.length === 1 ? devices[0].id : '', button: buttons.length === 1 ? buttons[0].id : '' };
+  const grids = (plan.power?.blocks ?? []).filter(b => b.kind === 'grid');
+  if (grids.length === 1) rule.boiler.grid = { block: grids[0].id, limit: BOILER_LIMIT, nominal: BOILER_NOMINAL };
+  return rule;
 }
 
 export const isVentRule = (r: Rule): boolean => r.vent !== undefined;
@@ -195,7 +234,7 @@ export const isRuleInputDevice = (d: Device): boolean => INPUT_KINDS.has(d.props
 
 export function ruleActionsFor(d: Device): RuleDo[] {
   const p = d.props;
-  if (p.kind === 'valve') return ['open', 'close'];
+  if (p.kind === 'valve') return ['close'];
   if (p.kind === 'equipment') return p.controllable === true ? ['on', 'off'] : [];
   if (p.kind === 'ceiling_light' || p.kind === 'wall_light' || p.kind === 'socket' || p.kind === 'exhaust_fan') return ['on', 'off'];
   return [];
