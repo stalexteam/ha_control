@@ -10,9 +10,11 @@ from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from typing import Callable
 
 try:
+    from . import daylight
     from .boiler import MODES, Boiler
     from .timed import Timed
 except ImportError:  # pytest: module dir on sys.path
+    import daylight
     from boiler import MODES, Boiler
     from timed import Timed
 
@@ -251,7 +253,7 @@ def combine(mode: str, values: "list[bool | None]") -> "bool | None":
 
 
 class _Input:
-    """A rule input, the gate or a held source; type device, rule, light, sun, time or held."""
+    """A rule input, the gate or a held source; type device, rule, light, daylight, sun, time or held."""
 
     def __init__(self, raw: dict, devices: dict, rule_names: dict) -> None:
         src = raw.get("source") if isinstance(raw.get("source"), dict) else {}
@@ -259,6 +261,7 @@ class _Input:
         self.cyclic = self.missing = False
         self.rule: str | None = None
         self.kind = self.eid = None
+        self.did: str | None = None  # daylight: the illuminance sensor
         self.sources: list[_Input] = []  # held
         self.reads: list[str] = []  # the entities whose change re-evaluates the input
         self.pair: "tuple[dict, dict] | None" = None  # vent: the two climate sensors
@@ -304,6 +307,17 @@ class _Input:
             self.dark = src.get("unknownDark") is True
             self.sig = ("light", did, self.eid, self.dark)
             self.reads = [self.eid] if self.eid else []
+        elif "daylight" in src:
+            # the sensor's debounced state is shared by every input reading it (RuleEngine._days)
+            self.type = "daylight"
+            self.did = src["daylight"] if isinstance(src["daylight"], str) else ""
+            device = devices.get(self.did)
+            self.missing = device is None
+            self.label = _label(device, self.did)
+            self.kind = _kind(device) if device is not None else None
+            self.want = src.get("is") if src.get("is") in ("night", "dark", "day") else "night"
+            self.reads = daylight.entities(device) if self.kind == "illuminance_sensor" else []
+            self.sig = ("daylight", self.did, self.want)
         elif src.get("sun") is True:
             self.type, self.eid, self.label, self.sig = "sun", SUN, "Sun", ("sun",)
         elif isinstance(src.get("time"), dict):
@@ -545,6 +559,9 @@ class RuleEngine:
         self._holds: dict[str, _Hold] = {}  # shared device entity -> its arbitrated command
         self._loading = False  # inside load_plans: arbitrated calls wait for the end of the load
         self._deferred: list[str] = []  # the shared devices commanded in this load, called once at its end
+        self._days: dict[tuple[str, str], daylight.Daylight] = {}  # (plan id, sensor id) -> its debounced daylight
+        self._day_reads: dict[str, list[tuple[str, str]]] = {}  # entity -> the daylights reading it
+        self._day_rules: dict[tuple[str, str], list[Key]] = {}  # daylight -> the rules reading it
 
     # --- loading -------------------------------------------------------------
 
@@ -577,6 +594,7 @@ class RuleEngine:
         stopped: list[_Rule] = []  # boiler rules disabled while auto whose last command was on
         ended: list[_Rule] = []  # timed rules disabled while running
         rules: dict[Key, _Rule] = {}
+        sensors: dict[tuple[str, str], dict] = {}  # the illuminance sensors read by daylight inputs
         for plan in plans:
             pid = plan.get("id") if isinstance(plan, dict) else None
             if not isinstance(pid, str):
@@ -609,13 +627,19 @@ class RuleEngine:
                 if rule.timed is not None and self._load_timed(rule, prev, runs):
                     ended.append(rule)
                 rules[rule.key] = rule
+                for i in (p for top in rule.all_inputs for p in top.parts()):
+                    if i.type == "daylight" and i.kind == "illuminance_sensor":
+                        sensors[(pid, i.did)] = devices[i.did]
         for key, prev in old.items():
             if key not in rules:
                 prev.stop()
+        self._load_days(sensors)
         released = [] if unload else self._released_relays(old, rules)
         finished = [] if unload else self._released_runs(old, rules)
         self._rules = rules
         self._link()
+        for dk in self._days:
+            self._day_read(dk)
         for rule in rules.values():
             for _, _, eid in rule.leak_valves:
                 if eid is not None and eid not in rule.seen:
@@ -748,9 +772,46 @@ class RuleEngine:
         except Exception as err:  # noqa: BLE001 - a failing device must not stop the engine
             _LOGGER.warning("timed switch %s: turn_%s failed: %s", t.eid, t.final, err)
 
+    def _load_days(self, sensors: "dict[tuple[str, str], dict]") -> None:
+        """An unchanged sensor (bindings and thresholds) keeps its state and pending change; a changed one starts over
+        (its first raw state is accepted at once); one no rule reads any more is dropped. Timers are cancelled."""
+        days: dict[tuple[str, str], daylight.Daylight] = {}
+        for dk, device in sensors.items():
+            prev, new = self._days.get(dk), daylight.Daylight(device)
+            if prev is not None and prev.sig == new.sig:
+                prev.device = device
+                days[dk] = prev
+            else:
+                if prev is not None:
+                    prev.stop()
+                days[dk] = new
+        for dk, prev in self._days.items():
+            if days.get(dk) is not prev:
+                prev.stop()
+        self._days = days
+
+    def _day_read(self, dk: "tuple[str, str]") -> None:
+        """Take the sensor's current raw state; a change that has to hold arms the sensor's one timer."""
+        d = self._days[dk]
+        if d.step(*daylight.raw_state(d.device, self._lookup), self._now()):
+            due = d.due
+            d.cancel = self._schedule(max(0.0, due - self._now()), lambda: self._day_due(dk, d, due))
+
+    def _day_due(self, dk: "tuple[str, str]", d: daylight.Daylight, due: float) -> None:
+        """A pending daylight change has held: every rule reading the sensor sees it at once."""
+        if self._days.get(dk) is not d or d.due != due:
+            return
+        d.accept()
+        self._settle(set(self._day_rules.get(dk, ())))
+        self._flush()
+
     def _link(self) -> None:
         """Order rules so references come first; a reference closing a cycle is marked and ignored."""
         self._order, self._consumers, self._readers, self._targets = {}, {}, {}, {}
+        self._day_reads, self._day_rules = {}, {}
+        for dk, d in self._days.items():
+            for eid in d.eids:
+                self._day_reads.setdefault(eid, []).append(dk)
         state: dict[Key, int] = {}
 
         def visit(key: Key) -> None:
@@ -777,6 +838,10 @@ class RuleEngine:
             for eid in reads + (rule.boiler.reads if rule.boiler is not None else []) + timed:
                 if key not in self._readers.get(eid, []):
                     self._readers.setdefault(eid, []).append(key)
+            for i in (p for top in rule.all_inputs for p in top.parts()):
+                dk = (key[0], i.did or "")
+                if i.type == "daylight" and dk in self._days and key not in self._day_rules.get(dk, []):
+                    self._day_rules.setdefault(dk, []).append(key)
             actions = rule.on_true + rule.on_false + list(rule.timed_actions.values())
             for a in actions if rule.enabled else []:
                 if a.call is not None and key not in self._targets.get(a.call[2], []):
@@ -817,6 +882,10 @@ class RuleEngine:
         out = {"label": i.label, "value": value, "detail": detail}
         if i.type == "held" and wake is not None:
             out["until"] = int(wake * 1000)
+        if i.type == "daylight" and not i.missing:
+            d = self._days.get((rule.key[0], i.did or ""))
+            if d is not None and d.due is not None:
+                out["until"] = int(d.due * 1000)  # the sensor's pending change (one timer per sensor)
         if i.type == "vent":
             out["vent"] = self._vent_trace(i)
         if i.timer is not None and i.timer[0] != wake:
@@ -856,6 +925,9 @@ class RuleEngine:
             return (*self._vent(i), None)
         if i.type == "light":
             return (*self._light(i), None)
+        if i.type == "daylight":
+            d = self._days.get((rule.key[0], i.did or ""))
+            return (*(d.trace(i.want, now) if d is not None else (None, "missing")), None)
         if i.type == "sun":
             return (*_read_sun(self._lookup), None)
         return (*_read(i.kind, i.eid, self._lookup), None)
@@ -1552,6 +1624,8 @@ class RuleEngine:
         st = self._lookup(entity_id)
         if hold is not None and st is not None and st[0] == hold.cmd:
             hold.confirmed = True
+        for dk in self._day_reads.get(entity_id, ()):
+            self._day_read(dk)  # before the rules reading it are evaluated
         for key in self._targets.get(entity_id, ()):
             self._reclose(self._rules[key], entity_id)
         for key in keys or ():
