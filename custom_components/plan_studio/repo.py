@@ -95,7 +95,7 @@ def _validate_vent(r: dict, v: object) -> None:
         raise vol.Invalid("rule vent needs two different sensor ids")
     if not _is_num(v["above"]) or not _is_num(v["below"]) or v["above"] <= 0 or not 0 <= v["below"] <= v["above"]:
         raise vol.Invalid("rule vent needs above > 0 and 0 <= below <= above")
-    if r["inputs"] or "gate" in r or "leak" in r or "timed" in r or "outside" in r or "beurer" in r or r["combine"] != "any" or r["onDelay"] != 0:
+    if r["inputs"] or "gate" in r or "leak" in r or "timed" in r or "outside" in r or "beurer" in r or "control" in r or r["combine"] != "any" or r["onDelay"] != 0:
         raise vol.Invalid("rule vent needs no inputs or gate, combine any and onDelay 0")
     on, off = r["onTrue"], r["onFalse"]
     if len(on) != 1 or len(off) != 1 or on[0]["do"] != "on" or off[0]["do"] != "off" or on[0]["device"] != off[0]["device"]:
@@ -114,7 +114,7 @@ def _validate_boiler(r: dict, b: object) -> None:
             raise vol.Invalid("rule boiler grid needs block, limit and nominal")
         if not _is_num(g["limit"]) or not _is_num(g["nominal"]) or g["limit"] <= 0 or g["nominal"] <= 0:
             raise vol.Invalid("rule boiler grid needs limit > 0 and nominal > 0")
-    if r["inputs"] or "gate" in r or "vent" in r or "timed" in r or "outside" in r or "beurer" in r or r["combine"] != "any" or r["onDelay"] != 0 \
+    if r["inputs"] or "gate" in r or "vent" in r or "timed" in r or "outside" in r or "beurer" in r or "control" in r or r["combine"] != "any" or r["onDelay"] != 0 \
             or r["offDelay"] != 0 \
             or r["onTrue"] or r["onFalse"]:
         raise vol.Invalid("rule boiler needs no inputs, gate, vent or actions, combine any and no delays")
@@ -128,7 +128,7 @@ def _validate_leak(r: dict, lk: object) -> None:
         ids = lk[key]
         if not isinstance(ids, list) or not ids or not all(_is_id(i) for i in ids) or len(set(ids)) != len(ids):
             raise vol.Invalid(f"rule leak {key} needs at least one distinct device id")
-    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "timed" in r or "outside" in r or "beurer" in r or r["combine"] != "any" or r["onDelay"] != 0 \
+    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "timed" in r or "outside" in r or "beurer" in r or "control" in r or r["combine"] != "any" or r["onDelay"] != 0 \
             or r["offDelay"] != 0 or r["onTrue"] or r["onFalse"]:
         raise vol.Invalid("rule leak needs no inputs, gate, vent, boiler or actions, combine any and no delays")
 
@@ -143,7 +143,7 @@ def _validate_timed(r: dict, tm: object) -> None:
         raise vol.Invalid("rule timed minutes must be a whole number 1..1440")
     if "invert" in tm and tm["invert"] is not True:
         raise vol.Invalid("rule timed invert may only be true")
-    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or "outside" in r or "beurer" in r or r["combine"] != "any" \
+    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or "outside" in r or "beurer" in r or "control" in r or r["combine"] != "any" \
             or r["onDelay"] != 0 or r["offDelay"] != 0 or r["onTrue"] or r["onFalse"]:
         raise vol.Invalid("rule timed needs no inputs, gate, vent, boiler, leak or actions, combine any and no delays")
 
@@ -167,7 +167,7 @@ def _validate_outside(r: dict, o: object) -> None:
             raise vol.Invalid("rule outside window needs from and to as HH:MM")
         if w["from"] == w["to"]:
             raise vol.Invalid("rule outside window needs from different from to")
-    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "beurer" in r or r["combine"] != "any" \
+    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "beurer" in r or "control" in r or r["combine"] != "any" \
             or r["onDelay"] != 0 or r["offDelay"] != 0 or r["onTrue"] or r["onFalse"]:
         raise vol.Invalid("rule outside needs no inputs, gate, vent, boiler, leak, timed or actions, combine any and no delays")
 
@@ -184,9 +184,23 @@ def _validate_beurer(r: dict, b: object) -> None:
     for key in ("keep", "every"):
         if type(b[key]) is not int or not 0 <= b[key] <= 1440:
             raise vol.Invalid(f"rule beurer {key} must be a whole number of minutes 0..1440")
-    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "outside" in r or r["combine"] != "any" \
+    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "outside" in r or "control" in r or r["combine"] != "any" \
             or r["onDelay"] != 0 or r["onTrue"] or r["onFalse"]:
-        raise vol.Invalid("rule beurer needs no inputs, gate, vent, boiler, leak, timed, outside or actions, combine any and onDelay 0")
+        raise vol.Invalid("rule beurer needs no inputs, gate, vent, boiler, leak, timed, outside, control or actions, combine any and onDelay 0")
+
+
+def _validate_control(r: dict, c: object) -> None:
+    """A load control rule: sources (buttons, wall switches, motion sensors) switch loads directly; no inputs, gate, other kinds, actions or delays."""
+    if not isinstance(c, dict) or set(c) != {"sources", "loads"}:
+        raise vol.Invalid("rule control needs sources and loads")
+    for key in ("sources", "loads"):
+        ids = c[key]
+        if not isinstance(ids, list) or not ids or not all(_is_id(i) for i in ids) or len(set(ids)) != len(ids):
+            raise vol.Invalid(f"rule control {key} needs at least one distinct device id")
+    if set(c["sources"]) & set(c["loads"]):
+        raise vol.Invalid("rule control needs a device in only one of sources and loads")
+    if r["inputs"] or "gate" in r or "vent" in r or "boiler" in r or "leak" in r or "timed" in r or "outside" in r or "beurer" in r or r["combine"] != "any"             or r["onDelay"] != 0 or r["offDelay"] != 0 or r["onTrue"] or r["onFalse"]:
+        raise vol.Invalid("rule control needs no inputs, gate, other kinds or actions, combine any and no delays")
 
 
 def _validate_rules(rules: object) -> None:
@@ -238,6 +252,8 @@ def _validate_rules(rules: object) -> None:
             _validate_outside(r, r["outside"])
         if "beurer" in r:
             _validate_beurer(r, r["beurer"])
+        if "control" in r:
+            _validate_control(r, r["control"])
         graph[r["id"]] = refs
     state: dict[str, int] = {}
 

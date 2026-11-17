@@ -387,3 +387,37 @@ def test_validate_plan_beurer_rule():
     for other in (vent_rule(), boiler_rule(), leak_rule(), timed_rule(), outside_rule()):
         with pytest.raises(vol.Invalid, match="rule (timed|vent|boiler|leak|outside)"):
             validate_plan({**plan("p"), "rules": [{**other, "beurer": {"heater": "h", "source": "p", "above": 200, "keep": 10, "every": 30}}]})
+
+
+def control_rule(rid="c1", control=None, **kw):
+    r = rule(rid, inputs=[], onTrue=[], control={"sources": ["s"], "loads": ["l"]} if control is None else control)
+    r.update(kw)
+    return r
+
+
+def test_validate_plan_control_rule():
+    validate_plan({**plan("p"), "rules": [control_rule()]})
+    validate_plan({**plan("p"), "rules": [control_rule(control={"sources": ["s", "s2"], "loads": ["l", "l2"]})]})
+    bad = [
+        "x", [], {}, {"sources": ["s"]}, {"loads": ["l"]}, {"sources": ["s"], "loads": ["l"], "x": 1},
+        {"sources": [], "loads": ["l"]}, {"sources": ["s"], "loads": []},
+        {"sources": "s", "loads": ["l"]}, {"sources": ["s"], "loads": "l"},
+        {"sources": ["s", "s"], "loads": ["l"]}, {"sources": ["s"], "loads": ["l", "l"]},
+        {"sources": [3], "loads": ["l"]}, {"sources": ["s"], "loads": [""]}, {"sources": ["s"], "loads": ["s"]},
+    ]
+    for c in bad:
+        with pytest.raises(vol.Invalid, match="rule control"):
+            validate_plan({**plan("p"), "rules": [control_rule(control=c)]})
+    for kw in (
+        {"inputs": ref("x")}, {"combine": "all"}, {"onDelay": 5}, {"offDelay": 5}, {"gate": {"source": {"sun": True}}},
+        {"onTrue": [{"device": "d", "do": "on"}]}, {"onFalse": [{"device": "d", "do": "off"}]},
+        {"vent": {"sensor": "a", "than": "b", "above": 9, "below": 5}}, {"boiler": {"device": "d", "button": "b"}},
+        {"leak": {"sensors": ["s"], "valves": ["v"]}}, {"timed": {"button": "b", "device": "d", "minutes": 5}},
+        {"outside": {"light": "l", "sensor": "s", "pause": 5}}, {"beurer": {"heater": "h", "source": "p", "above": 200, "keep": 10, "every": 30}},
+    ):
+        with pytest.raises(vol.Invalid, match="rule "):
+            validate_plan({**plan("p"), "rules": [control_rule(**kw)]})
+    # the other kinds reject a control key too
+    for other in (vent_rule(), boiler_rule(), leak_rule(), timed_rule(), outside_rule(), beurer_rule()):
+        with pytest.raises(vol.Invalid, match="rule (timed|vent|boiler|leak|outside|beurer)"):
+            validate_plan({**plan("p"), "rules": [{**other, "control": {"sources": ["s"], "loads": ["l"]}}]})
