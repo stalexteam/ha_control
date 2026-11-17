@@ -102,18 +102,68 @@ describe('leak diagram', () => {
     expect(host.querySelector('[data-note="status"]')!.textContent).toBe('Waiting for data');
   });
 
-  it('four sensors: three per row, the last row centred; every block inside the width', () => {
-    const { host } = draw({ rule: rule(['wc', 'kit', 'a', 'b'], ['cold']) });
-    const ys = ['wc', 'kit', 'a', 'b'].map(id => pos(host, `leak-sensor:${id}`).y);
-    expect(ys[0]).toBe(ys[2]);
-    expect(ys[3]).toBeGreaterThan(ys[0]);
-    const last = pos(host, 'leak-sensor:b');
-    expect(last.x + last.w / 2).toBe(LEAK_WIDTH / 2);
-    for (const b of order(host)) {
-      const p = pos(host, b!);
-      expect(p.x).toBeGreaterThanOrEqual(0);
-      expect(p.x + p.w).toBeLessThanOrEqual(LEAK_WIDTH);
+  it('several sensors: two per row on a grid with the middle gap at the centre; the last odd one in the left column', () => {
+    const { host } = draw({ rule: rule(['wc', 'kit', 'a'], ['cold']) });
+    const p = ['wc', 'kit', 'a'].map(id => pos(host, `leak-sensor:${id}`));
+    expect(p[0].y).toBe(p[1].y);
+    expect(p[2].y).toBeGreaterThan(p[0].y);
+    expect(p[2].x).toBe(p[0].x);
+    expect(p[0].x + p[0].w).toBeLessThan(LEAK_WIDTH / 2);
+    expect(p[1].x).toBeGreaterThan(LEAK_WIDTH / 2);
+    const one = pos(draw({ rule: rule(['wc'], ['cold']) }).host, 'leak-sensor:wc');
+    expect(one.x + one.w / 2).toBe(LEAK_WIDTH / 2); // a single block is centred
+  });
+
+  /** Axis-aligned segments of the link path (M, H, V commands). */
+  const segments = (host: HTMLElement): { x1: number; y1: number; x2: number; y2: number }[] => {
+    const d = host.querySelector('path.fc-link')!.getAttribute('d')!;
+    const out: { x1: number; y1: number; x2: number; y2: number }[] = [];
+    let x = 0, y = 0;
+    for (const [, c, a, b] of d.matchAll(/([MHV])\s*(-?[\d.]+)(?:\s+(-?[\d.]+))?/g)) {
+      if (c === 'M') { x = Number(a); y = Number(b); continue; }
+      const nx = c === 'H' ? Number(a) : x, ny = c === 'V' ? Number(a) : y;
+      out.push({ x1: x, y1: y, x2: nx, y2: ny });
+      x = nx; y = ny;
     }
+    return out;
+  };
+  const overlap = (a1: number, a2: number, b1: number, b2: number) => Math.min(Math.max(a1, a2), b2) - Math.max(Math.min(a1, a2), b1) > 0.01;
+  const inside = (v: number, b1: number, b2: number) => v > b1 + 0.01 && v < b2 - 0.01;
+
+  for (const n of [1, 3, 4, 7]) {
+    it(`${n} sensors and ${n} valves: every block inside the width, no link crosses a block`, () => {
+      const ids = (p: string) => Array.from({ length: n }, (_, i) => `${p}${i}`);
+      const { host } = draw({ rule: rule(ids('s'), ids('v')), deviceName: id => id });
+      const blocks = order(host).map(f => {
+        const q = pos(host, f!);
+        return { ...q, h: Number(host.querySelector(`[data-block="${f}"] rect`)!.getAttribute('height')), f };
+      });
+      expect(blocks.length).toBe(2 * n + 1);
+      for (const b of blocks) {
+        expect(b.x).toBeGreaterThanOrEqual(0);
+        expect(b.x + b.w).toBeLessThanOrEqual(LEAK_WIDTH);
+      }
+      const segs = segments(host);
+      expect(segs.length).toBeGreaterThan(0);
+      for (const s of segs) for (const b of blocks) {
+        const crosses = s.x1 === s.x2
+          ? inside(s.x1, b.x, b.x + b.w) && overlap(s.y1, s.y2, b.y, b.y + b.h)
+          : inside(s.y1, b.y, b.y + b.h) && overlap(s.x1, s.x2, b.x, b.x + b.w);
+        expect(crosses, `${JSON.stringify(s)} crosses ${b.f}`).toBe(false);
+      }
+      // every block is reached: a link segment ends on its top or bottom edge at its centre
+      for (const b of blocks) {
+        const cx = b.x + b.w / 2;
+        expect(segs.some(s => s.x2 === cx && (s.y2 === b.y || s.y2 === b.y + b.h || s.y1 === b.y + b.h || s.y1 === b.y)), b.f!).toBe(true);
+      }
+    });
+  }
+
+  it('the last action shows on the first valve of that name only', () => {
+    const tr: RuleTrace = { ...wet, leak: { valves: [{ id: 'cold', name: 'Cold water valve', state: 'closed' }, { id: 'hot', name: 'Cold water valve', state: 'closed' }] } };
+    const { host } = draw({ trace: tr, deviceName: () => 'Cold water valve' });
+    expect(text(host, 'leak-valve:cold')).toBe('Cold water valve | closed | re-closed 21:43');
+    expect(text(host, 'leak-valve:hot')).toBe('Cold water valve | closed');
   });
 
   it('empty lists show a placeholder block that leads to the add field', () => {

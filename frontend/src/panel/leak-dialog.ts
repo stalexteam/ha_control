@@ -29,15 +29,15 @@ export interface LeakDialogOpts {
 /**
  * One list of the rule (sensors or valves): a chip per id (marked when it is not a device of `list`; the x removes it),
  * then the add select with the devices of `list` not yet in it. The select carries `data-field` (the diagram focuses it);
- * the chip of the block last clicked in the diagram is highlighted.
+ * the chip whose diagram block (`<block>:<id>`) was clicked last is highlighted.
  */
-function chips(o: LeakDialogOpts, field: string, ids: Id[], list: Device[], addText: string, onSet: (ids: Id[]) => void): TemplateResult {
+function chips(o: LeakDialogOpts, field: string, block: string, ids: Id[], list: Device[], addText: string, onSet: (ids: Id[]) => void): TemplateResult {
   const name = (id: Id) => o.deviceById(id)?.name ?? t('rules.missingDevice');
   const focused = o.draft.focused;
   return html`
     <div class="rsources" data-group=${field}>
       ${ids.map(id => html`
-        <span class="rchip${list.some(d => d.id === id) ? '' : ' bad'}${focused === `${field.slice(0, -1)}:${id}` ? ' hl' : ''}"
+        <span class="rchip${list.some(d => d.id === id) ? '' : ' bad'}${focused === `${block}:${id}` ? ' hl' : ''}"
           data-id=${id}>${name(id)}
           <button class="btn" data-action="remove" title=${t('leak.remove')}
             @click=${() => onSet(ids.filter(x => x !== id))}>&times;</button></span>`)}
@@ -80,9 +80,9 @@ export function renderLeakDialog(o: LeakDialogOpts): TemplateResult {
     texts: problemTexts(o), onChange: o.onChange, onOk: o.onOk, onCancel: o.onCancel,
     form: html`
       <label class="rlabel">${t('leak.sensors')}</label>
-      ${chips(o, 'leak-sensors', l.sensors, o.sensors, t('leak.addSensor'), ids => o.onChange({ ...r, leak: { ...l, sensors: ids } }))}
+      ${chips(o, 'leak-sensors', 'leak-sensor', l.sensors, o.sensors, t('leak.addSensor'), ids => o.onChange({ ...r, leak: { ...l, sensors: ids } }))}
       <label class="rlabel">${t('leak.valves')}</label>
-      ${chips(o, 'leak-valves', l.valves, o.valves, t('leak.addValve'), ids => o.onChange({ ...r, leak: { ...l, valves: ids } }))}`,
+      ${chips(o, 'leak-valves', 'leak-valve', l.valves, o.valves, t('leak.addValve'), ids => o.onChange({ ...r, leak: { ...l, valves: ids } }))}`,
     diagram: renderLeakTrace({
       rule: r, deviceName: id => o.deviceById(id)?.name ?? t('rules.missingDevice'),
       trace: o.trace, note: o.note, now: o.now, focused: o.draft.focused, onFocus: o.onFocus,

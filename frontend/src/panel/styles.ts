@@ -295,13 +295,14 @@ export const panelStyles = css`
   .rparams { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding-left: 4px; }
   .rparams label { display: inline-flex; align-items: center; gap: 4px; color: var(--ch-muted); font-size: 12px; }
   .rsources { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-  .rchip { display: inline-flex; align-items: center; gap: 2px; padding: 0 2px 0 8px; border: 1px solid var(--ch-divider); border-radius: 10px; font-size: 12px; }
+  .rchip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 3px 2px 10px; border: 1px solid var(--ch-divider); border-radius: 12px; font-size: 12px; }
   .rchip.bad { border-color: var(--ch-error); }
   .rchip.hl { border-color: var(--ch-primary); background: var(--ch-tint); }
   .rwarn { flex-basis: 100%; margin: 0; color: var(--ch-error); font-size: 12px; }
   .rline.bad { border-color: var(--ch-error); }
   .rline .grow, .rsettings .grow { flex: 1; min-width: 0; }
   .rline .btn { padding: 1px 8px; }
+  .rchip .btn { padding: 1px 7px; border-radius: 9px; line-height: 16px; }
   .rnot { display: inline-flex; align-items: center; gap: 4px; color: var(--ch-muted); font-size: 12px; cursor: pointer; }
   .rnot input { margin: 0; }
   .radd { color: var(--ch-muted); }

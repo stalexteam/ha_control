@@ -338,6 +338,24 @@ function leakPlan(): Plan {
   return p;
 }
 
+/** Scene `leak-many`: the leak protection rule over five sensors and four valves (layout of several rows). */
+function leakManyPlan(): Plan {
+  const p = leakPlan();
+  const level = p.levels[0];
+  const add = (id: string, name: string, kind: 'leak_sensor' | 'valve', x: number) => level.devices.push(kind === 'leak_sensor'
+    ? { id, name, invalid: false, bindings: {}, placement: { mode: 'free', x, y: 2600, rotation: 0 }, props: { kind } }
+    : { id, name, invalid: false, bindings: {}, placement: { mode: 'free', x, y: 2700, rotation: 0 }, props: { kind, autoByDoubleToggle: false, windowSec: 3 } });
+  add('d-leak3', 'Leak bathroom', 'leak_sensor', 1000);
+  add('d-leak4', 'Leak dishwasher', 'leak_sensor', 1400);
+  add('d-leak5', 'Leak boiler room', 'leak_sensor', 1800);
+  add('d-valve3', 'Boiler inlet valve', 'valve', 2200);
+  add('d-valve4', 'Garden valve', 'valve', 2600);
+  p.rules!.find(r => r.id === 'rule-leakp')!.leak = {
+    sensors: ['d-leak2', 'd-leak', 'd-leak3', 'd-leak4', 'd-leak5'], valves: ['d-valve', 'd-valve2', 'd-valve3', 'd-valve4'],
+  };
+  return p;
+}
+
 const valves = (a: 'open' | 'closed' | null, b: 'open' | 'closed' | null) => ({
   valves: [{ id: 'd-valve', name: 'Water valve', state: a }, { id: 'd-valve2', name: 'Hot water valve', state: b }],
 });
@@ -514,6 +532,7 @@ export const SCENES: Record<string, Scene> = {
   boiler: { plans: [boilerPlan()], rulesFrame: BOILER_RULES },
   leak: { plans: [leakPlan()], rulesFrame: { ...ROOM_RULES, 'rule-leakp': LEAK_DRY } },
   'leak-wet': { plans: [leakPlan()], rulesFrame: { ...ROOM_RULES, 'rule-leakp': LEAK_WET } },
+  'leak-many': { plans: [leakManyPlan()], rulesFrame: ROOM_RULES },
   'leak-na': { plans: [leakPlan()], rulesFrame: { ...ROOM_RULES, 'rule-leakp': LEAK_NA } },
   'boiler-limit': { plans: [boilerPlan()], rulesFrame: BOILER_LIMIT_RULES },
   'boiler-heat': { plans: [boilerPlan()], rulesFrame: BOILER_HEAT_RULES },
