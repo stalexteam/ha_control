@@ -405,7 +405,7 @@ export class PlanStudioPanel extends LitElement {
       id => devices.some(x => x.id === id && x.props.kind === 'climate_sensor'),
       id => devices.some(x => x.id === id && !!x.bindings?.control && !!x.bindings?.power),
       id => devices.some(x => x.id === id && (x.props.kind === 'wall_switch' || x.props.kind === 'smart_button')),
-      id => !!this.plan?.power?.blocks.some(b => b.id === id && b.kind === 'grid' && !!b.power));
+      id => this.power.blocks.some(b => b.id === id && b.kind === 'grid' && !!b.power));
     if (isVentRule(rule)) {
       return renderVentDialog({
         draft: d,

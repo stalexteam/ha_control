@@ -315,6 +315,9 @@ describe('boiler rule', () => {
       { gate: { source: { sun: true as const } } }, { onTrue: [{ device: 'f', do: 'on' as const }] }, { onFalse: [{ device: 'f', do: 'off' as const }] }])
       expect(probs(boiler(o)), JSON.stringify(o)).toContain('boiler');
   });
+  it('an empty grid block is only a boiler problem without a lookup', () => {
+    expect(probs(boiler({}, { grid: { block: '', limit: 3000, nominal: 1400 } }))).toEqual(['boiler']);
+  });
   it('lookups', () => {
     expect(probs(boiler(), id => id !== 'd')).toEqual(['device-missing']);
     expect(probs(boiler(), () => true, id => id !== 'btn')).toEqual(['device-missing']);

@@ -108,7 +108,8 @@ def _validate_boiler(r: dict, b: object) -> None:
             raise vol.Invalid("rule boiler grid needs block, limit and nominal")
         if not _is_num(g["limit"]) or not _is_num(g["nominal"]) or g["limit"] <= 0 or g["nominal"] <= 0:
             raise vol.Invalid("rule boiler grid needs limit > 0 and nominal > 0")
-    if r["inputs"] or "gate" in r or "vent" in r or r["combine"] != "any" or r["onDelay"] != 0 or r["offDelay"] != 0             or r["onTrue"] or r["onFalse"]:
+    if r["inputs"] or "gate" in r or "vent" in r or r["combine"] != "any" or r["onDelay"] != 0 or r["offDelay"] != 0 \
+            or r["onTrue"] or r["onFalse"]:
         raise vol.Invalid("rule boiler needs no inputs, gate, vent or actions, combine any and no delays")
 
 

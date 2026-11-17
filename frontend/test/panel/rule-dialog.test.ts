@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { $, click, key, mount, press, pressSave, stored, undo } from './helpers';
 import { createMockHass, STORAGE_KEY } from '../../dev/mock-hass';
 import { SCENES } from '../../dev/scenes';
+import { deviceDefaults } from '../../src/model/types';
 import type { Plan, Rule } from '../../src/model/types';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
 
@@ -452,5 +453,29 @@ describe('Rule dialog', () => {
     await press(el, '[data-field="input-1"] input[data-part="not"]');
     expect(q(el, '[data-block="input-1"]').textContent).toContain('above horizon');
     expect(q(el, '[data-field="input-1"] .muted').textContent).toBe('above horizon');
+  });
+
+  it('boiler rule problems use the edited plan: device, button and an unsaved grid block', async () => {
+    const el = await open([]);
+    const h = el.history!;
+    const btn = { id: 'd-btn', name: 'Btn', invalid: false, placement: { mode: 'free' as const, x: 500, y: 500, rotation: 0 }, props: deviceDefaults('wall_switch', 'free') };
+    const lvl = h.current.level;
+    h.push({ ...h.current, level: { ...lvl, devices: [...lvl.devices, btn] } });
+    const probs = async (boiler: NonNullable<Rule['boiler']>) => {
+      el.ruleDraft = { rule: { id: 'rb', name: 'Boiler', zoneId: null, combine: 'any', inputs: [], onDelay: 0, offDelay: 0, onTrue: [], onFalse: [], boiler }, isNew: true, focused: null };
+      el.dialog = { kind: 'rule' };
+      await el.updateComplete;
+      return names(el, '.rproblems li');
+    };
+    const missing = 'A device of this rule is no longer on the plan.';
+    expect(await probs({ device: 'd-socket', button: 'd-btn' })).not.toContain(missing);
+    expect(await probs({ device: 'd-leak', button: 'd-btn' })).toContain(missing); // no control + power
+    expect(await probs({ device: 'd-socket', button: 'd-socket' })).toContain(missing); // not a button
+    const grid = { block: 'g1', limit: 3000, nominal: 1400 };
+    expect(await probs({ device: 'd-socket', button: 'd-btn', grid })).toContain(missing); // no such block
+    h.push({ ...h.current, power: { blocks: [{ id: 'g1', kind: 'grid', x: 0, y: 0, power: 'sensor.grid' }], wires: [] } }); // not saved
+    expect(await probs({ device: 'd-socket', button: 'd-btn', grid })).not.toContain(missing);
+    h.push({ ...h.current, power: { blocks: [{ id: 'g1', kind: 'grid', x: 0, y: 0 }], wires: [] } });
+    expect(await probs({ device: 'd-socket', button: 'd-btn', grid })).toContain(missing); // grid without a power entity
   });
 });
