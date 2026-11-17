@@ -124,6 +124,15 @@ export const panelStyles = css`
     background: var(--ch-primary); }
   .tool[data-key]::after { content: attr(data-key); position: absolute; right: 5px; top: 4px; font-size: 9.5px;
     font-weight: 400; color: var(--ch-muted); opacity: .75; }
+  /* The Automation rail's "Automations" menu: fixed beside its button, over everything but the dialogs. */
+  .amenu-back { position: fixed; inset: 0; z-index: 8; }
+  .amenu { position: fixed; z-index: 9; display: flex; flex-direction: column; min-width: 220px; padding: 4px;
+    background: var(--ch-card); border: 1px solid var(--ch-divider); border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .3); }
+  .amenu-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 0; border-radius: 6px;
+    background: transparent; color: var(--ch-text); font-size: 13px; text-align: left; cursor: pointer; }
+  .amenu-item .ticon { width: 20px; height: 20px; fill: currentColor; opacity: .8; flex: none; }
+  .amenu-item:hover, .amenu-item:focus-visible { background: var(--ch-hover); outline: none; }
+  .amenu-item:focus { background: var(--ch-tint); outline: none; }
   .tool-sep { flex: none; height: 1px; background: var(--ch-divider); margin: 2px 8px; }
   .blist { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ch-card);
     border-right: 1px solid var(--ch-divider); }
@@ -269,6 +278,7 @@ export const panelStyles = css`
      the diagram is on the right, the footer below. */
   .dialog.rdlg { box-sizing: border-box; width: 90%; height: 90%; max-width: none; display: flex; flex-direction: column; padding: 14px 18px; }
   .rsettings > p.muted { margin: 0; }
+  .rsettings .rcheck { margin-top: 12px; font-size: 13px; color: var(--ch-text); }
   .vnums { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 8px; }
   .vnums label { display: inline-flex; align-items: center; gap: 6px; color: var(--ch-muted); font-size: 12px; }
   .rcols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 38%) 1fr; gap: 18px; margin-top: 4px; }

@@ -14,6 +14,19 @@ export interface RuleInputTrace {
 /** One climate sensor of a vent rule: unrounded values (t in °C) or null; `why` = the reason it has no data, else null. */
 export interface VentSensorTrace { t: number | null; rh: number | null; ah: number | null; why: string | null }
 
+/**
+ * A boiler rule's state: `grid` and `boilerW` in W (null = no data; `grid` also null without a power limit),
+ * `headroom` = grid + nominal - boiler (unknown boiler = 0), the value compared with the limit (null without grid data
+ * or limit), `phase` null in manual, `until` = epoch ms of the next self-check (waiting, or the heating grace).
+ */
+export interface BoilerTrace {
+  mode: 'auto' | 'manual';
+  phase: 'heating' | 'waiting' | 'blackout' | 'limit' | 'done' | null;
+  grid: number | null; boilerW: number | null; headroom: number | null;
+  relay: 'on' | 'off' | null;
+  until?: number;
+}
+
 /** The gate as the server reports it: `value` is after NOT (true = open); `until` = epoch ms when a Held gate opens. */
 export interface RuleGateTrace { value: boolean | null; detail: string; until?: number }
 
@@ -35,6 +48,8 @@ export interface RuleTrace {
   /** How many inputs have no data (a warning when > 0). */
   unknownInputs: number;
   last?: RuleLast;
+  /** Boiler rule only. */
+  boiler?: BoilerTrace;
 }
 
 /** One `plan_studio/rules/subscribe` event: `full` replaces the map, otherwise the changed rules merge into it. */

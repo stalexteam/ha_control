@@ -235,6 +235,84 @@ const VENT_NA: RuleTrace = {
   last: { action: 'off', target: 'WC fan', at: new Date().setHours(5, 8, 0, 0), reason: 'vent' },
 };
 
+/**
+ * Scene `boiler`: the room with a Utility zone in its top-right corner holding the Boiler (control + power) and the
+ * wall switch "Button Boiler", the AC-IN grid block with a power entity, and two boiler rules: `rule-boiler` with the
+ * power limit (live: blackout, the grid has no data) and `rule-boiler-nl` without it (live: heating, power check
+ * countdown). Scene `boiler-limit`: the limited rule waits after a kettle took it over the limit.
+ */
+function boilerPlan(): Plan {
+  const p = room();
+  const level = p.levels[0];
+  level.zones.push({
+    id: 'z-util', name: 'Utility', invalid: false,
+    shape: { kind: 'polygon', vertices: [[3300, 100], [4100, 100], [4100, 1300], [3300, 1300]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
+  });
+  level.devices.push(
+    {
+      id: 'd-boiler', name: 'Boiler', invalid: false, bindings: { control: 'switch.boiler', power: 'sensor.boiler_power' },
+      placement: { mode: 'free', x: 3650, y: 900, rotation: 0 },
+      props: { kind: 'equipment', shape: 'circle', width: 600, depth: 400, diameter: 500, icon: 'mdi:water-boiler', label: '', controllable: true },
+    },
+    {
+      id: 'd-button-boiler', name: 'Button Boiler', invalid: false, bindings: { state: 'switch.wallswitch_boiler' },
+      placement: { mode: 'wall', wallId: 'w1', side: 'right', offset: 700 },
+      props: { kind: 'wall_switch', autoByDoubleToggle: true, windowSec: 3 },
+    },
+  );
+  p.power = { blocks: [{ id: 'grid', kind: 'grid', x: 0, y: 0, name: 'AC-IN', power: 'sensor.grid_power' }], wires: [] };
+  const fixed = { combine: 'any' as const, inputs: [], onDelay: 0, offDelay: 0, onTrue: [], onFalse: [] };
+  p.rules!.push(
+    { id: 'rule-boiler', name: 'Cost effective boiler Utility', zoneId: 'z-util', ...fixed,
+      boiler: { device: 'd-boiler', button: 'd-button-boiler', grid: { block: 'grid', limit: 3000, nominal: 1400 } } },
+    { id: 'rule-boiler-nl', name: 'Cost effective boiler, no limit', zoneId: 'z-util', ...fixed,
+      boiler: { device: 'd-boiler', button: 'd-button-boiler' } },
+  );
+  return p;
+}
+
+const BOILER_RULES: Record<string, RuleTrace> = {
+  ...ROOM_RULES,
+  'rule-boiler': {
+    status: 'ok', verdict: true, inputs: [], unknownInputs: 0,
+    last: { action: 'off', target: 'Boiler', at: new Date().setHours(21, 43, 0, 0), reason: 'blackout' },
+    boiler: { mode: 'auto', phase: 'blackout', grid: null, boilerW: 0, headroom: null, relay: 'off' },
+  },
+  'rule-boiler-nl': {
+    status: 'ok', verdict: true, inputs: [], unknownInputs: 0,
+    last: { action: 'on', target: 'Boiler', at: new Date().setHours(21, 44, 0, 0), reason: 'auto' },
+    boiler: { mode: 'auto', phase: 'heating', grid: null, boilerW: 0, headroom: null, relay: 'on', until: Date.now() + 45_000 },
+  },
+};
+
+/** The limited boiler rule after a kettle: 546 W + 2000 W kettle + 1400 W nominal over 3000 W, waiting to retry. */
+const BOILER_LIMIT_RULES: Record<string, RuleTrace> = {
+  ...BOILER_RULES,
+  'rule-boiler': {
+    status: 'ok', verdict: true, inputs: [], unknownInputs: 0,
+    last: { action: 'off', target: 'Boiler', at: new Date().setHours(21, 43, 0, 0), reason: 'power limit' },
+    boiler: { mode: 'auto', phase: 'limit', grid: 2546, boilerW: 0, headroom: 3946, relay: 'off' },
+  },
+  'rule-boiler-nl': {
+    status: 'ok', verdict: true, inputs: [], unknownInputs: 0,
+    boiler: { mode: 'auto', phase: 'waiting', grid: null, boilerW: 0, headroom: null, relay: 'off', until: Date.now() + 12_000 },
+  },
+};
+
+/** The limited boiler rule heating within the limit (scene `boiler-heat`): 546 + 1400 - 1380 = 566 of 3000 W. */
+const BOILER_HEAT_RULES: Record<string, RuleTrace> = {
+  ...BOILER_RULES,
+  'rule-boiler': {
+    status: 'ok', verdict: true, inputs: [], unknownInputs: 0,
+    last: { action: 'on', target: 'Boiler', at: new Date().setHours(21, 44, 0, 0), reason: 'auto' },
+    boiler: { mode: 'auto', phase: 'heating', grid: 546, boilerW: 1380, headroom: 566, relay: 'on' },
+  },
+  'rule-boiler-nl': {
+    status: 'ok', verdict: false, inputs: [], unknownInputs: 0,
+    boiler: { mode: 'manual', phase: null, grid: null, boilerW: 1380, headroom: null, relay: 'on' },
+  },
+};
+
 const equipment = (id: string, name: string, placement: Device['placement'], bindings: Device['bindings'],
   flags: { inverter?: true; controllable?: true } = {}): Device => ({
   id, name, invalid: false, bindings, placement,
@@ -390,4 +468,7 @@ export const SCENES: Record<string, Scene> = {
   power: { plans: [powerPlan()], powerFrame: POWER_FRAME },
   'power-off': { plans: [powerPlan()], powerFrame: POWER_OFF_FRAME },
   'power-nodata': { plans: [powerPlan()], powerFrame: { wires: {}, blocks: {} } },
+  boiler: { plans: [boilerPlan()], rulesFrame: BOILER_RULES },
+  'boiler-limit': { plans: [boilerPlan()], rulesFrame: BOILER_LIMIT_RULES },
+  'boiler-heat': { plans: [boilerPlan()], rulesFrame: BOILER_HEAT_RULES },
 };

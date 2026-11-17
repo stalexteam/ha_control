@@ -14,7 +14,7 @@ import type { PlanStudioPanel } from './plan-studio-panel';
 export function renderRail(h: PlanStudioPanel, level: Level): TemplateResult {
   if (h.mode === 'automation') {
     return html`<div class="tools">${toolButtons(h.mode, h.toolId, id => h.pickTool(id))}<div class="tool-sep"></div>${
-      ruleTemplateButtons(tpl => h.openRuleDialog(tpl))}</div>`;
+      ruleTemplateButtons(tpl => h.openRuleDialog(tpl), h.automationsMenu !== null, b => h.toggleAutomationsMenu(b))}</div>`;
   }
   if (h.mode !== 'binding') return renderToolRail(h.mode, h.toolId, id => h.pickTool(id));
   return renderBindingList({

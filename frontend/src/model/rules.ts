@@ -153,10 +153,10 @@ export const isBoilerRule = (r: Rule): boolean => r.boiler !== undefined;
 export const BOILER_LIMIT = 3000;
 export const BOILER_NOMINAL = 1400;
 
-/** The "Boiler" template: the zone's single device with control and power, its single button container, the plan's single grid block. */
+/** The "Cost effective boiler" template: the zone's single device with control and power, its single button container, the plan's single grid block. */
 export function boilerTemplate(plan: { levels: Level[]; power?: PowerSchema }, zoneId: Id | null, zoneName: string | null): Rule {
   const rule = newRule(zoneId);
-  rule.name = zoneId !== null && zoneName ? `Boiler ${zoneName}` : 'Boiler';
+  rule.name = zoneId !== null && zoneName ? `Cost effective boiler ${zoneName}` : 'Cost effective boiler';
   const level = zoneId === null ? undefined : plan.levels.find(l => l.zones.some(z => z.id === zoneId));
   const members = level ? zoneMembers(level, zoneId as Id).filter(m => m.participates).map(m => m.device) : [];
   const devices = members.filter(d => !!d.bindings?.control && !!d.bindings?.power);

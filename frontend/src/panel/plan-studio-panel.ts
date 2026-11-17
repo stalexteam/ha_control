@@ -11,7 +11,7 @@ import { presence } from '../binding/ha-meta';
 import { devicePose } from '../geometry/devices';
 import { History } from '../editor/history';
 import {
-  defaultPower, deleteBlock, deleteDeviceDoc, deleteWire, pruneLevelDevices, type PlanDoc, type Position, type PowerSchema,
+  defaultPower, deleteBlock, deleteDeviceDoc, deleteWire, pruneLevelDevices, type PlanDoc, type Position, type PowerBlock, type PowerSchema,
 } from '../model/power';
 import { schemaBounds } from '../geometry/power';
 import { SaveController } from '../editor/save';
@@ -42,10 +42,11 @@ import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { RulesFeed, type RuleTrace } from '../live/rules-feed';
-import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakTemplate, ventTemplate, isVentRule, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
-import type { RuleTemplate } from './rule-templates';
+import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakTemplate, ventTemplate, isVentRule, boilerTemplate, isBoilerRule, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
+import { renderAutomationsMenu, type RuleTemplate } from './rule-templates';
 import { renderRuleDialog, type RuleDraft } from './rule-dialog';
 import { renderVentDialog } from './vent-dialog';
+import { renderBoilerDialog } from './boiler-dialog';
 import { PowerFeed, powerPayload } from '../live/power-feed';
 import { deviceLive, liveBubbles } from '../live/device-live';
 import { DeviceEventTracker, eventSources } from '../live/device-events';
@@ -59,6 +60,8 @@ export class PlanStudioPanel extends LitElement {
   @property({ attribute: false }) panel: unknown;
 
   @state() plan: Plan | null = null;
+  /** The Automation rail's "Automations" menu while open: where it sits (viewport px), else null. */
+  @state() automationsMenu: { x: number; y: number } | null = null;
   @state() loadError: string | null = null;
   @state() selection: Selection | null = null;
   @state() toolId: ToolId = 'select';
@@ -253,7 +256,8 @@ export class PlanStudioPanel extends LitElement {
       deviceLive(d, this.hass!.states).timerSince !== undefined || this.events.event(d.id, now) !== null
       || this.events.leaving(d.id, now).length > 0);
     const tr = this.modal && this.ruleDraft ? this.shownRuleTrace(this.ruleDraft.rule) : undefined;
-    const countdown = !!tr && (!!tr.pending || tr.inputs.some(i => i.until !== undefined && i.until > now) || (tr.gate?.until ?? 0) > now);
+    const countdown = !!tr && (!!tr.pending || tr.inputs.some(i => i.until !== undefined && i.until > now) || (tr.gate?.until ?? 0) > now
+      || (tr.boiler?.until ?? 0) > now);
     if ((need || countdown) && !this.ticker) this.ticker = setInterval(() => this.requestUpdate(), 1000);
     else if (!need && !countdown) this.stopTicker();
   }
@@ -349,12 +353,32 @@ export class PlanStudioPanel extends LitElement {
         : template === 'timer' ? timerTemplate({ levels }, zid, dev && isRuleInputDevice(dev) ? dev.id : null, dev && isRuleInputDevice(dev) ? dev.name : '')
         : template === 'outside' ? outsideLightTemplate({ levels }, zid, zone?.name ?? null)
         : template === 'vent' ? ventTemplate({ levels }, zid, zone?.name ?? null)
+        : template === 'boiler' ? boilerTemplate({ levels, power: { ...this.power, blocks: this.boilerGridBlocks() } }, zid, zone?.name ?? null)
         : newRule(zid);
       draft = { rule, isNew: true, focused: null };
     }
     this.ruleDraft = draft;
     this.dialog = { kind: 'rule' };
     void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('.rule-backdrop [data-field="name"]')?.focus());
+  }
+
+  /** The edited Power schematic's grid blocks that have a power entity (the boiler rule's power limit reads one). */
+  private boilerGridBlocks(): PowerBlock[] {
+    return this.power.blocks.filter(b => b.kind === 'grid' && !!b.power);
+  }
+
+  /** Opens the "Automations" menu beside its rail button (focus on the first item), or closes it when open. */
+  toggleAutomationsMenu(button: HTMLElement): void {
+    if (this.automationsMenu) { this.automationsMenu = null; return; }
+    const r = button.getBoundingClientRect();
+    this.automationsMenu = { x: r.right + 4, y: r.top };
+    void this.updateComplete.then(() => this.renderRoot.querySelector<HTMLElement>('.amenu [role="menuitem"]')?.focus());
+  }
+
+  /** A purpose-built automation picked from the menu: its dialog, pre-filled for the selected zone. */
+  private pickAutomation(tpl: RuleTemplate): void {
+    this.automationsMenu = null;
+    this.openRuleDialog(tpl);
   }
 
   /** A click on a flowchart block: the matching form field gets the focus and the highlight. */
@@ -405,7 +429,21 @@ export class PlanStudioPanel extends LitElement {
       id => devices.some(x => x.id === id && x.props.kind === 'climate_sensor'),
       id => devices.some(x => x.id === id && !!x.bindings?.control && !!x.bindings?.power),
       id => devices.some(x => x.id === id && (x.props.kind === 'wall_switch' || x.props.kind === 'smart_button')),
-      id => this.power.blocks.some(b => b.id === id && b.kind === 'grid' && !!b.power));
+      id => this.boilerGridBlocks().some(b => b.id === id));
+    if (isBoilerRule(rule)) {
+      return renderBoilerDialog({
+        draft: d,
+        boilers: devices.filter(x => !!x.bindings?.control && !!x.bindings?.power),
+        buttons: devices.filter(x => x.props.kind === 'wall_switch' || x.props.kind === 'smart_button'),
+        grids: this.boilerGridBlocks().map(b => ({ id: b.id, name: b.name || t('power.kind.grid') })),
+        deviceById: id => devices.find(x => x.id === id),
+        zones, problems, trace, note, now: Date.now(),
+        onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
+        onFocus: f => this.focusRuleField(f),
+        onOk: () => this.commitRuleDraft(),
+        onCancel: () => { this.dialog = null; this.ruleDraft = null; },
+      });
+    }
     if (isVentRule(rule)) {
       return renderVentDialog({
         draft: d,
@@ -540,6 +578,7 @@ export class PlanStudioPanel extends LitElement {
   setMode(mode: EditorMode): void {
     if (mode === this.mode || this.modal) return;
     if (this.mode === 'power') this.placeDeviceId = null;
+    this.automationsMenu = null;
     this.mode = mode;
     this.pickTool(toolIdsFor(mode)[0]);
     if (mode === 'binding' || mode === 'power') this.haMeta.enter();
@@ -700,6 +739,7 @@ export class PlanStudioPanel extends LitElement {
           onGrid: on => { this.grid = on; }, cones: this.cones, onCones: on => { this.cones = on; },
           tool: this.toolId, zoneMethod: this.nextObj.zone.method, power,
         })}
+        ${this.automationsMenu ? renderAutomationsMenu(this.automationsMenu, tpl => this.pickAutomation(tpl), () => { this.automationsMenu = null; }) : nothing}
         ${this.renderDialog()}
         ${this.renderRuleDialogNow()}
       </div>`;

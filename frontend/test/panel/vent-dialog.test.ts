@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { $, click, mount, press, undo } from './helpers';
+import { $, click, mount, pickAutomation, press, undo } from './helpers';
 import { createMockHass, STORAGE_KEY } from '../../dev/mock-hass';
 import { SCENES } from '../../dev/scenes';
 import type { Plan, Rule } from '../../src/model/types';
@@ -42,7 +42,7 @@ describe('Wet zone ventilation form', () => {
     const el = await open([]);
     click(el, 300, 300); // Main
     await el.updateComplete;
-    await press(el, 'button[data-template="vent"]');
+    await pickAutomation(el, 'vent');
     expect(el.dialog).toEqual({ kind: 'rule' });
     expect(q<HTMLInputElement>(el, '[data-field="name"]').value).toBe('Vent Main');
     expect(q<HTMLSelectElement>(el, '[data-field="vent-sensor"]').value).toBe('d-wc-climate');
@@ -58,7 +58,7 @@ describe('Wet zone ventilation form', () => {
     const el = await open([]);
     click(el, 300, 300);
     await el.updateComplete;
-    await press(el, 'button[data-template="vent"]');
+    await pickAutomation(el, 'vent');
     await set(el, '[data-field="vent-than"]', 'd-main-climate', 'change');
     await set(el, '[data-field="vent-runon"]', '15');
     await set(el, '[data-field="vent-above"]', '12');
@@ -155,7 +155,7 @@ describe('Wet zone ventilation form', () => {
     const el = await open([]);
     click(el, 300, 300);
     await el.updateComplete;
-    await press(el, 'button[data-template="vent"]');
+    await pickAutomation(el, 'vent');
     await set(el, '[data-field="vent-fan"]', '', 'change');
     const keys = [...el.shadowRoot!.querySelectorAll('.rule-backdrop .rproblems li')].map(x => x.textContent);
     expect(keys).toEqual(['Choose the sensor to compare with', 'Choose the fan']);
@@ -189,11 +189,11 @@ describe('Wet zone ventilation form', () => {
     const el = await open([]);
     click(el, 300, 300);
     await el.updateComplete;
-    await press(el, 'button[data-template="vent"]');
+    await pickAutomation(el, 'vent');
     await set(el, '[data-field="vent-than"]', 'd-main-climate', 'change');
     await press(el, 'button[data-action="rule-cancel"]');
     expect(el.rules).toEqual([]);
-    await press(el, 'button[data-template="vent"]');
+    await pickAutomation(el, 'vent');
     await set(el, '[data-field="vent-than"]', 'd-main-climate', 'change');
     await press(el, 'button[data-action="rule-ok"]');
     expect(el.rules).toHaveLength(1);

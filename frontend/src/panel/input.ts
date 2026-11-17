@@ -5,7 +5,7 @@ import { panBy, zoomAt } from './viewport';
 
 /** The panel members the pointer / keyboard handlers use. */
 export type InputHost = Pick<PlanStudioPanel,
-  'activeTool' | 'view' | 'history' | 'selection' | 'dialog' | 'toMm' | 'focus' | 'requestUpdate' | 'undo' | 'redo' | 'doSave' | 'deleteSelection' | 'mode' | 'toolId' | 'pickTool'>;
+  'activeTool' | 'view' | 'history' | 'selection' | 'dialog' | 'automationsMenu' | 'toMm' | 'focus' | 'requestUpdate' | 'undo' | 'redo' | 'doSave' | 'deleteSelection' | 'mode' | 'toolId' | 'pickTool'>;
 
 const MODIFIER_KEYS = ['Shift', 'Control', 'Alt', 'Meta'];
 
@@ -100,6 +100,7 @@ export class EditorInput {
   };
 
   readonly keyDown = (e: KeyboardEvent) => {
+    if (this.h.automationsMenu !== null && e.key === 'Escape') { e.preventDefault(); this.h.automationsMenu = null; return; }
     if (this.h.dialog !== null) {
       if (e.key === 'Escape') { e.preventDefault(); this.h.dialog = null; } // closes without deciding: a restore prompt leaves its banner
       return;

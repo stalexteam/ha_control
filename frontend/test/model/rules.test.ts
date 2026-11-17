@@ -337,7 +337,7 @@ describe('boiler rule', () => {
   const heater = (id: string, x = 100): Device => ({ ...dev(id, 'equipment', x, 100), bindings: { control: 'switch.a', power: 'sensor.a' } });
   it('template picks the single device, button and grid', () => {
     const r = boilerTemplate(plan([heater('h'), dev('w', 'wall_switch', 200, 200), dev('c', 'climate_sensor', 300, 300)]), 'z1', 'WC');
-    expect(r.name).toBe('Boiler WC');
+    expect(r.name).toBe('Cost effective boiler WC');
     expect(r.boiler).toEqual({ device: 'h', button: 'w', grid: { block: 'g0', limit: 3000, nominal: 1400 } });
     expect([r.inputs, r.onTrue, r.onFalse, r.offDelay]).toEqual([[], [], [], 0]);
     expect(boilerTemplate(plan([dev('s', 'smart_button', 200, 200)]), 'z1', null).boiler?.button).toBe('s');
@@ -346,7 +346,7 @@ describe('boiler rule', () => {
     const r = boilerTemplate(plan([heater('h1'), heater('h2', 200), dev('w1', 'wall_switch', 300, 300), dev('w2', 'smart_button', 400, 400)], 2), 'z1', 'WC');
     expect(r.boiler).toEqual({ device: '', button: '' });
     const none = boilerTemplate({ levels: plan([]).levels }, null, null);
-    expect(none.name).toBe('Boiler');
+    expect(none.name).toBe('Cost effective boiler');
     expect(none.boiler).toEqual({ device: '', button: '' });
     const out = { ...heater('h'), zoneBlacklist: ['z1'] };
     expect(boilerTemplate(plan([out]), 'z1', 'WC').boiler?.device).toBe('');

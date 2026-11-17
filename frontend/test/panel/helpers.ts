@@ -87,6 +87,12 @@ export async function press(el: PlanStudioPanel, sel: string): Promise<void> {
   await el.updateComplete;
 }
 
+/** Automation step: opens the rail's "Automations" menu and picks the automation `id` (vent, boiler). */
+export async function pickAutomation(el: PlanStudioPanel, id: string): Promise<void> {
+  await press(el, 'button[data-action="automations"]');
+  await press(el, `.amenu [data-automation="${id}"]`);
+}
+
 /** The current model of device `id`. */
 export const device = (el: PlanStudioPanel, id: string): Device => el.history!.current.level.devices.find(d => d.id === id)!;
 export const combo = (el: PlanStudioPanel, role: string) => $<EntityCombo>(el, `.props ps-entity-combo[data-role="${role}"]`);
