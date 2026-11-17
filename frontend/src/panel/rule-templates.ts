@@ -1,18 +1,18 @@
 import { html, svg, type TemplateResult } from 'lit';
-import { mdiCodeBraces, mdiRobotOutline, mdiTimerOutline, mdiTimerPlayOutline, mdiWaterAlert, mdiWaterBoiler, mdiWeatherNight, mdiFan, mdiHeatingCoil, mdiLightSwitch } from '@mdi/js';
+import { mdiCodeBraces, mdiRobotOutline, mdiTimerOutline, mdiTimerPlayOutline, mdiWaterAlert, mdiWaterBoiler, mdiWeatherNight, mdiFan, mdiHeatingCoil, mdiLightSwitch, mdiMotionSensor } from '@mdi/js';
 import { t } from '../i18n';
 
-export type RuleTemplate = 'condition' | 'leak' | 'timer' | 'outside' | 'vent' | 'boiler' | 'timed' | 'beurer' | 'control';
+export type RuleTemplate = 'condition' | 'leak' | 'timer' | 'outside' | 'vent' | 'boiler' | 'timed' | 'beurer' | 'control' | 'motionLight';
 
 const ICONS: Record<RuleTemplate, string> = {
   condition: mdiCodeBraces, leak: mdiWaterAlert, timer: mdiTimerOutline, outside: mdiWeatherNight, vent: mdiFan, boiler: mdiWaterBoiler,
-  timed: mdiTimerPlayOutline, beurer: mdiHeatingCoil, control: mdiLightSwitch,
+  timed: mdiTimerPlayOutline, beurer: mdiHeatingCoil, control: mdiLightSwitch, motionLight: mdiMotionSensor,
 };
 
 /** Universal templates (the condition rule's and Load control): one rail button each. */
 const RAIL_TEMPLATES = ['condition', 'timer', 'control'] as const;
 /** Purpose-built automations, each with its own dialog: listed in the rail's "Automations" menu, in this order. */
-export const AUTOMATIONS: readonly RuleTemplate[] = ['vent', 'boiler', 'leak', 'timed', 'outside', 'beurer'];
+export const AUTOMATIONS: readonly RuleTemplate[] = ['vent', 'boiler', 'leak', 'timed', 'outside', 'motionLight', 'beurer'];
 
 const icon = (d: string): TemplateResult => html`<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true">${svg`<path d=${d}></path>`}</svg>`;
 

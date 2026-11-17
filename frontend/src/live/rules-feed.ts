@@ -102,6 +102,24 @@ export interface ControlTrace {
   devices: { id: Id; name: string; state: 'on' | 'off' | 'open' | 'closed' | null }[];
 }
 
+/**
+ * A light motion control rule's state: the `mode` (the verdict is null in manual), `motion` any sensor on, every sensor with its
+ * state (null = no data), `dark` null without a daylight sensor, `daylight` the sensor's debounced state with its reading,
+ * `light` null = no data; `offAt` = epoch ms the light goes off (only while an off is pending), `minUntil` = epoch ms the
+ * minimum on time ends (only while it runs), `autoAt` = epoch ms auto returns (only in manual with "Auto again after").
+ */
+export interface MotionLightTrace {
+  mode: 'auto' | 'manual';
+  motion: boolean;
+  sensors: { id: Id; name: string; state: 'on' | 'off' | null }[];
+  dark: boolean | null;
+  daylight?: { state: string | null; detail: string };
+  light: 'on' | 'off' | null;
+  offAt?: number;
+  minUntil?: number;
+  autoAt?: number;
+}
+
 /** A timed switch rule's run: `until` = epoch ms of its end (only while running); `device` null = no data. */
 export interface TimedTrace { running: boolean; until?: number; device: 'on' | 'off' | null }
 
@@ -132,6 +150,8 @@ export interface RuleTrace {
   outside?: OutsideTrace;
   /** Beurer heater rule only. */
   beurer?: BeurerTrace;
+  /** Light motion control rule only. */
+  motionLight?: MotionLightTrace;
   /** Load control rule only. */
   control?: ControlTrace;
 }

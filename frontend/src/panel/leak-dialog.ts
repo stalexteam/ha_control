@@ -31,7 +31,7 @@ export interface LeakDialogOpts {
  * then the add select with the devices of `list` not yet in it. The select carries `data-field` (the diagram focuses it);
  * the chip whose diagram block (`<block>:<id>`) was clicked last is highlighted.
  */
-function chips(o: LeakDialogOpts, field: string, block: string, ids: Id[], list: Device[], addText: string, onSet: (ids: Id[]) => void): TemplateResult {
+export function chips(o: Pick<LeakDialogOpts, 'draft' | 'deviceById'>, field: string, block: string, ids: Id[], list: Device[], addText: string, onSet: (ids: Id[]) => void): TemplateResult {
   const name = (id: Id) => o.deviceById(id)?.name ?? t('rules.missingDevice');
   const focused = o.draft.focused;
   return html`

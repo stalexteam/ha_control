@@ -1,5 +1,5 @@
 import type { Device, DeviceProps, Plan, Rule, Zone } from '../src/model/types';
-import type { BeurerTrace, OutsideTrace, RuleTrace } from '../src/live/rules-feed';
+import type { BeurerTrace, MotionLightTrace, OutsideTrace, RuleTrace } from '../src/live/rules-feed';
 import { fitWallMount } from '../src/geometry/devices';
 import type { PowerFrame, PowerSchema } from '../src/model/power';
 import { rectRoomLevel } from '../test/fixtures';
@@ -564,6 +564,60 @@ function beurerPlan(): Plan {
 }
 
 /**
+ * Scene `motionlight`: the room with a second motion sensor "Motion hall", the wall switch "Switch hall", the smart button "Button hall" and the rule
+ * `rule-ml` "Light motion control Main": Ceiling light, both motion sensors, Light sensor is dark, off after 180 s,
+ * minimum on 60 s, the wall switch and the button, auto again after 30 min. Live: auto, no motion for a while, the off in 2:41 and the
+ * minimum on time 0:38 still to run. Scene `motionlight-manual`: a button press made it manual, auto again in 12:34.
+ */
+function motionLightPlan(): Plan {
+  const p = room();
+  p.levels[0].devices.push(
+    {
+      id: 'd-motion-hall', name: 'Motion hall', invalid: false, bindings: { motion: 'binary_sensor.hall2_motion' },
+      placement: { mode: 'free', x: 1000, y: 2400, rotation: 315 },
+      props: { kind: 'motion_sensor', zoneAngle: 110, zoneRange: 3000 },
+    },
+    {
+      id: 'd-switch-ml', name: 'Switch hall', invalid: false, bindings: { state: 'switch.wallswitch_hall' },
+      placement: { mode: 'wall', wallId: 'w3', side: 'right', offset: 1500 },
+      props: { kind: 'wall_switch', autoByDoubleToggle: false, windowSec: 3 },
+    },
+    {
+      id: 'd-button-ml', name: 'Button hall', invalid: false, bindings: { on: 'sensor.button_hall_action' },
+      placement: { mode: 'wall', wallId: 'w3', side: 'right', offset: 2200 },
+      props: {
+        kind: 'smart_button', separateOff: false, autoEnabled: false,
+        on: { slot: 0, event: 'single' }, off: { slot: 0, event: 'double' }, auto: { slot: 0, event: 'hold' },
+      },
+    },
+  );
+  p.rules!.push({
+    id: 'rule-ml', name: 'Light motion control Main', zoneId: 'r0', combine: 'any', inputs: [], onDelay: 0, offDelay: 180, onTrue: [], onFalse: [],
+    motionLight: { light: 'd-light', sensors: ['d-motion', 'd-motion-hall'], daylight: { sensor: 'd-lux', is: 'dark' }, minOn: 60, buttons: ['d-switch-ml', 'd-button-ml'], autoAfter: 30 },
+  });
+  return p;
+}
+
+const motionLightTrace = (m: Partial<MotionLightTrace>, over: Partial<RuleTrace> = {}): RuleTrace => ({
+  status: 'ok', verdict: true, unknownInputs: 0,
+  inputs: [{ label: 'Motion sensor', value: false, detail: 'clear' }, { label: 'Motion hall', value: false, detail: 'clear' }, { label: 'Light sensor', value: true, detail: 'night, 5 lx' }],
+  motionLight: {
+    mode: 'auto', motion: false, dark: true, light: 'on', daylight: { state: 'night', detail: '5 lx' },
+    sensors: [{ id: 'd-motion', name: 'Motion sensor', state: 'off' }, { id: 'd-motion-hall', name: 'Motion hall', state: 'off' }],
+    ...m,
+  },
+  ...over,
+});
+const MOTION_LIGHT_AUTO = motionLightTrace(
+  { offAt: Date.now() + 161_000, minUntil: Date.now() + 38_000 },
+  { pending: { to: false, at: Date.now() + 161_000 }, last: { action: 'on', target: 'Ceiling light', at: at(21, 40), reason: 'became true: Motion sensor motion, Light sensor night, 5 lx' } },
+);
+const MOTION_LIGHT_MANUAL = motionLightTrace(
+  { mode: 'manual', autoAt: Date.now() + 754_000, sensors: [{ id: 'd-motion', name: 'Motion sensor', state: 'on' }, { id: 'd-motion-hall', name: 'Motion hall', state: null }], motion: true },
+  { verdict: null, last: { action: 'on', target: 'Ceiling light', at: at(21, 41), reason: 'button: manual' } },
+);
+
+/**
  * Scene `control`: the `timed` room plus the smart button "Button hall" (toggle) and a load control rule `rule-control`
  * "Load control Main": sources Button hall (gives toggle), Switch hall (a wall switch input) and Held motion; gate
  * Daylight dark; When on: Ceiling light, Vent; When off: Ceiling light, Vent, Water valve close; When toggle: Socket.
@@ -791,6 +845,8 @@ export const SCENES: Record<string, Scene> = {
   'outside-day': { plans: [outsidePlan()], rulesFrame: OUTSIDE_DAY },
   'outside-window': { plans: [outsidePlan()], rulesFrame: OUTSIDE_WINDOW },
   control: { plans: [controlPlan()], rulesFrame: { ...ROOM_RULES, 'rule-control': CONTROL_TRACE } },
+  motionlight: { plans: [motionLightPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_AUTO } },
+  'motionlight-manual': { plans: [motionLightPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_MANUAL } },
   beurer: { plans: [beurerPlan()], rulesFrame: BEURER_RULES },
   'beurer-cycle': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ cycleAt: undefined, pausedUntil: Date.now() + 3_000, heater: 'off' }) } },
   'beurer-kept': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ watts: null, detail: 'no data, kept', keptUntil: Date.now() + 252_000 }, { pending: { to: false, at: Date.now() + 45_000 } }) } },
