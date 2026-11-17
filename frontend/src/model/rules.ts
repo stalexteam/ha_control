@@ -64,7 +64,7 @@ export function ruleCycle(rules: Rule[], candidate: Rule): Id[] | null {
   return null;
 }
 
-export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'time' | 'held';
+export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'time' | 'held' | 'vent';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
@@ -91,18 +91,21 @@ const delayOk = (n: unknown): boolean => Number.isInteger(n) && (n as number) >=
 /**
  * `actionsOf` (optional) gives the actions a device takes; an action outside them is the 'action' problem.
  * `lightSensorExists` (optional) tells whether an id is an illuminance_sensor device; default = any existing device.
+ * `climateSensorExists` (optional) the same for climate_sensor devices (vent rules).
  */
 export function ruleProblems(
   rules: Rule[], r: Rule, deviceExists: (id: Id) => boolean, actionsOf?: (id: Id) => RuleDo[] | undefined,
   lightSensorExists?: (id: Id) => boolean,
+  climateSensorExists?: (id: Id) => boolean,
 ): RuleProblem[] {
   const out: RuleProblem[] = [];
   if (!r.name.trim()) out.push('name');
-  if (r.inputs.length === 0) out.push('inputs');
+  if (r.inputs.length === 0 && !r.vent) out.push('inputs');
   const all = [...r.inputs, ...(r.gate ? [r.gate] : [])];
   const devices = [...all.flatMap(inputDevices), ...r.onTrue.map(a => a.device), ...r.onFalse.map(a => a.device)];
   const lights = all.flatMap(i => ('light' in i.source ? [i.source.light] : []));
-  if (devices.some(id => !deviceExists(id)) || lights.some(id => !(lightSensorExists ?? deviceExists)(id))) out.push('device-missing');
+  if (devices.some(id => !deviceExists(id)) || lights.some(id => !(lightSensorExists ?? deviceExists)(id))
+    || (r.vent && [r.vent.sensor, r.vent.than].some(id => !(climateSensorExists ?? deviceExists)(id)))) out.push('device-missing');
   const known = new Set(rules.map(x => x.id));
   if (ruleRefs(r).some(id => id !== r.id && !known.has(id))) out.push('rule-missing');
   if (ruleCycle(rules, r)) out.push('cycle');
@@ -111,8 +114,38 @@ export function ruleProblems(
     const p = paramProblem(i);
     if (p && !out.includes(p)) out.push(p);
   }
+  if (r.vent && ventProblem(r, r.vent)) out.push('vent');
   if (actionsOf && [...r.onTrue, ...r.onFalse].some(a => { const ok = actionsOf(a.device); return ok !== undefined && !ok.includes(a.do); })) out.push('action');
   return out;
+}
+
+/** A vent rule's fixed shape and data bounds; true = violated. */
+function ventProblem(r: Rule, v: NonNullable<Rule['vent']>): boolean {
+  if (r.inputs.length > 0 || r.gate || r.combine !== 'any' || r.onDelay !== 0) return true;
+  if (!v.sensor || !v.than || v.sensor === v.than) return true;
+  if (!isNum(v.above) || !isNum(v.below) || v.above <= 0 || v.below < 0 || v.below > v.above) return true;
+  const [on, off] = [r.onTrue[0], r.onFalse[0]];
+  return r.onTrue.length !== 1 || r.onFalse.length !== 1 || on.do !== 'on' || off.do !== 'off' || !on.device || on.device !== off.device;
+}
+
+export const isVentRule = (r: Rule): boolean => r.vent !== undefined;
+
+const VENT_RUN_ON = 600;
+
+/** The "Wet zone ventilation" template: the zone's first climate sensor, its exhaust fan when exactly one; the owner picks the rest. */
+export function ventTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
+  const rule = newRule(zoneId);
+  rule.name = zoneId !== null && zoneName ? `Vent ${zoneName}` : 'Vent';
+  rule.offDelay = VENT_RUN_ON;
+  const level = zoneId === null ? undefined : plan.levels.find(l => l.zones.some(z => z.id === zoneId));
+  const members = level ? zoneMembers(level, zoneId as Id).filter(m => m.participates).map(m => m.device) : [];
+  const fans = members.filter(d => d.props.kind === 'exhaust_fan');
+  rule.vent = { sensor: members.find(d => d.props.kind === 'climate_sensor')?.id ?? '', than: '', above: 9, below: 5 };
+  if (fans.length === 1) {
+    rule.onTrue = [{ device: fans[0].id, do: 'on' }];
+    rule.onFalse = [{ device: fans[0].id, do: 'off' }];
+  }
+  return rule;
 }
 
 /** The "Leak -> valve" template: the zone's leak sensors, any, close the zone's valve when it has exactly one. */

@@ -161,6 +161,8 @@ export interface Rule {
   /** Optional gate: actions are sent only while it is true. */
   gate?: RuleInput;
   inputs: RuleInput[]; onDelay: number; offDelay: number; onTrue: RuleAction[]; onFalse: RuleAction[];
+  /** Wet zone ventilation: sensor vs than (climate sensors), % absolute-humidity margins; inputs stay empty, offDelay is the run-on. */
+  vent?: { sensor: Id; than: Id; above: number; below: number };
 }
 
 export const WALL_PRESETS: Record<WallType, number> = {

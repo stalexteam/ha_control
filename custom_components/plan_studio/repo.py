@@ -81,6 +81,21 @@ def _validate_input(i: object) -> list[str]:
     return [rule_id] if rule_id is not None else []
 
 
+def _validate_vent(r: dict, v: object) -> None:
+    """A vent rule: sensor vs than, % margins, one fan switched on/off, no inputs or gate."""
+    if not isinstance(v, dict) or set(v) != {"sensor", "than", "above", "below"}:
+        raise vol.Invalid("rule vent needs sensor, than, above and below")
+    if not _is_id(v["sensor"]) or not _is_id(v["than"]) or v["sensor"] == v["than"]:
+        raise vol.Invalid("rule vent needs two different sensor ids")
+    if not _is_num(v["above"]) or not _is_num(v["below"]) or v["above"] <= 0 or not 0 <= v["below"] <= v["above"]:
+        raise vol.Invalid("rule vent needs above > 0 and 0 <= below <= above")
+    if r["inputs"] or "gate" in r or r["combine"] != "any" or r["onDelay"] != 0:
+        raise vol.Invalid("rule vent needs no inputs or gate, combine any and onDelay 0")
+    on, off = r["onTrue"], r["onFalse"]
+    if len(on) != 1 or len(off) != 1 or on[0]["do"] != "on" or off[0]["do"] != "off" or on[0]["device"] != off[0]["device"]:
+        raise vol.Invalid("rule vent needs one fan: on when true, off when false")
+
+
 def _validate_rules(rules: object) -> None:
     if not isinstance(rules, list):
         raise vol.Invalid("rules must be a list")
@@ -118,6 +133,8 @@ def _validate_rules(rules: object) -> None:
             for a in actions:
                 if not isinstance(a, dict) or not _is_id(a.get("device")) or a.get("do") not in ("on", "off", "open", "close"):
                     raise vol.Invalid("rule action needs a device and do on/off/open/close")
+        if "vent" in r:
+            _validate_vent(r, r["vent"])
         graph[r["id"]] = refs
     state: dict[str, int] = {}
 

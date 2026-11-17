@@ -169,3 +169,38 @@ def test_validate_plan_rule_cycle_through_gate_and_held():
         validate_plan({**plan("p"), "rules": [rule("a", inputs=[held(sources=[{"rule": "b"}])]), rule("b", inputs=ref("a"))]})
     with pytest.raises(vol.Invalid, match="cycle"):
         validate_plan({**plan("p"), "rules": [rule("a", gate=held(sources=[{"rule": "a"}]))]})
+
+
+def vent_rule(rid="v1", vent=None, **kw):
+    r = rule(rid, inputs=[], offDelay=600,
+             vent={"sensor": "s1", "than": "s2", "above": 9, "below": 5} if vent is None else vent,
+             onTrue=[{"device": "f", "do": "on"}], onFalse=[{"device": "f", "do": "off"}])
+    r.update(kw)
+    return r
+
+
+def test_validate_plan_vent_rule():
+    validate_plan({**plan("p"), "rules": [vent_rule()]})
+    validate_plan({**plan("p"), "rules": [vent_rule(vent={"sensor": "a", "than": "b", "above": 0.5, "below": 0}, offDelay=0)]})
+    validate_plan({**plan("p"), "rules": [vent_rule(), rule("u", inputs=ref("v1"))]})
+    base = {"sensor": "s1", "than": "s2", "above": 9, "below": 5}
+    bad = [
+        {k: v for k, v in base.items() if k != "below"}, {**base, "extra": 1}, "x",
+        {**base, "than": "s1"}, {**base, "sensor": ""}, {**base, "than": 3},
+        {**base, "above": 0}, {**base, "above": -1}, {**base, "below": -1}, {**base, "below": 10},
+        {**base, "above": True}, {**base, "above": float("nan")}, {**base, "below": "5"},
+    ]
+    for v in bad:
+        with pytest.raises(vol.Invalid, match="rule vent"):
+            validate_plan({**plan("p"), "rules": [vent_rule(vent=v)]})
+    for kw in (
+        {"inputs": ref("x")}, {"combine": "all"}, {"onDelay": 5}, {"gate": {"source": {"sun": True}}},
+        {"onTrue": []}, {"onFalse": []},
+        {"onTrue": [{"device": "f", "do": "off"}]}, {"onFalse": [{"device": "g", "do": "off"}]},
+        {"onTrue": [{"device": "f", "do": "on"}, {"device": "g", "do": "on"}]},
+    ):
+        with pytest.raises(vol.Invalid, match="rule vent"):
+            validate_plan({**plan("p"), "rules": [vent_rule(**kw)]})
+    with pytest.raises(vol.Invalid, match="offDelay"):
+        validate_plan({**plan("p"), "rules": [vent_rule(offDelay=3601)]})
+

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RULE_DELAY_MAX, addRule, deleteRule, isRuleInputDevice, leakTemplate, newRule, outsideLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
+  RULE_DELAY_MAX, isVentRule, ventTemplate, addRule, deleteRule, isRuleInputDevice, leakTemplate, newRule, outsideLightTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
   rulesFor, ruleUsers, updateRule,
 } from '../../src/model/rules';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Rule, type Zone } from '../../src/model/types';
@@ -213,5 +213,83 @@ describe('rules model', () => {
     const e = outsideLightTemplate({ levels: [lvl] }, null, null);
     expect(e.name).toBe('Outside light');
     expect(e.inputs[0].source).toEqual({ light: '', below: 10, hysteresis: 5, unknownDark: true });
+  });
+});
+
+describe('vent rule', () => {
+  const vent = (over: Partial<Rule> = {}, v: Partial<NonNullable<Rule['vent']>> = {}): Rule => ({
+    ...newRule(null), id: 'v', name: 'Vent', inputs: [], offDelay: 600,
+    vent: { sensor: 's', than: 't', above: 9, below: 5, ...v },
+    onTrue: [{ device: 'f', do: 'on' }], onFalse: [{ device: 'f', do: 'off' }], ...over,
+  });
+  const probs = (r: Rule, climate?: (id: string) => boolean) => ruleProblems([r], r, exists, undefined, undefined, climate);
+
+  it('a valid vent rule has no problems and isVentRule', () => {
+    expect(probs(vent())).toEqual([]);
+    expect(isVentRule(vent())).toBe(true);
+    expect(isVentRule(rule('a'))).toBe(false);
+    expect(probs(vent({ offDelay: 0 }, { below: 0 }))).toEqual([]);
+    expect(probs(vent({}, { below: 9 }))).toEqual([]);
+  });
+  it('data bounds', () => {
+    for (const v of [{ above: 0 }, { above: -1 }, { below: -1 }, { below: 10 }, { above: NaN }, { sensor: 't' }, { sensor: '' }, { than: '' }]) {
+      expect(probs(vent({}, v)), JSON.stringify(v)).toContain('vent');
+    }
+    expect(probs(vent({}, { sensor: '' }), id => id !== '')).toContain('device-missing');
+  });
+  it('fixed fields', () => {
+    expect(probs(vent({ inputs: [{ source: { device: 'd' } }] }))).toContain('vent');
+    expect(probs(vent({ combine: 'all' }))).toContain('vent');
+    expect(probs(vent({ onDelay: 5 }))).toContain('vent');
+    expect(probs(vent({ gate: { source: { sun: true } } }))).toContain('vent');
+    expect(probs(vent({ offDelay: 3601 }))).toContain('delay');
+    expect(probs(vent({ onTrue: [{ device: 'f', do: 'off' }] }))).toContain('vent');
+    expect(probs(vent({ onFalse: [{ device: 'g', do: 'off' }] }))).toContain('vent');
+    expect(probs(vent({ onTrue: [], onFalse: [] }))).toEqual(['vent']);
+    expect(probs(vent({ onTrue: [{ device: 'f', do: 'on' }, { device: 'g', do: 'on' }] }))).toContain('vent');
+  });
+  it('missing or non-climate sensor ids', () => {
+    expect(probs(vent(), id => id === 's')).toEqual(['device-missing']);
+    expect(probs(vent(), () => false)).toEqual(['device-missing']);
+    expect(ruleProblems([vent()], vent(), id => id !== 't')).toContain('device-missing');
+    expect(ruleProblems([vent()], vent(), id => id !== 'f')).toContain('device-missing');
+  });
+  it('references no rules', () => {
+    expect(ruleRefs(vent())).toEqual([]);
+    expect(ruleCycle([vent()], vent())).toBeNull();
+    const user = rule('u', { inputs: refs('v') });
+    expect(ruleUsers([vent(), user], 'v').map(r => r.id)).toEqual(['u']);
+  });
+
+  const zone: Zone = {
+    id: 'z1', name: 'WC', invalid: false,
+    shape: { kind: 'polygon', vertices: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
+  };
+  const lvl = (devices: Device[]) => ({ levels: [{ ...emptyLevel('L'), zones: [zone], devices }] });
+  const fan = (id: string, x: number, y: number): Device => dev(id, 'exhaust_fan', x, y, { diameter: 100 });
+  it('template with sensor and one fan', () => {
+    const r = ventTemplate(lvl([dev('c1', 'climate_sensor', 100, 100), dev('c2', 'climate_sensor', 200, 200), fan('f1', 300, 300)]), 'z1', 'WC');
+    expect(r.name).toBe('Vent WC');
+    expect(r.vent).toEqual({ sensor: 'c1', than: '', above: 9, below: 5 });
+    expect(r.offDelay).toBe(600);
+    expect(r.inputs).toEqual([]);
+    expect(r.onTrue).toEqual([{ device: 'f1', do: 'on' }]);
+    expect(r.onFalse).toEqual([{ device: 'f1', do: 'off' }]);
+  });
+  it('template without a sensor, with two fans, without a zone', () => {
+    const r = ventTemplate(lvl([fan('f1', 300, 300), fan('f2', 400, 400)]), 'z1', 'WC');
+    expect(r.vent?.sensor).toBe('');
+    expect(r.onTrue).toEqual([]);
+    expect(r.onFalse).toEqual([]);
+    expect(probs(r)).toContain('vent');
+    const g = ventTemplate(lvl([]), null, null);
+    expect(g.name).toBe('Vent');
+    expect(g.vent).toEqual({ sensor: '', than: '', above: 9, below: 5 });
+  });
+  it('template skips devices that opted out of the zone', () => {
+    const out = { ...fan('f1', 300, 300), zoneBlacklist: ['z1'] };
+    const r = ventTemplate(lvl([{ ...dev('c1', 'climate_sensor', 100, 100), zoneBlacklist: ['z1'] }, dev('c2', 'climate_sensor', 200, 200), out]), 'z1', 'WC');
+    expect(r.vent?.sensor).toBe('c2');
+    expect(r.onTrue).toEqual([]);
   });
 });
