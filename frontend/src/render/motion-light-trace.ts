@@ -1,9 +1,10 @@
 import { html, nothing, svg, type TemplateResult } from 'lit';
 import type { Id, Rule } from '../model/types';
-import type { RuleTrace } from '../live/rules-feed';
+import type { RuleLast, RuleTrace } from '../live/rules-feed';
 import { tone, word } from './rule-trace';
 import { FLOW_PAD as PAD, FLOW_VGAP as VGAP, PURPOSE_WIDTH, blockH, countdown, flowBlock } from './flow-block';
 import { lastLine } from './outside-trace';
+import { clock } from '../panel/rules-panel';
 import { t } from '../i18n';
 
 export interface MotionLightTraceOpts {
@@ -34,6 +35,16 @@ export const MOTION_LIGHT_WIDTH = PURPOSE_WIDTH;
 const MW = MOTION_LIGHT_WIDTH - 2 * PAD, CX = MOTION_LIGHT_WIDTH / 2;
 /** The sensors and the Daylight block: up to three per row, a bus under each row. */
 const GAP = 12, PER_ROW = 3;
+
+/** The mode changes of this kind are worded as what they are; every other entry goes through the shared wording. */
+const MODE_LAST: Record<string, string> = {
+  'button: auto': 'lastAuto', 'auto again': 'lastAutoAgain', 'button: manual': 'lastManualButton',
+  'switched elsewhere: manual': 'lastManualElsewhere', 'found on': 'lastFound',
+};
+const motionLast = (l: RuleLast): string => {
+  const key = MODE_LAST[l.reason];
+  return key ? t(`motionLight.flow.${key}`).replace('{at}', clock(l.at)).replace('{s}', l.action) : lastLine(l);
+};
 
 const left = (until: number, now: number): string => countdown(Math.max(0, Math.ceil((until - now) / 1000)));
 
@@ -124,7 +135,7 @@ export function renderMotionLightTrace(o: MotionLightTraceOpts): TemplateResult 
   const lightLines = [
     o.deviceName(cfg.light),
     ml ? t('timed.flow.state').replace('{s}', ml.light ?? word(null)) : t('outside.flow.onOff'),
-    ...(last ? [lastLine(last)] : []),
+    ...(last ? [motionLast(last)] : []),
   ];
   add({
     field: 'motionlight-light', cls: ml ? tone(ml.light === null ? null : ml.light === 'on') : '', lines: lightLines, err: last?.error,

@@ -4,6 +4,7 @@ import { render } from 'lit';
 import { renderMotionLightTrace, motionLightFocus, MOTION_LIGHT_WIDTH, type MotionLightTraceOpts } from '../../src/render/motion-light-trace';
 import { PURPOSE_WIDTH } from '../../src/render/flow-block';
 import type { Rule } from '../../src/model/types';
+import { clock } from '../../src/panel/rules-panel';
 import type { MotionLightTrace, RuleTrace } from '../../src/live/rules-feed';
 
 const NOW = new Date(2026, 10, 17, 20, 0).getTime();
@@ -131,13 +132,13 @@ describe('light motion control diagram', () => {
     expect(cls(host, 'motionlight-mode')).toContain('off');
     expect(text(host, 'motionlight-wants')).toBe('Wants | on at motion when dark, off 3:00 after it ends, at least 1:00 on');
     expect(cls(host, 'motionlight-wants')).not.toContain('nodata');
-    expect(text(host, 'motionlight-light')).toMatch(/^Kitchen light \| state: on \| last: turned on .*19.43.* \(button\)$/);
+    expect(text(host, 'motionlight-light')).toBe(`Kitchen light | state: on | last: manual ${clock(at(19, 43))} (button)`);
   });
 
   it('manual without a countdown: the way back is a button', () => {
     const { host } = draw({ trace: live({ mode: 'manual' }, { verdict: null, last: { action: 'off', target: 'Kitchen light', at: at(19, 43), reason: 'switched elsewhere: manual', sent: false } }) });
     expect(text(host, 'motionlight-mode')).toBe('Mode: manual | back to auto: a button\'s Auto action');
-    expect(text(host, 'motionlight-light')).toMatch(/^Kitchen light \| state: on \| switched off elsewhere .*19.43.*, manual$/);
+    expect(text(host, 'motionlight-light')).toBe(`Kitchen light | state: on | last: manual ${clock(at(19, 43))} (switched off elsewhere)`);
   });
 
   it('the light without data, a command error and a status note', () => {
@@ -146,6 +147,22 @@ describe('light motion control diagram', () => {
     expect(text(host, 'motionlight-light')).toContain('target unavailable');
     expect(cls(host, 'motionlight-light')).toContain('nodata');
     expect(host.querySelector('[data-note="status"]')!.textContent).toBe('Error: target unavailable');
+  });
+
+  it('mode-change entries are worded plainly, never as refused commands; other entries keep the shared wording', () => {
+    const lastOf = (last: RuleTrace['last']) => text(draw({ trace: live({}, { last }) }).host, 'motionlight-light').split(' | ')[2];
+    const c = clock(at(21, 41));
+    const e = (action: 'on' | 'off' | 'auto', reason: string, extra: object = {}) => ({ action, target: 'Kitchen light', at: at(21, 41), reason, ...extra }) as RuleTrace['last'];
+    expect(lastOf(e('auto', 'button: auto', { sent: false }))).toBe(`last: back to auto ${c} (button)`);
+    expect(lastOf(e('auto', 'auto again', { sent: false }))).toBe(`last: back to auto ${c} (no motion)`);
+    expect(lastOf(e('on', 'button: manual'))).toBe(`last: manual ${c} (button)`);
+    expect(lastOf(e('off', 'button: manual', { sent: false }))).toBe(`last: manual ${c} (button)`);
+    expect(lastOf(e('off', 'switched elsewhere: manual', { sent: false }))).toBe(`last: manual ${c} (switched off elsewhere)`);
+    expect(lastOf(e('on', 'found on', { sent: false }))).toBe(`last: found on ${c}`);
+    expect(lastOf(e('on', 'became true: Motion kitchen motion'))).toBe(`last: turned on ${c} (became true)`);
+    const err = text(draw({ trace: live({}, { last: e('on', 'button: manual', { error: 'target unavailable' }) }) }).host, 'motionlight-light');
+    expect(err).toContain(`last: manual ${c} (button)`);
+    expect(err).toContain('target unavailable');
   });
 
   it('a click on a block calls onFocus with its data-block; the focused block is highlighted; the focus map', () => {
