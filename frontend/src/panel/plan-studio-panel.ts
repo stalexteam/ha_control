@@ -345,7 +345,7 @@ export class PlanStudioPanel extends LitElement {
       const dev = this.selection?.kind === 'device' ? levels.flatMap(l => l.devices).find(x => x.id === (this.selection as { id: Id }).id) : undefined;
       const zid = zone?.id ?? null;
       const rule = template === 'leak' ? leakTemplate({ levels }, zid, zone?.name ?? null)
-        : template === 'timer' ? timerTemplate({ levels }, zid, dev?.id ?? null, dev?.name ?? '')
+        : template === 'timer' ? timerTemplate({ levels }, zid, dev && isRuleInputDevice(dev) ? dev.id : null, dev && isRuleInputDevice(dev) ? dev.name : '')
         : template === 'outside' ? outsideLightTemplate({ levels }, zid, zone?.name ?? null)
         : newRule(zid);
       draft = { rule, isNew: true, focused: null };

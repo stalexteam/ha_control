@@ -25,7 +25,7 @@ def _is_id(v: object) -> bool:
     return isinstance(v, str) and bool(v)
 
 
-_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+_TIME_RE = re.compile(r"([01]\d|2[0-3]):[0-5]\d")
 
 
 def _is_num(v: object) -> bool:
@@ -47,19 +47,21 @@ def _validate_input(i: object) -> list[str]:
     if "not" in i and i["not"] is not True:
         raise vol.Invalid("rule input not may only be true")
     if "light" in src:
-        if set(src) != {"light", "below", "hysteresis"} or not _is_id(src["light"]):
+        if set(src) - {"unknownDark"} != {"light", "below", "hysteresis"} or not _is_id(src["light"]):
             raise vol.Invalid("rule light input needs a sensor id, below and hysteresis")
+        if "unknownDark" in src and src["unknownDark"] is not True:
+            raise vol.Invalid("rule light unknownDark may only be true")
         if not _is_num(src["below"]) or src["below"] <= 0 or not _is_num(src["hysteresis"]) or src["hysteresis"] < 0:
             raise vol.Invalid("rule light input needs below > 0 and hysteresis >= 0")
         return []
     if "sun" in src:
-        if src != {"sun": True}:
+        if len(src) != 1 or src["sun"] is not True:
             raise vol.Invalid("rule sun input must be {sun: true}")
         return []
     if "time" in src:
         t = src["time"]
         if len(src) != 1 or not isinstance(t, dict) or set(t) != {"from", "to"} or not all(
-                isinstance(t[k], str) and _TIME_RE.match(t[k]) for k in ("from", "to")):
+                isinstance(t[k], str) and _TIME_RE.fullmatch(t[k]) for k in ("from", "to")):
             raise vol.Invalid("rule time input needs from and to as HH:MM")
         if t["from"] == t["to"]:
             raise vol.Invalid("rule time input needs from different from to")

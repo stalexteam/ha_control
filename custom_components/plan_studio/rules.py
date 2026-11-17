@@ -193,7 +193,8 @@ class _Input:
             below, hyst = src.get("below"), src.get("hysteresis")
             self.below = float(below) if isinstance(below, (int, float)) else 0.0
             self.hyst = float(hyst) if isinstance(hyst, (int, float)) else 0.0
-            self.sig = ("light", did, self.eid)
+            self.dark = src.get("unknownDark") is True
+            self.sig = ("light", did, self.eid, self.dark)
         elif src.get("sun") is True:
             self.type, self.eid, self.label, self.sig = "sun", SUN, "Sun", ("sun",)
         elif isinstance(src.get("time"), dict):
@@ -460,6 +461,8 @@ class RuleEngine:
     def _input(self, rule: _Rule, i: _Input) -> dict:
         """The trace entry of one input or the gate; (re)arms its timer."""
         value, detail, wake = self._value(rule, i, self._now())
+        if not rule.enabled:
+            wake = None  # a disabled rule arms no timers
         out = {"label": i.label, "value": value, "detail": detail}
         if i.type == "held" and wake is not None:
             out["until"] = int(wake * 1000)
@@ -499,19 +502,20 @@ class RuleEngine:
 
     def _light(self, i: _Input) -> "tuple[bool | None, str]":
         """Below the threshold: true; above it plus the hysteresis: false; in between: the previous value."""
+        no_data: "tuple[bool | None, str]" = (True, "no data (dark)") if i.dark else (None, "")
         st = self._lookup(i.eid) if i.eid else None
         if st is None:
-            return None, "missing"
+            return no_data if i.dark else (None, "missing")
         if st[0] in ("unknown", "unavailable"):
-            return None, st[0]
+            return no_data if i.dark else (None, st[0])
         if (st[1] or {}).get("unit_of_measurement") != "lx":
-            return None, "not lx"
+            return no_data if i.dark else (None, "not lx")
         try:
             v = float(st[0])
         except ValueError:
-            return None, "unknown"
+            return no_data if i.dark else (None, "unknown")
         if not math.isfinite(v):
-            return None, "unknown"
+            return no_data if i.dark else (None, "unknown")
         if v < i.below:
             i.prev = True
         elif v > i.below + i.hyst or i.prev is None:

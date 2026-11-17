@@ -120,6 +120,15 @@ describe('rule flowchart', () => {
       expect(x('gate-input')).toBeLessThan(x('action-true-0'));
     });
 
+    it('shows the server detail of a dark-by-default light input', () => {
+      const trace: RuleTrace = {
+        status: 'ok', verdict: true, unknownInputs: 0,
+        inputs: [{ label: 'a', value: true, detail: 'no data (dark)' }, ...r2.inputs.slice(1).map(() => ({ label: '', value: true, detail: 'd' }))],
+      };
+      const { host } = draw({ rule: r2, inputName: nm, trace });
+      expect(text(host, '[data-block="input-0"]')).toBe('Light sensor no data (dark)');
+    });
+
     it('draws no gate block without a gate', () => {
       const { host } = draw();
       expect(host.querySelector('[data-block="gate-input"]')).toBeNull();

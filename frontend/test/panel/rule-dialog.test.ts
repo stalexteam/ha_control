@@ -277,6 +277,26 @@ describe('Rule dialog', () => {
       expect(q(el, '[data-warn="light-unit"]').textContent).toContain('klx');
     });
 
+    it('a Light input has a No data counts as dark checkbox', async () => {
+      const el = await edit('rule-outside');
+      const box = () => q<HTMLInputElement>(el, '[data-field="input-0"] [data-part="unknown-dark"]');
+      expect(box().checked).toBe(false);
+      expect(el.shadowRoot!.querySelector('.rule-backdrop [data-field="input-0"]')!.textContent).toContain('No data counts as dark');
+      box().checked = true;
+      box().dispatchEvent(new Event('change', { bubbles: true }));
+      await el.updateComplete;
+      await press(el, 'button[data-action="rule-ok"]');
+      expect(rule(el, 'rule-outside').inputs[0].source).toEqual({ light: 'd-lux', below: 10, hysteresis: 5, unknownDark: true });
+      el.openRuleDialog('condition', 'rule-outside');
+      await el.updateComplete;
+      expect(box().checked).toBe(true);
+      box().checked = false;
+      box().dispatchEvent(new Event('change', { bubbles: true }));
+      await el.updateComplete;
+      await press(el, 'button[data-action="rule-ok"]');
+      expect(rule(el, 'rule-outside').inputs[0].source).toEqual({ light: 'd-lux', below: 10, hysteresis: 5 });
+    });
+
     it('a Light input with a bad threshold blocks OK', async () => {
       const el = await edit('rule-outside');
       await type(el, '[data-field="input-0"] [data-part="below"]', '0');
@@ -378,6 +398,13 @@ describe('Rule dialog', () => {
       el.selection = { kind: 'device', id: 'd-light' };
       await press(el, 'button[data-template="timer"]');
       expect(q<HTMLInputElement>(el, '[data-field="name"]').value).toBe('Ceiling light unchanged 30 min');
+      await press(el, 'button[data-action="rule-cancel"]');
+      el.selection = { kind: 'device', id: 'd-lux' }; // a sensor is no rule input device
+      await press(el, 'button[data-template="timer"]');
+      expect(el.ruleDraft!.rule.inputs).toEqual([{ source: { held: { sources: [], state: 'any', seconds: 1800 } } }]);
+      await press(el, 'button[data-action="rule-cancel"]');
+      el.selection = { kind: 'device', id: 'd-light' };
+      await press(el, 'button[data-template="timer"]');
       expect(el.ruleDraft!.rule.inputs[0].source).toEqual({ held: { sources: [{ device: 'd-light' }], state: 'any', seconds: 1800 } });
     });
 

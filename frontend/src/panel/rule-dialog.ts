@@ -179,6 +179,12 @@ function params(o: RuleDialogOpts, field: string, s: RuleSource, set: (s: RuleSo
         <label>${t('rules.light.hysteresis')}
           <input class="num" data-part="hysteresis" type="number" min="0" step="any" .value=${NAN_SAFE(s.hysteresis)}
             @input=${(e: Event) => set({ ...s, hysteresis: num((e.target as HTMLInputElement).value) })} /> lx</label>
+        <label class="chk">
+          <input type="checkbox" data-part="unknown-dark" .checked=${s.unknownDark === true}
+            @change=${(e: Event) => {
+              const { unknownDark: _drop, ...rest } = s;
+              set((e.target as HTMLInputElement).checked ? { ...rest, unknownDark: true } : rest);
+            }} /> ${t('rules.light.unknownDark')}</label>
         ${unit !== undefined && unit !== 'lx' ? html`<p class="rwarn" data-warn="light-unit">${t('rules.light.unit').replace('{unit}', unit)}</p>` : nothing}
       </div>`;
   }

@@ -72,7 +72,7 @@ const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFin
 /** The parameter problem of one input ('light' | 'time' | 'held'), if any. */
 function paramProblem(i: RuleInput): RuleProblem | null {
   const s = i.source;
-  if ('light' in s) return isNum(s.below) && s.below > 0 && isNum(s.hysteresis) && s.hysteresis >= 0 ? null : 'light';
+  if ('light' in s) return isNum(s.below) && s.below > 0 && isNum(s.hysteresis) && s.hysteresis >= 0 && (s.unknownDark === undefined || s.unknownDark === true) ? null : 'light';
   if ('time' in s) {
     const { from, to } = s.time;
     return typeof from === 'string' && typeof to === 'string' && TIME_RE.test(from) && TIME_RE.test(to) && from !== to ? null : 'time';
@@ -149,7 +149,7 @@ export function outsideLightTemplate(plan: { levels: Level[] }, zoneId: Id | nul
     ? zoneMembers(level, zoneId as Id).find(m => m.participates && m.device.props.kind === 'illuminance_sensor')?.device.id
     : undefined;
   rule.inputs = [
-    { source: { light: sensor ?? '', below: 10, hysteresis: 5 } },
+    { source: { light: sensor ?? '', below: 10, hysteresis: 5, unknownDark: true } },
     { source: { sun: true } },
     { source: { time: { from: '17:00', to: '01:00' } } },
   ];

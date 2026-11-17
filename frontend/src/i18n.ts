@@ -325,6 +325,7 @@ const en: Dict = {
   'rules.light.sensor': 'Light sensor',
   'rules.light.below': 'Below',
   'rules.light.hysteresis': 'Hysteresis',
+  'rules.light.unknownDark': 'No data counts as dark',
   'rules.light.noSensor': 'Pick a light sensor',
   'rules.light.unit': 'This sensor reports {unit}, not lx; the thresholds are read as lx and the input has no data.',
   'rules.sun.below': 'below horizon',

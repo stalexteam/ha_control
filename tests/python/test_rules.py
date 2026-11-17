@@ -819,6 +819,12 @@ def light_in(did="lx", below=10, hysteresis=5):
     return {"source": {"light": did, "below": below, "hysteresis": hysteresis}}
 
 
+def dark_in(*a, **kw):
+    i = light_in(*a, **kw)
+    i["source"]["unknownDark"] = True
+    return i
+
+
 def window(a, b):
     return {"source": {"time": {"from": a, "to": b}}}
 
@@ -867,6 +873,40 @@ def test_light_keeps_its_value_through_an_unknown_reading():
     assert trace(w)["inputs"][0]["value"] is None
     w.set("sensor.lux", "12")
     assert trace(w)["verdict"] is True
+
+
+@pytest.mark.parametrize("state", [
+    lux(5, "lm"), lux("dark"), lux("nan"), ("unavailable", {}), ("unknown", {}), None,
+])
+def test_light_unknown_counts_as_dark_when_asked(state):
+    w = World(**({} if state is None else {"sensor__lux": state}))
+    w.engine.load_plans([plan([LUX], [rule("r", [dark_in()])])])
+    t = trace(w)
+    assert t["inputs"][0]["value"] is True and t["inputs"][0]["detail"] == "no data (dark)"
+    assert t["verdict"] is True
+
+
+def test_light_unknown_dark_does_not_touch_the_hysteresis_memory():
+    w = World(sensor__lux=lux(15))
+    w.engine.load_plans([plan([LUX], [rule("r", [dark_in()])])])
+    assert trace(w)["verdict"] is False
+    w.set("sensor.lux", "unavailable")
+    assert trace(w)["verdict"] is True
+    w.set("sensor.lux", "12")  # between: memory is still false
+    assert trace(w)["verdict"] is False
+
+
+def test_light_unknown_dark_keeps_a_missing_device_missing():
+    w = World(sensor__lux=lux(5))
+    w.engine.load_plans([plan([LUX], [rule("r", [dark_in("gone")])])])
+    assert trace(w)["status"] == "error" and trace(w)["reason"] == "device missing"
+
+
+def test_disabled_rule_arms_no_timers():
+    w = World(t=utc(2026, 1, 1, 7), binary_sensor__m="on")
+    r = rule("r", [window("08:00", "09:30"), held("m")], enabled=False)
+    w.engine.load_plans([plan([HALL], [r])])
+    assert w.pending() == []
 
 
 def test_light_needs_an_illuminance_sensor():

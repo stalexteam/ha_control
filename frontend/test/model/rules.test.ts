@@ -130,6 +130,8 @@ describe('rules model', () => {
     expect(probs(inp({ light: 'd', below: 10, hysteresis: 5 }))).toEqual([]);
     expect(probs(inp({ light: 'd', below: 10, hysteresis: 0 }))).toEqual([]);
     expect(probs(inp({ light: 'd', below: 0, hysteresis: 5 }))).toEqual(['light']);
+    expect(probs(inp({ light: 'd', below: 10, hysteresis: 5, unknownDark: true }))).toEqual([]);
+    expect(probs(inp({ light: 'd', below: 10, hysteresis: 5, unknownDark: false as unknown as true }))).toEqual(['light']);
     expect(probs(inp({ light: 'd', below: 10, hysteresis: -1 }))).toEqual(['light']);
     expect(probs(inp({ light: 'd', below: NaN, hysteresis: 1 }))).toEqual(['light']);
     expect(ruleProblems([], rule('a', { inputs: [inp({ light: 'x', below: 10, hysteresis: 1 })] }), () => false)).toContain('device-missing');
@@ -202,7 +204,7 @@ describe('rules model', () => {
     expect(r.name).toBe('Outside light Yard');
     expect(r.combine).toBe('all');
     expect(r.inputs).toEqual([
-      { source: { light: 's2', below: 10, hysteresis: 5 } },
+      { source: { light: 's2', below: 10, hysteresis: 5, unknownDark: true } },
       { source: { sun: true } },
       { source: { time: { from: '17:00', to: '01:00' } } },
     ]);
@@ -210,6 +212,6 @@ describe('rules model', () => {
     expect(r.onTrue).toEqual([]);
     const e = outsideLightTemplate({ levels: [lvl] }, null, null);
     expect(e.name).toBe('Outside light');
-    expect(e.inputs[0].source).toEqual({ light: '', below: 10, hysteresis: 5 });
+    expect(e.inputs[0].source).toEqual({ light: '', below: 10, hysteresis: 5, unknownDark: true });
   });
 });

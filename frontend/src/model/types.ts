@@ -149,7 +149,7 @@ export interface Plan {
 export type RuleDo = 'on' | 'off' | 'open' | 'close';
 export type RuleSource =
   | { device: Id } | { rule: Id }
-  | { light: Id; below: number; hysteresis: number }
+  | { light: Id; below: number; hysteresis: number; unknownDark?: true }
   | { sun: true }
   | { time: { from: string; to: string } }
   | { held: { sources: ({ device: Id } | { rule: Id })[]; state: 'on' | 'off' | 'any'; seconds: number } };
