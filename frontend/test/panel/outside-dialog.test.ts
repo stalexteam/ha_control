@@ -57,9 +57,9 @@ describe('Outside light form', () => {
     expect([...el.shadowRoot!.querySelectorAll('.tools button[data-template]')].map(b => b.getAttribute('data-template'))).toEqual(['condition', 'timer']);
     await press(el, 'button[data-action="automations"]');
     const items = [...el.shadowRoot!.querySelectorAll('.amenu [role="menuitem"]')];
-    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'outside', 'beurer']);
-    expect(items[4].textContent!.trim()).toBe('Outside light');
-    expect(items[4].querySelector('svg.ticon')).toBeTruthy();
+    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'control', 'outside', 'beurer']);
+    expect(items[5].textContent!.trim()).toBe('Outside light');
+    expect(items[5].querySelector('svg.ticon')).toBeTruthy();
   });
 
   it('opens pre-filled with the zone\'s light and the plan\'s sensor, the night options on, pause 30; OK adds the rule', async () => {

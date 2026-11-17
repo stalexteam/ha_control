@@ -43,9 +43,9 @@ describe('Beurer heater form', () => {
     const el = await open();
     await press(el, 'button[data-action="automations"]');
     const items = [...el.shadowRoot!.querySelectorAll('.amenu [role="menuitem"]')];
-    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'outside', 'beurer']);
-    expect(items[5].textContent!.trim()).toBe('Beurer heater');
-    expect(items[5].querySelector('svg.ticon')).toBeTruthy();
+    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'control', 'outside', 'beurer']);
+    expect(items[6].textContent!.trim()).toBe('Beurer heater');
+    expect(items[6].querySelector('svg.ticon')).toBeTruthy();
     await press(el, '.amenu [data-automation="beurer"]');
     expect(el.dialog).toEqual({ kind: 'rule' });
     expect(isBeurerRule(el.ruleDraft!.rule)).toBe(true);

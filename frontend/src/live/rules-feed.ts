@@ -1,4 +1,5 @@
 import type { HassLike } from '../api';
+import type { Id } from '../model/types';
 import { messageOf } from '../errors';
 import { t } from '../i18n';
 
@@ -90,6 +91,12 @@ export interface BeurerTrace {
   pausedUntil?: number;
 }
 
+/** A load control rule's devices: each source's kind and state (null = no data; a smart button's is always null) and each load's state. */
+export interface ControlTrace {
+  sources: { id: Id; name: string; kind: 'wall_switch' | 'smart_button' | 'motion_sensor'; state: 'on' | 'off' | null }[];
+  loads: { id: Id; name: string; state: 'on' | 'off' | null }[];
+}
+
 /** A timed switch rule's run: `until` = epoch ms of its end (only while running); `device` null = no data. */
 export interface TimedTrace { running: boolean; until?: number; device: 'on' | 'off' | null }
 
@@ -120,6 +127,8 @@ export interface RuleTrace {
   outside?: OutsideTrace;
   /** Beurer heater rule only. */
   beurer?: BeurerTrace;
+  /** Load control rule only. */
+  control?: ControlTrace;
 }
 
 /** One `plan_studio/rules/subscribe` event: `full` replaces the map, otherwise the changed rules merge into it. */

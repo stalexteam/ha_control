@@ -1,5 +1,5 @@
 import type { Device, DeviceProps, Plan, Rule, Zone } from '../src/model/types';
-import type { BeurerTrace, OutsideTrace, RuleTrace } from '../src/live/rules-feed';
+import type { BeurerTrace, ControlTrace, OutsideTrace, RuleTrace } from '../src/live/rules-feed';
 import { fitWallMount } from '../src/geometry/devices';
 import type { PowerFrame, PowerSchema } from '../src/model/power';
 import { rectRoomLevel } from '../test/fixtures';
@@ -563,6 +563,47 @@ function beurerPlan(): Plan {
   return p;
 }
 
+/**
+ * Scene `control`: the `timed` room with a load control rule `rule-control` "Load control Main": sources Switch hall
+ * (wall switch), Button vent (smart button, On / Off) and Motion sensor, loads Ceiling light, Vent and Socket. Live: the
+ * switch on, the motion clear, the light on and the socket without data; the last entry a repeat of the switch.
+ * Scene `control-error`: the last command failed (target unavailable). Scene `control-many`: five loads (two rows).
+ */
+function controlPlan(extraLoads = false): Plan {
+  const p = timedPlan();
+  if (extraLoads) {
+    p.levels[0].devices.push({
+      id: 'd-heater', name: 'Bathroom heater', invalid: false, bindings: { control: 'switch.heater' }, placement: { mode: 'free', x: 3000, y: 1800, rotation: 0 },
+      props: { kind: 'equipment', shape: 'rect', width: 400, depth: 300, diameter: 400, icon: 'mdi:radiator', label: '', controllable: true },
+    });
+  }
+  p.rules = p.rules!.filter(r => r.timed === undefined);
+  p.rules.push({
+    id: 'rule-control', name: 'Load control Main', zoneId: 'r0', combine: 'any', inputs: [], onDelay: 0, offDelay: 0, onTrue: [], onFalse: [],
+    control: { sources: ['d-switch-hall', 'd-button-vent', 'd-motion'], loads: ['d-light', 'd-vent', 'd-socket', ...(extraLoads ? ['d-fan', 'd-heater'] : [])] },
+  });
+  return p;
+}
+
+const controlTrace = (over: Partial<RuleTrace> = {}, c: Partial<ControlTrace> = {}): RuleTrace => ({
+  status: 'ok', verdict: null, unknownInputs: 0, inputs: [],
+  control: {
+    sources: [
+      { id: 'd-switch-hall', name: 'Switch hall', kind: 'wall_switch', state: 'on' },
+      { id: 'd-button-vent', name: 'Button vent', kind: 'smart_button', state: null },
+      { id: 'd-motion', name: 'Motion sensor', kind: 'motion_sensor', state: 'off' },
+    ],
+    loads: [
+      { id: 'd-light', name: 'Ceiling light', state: 'on' },
+      { id: 'd-vent', name: 'Vent', state: 'off' },
+      { id: 'd-socket', name: 'Socket', state: null },
+    ],
+    ...c,
+  },
+  last: { action: 'on', target: 'Socket', at: at(21, 43), reason: 'Switch hall: on' },
+  ...over,
+});
+
 const beurerTrace = (b: Partial<BeurerTrace>, over: Partial<RuleTrace> = {}): RuleTrace => ({
   status: 'ok', verdict: true, unknownInputs: 0, inputs: [],
   beurer: { watts: 312, detail: '312 W', heater: 'on', fresh: true, cycleAt: Date.now() + 754_000, ...b },
@@ -742,6 +783,15 @@ export const SCENES: Record<string, Scene> = {
   'outside-paused': { plans: [outsidePlan()], rulesFrame: OUTSIDE_PAUSED },
   'outside-day': { plans: [outsidePlan()], rulesFrame: OUTSIDE_DAY },
   'outside-window': { plans: [outsidePlan()], rulesFrame: OUTSIDE_WINDOW },
+  control: { plans: [controlPlan()], rulesFrame: { ...ROOM_RULES, 'rule-control': controlTrace() } },
+  'control-error': { plans: [controlPlan()], rulesFrame: { ...ROOM_RULES, 'rule-control': controlTrace({ status: 'error', reason: 'target unavailable', last: { action: 'on', target: 'Socket', at: at(21, 43), reason: 'Button vent: toggle', error: 'target unavailable' } }) } },
+  'control-many': {
+    plans: [controlPlan(true)],
+    rulesFrame: { ...ROOM_RULES, 'rule-control': controlTrace({}, { loads: [
+      { id: 'd-light', name: 'Ceiling light', state: 'on' }, { id: 'd-vent', name: 'Vent', state: 'off' }, { id: 'd-socket', name: 'Socket', state: null },
+      { id: 'd-fan', name: 'WC fan', state: 'on' }, { id: 'd-heater', name: 'Bathroom heater', state: 'off' },
+    ] }) },
+  },
   beurer: { plans: [beurerPlan()], rulesFrame: BEURER_RULES },
   'beurer-cycle': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ cycleAt: undefined, pausedUntil: Date.now() + 3_000, heater: 'off' }) } },
   'beurer-kept': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ watts: null, detail: 'no data, kept', keptUntil: Date.now() + 252_000 }, { pending: { to: false, at: Date.now() + 45_000 } }) } },
