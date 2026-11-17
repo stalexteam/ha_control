@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { $, click, mount, press } from './helpers';
+import { $, click, mount, press, undo } from './helpers';
 import { createMockHass, STORAGE_KEY } from '../../dev/mock-hass';
 import { SCENES } from '../../dev/scenes';
 import type { Plan, Rule } from '../../src/model/types';
@@ -116,9 +116,60 @@ describe('Wet zone ventilation form', () => {
     const live = q<HTMLElement>(el, '.vent-live').textContent!;
     expect(live).toContain('17.4 / 9.7 g/m³ (+80 %)');
     expect(live).toContain('Condition true');
-    expect(live).toMatch(/false in \d+ s/);
+    expect(live).toMatch(/off in \d+:\d\d/);
     expect(live).toContain('WC fan');
     await set(el, '[data-field="vent-above"]', '10');
     expect(q<HTMLElement>(el, '.vent-live').textContent).not.toContain('17.4');
+  });
+
+  it('empty picks show pick hints, not the missing-device text', async () => {
+    const el = await open([]);
+    click(el, 300, 300);
+    await el.updateComplete;
+    await press(el, 'button[data-template="vent"]');
+    await set(el, '[data-field="vent-fan"]', '', 'change');
+    const keys = [...el.shadowRoot!.querySelectorAll('.rule-backdrop .rproblems li')].map(x => x.textContent);
+    expect(keys).toEqual(['Choose the sensor to compare with', 'Choose the fan']);
+  });
+
+  it('run-on out of 0..60 min shows its own message; the field keeps what is typed', async () => {
+    const el = await open([ventRule()]);
+    await edit(el);
+    await set(el, '[data-field="vent-runon"]', '61');
+    expect(okBtn(el).disabled).toBe(true);
+    expect(q(el, '.rproblems [data-problem="delay"]').textContent).toBe('Run-on: 0 to 60 min');
+    expect(q<HTMLInputElement>(el, '[data-field="vent-runon"]').value).toBe('61');
+    await set(el, '[data-field="vent-runon"]', '60');
+    expect(el.ruleDraft!.rule.offDelay).toBe(3600);
+    expect(okBtn(el).disabled).toBe(false);
+  });
+
+  it('no live block at all for a saved rule the server has no trace of', async () => {
+    const plan: Plan = structuredClone(SCENES.room.plans[0]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { [plan.id]: plan } }));
+    const el = await mount(createMockHass({ rulesFrame: {} }));
+    el.setMode('automation');
+    await vi.waitFor(() => expect(el.rulesFeed.ready).toBe(true));
+    await edit(el);
+    expect(el.shadowRoot!.querySelector('.rule-backdrop .vent-live')).toBeNull();
+  });
+
+  it('Cancel leaves rules untouched; one undo reverts an OK; a normal rule opens the rule dialog', async () => {
+    const el = await open([]);
+    click(el, 300, 300);
+    await el.updateComplete;
+    await press(el, 'button[data-template="vent"]');
+    await set(el, '[data-field="vent-than"]', 'd-main-climate', 'change');
+    await press(el, 'button[data-action="rule-cancel"]');
+    expect(el.rules).toEqual([]);
+    await press(el, 'button[data-template="vent"]');
+    await set(el, '[data-field="vent-than"]', 'd-main-climate', 'change');
+    await press(el, 'button[data-action="rule-ok"]');
+    expect(el.rules).toHaveLength(1);
+    await undo(el);
+    expect(el.rules).toEqual([]);
+    await press(el, 'button[data-template="leak"]');
+    expect(el.shadowRoot!.querySelector('.rule-backdrop svg.fc')).not.toBeNull();
+    expect(el.shadowRoot!.querySelector('.rule-backdrop [data-field="vent-sensor"]')).toBeNull();
   });
 });

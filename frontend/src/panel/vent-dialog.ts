@@ -1,7 +1,8 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import type { Device, Id, Rule } from '../model/types';
 import type { RuleProblem } from '../model/rules';
-import { RULE_DELAY_MAX } from '../model/rules';
+import { formatDuration } from '../live/device-live';
+import { fieldValue } from './field-value';
 import type { RuleTrace } from '../live/rules-feed';
 import { lastText } from './rules-panel';
 import type { RuleDraft } from './rule-dialog';
@@ -39,9 +40,28 @@ function deviceSelect(o: VentDialogOpts, field: string, value: Id, list: Device[
     </select>`;
 }
 
-function live(o: VentDialogOpts): TemplateResult {
+/** The messages under the form: a pick hint per empty select, the run-on range, the rest as the rule dialog words them. */
+function problemTexts(o: VentDialogOpts): { key: string; text: string }[] {
+  const r = o.draft.rule;
+  const v = r.vent!;
+  const hints: { key: string; text: string }[] = [];
+  if (!v.sensor) hints.push({ key: 'pick-sensor', text: t('vent.problem.sensor') });
+  if (!v.than) hints.push({ key: 'pick-than', text: t('vent.problem.than') });
+  if (!(r.onTrue[0]?.device)) hints.push({ key: 'pick-fan', text: t('vent.problem.fan') });
+  const out = [...hints];
+  const setIds = [v.sensor, v.than, r.onTrue[0]?.device, r.onFalse[0]?.device].filter((x): x is Id => !!x);
+  for (const p of o.problems) {
+    if (p === 'device-missing' && !setIds.some(id => !o.deviceById(id)) && !(v.sensor && !o.climateSensors.some(d => d.id === v.sensor))
+      && !(v.than && !o.climateSensors.some(d => d.id === v.than))) continue; // only empty picks: the hints say it
+    if (p === 'vent' && hints.length > 0) continue;
+    out.push({ key: p, text: p === 'delay' ? t('vent.problem.runon') : t(`rules.problem.${p}`) });
+  }
+  return out;
+}
+
+function live(o: VentDialogOpts): TemplateResult | typeof nothing {
   const tr = o.trace;
-  if (!tr) return html`<div class="vent-live"><p class="fc-note">${o.note ?? ''}</p></div>`;
+  if (!tr) return o.note ? html`<div class="vent-live"><p class="fc-note">${o.note}</p></div>` : nothing;
   const left = tr.pending ? Math.max(0, Math.ceil((tr.pending.at - o.now) / 1000)) : 0;
   const status = tr.status === 'error' && tr.reason ? `${t('rules.status.error')}: ${tr.reason}` : t(`rules.status.${tr.status}`);
   return html`
@@ -49,7 +69,7 @@ function live(o: VentDialogOpts): TemplateResult {
       <p class="fc-last">${status}</p>
       ${tr.inputs[0] ? html`<p class="fc-last" data-part="detail">${tr.inputs[0].label}: ${tr.inputs[0].detail}</p>` : nothing}
       <p class="fc-last" data-part="verdict">${valWord(tr.verdict)}${tr.pending
-        ? `, ${t('rules.flow.pending').replace('{to}', t(`rules.val.${tr.pending.to}`)).replace('{n}', String(left))}` : ''}</p>
+        ? `, ${t('vent.pending').replace('{to}', tr.pending.to ? 'on' : 'off').replace('{t}', left < 60 ? `${left} s` : formatDuration(left * 1000))}` : ''}</p>
       ${tr.last ? html`<p class="fc-last">${t('rules.flow.last')} ${lastText(tr.last)}</p>` : nothing}
     </div>`;
 }
@@ -62,6 +82,7 @@ export function renderVentDialog(o: VentDialogOpts): TemplateResult {
   const fan = r.onTrue[0]?.device ?? '';
   const zoneKnown = r.zoneId === null || o.zones.some(z => z.id === r.zoneId);
   const title = t('vent.title');
+  const texts = problemTexts(o);
   return html`
     <div class="backdrop rule-backdrop" @change=${(e: Event) => e.stopPropagation()}>
       <div class="dialog vdlg" role="dialog" aria-modal="true" aria-label=${title}>
@@ -87,19 +108,19 @@ export function renderVentDialog(o: VentDialogOpts): TemplateResult {
 
           <div class="vnums">
             <label>${t('vent.above')}
-              <input class="num" data-field="vent-above" type="number" min="0" step="any" .value=${shown(v.above)}
+              <input class="num" data-field="vent-above" type="number" min="0" step="any" .value=${fieldValue(shown(v.above))}
                 @input=${(e: Event) => setVent({ above: num((e.target as HTMLInputElement).value) })} /></label>
             <label>${t('vent.below')}
-              <input class="num" data-field="vent-below" type="number" min="0" step="any" .value=${shown(v.below)}
+              <input class="num" data-field="vent-below" type="number" min="0" step="any" .value=${fieldValue(shown(v.below))}
                 @input=${(e: Event) => setVent({ below: num((e.target as HTMLInputElement).value) })} /></label>
             <label>${t('vent.runon')}
-              <input class="num" data-field="vent-runon" type="number" min="0" max=${RULE_DELAY_MAX / 60} step="any" .value=${shown(r.offDelay / 60)}
-                @input=${(e: Event) => o.onChange({ ...r, offDelay: Math.round(num((e.target as HTMLInputElement).value) * 60) })} /></label>
+              <input class="num" data-field="vent-runon" type="number" min="0" max="60" step="1" .value=${fieldValue(shown(r.offDelay / 60))}
+                @input=${(e: Event) => o.onChange({ ...r, offDelay: Math.round(num((e.target as HTMLInputElement).value)) * 60 })} /></label>
           </div>
         </div>
         ${live(o)}
-        ${o.problems.length > 0 ? html`<ul class="rproblems" role="alert">
-          ${o.problems.map(p => html`<li data-problem=${p}>${t(`rules.problem.${p}`)}</li>`)}</ul>` : nothing}
+        ${texts.length > 0 ? html`<ul class="rproblems" role="alert">
+          ${texts.map(p => html`<li data-problem=${p.key}>${p.text}</li>`)}</ul>` : nothing}
         <div class="rfoot">
           <label class="rlabel" for="vent-zone">${t('rules.zone')}</label>
           <select id="vent-zone" data-field="zone" data-value=${r.zoneId ?? ''}
