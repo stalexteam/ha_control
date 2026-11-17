@@ -14,6 +14,7 @@ try:
     from .beurer import Beurer
     from .boiler import MODES, Boiler, watts
     from .control import ECHO, Control
+    from .motion_light import MotionLight
     from .outside import Outside
     from .timed import Timed
 except ImportError:  # pytest: module dir on sys.path
@@ -21,6 +22,7 @@ except ImportError:  # pytest: module dir on sys.path
     from beurer import Beurer
     from boiler import MODES, Boiler, watts
     from control import ECHO, Control
+    from motion_light import MotionLight
     from outside import Outside
     from timed import Timed
 
@@ -449,6 +451,12 @@ class _Rule:
             light = outside.get("light") if isinstance(outside.get("light"), str) else ""
             call = _Action({"device": light, "do": "on"}, devices).call
             self.outside = Outside(outside, devices, call[2] if call is not None else None)
+        motion = raw.get("motionLight")
+        self.motion_light: MotionLight | None = None
+        if isinstance(motion, dict):
+            light = motion.get("light") if isinstance(motion.get("light"), str) else ""
+            call = _Action({"device": light, "do": "on"}, devices).call
+            self.motion_light = MotionLight(motion, devices, call[2] if call is not None else None)
         beurer = raw.get("beurer")
         self.beurer: Beurer | None = None
         if isinstance(beurer, dict):
@@ -488,6 +496,8 @@ class _Rule:
             raw_inputs = [{"source": {"vent": vent}}]
         elif self.outside is not None:
             raw_inputs = self.outside.inputs()
+        elif self.motion_light is not None:
+            raw_inputs = self.motion_light.inputs()
         elif self.beurer is not None:
             raw_inputs = [self.beurer.input()]
         elif self.control is not None:
@@ -501,6 +511,9 @@ class _Rule:
         on_false = raw.get("onFalse") or []
         if self.outside is not None:  # the light is held on while the rule wants it on (holder slots)
             light = self.outside.light or ""
+            on_true, on_false = [{"device": light, "do": "on"}], [{"device": light, "do": "off"}]
+        if self.motion_light is not None:  # the light is held on while the rule wants it on in auto (holder slots)
+            light = self.motion_light.light or ""
             on_true, on_false = [{"device": light, "do": "on"}], [{"device": light, "do": "off"}]
         if self.beurer is not None:  # the heater is held on while the source is in use (holder slots)
             heater = self.beurer.heater or ""
@@ -563,11 +576,13 @@ class _Rule:
             self.pending = None
 
     def stop(self) -> None:
-        """Cancel every timer: the debounce, the time / held inputs, the boiler's, the timed run's, the pause's and the
-        power-cycle's."""
+        """Cancel every timer: the debounce, the time / held inputs, the boiler's, the timed run's, the pause's, the
+        auto-return's and the power-cycle's."""
         self.cancel()
         if self.outside is not None:
             self.outside.stop()
+        if self.motion_light is not None:
+            self.motion_light.stop()
         if self.beurer is not None:
             self.beurer.stop()
         for i in self.all_inputs:
@@ -592,7 +607,7 @@ class _Rule:
             found.add("target missing")
         if any(a.call is None for actions in self.control_actions.values() for a in actions):
             found.add("target missing")
-        if any(x is not None and x.missing for x in (self.boiler, self.timed, self.outside, self.beurer, self.control)):
+        if any(x is not None and x.missing for x in (self.boiler, self.timed, self.outside, self.beurer, self.control, self.motion_light)):
             found.add("device missing")
         return next((r for r in STATIC_REASONS if r in found), None)
 
@@ -614,6 +629,19 @@ def _stamps(stored: object) -> "dict[str, dict[str, float]]":
     return {pid: rs for pid, rs in kept.items() if rs}
 
 
+def _manual_modes(stored: object) -> "dict[str, dict[str, dict]]":
+    """The stored {plan id: {rule id: {mode, since}}} of motion light rules in manual, without malformed entries."""
+    out: dict[str, dict[str, dict]] = {}
+    for pid, rs in stored.items() if isinstance(stored, dict) else ():
+        kept = {
+            rid: {"mode": "manual", "since": float(v["since"]) if _epoch(v.get("since")) else None}
+            for rid, v in rs.items() if isinstance(v, dict) and v.get("mode") == "manual"
+        } if isinstance(rs, dict) else {}
+        if kept:
+            out[pid] = kept
+    return out
+
+
 class RuleEngine:
     def __init__(
         self,
@@ -627,6 +655,7 @@ class RuleEngine:
         on_modes: "Callable[[dict[str, dict[str, str]]], None]" = lambda modes: None,
         on_runs: "Callable[[dict[str, dict[str, float]]], None]" = lambda runs: None,
         on_pauses: "Callable[[dict[str, dict[str, float]]], None]" = lambda pauses: None,
+        on_motion_modes: "Callable[[dict[str, dict[str, dict]]], None]" = lambda modes: None,
     ) -> None:
         self._lookup = lookup
         self._now = now  # epoch seconds
@@ -648,6 +677,8 @@ class RuleEngine:
         self._runs: dict[str, dict[str, float]] = {}  # the runs last reported (or loaded)
         self._on_pauses = on_pauses  # the outside light pauses {plan id: {rule id: end epoch s}} after any changed
         self._pauses: dict[str, dict[str, float]] = {}  # the pauses last reported (or loaded)
+        self._on_motion_modes = on_motion_modes  # the motion light rules in manual {plan id: {rule id: {mode, since}}}
+        self._motion_modes: dict[str, dict[str, dict]] = {}  # the manual modes last reported (or loaded)
         self._booting = False  # a boot load happened and started() has not come yet: boiler auto waits
         self._holds: dict[str, _Hold] = {}  # shared device entity -> its arbitrated command
         self._loading = False  # inside load_plans: arbitrated calls wait for the end of the load
@@ -664,12 +695,14 @@ class RuleEngine:
 
     def load_plans(
         self, plans: "list[dict]", *, boot: "bool | None" = None, modes: "dict | None" = None,
-        runs: "dict | None" = None, pauses: "dict | None" = None, unload: bool = False,
+        runs: "dict | None" = None, pauses: "dict | None" = None, motion_modes: "dict | None" = None,
+        unload: bool = False,
     ) -> None:
         """boot: True when this load is the HA start; None keeps "the first call is the start".
         modes: the stored boiler modes {plan id: {rule id: 'auto' | 'manual'}}, used for boiler rules not loaded yet.
         runs: the stored timed runs {plan id: {rule id: until epoch s}}, restored for timed rules not loaded yet.
         pauses: the stored outside light pauses {plan id: {rule id: end epoch s}}, restored likewise.
+        motion_modes: the stored motion light rules in manual {plan id: {rule id: {mode, since}}}, restored likewise.
         unload: the integration stops: no device is switched (boiler relays and running timed devices stay as they are;
         the modes and runs are restored on the next start)."""
         old = self._rules
@@ -682,6 +715,8 @@ class RuleEngine:
             self._runs = _stamps(runs)
         if pauses is not None:
             self._pauses = _stamps(pauses)
+        if motion_modes is not None:
+            self._motion_modes = _manual_modes(motion_modes)
         first, self._started = not self._started, True
         if boot is None:
             boot = first
@@ -726,6 +761,8 @@ class RuleEngine:
                     ended.append(rule)
                 if rule.outside is not None:
                     self._load_outside(rule, prev, pauses)
+                if rule.motion_light is not None:
+                    self._load_motion(rule, prev, motion_modes)
                 if rule.beurer is not None and (prev is None or prev.sig != rule.sig):
                     rule.beurer.seen = rule.beurer.state(self._lookup)  # a new one reads its heater
                 rules[rule.key] = rule
@@ -785,6 +822,7 @@ class RuleEngine:
         self._report_modes()
         self._report_runs()
         self._report_pauses()
+        self._report_motion_modes()
 
     def _released_relays(self, old: "dict[Key, _Rule]", rules: "dict[Key, _Rule]") -> "list[str]":
         """Relays of boiler rules that were auto and lose their state in this load (rule deleted, no longer a boiler,
@@ -866,6 +904,22 @@ class RuleEngine:
         stored = self._pauses.get(rule.key[0], {}).get(rule.key[1]) if prev is None and pauses is not None else None
         if stored is not None and rule.enabled:
             o.restore(stored)  # evaluated once the boot phase is over (started())
+
+    def _load_motion(self, rule: _Rule, prev: "_Rule | None", motion_modes: "dict | None") -> None:
+        """Keep the mode of the same motion light rule (light entity and buttons unchanged); one not loaded yet takes its
+        stored mode; any other one starts in auto."""
+        m = rule.motion_light
+        assert m is not None
+        old = prev.motion_light if prev is not None else None
+        if old is not None and old.ident == m.ident:
+            old.stop()
+            m.take(old)
+            rule.last, rule.failed = prev.last, prev.failed
+            return
+        m.seen = m.state(self._lookup)
+        stored = self._motion_modes.get(rule.key[0], {}).get(rule.key[1]) if prev is None and motion_modes is not None else None
+        if stored is not None:
+            m.restore(stored["mode"], stored["since"])  # evaluated once the boot phase is over (started())
 
     def _released_runs(self, old: "dict[Key, _Rule]", rules: "dict[Key, _Rule]") -> "list[Timed]":
         """Running timed switches that lose their run in this load (rule deleted, no longer timed, or its button,
@@ -961,6 +1015,8 @@ class RuleEngine:
             timed = [rule.timed.eid] if rule.timed is not None and rule.timed.eid else []
             if rule.outside is not None and rule.outside.eid:
                 timed.append(rule.outside.eid)  # its light: a manual switch pauses the rule
+            if rule.motion_light is not None and rule.motion_light.eid:
+                timed.append(rule.motion_light.eid)  # its light: a manual switch sets manual
             if rule.beurer is not None and rule.beurer.eid:
                 timed.append(rule.beurer.eid)  # its heater: switched off elsewhere, the power-cycle
             # load control: its devices only so the trace follows them (its input sources are in `reads`)
@@ -997,6 +1053,9 @@ class RuleEngine:
             values.append(t["value"] if t["value"] is None or not i.negate else not t["value"])
         if rule.outside is not None:
             rule.raw = rule.outside.want(values)
+        elif rule.motion_light is not None:
+            m = rule.motion_light
+            rule.raw = m.raw(values, m.state(self._lookup) == "on" or rule.verdict is True)
         else:
             rule.raw = combine(rule.mode, values) if values else None
         rule.trace_inputs = trace
@@ -1196,6 +1255,8 @@ class RuleEngine:
             return self._boiler(rule)
         if rule.timed is not None:
             return self._timed(rule)
+        if rule.motion_light is not None:
+            return self._motion(rule, due)
         self._compute(rule)
         if not rule.enabled:
             return False
@@ -1234,6 +1295,8 @@ class RuleEngine:
             return False
         rule.cancel()
         delay = rule.on_delay if raw else rule.off_delay
+        if rule.motion_light is not None and not raw:  # not before the minimum on time since its on decision
+            delay = rule.motion_light.off_delay(self._now(), delay)
         if delay <= 0:
             self._commit(rule, raw, "became true" if raw else "became false")
             return True
@@ -1698,6 +1761,175 @@ class RuleEngine:
         out["light"] = o.state(self._lookup)
         return out
 
+    # --- light motion control --------------------------------------------------
+
+    def _motion(self, rule: _Rule, due: "_Pending | None") -> bool:
+        """Evaluate a motion light rule. In auto it is the condition machinery over its inputs (the light held through
+        the slots; a light found on is held; the off waits for the minimum on time). In manual, while HA starts, disabled
+        or with a static problem it is out of the slots (verdict None, nothing sent); manual arms the auto-return.
+        True when the verdict changed."""
+        m = rule.motion_light
+        assert m is not None
+        self._compute(rule)
+        was, now = rule.verdict, self._now()
+        active = rule.enabled and not m.missing and m.eid is not None and not self._booting
+        if active and m.mode == "manual":
+            wake = m.auto_due(now, m.motion([t["value"] for t in rule.trace_inputs]))
+            if wake is not None and wake <= now:
+                self._motion_auto(rule, "auto again")
+            else:
+                self._motion_arm(rule, wake)
+        if not active or m.mode == "manual":
+            if not active:
+                m.stop()
+            rule.cancel()
+            rule.open, rule.verdict = False, None
+            return rule.verdict != was
+        m.stop()
+        rule.open = True
+        if rule.verdict is None:  # rule start, entering auto, the light back from no data: take the light as it is
+            self._motion_hold(rule, m.state(self._lookup) == "on")
+        if self._step(rule, due):
+            # the rule decided to switch the light on: the minimum on time counts from here
+            m.on_at = now if rule.verdict is True else None
+        return rule.verdict != was
+
+    def _motion_hold(self, rule: _Rule, on: bool) -> None:
+        """Take the light's state as the verdict without a command: a light found on is held (its off comes after the
+        off delay; the minimum on time does not apply), one found off is not."""
+        m = rule.motion_light
+        assert m is not None and m.eid is not None
+        rule.cancel()
+        rule.verdict, m.on_at = on, None
+        self._new_firing(rule)
+        self._give_up(m.eid, rule.key)  # a command of the rule still waiting for the light is stale
+
+    def _motion_manual(self, rule: _Rule, why: str, action: "str | None", sent: bool = False) -> dict:
+        """Enter (or stay in) manual: out of the slots at once, nothing owed or waiting for the light any more."""
+        m = rule.motion_light
+        assert m is not None and m.eid is not None
+        m.mode, m.since, m.moving, m.on_at, m.skip = "manual", self._now(), False, None, False
+        rule.cancel()
+        rule.open, rule.verdict = False, None
+        self._give_up(m.eid, rule.key)
+        hold = self._holds.get(m.eid)
+        if hold is not None:
+            hold.owed = None  # the person took over: nothing may switch the light back
+        entry = {"action": action, "target": m.label, "at": int(self._now() * 1000), "reason": why}
+        if not sent:
+            entry["sent"] = False
+        rule.last, rule.failed = entry, None
+        return entry
+
+    def _motion_auto(self, rule: _Rule, why: str) -> None:
+        """Enter auto: the auto rules apply from now on (the evaluation takes the light as it is)."""
+        m = rule.motion_light
+        assert m is not None
+        m.mode, m.since, m.moving, m.on_at = "auto", None, False, None
+        m.stop()
+        rule.cancel()
+        rule.verdict = None
+        rule.last, rule.failed = {"action": "auto", "target": m.label, "at": int(self._now() * 1000), "reason": why,
+                                  "sent": False}, None
+
+    def _motion_arm(self, rule: _Rule, wake: "float | None") -> None:
+        m = rule.motion_light
+        assert m is not None
+        if m.timer is not None and m.timer[0] != wake:
+            m.stop()
+        if wake is not None and m.timer is None:
+            key = rule.key
+            m.timer = (wake, self._schedule(max(0.0, wake - self._now()), lambda: self._motion_wake(key, m)))
+
+    def _motion_wake(self, key: Key, m: MotionLight) -> None:
+        rule = self._rules.get(key)
+        if rule is None or rule.motion_light is not m:
+            return
+        m.timer = None
+        self._settle({key})
+        self._flush()
+
+    def _motion_light_changed(self, rule: _Rule, confirms: bool) -> None:
+        """A state change of a motion light rule's light, before the evaluation (manual detection uses `confirms`
+        only: a Plan Studio command that does not confirm the slots is a manual switch too)."""
+        m = rule.motion_light
+        assert m is not None
+        state = m.state(self._lookup)
+        change = m.light_changed(state, confirms, rule.enabled and not m.missing and not self._booting)
+        if change == "manual":
+            self._motion_manual(rule, "switched elsewhere: manual", state)
+        elif change == "back":
+            rule.cancel()
+            rule.verdict = None  # the auto start applies again
+        elif change == "found" and rule.verdict is False:
+            self._motion_hold(rule, True)  # switched on by another slot participant: held from now
+
+    def _motion_press(self, rule: _Rule, button: str, intent: dict) -> bool:
+        """A button intent of a motion light rule; True when it was taken. toggle / set on / set off: manual with a
+        direct command (own context, never re-sent); auto: auto."""
+        m = rule.motion_light
+        assert m is not None and m.eid is not None
+        light = m.state(self._lookup)
+        mode, do = m.press(intent, button, light)
+        if mode == "auto":
+            self._motion_auto(rule, "button: auto")
+            return True
+        if mode != "manual":
+            return False
+        shown = do or (intent.get("value") if intent.get("action") == "set" else "off" if light == "on" else "on")
+        entry = self._motion_manual(rule, "button: manual", shown, sent=do is not None)
+        if do is None:
+            return True
+        eid = m.eid
+
+        def on_error(err: str, why: str = "service failed") -> None:
+            _LOGGER.warning("rule %s: turn_%s %s failed: %s", rule.name, do, eid, err)
+            entry["error"] = "service failed" if "service failed" in (entry.get("error"), why) else why
+            self._flush()
+
+        try:
+            held = self._call(eid.split(".", 1)[0], f"turn_{do}", eid, on_error=on_error, current=lambda: True)
+        except Exception as err:  # noqa: BLE001 - a failing light must not stop the engine
+            _LOGGER.warning("rule %s: turn_%s %s failed: %s", rule.name, do, eid, err)
+            entry["error"] = "service failed"
+            return True
+        if held is not True and not _available(self._lookup(eid)):
+            entry["error"] = "target unavailable"
+        return True
+
+    def motion_modes(self) -> "dict[str, dict[str, dict]]":
+        """The motion light rules in manual {plan id: {rule id: {"mode": "manual", "since": epoch s}}} of every loaded
+        rule (auto is the default and is not stored)."""
+        out: dict[str, dict[str, dict]] = {}
+        for (pid, rid), rule in self._rules.items():
+            m = rule.motion_light
+            if m is not None and m.mode == "manual":
+                out.setdefault(pid, {})[rid] = {"mode": "manual", "since": m.since}
+        return out
+
+    def _report_motion_modes(self) -> None:
+        modes = self.motion_modes()
+        if modes == self._motion_modes:
+            return
+        self._motion_modes = modes
+        try:
+            self._on_motion_modes(copy.deepcopy(modes))
+        except Exception:  # noqa: BLE001 - a failing store must not stop the engine
+            _LOGGER.exception("saving the motion light modes failed")
+
+    def _motion_trace(self, rule: _Rule) -> dict:
+        m = rule.motion_light
+        assert m is not None
+        values = [t["value"] for t in rule.trace_inputs]
+        labels = [t["label"] for t in rule.trace_inputs]
+        off_at = rule.pending.at if rule.pending is not None and not rule.pending.to else None
+        out = m.trace(values, labels, m.state(self._lookup), self._now(), off_at)
+        if m.daylight is not None:
+            t = rule.trace_inputs[len(m.sensors)] if len(rule.trace_inputs) > len(m.sensors) else {}
+            d = self._days.get((rule.key[0], m.daylight[0]))
+            out["daylight"] = {"state": d.state if d is not None else None, "detail": t.get("detail", "missing")}
+        return out
+
     # --- beurer heater ---------------------------------------------------------
 
     def _beurer_heater(self, rule: _Rule, ours: bool) -> None:
@@ -1954,13 +2186,13 @@ class RuleEngine:
             _LOGGER.exception("saving the timed runs failed")
 
     def started(self) -> None:
-        """HA has started: end the boot phase and evaluate the boiler rules in auto, the restored timed runs and the
-        restored outside light pauses once, and run the beurer power-cycles."""
+        """HA has started: end the boot phase and evaluate the boiler rules in auto, the restored timed runs, the
+        restored outside light pauses and the motion light rules once, and run the beurer power-cycles."""
         if not self._booting:
             return
         self._booting = False
         self._settle({key for key, rule in self._rules.items() if rule.boiler is not None or rule.timed is not None
-                      or rule.outside is not None or rule.beurer is not None})
+                      or rule.outside is not None or rule.beurer is not None or rule.motion_light is not None})
         self._flush()
 
     def _boiler_wake(self, key: Key, b: Boiler) -> None:
@@ -2048,12 +2280,20 @@ class RuleEngine:
 
     def on_intent(self, plan_id: str, container_id: str, intent: dict) -> None:
         """A container intent ({"action": "toggle"}, {"action": "set", "value": "on" | "off"}, {"action": "auto"}); a
-        boiler or timed rule whose button it is takes it, and so does every load control rule with that smart button
-        among its sources (not while HA is starting). Status events and other actions are ignored."""
+        boiler, timed or motion light rule whose button it is takes it, and so does every load control rule with that
+        smart button among its sources (not while HA is starting). Status events and other actions are ignored."""
         if not isinstance(intent, dict):
             return
         dirty: set[Key] = set()
         for key, rule in self._rules.items():
+            m = rule.motion_light
+            if m is not None:
+                if key[0] != plan_id or container_id not in m.buttons or not rule.enabled or m.missing or m.eid is None \
+                        or self._booting:
+                    continue
+                if self._motion_press(rule, container_id, intent):
+                    dirty.add(key)
+                continue
             c = rule.control
             if c is not None:  # a button source; any other source is read through its input (handle_state)
                 if key[0] != plan_id or not rule.enabled or c.missing or self._booting:
@@ -2133,6 +2373,8 @@ class RuleEngine:
                 self._timed_device(rule, own)
             if rule.outside is not None and rule.outside.eid == entity_id:
                 self._outside_light(rule, own or confirms)
+            if rule.motion_light is not None and rule.motion_light.eid == entity_id:
+                self._motion_light_changed(rule, confirms)
             if rule.beurer is not None and rule.beurer.eid == entity_id:
                 self._beurer_heater(rule, own or confirms)
         # A load control rule finding a source change of this entity asks once whether it is its command arriving;
@@ -2183,6 +2425,8 @@ class RuleEngine:
             out["timed"] = rule.timed.trace(self._lookup)
         if rule.outside is not None:
             out["outside"] = self._outside_trace(rule)
+        if rule.motion_light is not None:
+            out["motionLight"] = self._motion_trace(rule)
         if rule.beurer is not None:
             out["beurer"] = self._beurer_trace(rule)
         if rule.control is not None:  # one entry per source in rule order; a button has no value
@@ -2208,6 +2452,7 @@ class RuleEngine:
         self._report_modes()
         self._report_runs()
         self._report_pauses()
+        self._report_motion_modes()
         frames: dict[str, dict[str, dict]] = {}
         for key, rule in self._rules.items():
             trace = self._trace(rule)

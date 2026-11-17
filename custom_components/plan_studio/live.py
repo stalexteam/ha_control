@@ -1,6 +1,7 @@
 """Runs the container runtime and the power hub inside Home Assistant: state lookup, state tracking and clock.
 
-The transfer positions, the boiler modes, the running timed switches and the outside light pauses are persisted."""
+The transfer positions, the boiler modes, the running timed switches, the outside light pauses and the light motion
+control modes are persisted."""
 
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     BOILER_STORAGE_KEY,
+    MOTION_LIGHT_STORAGE_KEY,
     OUTSIDE_STORAGE_KEY,
     POWER_STORAGE_KEY,
     RUNTIME_STORAGE_KEY,
@@ -65,6 +67,8 @@ class LiveRuntime:
         self._runs: dict | None = None  # stored timed runs, handed to the first engine load only
         self._outside_store: Store = Store(hass, 1, OUTSIDE_STORAGE_KEY)
         self._pauses: dict | None = None  # stored outside light pauses, handed to the first engine load only
+        self._motion_store: Store = Store(hass, 1, MOTION_LIGHT_STORAGE_KEY)
+        self._motion_modes: dict | None = None  # stored light motion control modes, handed to the first engine load only
         self._engine_start: CALLBACK_TYPE | None = None  # waits for HA to start after a boot load
         # rule actions fired before HA has started (a sensor known at boot), sent in order once it has
         self._deferred: list[tuple[str, str, str, Callable[..., None], Callable[[], bool]]] = []
@@ -87,6 +91,8 @@ class LiveRuntime:
         self._runs = runs if isinstance(runs, dict) else {}
         pauses = await self._outside_store.async_load()
         self._pauses = pauses if isinstance(pauses, dict) else {}
+        motion_modes = await self._motion_store.async_load()
+        self._motion_modes = motion_modes if isinstance(motion_modes, dict) else {}
         self.engine = RuleEngine(
             self._lookup, time.time, self._call, self._schedule,
             local=lambda ts: dt_util.as_local(dt_util.utc_from_timestamp(ts)),  # the real zone: DST-safe
@@ -94,6 +100,7 @@ class LiveRuntime:
             on_modes=self._save_modes,
             on_runs=self._save_runs,
             on_pauses=self._save_pauses,
+            on_motion_modes=self._save_motion_modes,
         )
         self.reload()
 
@@ -107,8 +114,9 @@ class LiveRuntime:
         modes, self._modes = self._modes, None
         runs, self._runs = self._runs, None
         pauses, self._pauses = self._pauses, None
-        self.engine.load_plans(plans, boot=boot, modes=modes, runs=runs, pauses=pauses)
-        if boot and self._engine_start is None:  # a restored auto, timed run or pause waits for HA to have started
+        motion_modes, self._motion_modes = self._motion_modes, None
+        self.engine.load_plans(plans, boot=boot, modes=modes, runs=runs, pauses=pauses, motion_modes=motion_modes)
+        if boot and self._engine_start is None:  # a restored auto, timed run, pause or motion mode waits for HA to have started
             self._engine_start = async_at_started(self._hass, self._engine_started)
         self.retrack()
 
@@ -120,7 +128,7 @@ class LiveRuntime:
 
     @callback
     def _on_container(self, plan_id: str, device_id: str, event: dict) -> None:
-        """Container intents (not status changes) are the boiler, timed switch and load control buttons' input."""
+        """Container intents (not status changes) are the boiler, timed switch, light motion control and load control buttons' input."""
         if "action" in event and not self._stopped:
             try:
                 self.engine.on_intent(plan_id, device_id, event)
@@ -144,6 +152,12 @@ class LiveRuntime:
         if self._stopped:  # stop reloads no plans: that report must not wipe the store
             return
         self._outside_store.async_delay_save(lambda: pauses, 1)
+
+    @callback
+    def _save_motion_modes(self, modes: dict) -> None:
+        if self._stopped:  # stop reloads no plans: that report must not wipe the store
+            return
+        self._motion_store.async_delay_save(lambda: modes, 1)
 
     @callback
     def retrack(self) -> None:
@@ -178,6 +192,10 @@ class LiveRuntime:
             await self._outside_store.async_save(self.engine.pauses())
         except Exception:  # noqa: BLE001 - stopping must go on
             _LOGGER.warning("could not save the outside light pauses", exc_info=True)
+        try:  # likewise the light motion control modes
+            await self._motion_store.async_save(self.engine.motion_modes())
+        except Exception:  # noqa: BLE001 - stopping must go on
+            _LOGGER.warning("could not save the light motion control modes", exc_info=True)
         self.engine.load_plans([], unload=True)  # cancels every rule timer; switches no boiler relay or timed device
 
     @callback

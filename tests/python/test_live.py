@@ -1169,3 +1169,96 @@ def test_outside_restored_expired_pause_applies_the_want_after_ha_started(env):
         assert _osaves()[-1] == (OUTSIDE_KEY, {})
 
     asyncio.run(go())
+
+
+# --- light motion control rule ------------------------------------------------------
+
+MOTION_KEY = "plan_studio.motion_light"
+
+
+def _motion_plan():
+    def dev(i, kind, bindings):
+        return {"id": i, "name": i, "props": {"kind": kind}, "bindings": bindings}
+
+    return {
+        "id": "p1",
+        "levels": [{"devices": [dev("lamp", "ceiling_light", {"control": "light.k"}),
+                                dev("pir", "motion_sensor", {"motion": "binary_sensor.pir"})]}],
+        "rules": [
+            {
+                "id": "r1", "name": "Kitchen", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 180,
+                "inputs": [], "onTrue": [], "onFalse": [],
+                "motionLight": {"light": "lamp", "sensors": ["pir"], "minOn": 0, "buttons": [], "autoAfter": 0},
+            }
+        ],
+    }
+
+
+async def _mstart(env, hass, stored=None, light="off", pir="off"):
+    if stored is not None:
+        FakeStore.contents[MOTION_KEY] = stored
+    hass.services.known |= {("light", "turn_on"), ("light", "turn_off")}
+    hass.states.d.update({"light.k": light, "binary_sensor.pir": pir})
+    live = env.live.LiveRuntime(hass, FakePlans([_motion_plan()]))
+    await live.async_start()
+    return live
+
+
+def _msaves():
+    return [s for s in FakeStore.saved if s[0] == MOTION_KEY]
+
+
+def test_motion_mode_loads_before_the_first_load_and_saves_on_change(env):
+    async def go():
+        hass = FakeHass()
+        stored = {"p1": {"r1": {"mode": "manual", "since": time.time()}}}
+        live = await _mstart(env, hass, stored=stored, pir="on")
+        assert live.engine.motion_modes() == stored and _msaves() == []
+        assert live.engine.snapshot("p1")["r1"]["motionLight"]["mode"] == "manual" and hass.services.calls == []
+
+    asyncio.run(go())
+
+
+def test_motion_manual_switch_saves_the_mode(env):
+    async def go():
+        hass = FakeHass()
+        live = await _mstart(env, hass)
+        assert "binary_sensor.pir" in env.tracked[-1]["ids"] and "light.k" in env.tracked[-1]["ids"]
+        _boiler_event(env, hass, "light.k", "on", old="off")  # a person, foreign context
+        await asyncio.gather(*hass.tasks)
+        (key, saved), = _msaves()
+        assert key == MOTION_KEY and saved == live.engine.motion_modes() and saved["p1"]["r1"]["mode"] == "manual"
+        assert hass.services.calls == []
+
+    asyncio.run(go())
+
+
+def test_motion_stop_flushes_the_modes_and_an_entry_reload_restores_them(env):
+    async def go():
+        hass = FakeHass()
+        live = await _mstart(env, hass)
+        _boiler_event(env, hass, "light.k", "on", old="off")
+        modes = live.engine.motion_modes()
+        n = len(_msaves())
+        await live.async_stop()
+        assert (MOTION_KEY, modes) in FakeStore.flushed and FakeStore.contents[MOTION_KEY] == modes
+        assert len(_msaves()) == n and not [e for e in env.later if e["on"]]
+        live2 = env.live.LiveRuntime(hass, FakePlans([_motion_plan()]))
+        await live2.async_start()
+        assert live2.engine.motion_modes() == modes
+
+    asyncio.run(go())
+
+
+def test_motion_restored_auto_waits_for_ha_started(env):
+    async def go():
+        hass = FakeHass()
+        hass.state = CoreState.not_running
+        live = await _mstart(env, hass, pir="on")
+        assert hass.services.calls == [] and hass.tasks == []
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_on"]
+        assert live.engine.snapshot("p1")["r1"]["verdict"] is True
+
+    asyncio.run(go())
