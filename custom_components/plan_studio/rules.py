@@ -459,12 +459,20 @@ class _Rule:
             self.beurer = Beurer(beurer, devices, call[2] if call is not None else None, power)
         control = raw.get("control")
         self.control: Control | None = None
+        self.control_actions: dict[str, list[_Action]] = {}  # per event kind; a toggle resolves through the on call
+        self.control_devices: list[tuple[str, str, str | None, bool]] = []  # (id, label, entity, is a valve), once
         if isinstance(control, dict):
-            loads = []
-            for did in (x for x in control.get("loads") or [] if isinstance(x, str)):
-                action = _Action({"device": did, "do": "on"}, devices)
-                loads.append((did, action.label, action.call[2] if action.call is not None else None))
-            self.control = Control(control, devices, loads)
+            self.control = Control(control, devices)
+            for kind, actions in self.control.lists.items():
+                self.control_actions[kind] = []
+                for did, do in actions:
+                    a = _Action({"device": did, "do": "on" if do == "toggle" else do}, devices)
+                    a.do = do
+                    self.control_actions[kind].append(a)
+                    if all(d[0] != did for d in self.control_devices):
+                        valve = _valve_entity(devices.get(did))
+                        eid = valve or (a.call[2] if a.call is not None else None)
+                        self.control_devices.append((did, a.label, eid, valve is not None))
         leak = raw.get("leak")
         sensors = [x for x in leak.get("sensors") or [] if isinstance(x, str)] if isinstance(leak, dict) else []
         valves = [x for x in leak.get("valves") or [] if isinstance(x, str)] if isinstance(leak, dict) else []
@@ -483,7 +491,7 @@ class _Rule:
         elif self.beurer is not None:
             raw_inputs = [self.beurer.input()]
         elif self.control is not None:
-            raw_inputs = []  # the sources are read by the rule itself (RuleEngine._control_source, on_intent)
+            raw_inputs = self.control.inputs  # its non-button sources; the buttons come through on_intent
         else:
             raw_inputs = raw.get("inputs") or []
         self.inputs = [_Input(i, devices, rule_names) for i in raw_inputs if isinstance(i, dict)]
@@ -582,6 +590,8 @@ class _Rule:
                 found.add("rule missing" if i.rule is not None else "device missing")
         if any(a.call is None for a in self.on_true + self.on_false):
             found.add("target missing")
+        if any(a.call is None for actions in self.control_actions.values() for a in actions):
+            found.add("target missing")
         if any(x is not None and x.missing for x in (self.boiler, self.timed, self.outside, self.beurer, self.control)):
             found.add("device missing")
         return next((r for r in STATIC_REASONS if r in found), None)
@@ -647,6 +657,8 @@ class RuleEngine:
         self._day_rules: dict[tuple[str, str], list[Key]] = {}  # daylight -> the rules reading it
         # load control: per entity the changes its commands are expected to make (state, expires epoch s), in send order
         self._echoes: dict[str, list[tuple[str, float]]] = {}
+        self._trigger: str | None = None  # the entity whose state change is being settled (handle_state)
+        self._echo: bool | None = None  # whether that change is a load control command arriving; None: not asked yet
 
     # --- loading -------------------------------------------------------------
 
@@ -678,6 +690,7 @@ class RuleEngine:
         stopped: list[_Rule] = []  # boiler rules disabled while auto whose last command was on
         ended: list[_Rule] = []  # timed rules disabled while running
         rules: dict[Key, _Rule] = {}
+        adopted: dict[Key, bool] = {}  # whether each loaded rule kept the state of an unchanged old one
         sensors: dict[tuple[str, str], dict] = {}  # the illuminance sensors read by daylight inputs
         for plan in plans:
             pid = plan.get("id") if isinstance(plan, dict) else None
@@ -699,7 +712,8 @@ class RuleEngine:
                 if rule.key in rules:
                     continue
                 prev = old.get(rule.key)
-                if prev is not None and prev.sig == rule.sig:
+                adopted[rule.key] = prev is not None and prev.sig == rule.sig
+                if adopted[rule.key]:
                     rule.adopt(prev)
                 else:
                     if prev is not None:
@@ -734,12 +748,10 @@ class RuleEngine:
                     st = self._lookup(eid)
                     rule.seen[eid] = st[0] if st is not None else None
             c = rule.control
-            if c is not None:  # an entity that left the sources is forgotten: when it returns it is read anew
-                c.seen = {eid: s for eid, s in c.seen.items() if eid in c.switches()}
-            for eid in c.switches() if c is not None else ():
-                if eid not in c.seen:  # a new (or changed) rule's starting point: remembered only, nothing is sent
-                    st = self._lookup(eid)
-                    c.source_changed(eid, st[0] if st is not None else None)
+            if c is not None and adopted.get(rule.key):
+                for k, i in enumerate(rule.inputs):  # a referenced rule that started anew: its start verdict is no event
+                    if i.type == "rule" and not adopted.get((rule.key[0], i.rule or "")):
+                        c.forget(k)
         # Within a load every shared device gets one command, its final state (no flick between rules starting at
         # once); the releases come after the new rules were evaluated, so a rule that keeps the device on is known.
         self._loading = True
@@ -950,8 +962,8 @@ class RuleEngine:
                 timed.append(rule.outside.eid)  # its light: a manual switch pauses the rule
             if rule.beurer is not None and rule.beurer.eid:
                 timed.append(rule.beurer.eid)  # its heater: switched off elsewhere, the power-cycle
-            if rule.control is not None:  # its state sources; its loads only so the trace follows them
-                timed += list(rule.control.switches()) + [eid for _, _, eid in rule.control.loads if eid]
+            # load control: its devices only so the trace follows them (its input sources are in `reads`)
+            timed += [eid for _, _, eid, _ in rule.control_devices if eid]
             for eid in reads + (rule.boiler.reads if rule.boiler is not None else []) + timed:
                 if key not in self._readers.get(eid, []):
                     self._readers.setdefault(eid, []).append(key)
@@ -1175,7 +1187,8 @@ class RuleEngine:
 
     def _evaluate(self, rule: _Rule, due: "_Pending | None" = None) -> bool:
         """Recompute the rule; True when its debounced verdict changed. An opening gate sends the current verdict."""
-        if rule.control is not None:  # nothing to evaluate: it reacts to events only
+        if rule.control is not None:  # no verdict: its sources' changes are events
+            self._control_evaluate(rule)
             rule.raw = rule.verdict = None
             return False
         if rule.boiler is not None:
@@ -1790,43 +1803,90 @@ class RuleEngine:
                 self._echoes.pop(eid, None)
 
     def _control_state(self, eid: str) -> str | None:
-        """The effective state of a load: None without data; else its newest command still on its way, else its
-        reading ("unknown" is commanded)."""
+        """The effective state of a device: None without data; else its newest command still on its way, else its
+        reading ("unknown" is commanded; a closing valve counts as closed)."""
         st = self._lookup(eid)
         if st is None or st[0] == "unavailable":
             return None
         live = self._echo_live(eid)
         if live:
             return live[-1][0]
-        return st[0] if st[0] in ("on", "off") else "unknown"
+        if st[0] == "closing":
+            return "closed"
+        return st[0] if st[0] in ("on", "off", "open", "closed") else "unknown"
 
-    def _control_apply(self, rule: _Rule, what: str, source: str) -> None:
-        """An event of a source ("toggle", "on" or "off"): every load goes to the wanted state by a direct call (own
-        context); a load in that state already or without data gets nothing (never re-sent later)."""
+    def _control_evaluate(self, rule: _Rule) -> None:
+        """The input sources are evaluated as the condition rule's inputs (timers, NOT); each known false <-> true
+        change of one is an event, in rule order. Values are always recorded; nothing fires for a disabled rule, a
+        missing button, in a load, while HA starts, or for a device source whose entity change is a load control
+        command arriving (resolved once per state change, for every load control rule)."""
         c = rule.control
         assert c is not None
-        now = self._now()
-        effective = [self._control_state(eid) if eid else None for _, _, eid in c.loads]
-        do = c.want(what, effective)
-        reason = f"{source}: {what if what == 'toggle' else do}"
+        self._compute(rule)
+        live = rule.enabled and not c.missing and not self._loading and not self._booting
+        for k, (i, t) in enumerate(zip(rule.inputs, rule.trace_inputs)):
+            if i.type == "device" and i.kind == "valve" and i.eid:
+                st = self._lookup(i.eid)
+                if st is not None and st[0] in ("opening", "closing"):
+                    continue  # a moving valve keeps its settled value (as the Valve container does)
+            what = c.edge(k, t["value"] if t["value"] is None or not i.negate else not t["value"])
+            if what is None or not live:
+                continue
+            if i.type == "device" and i.eid is not None and i.eid == self._trigger:
+                if self._echo is None:
+                    st = self._lookup(i.eid)
+                    self._echo = st is not None and self._echo_take(i.eid, st[0])
+                if self._echo:
+                    continue
+            self._control_event(rule, i.label, what)
+
+    def _control_event(self, rule: _Rule, source: str, what: str) -> None:
+        """An event ("on", "off" or "toggle") of a source: recorded; dropped while the gate is not open; else the list
+        of its kind runs by direct calls (own context). Its toggle actions act as one group (any of their devices
+        effectively on: all off, else all on); on / off / close are literal. A device in the wanted state already or
+        without data gets nothing (never re-sent later)."""
+        c = rule.control
+        assert c is not None
+        at = int(self._now() * 1000)
+        c.event = {"source": source, "what": what, "at": at}
+        if rule.gate is not None and (rule.gate_trace is None or rule.gate_trace["value"] is not True):
+            c.event["dropped"] = "gate closed"
+            return
+        actions = rule.control_actions.get(what, [])
+        if not actions:
+            return
+        effective = [self._control_state(a.call[2]) if a.call is not None else None for a in actions]
+        group = c.want([s for a, s in zip(actions, effective) if a.do == "toggle"])
         rule.seq += 1  # a late failure of an older event must not mark this one
-        seq, at = rule.seq, int(now * 1000)
+        seq, reason = rule.seq, f"{source}: {what}"
         rule.entries = []
-        for (_, label, eid), state in zip(c.loads, effective):
-            entry = {"action": do, "target": label, "at": at, "reason": reason}
+        for a, state in zip(actions, effective):
+            do = group if a.do == "toggle" else a.do
+            entry = {"action": do, "target": a.label, "at": at, "reason": reason}
             rule.entries.append(entry)
-            if eid is None or state is None:
+            if a.call is None:
+                entry["error"] = "target missing"
+                continue
+            domain, service, eid = a.call
+            if do == "close":  # the valve services; a switch-backed valve reads off when closed
+                expect = "closed" if domain == "valve" else "off"
+            else:
+                service, expect = f"turn_{do}", do
+            if state is None:
                 entry["error"] = "target unavailable"
-            elif state == do:
+            elif state == expect:
                 entry["sent"] = False
             else:
-                self._control_call(rule, seq, eid, do, entry)
+                self._control_call(rule, seq, (domain, service, eid), expect, entry)
         self._control_refresh(rule)
 
-    def _control_call(self, rule: _Rule, seq: int, eid: str, do: str, entry: dict) -> None:
-        """One direct command; it is remembered as an expected change of the entity for ECHO s (until it arrives or
-        the call fails)."""
-        echo = (do, self._now() + ECHO)
+    def _control_call(
+        self, rule: _Rule, seq: int, call: "tuple[str, str, str]", expect: str, entry: dict,
+    ) -> None:
+        """One direct command; the state it should bring is remembered as an expected change of the entity for ECHO s
+        (until it arrives or the call fails)."""
+        domain, service, eid = call
+        echo = (expect, self._now() + ECHO)
 
         def on_error(err: str, why: str = "service failed") -> None:
             live = self._echoes.get(eid, [])
@@ -1842,9 +1902,9 @@ class RuleEngine:
             self._flush()
 
         try:
-            self._call(eid.split(".", 1)[0], f"turn_{do}", eid, on_error=on_error, current=lambda: True)
-        except Exception as err:  # noqa: BLE001 - one failing load must not stop the others
-            _LOGGER.warning("rule %s: turn_%s %s failed: %s", rule.name, do, eid, err)
+            self._call(domain, service, eid, on_error=on_error, current=lambda: True)
+        except Exception as err:  # noqa: BLE001 - one failing device must not stop the others
+            _LOGGER.warning("rule %s: %s.%s %s failed: %s", rule.name, domain, service, eid, err)
             entry["error"] = "service failed"
             return
         self._echo_live(eid)
@@ -1859,41 +1919,20 @@ class RuleEngine:
             sent = next((e for e in reversed(rule.entries) if e.get("sent", True)), rule.entries[-1])
             rule.last = next((e for e in rule.entries if "error" in e), sent)
 
-    def _control_source(self, keys: "list[Key]", eid: str, st: "tuple[str, dict] | None") -> None:
-        """A state of a load control state source (whoever made it): every rule reading it remembers it; a change
-        between known states sets their loads, unless it is a load control command arriving (checked once) or HA is
-        still starting (only remembered). Without such a change the state may still be the arrival of the entity's
-        oldest expected change."""
-        changes: list[tuple[_Rule, str, str]] = []
-        for key in keys:
-            rule = self._rules[key]
-            c = rule.control
-            if c is None or eid not in c.switches():
-                continue
-            do = c.source_changed(eid, st[0] if st is not None else None)
-            if do is not None and rule.enabled and not c.missing and not self._booting:
-                changes.append((rule, do, c.switches()[eid]))
-        if not changes:
-            self._echo_arrived(eid, st)
-            return
-        if self._echo_take(eid, changes[0][1]):
-            return
-        for rule, do, source in changes:
-            self._control_apply(rule, do, source)
-
     def _control_trace(self, rule: _Rule) -> dict:
         c = rule.control
         assert c is not None
 
-        def reading(eid: "str | None") -> "str | None":
+        def state(eid: "str | None", valve: bool) -> "str | None":
             st = self._lookup(eid) if eid else None
+            if valve:
+                return {True: "open", False: "closed", None: None}[_valve_open(eid, st)] if eid else None
             return st[0] if st is not None and st[0] in ("on", "off") else None
 
-        return {
-            "sources": [{"id": did, "name": label, "kind": kind, "state": reading(eid)}
-                        for did, label, kind, eid in c.sources],
-            "loads": [{"id": did, "name": label, "state": reading(eid)} for did, label, eid in c.loads],
-        }
+        out: dict = {} if c.event is None else {"event": dict(c.event)}
+        out["devices"] = [{"id": did, "name": label, "state": state(eid, valve)}
+                          for did, label, eid, valve in rule.control_devices]
+        return out
 
     def runs(self) -> "dict[str, dict[str, float]]":
         """The running timed switches {plan id: {rule id: until epoch s}} of every loaded rule."""
@@ -2015,13 +2054,13 @@ class RuleEngine:
         dirty: set[Key] = set()
         for key, rule in self._rules.items():
             c = rule.control
-            if c is not None:  # a smart button source; a wall switch source is read from its entity (handle_state)
-                if key[0] != plan_id or not rule.enabled or c.missing or self._booting or container_id not in c.buttons():
+            if c is not None:  # a button source; any other source is read through its input (handle_state)
+                if key[0] != plan_id or not rule.enabled or c.missing or self._booting:
                     continue
-                what = c.press(intent)
+                label = next((label for did, label in c.buttons if did == container_id), None)
+                what = c.press(intent) if label is not None else None
                 if what is not None:
-                    source = next(label for did, label, _, _ in c.sources if did == container_id)
-                    self._control_apply(rule, what, source)
+                    self._control_event(rule, label, what)
                     dirty.add(key)
                 continue
             t = rule.timed
@@ -2095,9 +2134,16 @@ class RuleEngine:
                 self._outside_light(rule, own or confirms)
             if rule.beurer is not None and rule.beurer.eid == entity_id:
                 self._beurer_heater(rule, own or confirms)
-        self._control_source(keys or (), entity_id, st)
-        if keys:
-            self._settle(set(keys))
+        # A load control rule finding a source change of this entity asks once whether it is its command arriving;
+        # when none did, the state may still be the arrival of the entity's oldest expected change.
+        self._trigger, self._echo = entity_id, None
+        try:
+            if keys:
+                self._settle(set(keys))
+        finally:
+            self._trigger = None
+        if self._echo is None:
+            self._echo_arrived(entity_id, st)
         self._resend(entity_id)  # after the inputs: a newer firing has already dropped stale waiting actions
         self._flush()
 
@@ -2138,7 +2184,13 @@ class RuleEngine:
             out["outside"] = self._outside_trace(rule)
         if rule.beurer is not None:
             out["beurer"] = self._beurer_trace(rule)
-        if rule.control is not None:
+        if rule.control is not None:  # one entry per source in rule order; a button has no value
+            c = rule.control
+            out["inputs"] = [
+                {**rule.trace_inputs[k], "gives": gives} if kind == "input"
+                else {"label": c.buttons[k][1], "value": None, "detail": "", "gives": gives}
+                for (kind, k), gives in zip(c.order, c.gives)
+            ]
             out["control"] = self._control_trace(rule)
         if rule.leak:
             out["leak"] = {"valves": [

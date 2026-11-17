@@ -1,58 +1,60 @@
-"""The Load control rule: sources (smart buttons, wall switches, motion sensors) switch loads (on / off devices) directly.
+"""The Load control rule, the event twin of the condition rule: sources (smart buttons, or any condition rule input)
+give on / off / toggle events; each event kind runs its own action list by direct calls.
 
 Must not import homeassistant.
 
-The rule engine owns the I/O (service calls, the expected changes of its commands, trace frames); this module holds the
-rule's configuration, its runtime state and the decisions."""
+The rule engine owns the I/O (the input evaluation, service calls, the expected changes of its commands, trace frames);
+this module holds the rule's configuration, its runtime state and the decisions."""
 
 from __future__ import annotations
 
 ECHO = 10  # s a command counts as an expected change of its entity
-SOURCES = ("wall_switch", "smart_button", "motion_sensor")
-STATE_ROLE = {"wall_switch": "state", "motion_sensor": "motion"}  # the binding a state source is read from
+KINDS = ("on", "off", "toggle")
 
 
 def _str(v: object) -> str | None:
     return v if isinstance(v, str) and v else None
 
 
-def _reading(state: str | None) -> str | None:
-    return state if state in ("on", "off") else None
-
-
 class Control:
-    def __init__(self, raw: dict, devices: dict, loads: "list[tuple[str, str, str | None]]") -> None:
-        """loads: (device id, label, on / off control entity or None) per load, in rule order (resolved by the engine)."""
-        ids = raw.get("sources") if isinstance(raw.get("sources"), list) else []
-        self.sources: list[tuple[str, str, str | None, str | None]] = []  # (id, label, kind, state entity)
-        missing = False
-        for did in (x for x in ids if _str(x)):
-            dev = devices.get(did)
-            name = dev.get("name") if dev else None
-            props = dev.get("props") if dev else None
-            kind = props.get("kind") if isinstance(props, dict) else None
-            eid = None
-            if kind in STATE_ROLE:
-                bindings = dev.get("bindings") if dev else None
-                eid = _str(bindings.get(STATE_ROLE[kind])) if isinstance(bindings, dict) else None
-                missing = missing or eid is None
-            missing = missing or kind not in SOURCES
-            self.sources.append((did, name if _str(name) else did, kind if isinstance(kind, str) else None, eid))
-        self.loads = loads
-        self.missing = missing or any(eid is None for _, _, eid in loads)
+    def __init__(self, raw: dict, devices: dict) -> None:
+        sources = raw.get("sources") if isinstance(raw.get("sources"), list) else []
+        self.order: list[tuple[str, int]] = []  # ("button", k) | ("input", k) per source, in rule order
+        self.buttons: list[tuple[str, str]] = []  # (device id, label) of the button sources
+        self.inputs: list[dict] = []  # the RuleInput sources (the engine builds and evaluates them)
+        self.gives: list[str] = []  # per source in rule order: "toggle" | "on / off"
+        self.missing = False  # a button source that is not a smart button
+        for s in (x for x in sources if isinstance(x, dict)):
+            if "button" in s:
+                did = _str(s["button"]) or ""
+                dev = devices.get(did)
+                props = dev.get("props") if dev else None
+                kind = props.get("kind") if isinstance(props, dict) else None
+                self.missing = self.missing or kind != "smart_button"
+                name = dev.get("name") if dev else None
+                self.order.append(("button", len(self.buttons)))
+                self.buttons.append((did, name if _str(name) else did))
+                split = isinstance(props, dict) and props.get("separateOff") is True
+                self.gives.append("on / off" if split else "toggle")
+            else:
+                self.order.append(("input", len(self.inputs)))
+                self.inputs.append(s)
+                self.gives.append("on / off")
+        self.lists: dict[str, list[tuple[str, str]]] = {}
+        for kind in KINDS:
+            actions = raw.get(kind) if isinstance(raw.get(kind), list) else []
+            self.lists[kind] = [
+                (a["device"], a["do"]) for a in actions
+                if isinstance(a, dict) and _str(a.get("device")) and _str(a.get("do"))
+            ]
         # runtime state, kept across an unchanged Save
-        self.seen: dict[str, str | None] = {}  # state source entity -> its last on / off reading (None after no data)
+        self.last: list[bool | None] = [None] * len(self.inputs)  # the remembered value of each input source
+        self.event: dict | None = None  # the last event: {source, what, at, dropped?}
 
     def take(self, old: "Control") -> None:
-        self.seen = dict(old.seen)
-
-    def buttons(self) -> "set[str]":
-        """The device ids of the smart button sources."""
-        return {did for did, _, kind, _ in self.sources if kind == "smart_button"}
-
-    def switches(self) -> "dict[str, str]":
-        """entity -> source label, of the state sources (wall switches, motion sensors)."""
-        return {eid: label for _, label, _, eid in self.sources if eid is not None}
+        if len(old.last) == len(self.last):
+            self.last = list(old.last)
+        self.event = old.event
 
     def press(self, intent: dict) -> str | None:
         """A smart button intent: "toggle", "on" or "off"; None for auto, status events and anything else."""
@@ -63,15 +65,18 @@ class Control:
             return value
         return None
 
-    def source_changed(self, eid: str, state: str | None) -> str | None:
-        """A state of a state source: remembered; the new state when it changed between known states (a change to or
-        a return from no data is not a change)."""
-        was, now = self.seen.get(eid), _reading(state)
-        self.seen[eid] = now
-        return now if was is not None and now is not None and now != was else None
+    def edge(self, k: int, value: "bool | None") -> str | None:
+        """The value of input source k (after NOT) is remembered; "on" / "off" when it changed between known values (a
+        change to or a return from no data is no event)."""
+        was, self.last[k] = self.last[k], value
+        if was is None or value is None or was == value:
+            return None
+        return "on" if value else "off"
 
-    def want(self, what: str, effective: "list[str | None]") -> str:
-        """The state for every load: toggle -> off when any load is effectively on, else on."""
-        if what == "toggle":
-            return "off" if "on" in effective else "on"
-        return what
+    def forget(self, k: int) -> None:
+        """The next known value of input source k is a new starting point."""
+        self.last[k] = None
+
+    def want(self, effective: "list[str | None]") -> str:
+        """The state for every device of a toggle group: off when any is effectively on, else on."""
+        return "off" if "on" in effective else "on"
