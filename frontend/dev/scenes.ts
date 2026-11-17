@@ -60,6 +60,21 @@ function room(): Plan {
       props: { kind: 'valve', autoByDoubleToggle: false, windowSec: 3 },
     },
     {
+      id: 'd-wc-climate', name: 'WC climate', invalid: false, bindings: { temperature: 'sensor.wc_temperature', humidity: 'sensor.wc_humidity' },
+      placement: { mode: 'free', x: 600, y: 2400, rotation: 0 },
+      props: { kind: 'climate_sensor' },
+    },
+    {
+      id: 'd-main-climate', name: 'Main climate', invalid: false, bindings: { temperature: 'sensor.main_temperature', humidity: 'sensor.main_humidity' },
+      placement: { mode: 'free', x: 3400, y: 2400, rotation: 0 },
+      props: { kind: 'climate_sensor' },
+    },
+    {
+      id: 'd-fan', name: 'WC fan', invalid: false, bindings: { control: 'switch.wc_fan' },
+      placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 800 },
+      props: { kind: 'exhaust_fan', diameter: 100 },
+    },
+    {
       // Wall-mounted body pushed into the top-right corner: fitWallMount keeps it flush between the faces (offset 3650).
       id: 'd-corner', name: 'Corner box', invalid: false, bindings: {},
       placement: { mode: 'wall', wallId: 'w0', side: 'right', offset: 3650 },
@@ -91,6 +106,11 @@ function room(): Plan {
       gate: { source: { held: { sources: [{ device: 'd-light' }], state: 'any', seconds: 1800 } } },
       onDelay: 0, offDelay: 0, onTrue: [{ device: 'd-light', do: 'on' }], onFalse: [{ device: 'd-light', do: 'off' }],
     },
+    {
+      id: 'rule-vent', name: 'Vent Main', zoneId: 'r0', combine: 'any', inputs: [],
+      vent: { sensor: 'd-wc-climate', than: 'd-main-climate', above: 9, below: 5 },
+      onDelay: 0, offDelay: 600, onTrue: [{ device: 'd-fan', do: 'on' }], onFalse: [{ device: 'd-fan', do: 'off' }],
+    },
   ];
   return { id: 'room', name: 'Room', schemaVersion: 2, revision: 1, levels: [level], rules };
 }
@@ -118,6 +138,11 @@ const OUTSIDE_TRACE: RuleTrace = {
   gate: { value: false, detail: 'unchanged 18 / 30 min', until: Date.now() + 12 * 60_000 },
 };
 ROOM_RULES['rule-outside'] = OUTSIDE_TRACE;
+ROOM_RULES['rule-vent'] = {
+  status: 'ok', verdict: true, unknownInputs: 0, pending: { to: false, at: Date.now() + 7 * 60_000 },
+  inputs: [{ label: 'WC climate vs Main climate', value: true, detail: '17.4 / 9.7 g/m³ (+80 %)' }],
+  last: { action: 'on', target: 'WC fan', at: new Date().setHours(21, 43, 0, 0), reason: 'vent' },
+};
 
 const equipment = (id: string, name: string, placement: Device['placement'], bindings: Device['bindings'],
   flags: { inverter?: true; controllable?: true } = {}): Device => ({

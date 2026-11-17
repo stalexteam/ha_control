@@ -267,6 +267,15 @@ export const panelStyles = css`
 
   /* Rule dialog: about 90 % of the viewport; settings scroll on the left, the flowchart is on the right. */
   .dialog.rdlg { box-sizing: border-box; width: 90%; height: 90%; max-width: none; display: flex; flex-direction: column; padding: 14px 18px; }
+  .dialog.vdlg { box-sizing: border-box; width: min(560px, 94%); max-height: 90%; overflow-y: auto; display: flex; flex-direction: column; padding: 14px 18px; }
+  .vform { display: flex; flex-direction: column; gap: 6px; }
+  .vform .rlabel { color: var(--ch-muted); font-size: 12px; margin-top: 6px; }
+  .vform input, .vform select { font: inherit; color: var(--ch-text); background: var(--ch-bg); border: 1px solid var(--ch-divider);
+    border-radius: 6px; padding: 5px 8px; min-width: 0; }
+  .vform .num { width: 72px; text-align: right; }
+  .vnums { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 8px; }
+  .vnums label { display: inline-flex; align-items: center; gap: 6px; color: var(--ch-muted); font-size: 12px; }
+  .vent-live { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
   .rcols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 38%) 1fr; gap: 18px; margin-top: 4px; }
   .rsettings { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 8px; min-width: 0; }
   .rsettings .rlabel, .rfoot .rlabel { color: var(--ch-muted); font-size: 12px; margin-top: 6px; }

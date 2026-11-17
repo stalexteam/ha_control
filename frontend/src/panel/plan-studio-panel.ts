@@ -42,9 +42,10 @@ import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { RulesFeed } from '../live/rules-feed';
-import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakTemplate, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
+import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakTemplate, ventTemplate, isVentRule, newRule, outsideLightTemplate, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import type { RuleTemplate } from './rule-templates';
 import { renderRuleDialog, type RuleDraft } from './rule-dialog';
+import { renderVentDialog } from './vent-dialog';
 import { PowerFeed, powerPayload } from '../live/power-feed';
 import { deviceLive, liveBubbles } from '../live/device-live';
 import { DeviceEventTracker, eventSources } from '../live/device-events';
@@ -347,6 +348,7 @@ export class PlanStudioPanel extends LitElement {
       const rule = template === 'leak' ? leakTemplate({ levels }, zid, zone?.name ?? null)
         : template === 'timer' ? timerTemplate({ levels }, zid, dev && isRuleInputDevice(dev) ? dev.id : null, dev && isRuleInputDevice(dev) ? dev.name : '')
         : template === 'outside' ? outsideLightTemplate({ levels }, zid, zone?.name ?? null)
+        : template === 'vent' ? ventTemplate({ levels }, zid, zone?.name ?? null)
         : newRule(zid);
       draft = { rule, isNew: true, focused: null };
     }
@@ -390,6 +392,23 @@ export class PlanStudioPanel extends LitElement {
     const trace = same ? this.rulesFeed.trace(rule.id) : undefined;
     const note = !saved ? t('rules.flow.new') : same ? null : t('rules.flow.edited');
     const multi = levels.length > 1;
+    const zones = levels.flatMap(l => l.zones.map(z => ({ id: z.id, name: multi ? `${z.name} (${l.name})` : z.name })));
+    const problems = ruleProblems(this.rules, rule, id => devices.some(x => x.id === id),
+      id => { const x = devices.find(v => v.id === id); return x && ruleActionsFor(x); },
+      id => devices.some(x => x.id === id && x.props.kind === 'illuminance_sensor'),
+      id => devices.some(x => x.id === id && x.props.kind === 'climate_sensor'));
+    if (isVentRule(rule)) {
+      return renderVentDialog({
+        draft: d,
+        climateSensors: devices.filter(x => x.props.kind === 'climate_sensor'),
+        fans: devices.filter(x => { const a = ruleActionsFor(x); return a.includes('on') && a.includes('off'); }),
+        deviceById: id => devices.find(x => x.id === id),
+        zones, problems, trace, note, now: Date.now(),
+        onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
+        onOk: () => this.commitRuleDraft(),
+        onCancel: () => { this.dialog = null; this.ruleDraft = null; },
+      });
+    }
     return renderRuleDialog({
       draft: d,
       inputDevices: devices.filter(isRuleInputDevice),
@@ -403,11 +422,7 @@ export class PlanStudioPanel extends LitElement {
       deviceById: id => devices.find(x => x.id === id),
       otherRules: this.rules.filter(r => r.id !== rule.id),
       ruleName: id => this.rules.find(r => r.id === id)?.name,
-      zones: levels.flatMap(l => l.zones.map(z => ({ id: z.id, name: multi ? `${z.name} (${l.name})` : z.name }))),
-      problems: ruleProblems(this.rules, rule, id => devices.some(x => x.id === id),
-        id => { const x = devices.find(v => v.id === id); return x && ruleActionsFor(x); },
-        id => devices.some(x => x.id === id && x.props.kind === 'illuminance_sensor'),
-        id => devices.some(x => x.id === id && x.props.kind === 'climate_sensor')),
+      zones, problems,
       trace, note, now: Date.now(),
       onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
       onFocus: f => this.focusRuleField(f),
