@@ -130,31 +130,31 @@ class MotionLight:
             return "auto", None
         return None, None
 
-    def decide(self, state: str, until: float) -> None:
-        """The rule decided `state` (sent or not): until then a change of the light to it is the rule's own."""
-        self.own.append((state, until))
+    def decide(self, state: str, now: float, window: float) -> None:
+        """The rule decided `state` (sent or not): for `window` s a change of the light to it is the rule's own."""
+        self.own = [o for o in self.own if o[1] > now]
+        self.own.append((state, now + window))
 
     def light_changed(self, state: "str | None", confirms: bool, active: bool, now: float = 0.0) -> "str | None":
         """A state change of the light in auto: "manual" for a known -> known change that does not confirm the slots'
         last command (whatever its context) and is not to a state the rule itself decided within its window (an
-        overtaken command arriving late; each decision counts once), "back" for a return from no data (or the
-        wall-switch change behind an auto intent: the auto start applies again), "found" for an off -> on that
-        confirms, else None."""
+        overtaken command arriving late; every known -> known change uses up the earliest matching decision, confirming
+        or not), "back" for a return from no data (or the wall-switch change behind an auto intent: the auto start
+        applies again, keeping the auto entry), "found" for an off -> on that confirms, else None."""
         was, self.seen = self.seen, state
         self.own = [o for o in self.own if o[1] > now]
         if not active or self.mode != "auto" or state is None or state == was:
             return None
         if was is None:
             return "back"
+        mine = next((o for o in self.own if o[0] == state), None)  # in decision order: the earliest
+        if mine is not None:
+            self.own.remove(mine)
         if self.skip:
-            self.skip = False
+            self.skip, self.entered = False, True
             return "back"
         if not confirms:
-            mine = next((o for o in self.own if o[0] == state), None)
-            if mine is None:
-                return "manual"
-            self.own.remove(mine)
-            return None
+            return None if mine is not None else "manual"
         return "found" if state == "on" else None
 
     def auto_due(self, now: float, motion: bool) -> "float | None":
@@ -181,6 +181,6 @@ class MotionLight:
             out["offAt"] = off_at
         if self.on_at is not None and self.on_at + self.min_on > now:
             out["minUntil"] = int((self.on_at + self.min_on) * 1000)
-        if self.mode == "manual" and self.auto_after > 0 and self.since is not None:
+        if self.mode == "manual" and self.auto_after > 0 and self.since is not None and not self.moving:
             out["autoAt"] = int((self.since + self.auto_after * 60) * 1000)
         return out

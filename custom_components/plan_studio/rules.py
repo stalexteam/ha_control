@@ -1793,7 +1793,7 @@ class RuleEngine:
         if self._step(rule, due):
             # the rule decided to switch the light on: the minimum on time counts from here
             m.on_at = now if rule.verdict is True else None
-            m.decide("on" if rule.verdict else "off", now + ON_WAY)  # its late echo is not a manual switch
+            m.decide("on" if rule.verdict else "off", now, ON_WAY)  # its late echo is not a manual switch
         return rule.verdict != was
 
     def _motion_hold(self, rule: _Rule, on: bool, note: bool = True) -> None:

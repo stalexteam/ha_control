@@ -162,6 +162,13 @@ def test_light_changed_table():
     assert m.light_changed("off", False, True) == "manual"
 
 
+def test_decide_prunes_expired_records():
+    m = make()
+    for t, state in ((0, "on"), (5, "off"), (20, "on"), (25, "off")):
+        m.decide(state, t, 10)
+    assert m.own == [("on", 30), ("off", 35)]
+
+
 def test_own_switches_and_ident():
     m = make()
     assert m.own_switches == {"ws"} and m.ident == ("light.k", ("btn", "ws")) and not m.missing
@@ -388,6 +395,27 @@ def test_wall_switch_double_toggle_returns_auto():
     assert w.calls == [OFF] and w.ml()["mode"] == "auto"
 
 
+def test_double_toggle_keeps_the_auto_entry():
+    w = loaded([ml_rule(buttons=("ws",))], light__k="on")
+    w.press("ws", "set", "off")
+    w.light("off")
+    w.press("ws", "auto")
+    assert w.tr()["last"]["reason"] == "button: auto"
+    w.light("on")  # the change of that same toggle
+    assert w.tr()["last"]["reason"] == "button: auto" and w.tr()["verdict"] is True
+
+
+def test_auto_at_is_hidden_while_motion_lasts():
+    w = loaded([ml_rule(auto_after=10)])
+    w.light("on")  # manual at T0
+    w.advance(T0 + 300)
+    w.pir("on")
+    w.advance(T0 + 900)  # since + 10 min (T0 + 600) is past, but auto waits for the motion to end
+    assert "autoAt" not in w.ml() and w.ml()["mode"] == "manual"
+    w.pir("off")
+    assert w.ml()["autoAt"] == (T0 + 1500) * 1000
+
+
 def test_button_press_in_manual_keeps_manual():
     w = loaded([ml_rule(buttons=("btn",))])
     w.press("btn", "toggle")
@@ -406,7 +434,7 @@ def test_auto_again_after_minutes_without_motion():
     assert w.ml()["autoAt"] == (T0 + 600) * 1000
     w.advance(T0 + 300)
     w.pir("on")
-    assert "autoAt" in w.ml()
+    assert "autoAt" not in w.ml()  # auto waits for the motion to end
     w.pir("off")
     assert w.ml()["autoAt"] == (T0 + 900) * 1000
     w.advance(T0 + 899)
@@ -485,6 +513,38 @@ def test_manual_switch_to_the_opposite_state_inside_the_window_is_manual():
     w.advance(T0 + 3)
     w.light("off")
     assert w.ml()["mode"] == "manual"
+
+
+def test_confirmed_echo_consumes_its_record():
+    w = lit()
+    w.pir("off")
+    w.advance(T0 + 180)
+    assert w.calls == [OFF]
+    w.light("off", own=True)  # confirms: its record is used up
+    w.advance(T0 + 183)
+    w.pir("on")
+    assert w.calls == [OFF, ON]
+    w.light("on", own=True)  # confirms
+    w.advance(T0 + 186)
+    w.light("off")  # the person
+    t = w.tr()
+    assert t["motionLight"]["mode"] == "manual" and t["verdict"] is None
+    w.pir("off")
+    w.advance(T0 + 3600)
+    w.pir("on")
+    assert w.calls == [OFF, ON]
+
+
+def test_confirmed_echoes_then_manual_on_with_off_zero():
+    w = loaded([ml_rule(off=0)])
+    w.pir("on")
+    w.light("on", own=True)
+    w.pir("off")
+    w.light("off", own=True)
+    assert w.calls == [ON, OFF] and w.ml()["mode"] == "auto"
+    w.advance(T0 + 5)
+    w.light("on")  # the person
+    assert w.ml()["mode"] == "manual" and w.calls == [ON, OFF]
 
 
 def test_own_window_expires():
