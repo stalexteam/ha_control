@@ -53,11 +53,11 @@ async function check(el: PlanStudioPanel, sel: string, on: boolean): Promise<voi
 describe('Timed switch form', () => {
   beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
 
-  it('the Automations menu lists Timed switch last', async () => {
+  it('the Automations menu lists Timed switch after Leak protection', async () => {
     const el = await open([]);
     await press(el, 'button[data-action="automations"]');
     const items = [...el.shadowRoot!.querySelectorAll('.amenu [role="menuitem"]')];
-    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed']);
+    expect(items.map(i => i.getAttribute('data-automation'))).toEqual(['vent', 'boiler', 'leak', 'timed', 'outside']);
     expect(items[3].textContent!.trim()).toBe('Timed switch');
   });
 

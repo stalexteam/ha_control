@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isTimedRule, timedTemplate, isRuleInputDevice, leakProtectionTemplate, newRule, outsideLightTemplate, isOutsideRule, outsideTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
+  RULE_DELAY_MAX, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isVentRule, ventTemplate, addRule, deleteRule, isLeakRule, isTimedRule, timedTemplate, isRuleInputDevice, leakProtectionTemplate, newRule, isOutsideRule, outsideTemplate, ruleRefs, timerTemplate, ruleActionsFor, ruleCycle, ruleProblems,
   rulesFor, ruleUsers, updateRule,
 } from '../../src/model/rules';
 import { deviceDefaults, emptyLevel, type Device, type DeviceKind, type Rule, type Zone } from '../../src/model/types';
@@ -330,28 +330,6 @@ describe('rules model', () => {
     });
     expect(t.gate).toBeUndefined();
     expect(timerTemplate(plan, null, null, '').inputs[0].source).toEqual({ held: { sources: [], state: 'any', seconds: 1800 } });
-  });
-
-  it('outsideLightTemplate picks the first participating illuminance sensor of the zone', () => {
-    const zone: Zone = {
-      id: 'z1', name: 'Yard', invalid: false,
-      shape: { kind: 'polygon', vertices: [[0, 0], [1000, 0], [1000, 1000], [0, 1000]].map(([x, y]) => ({ kind: 'free' as const, x, y })) },
-    };
-    const lvl = { ...emptyLevel('l1'), zones: [zone],
-      devices: [dev('far', 'illuminance_sensor', 5000, 5000), { ...dev('s1', 'illuminance_sensor'), zoneBlacklist: ['z1'] }, dev('s2', 'illuminance_sensor', 600, 600)] };
-    const r = outsideLightTemplate({ levels: [lvl] }, 'z1', 'Yard');
-    expect(r.name).toBe('Outside light Yard');
-    expect(r.combine).toBe('all');
-    expect(r.inputs).toEqual([
-      { source: { daylight: 's2', is: 'night' } },
-      { source: { sun: true } },
-      { source: { time: { from: '17:00', to: '01:00' } } },
-    ]);
-    expect(r.gate).toEqual({ source: { held: { sources: [], state: 'any', seconds: 1800 } } });
-    expect(r.onTrue).toEqual([]);
-    const e = outsideLightTemplate({ levels: [lvl] }, null, null);
-    expect(e.name).toBe('Outside light');
-    expect(e.inputs[0].source).toEqual({ daylight: '', is: 'night' });
   });
 });
 

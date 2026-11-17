@@ -279,7 +279,7 @@ export const panelStyles = css`
   .dialog.rdlg { box-sizing: border-box; width: 90%; height: 90%; max-width: none; display: flex; flex-direction: column; padding: 14px 18px; }
   .rsettings > p.muted { margin: 0; }
   .rsettings .rcheck { margin-top: 12px; font-size: 13px; color: var(--ch-text); }
-  .vnums { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 8px; }
+  .vnums { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; margin-top: 8px; }
   .vnums label { display: inline-flex; align-items: center; gap: 6px; color: var(--ch-muted); font-size: 12px; }
   .rcols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(280px, 38%) 1fr; gap: 18px; margin-top: 4px; }
   .rsettings { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 8px; min-width: 0; }

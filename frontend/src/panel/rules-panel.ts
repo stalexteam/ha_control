@@ -1,7 +1,7 @@
 import { html, nothing, type TemplateResult } from 'lit';
 import type { Id, Level, Rule } from '../model/types';
 import type { Selection } from '../editor/tools/types';
-import { SWITCHED_ELSEWHERE, keptOn, type RuleLast, type RuleTrace } from '../live/rules-feed';
+import { keptOn, switchedElsewhere, type RuleLast, type RuleTrace } from '../live/rules-feed';
 import { ruleEqual, rulesFor } from '../model/rules';
 import { t } from '../i18n';
 
@@ -34,7 +34,7 @@ export function clock(at: number): string {
 export function lastText(l: RuleLast): string {
   if (keptOn(l)) return t('rules.last.kept').replace('{target}', l.target).replace('{reason}', l.reason).replace('{at}', clock(l.at)).trim();
   if (l.sent === false) {
-    return t(l.reason === SWITCHED_ELSEWHERE ? 'rules.last.elsewhere' : 'rules.last.already')
+    return t(switchedElsewhere(l) ? 'rules.last.elsewhere' : 'rules.last.already')
       .replace('{target}', l.target).replace('{s}', l.action).replace('{at}', clock(l.at)).trim();
   }
   const base = `${t(`rules.did.${l.action}`)} ${l.target} ${clock(l.at)}`.trim();

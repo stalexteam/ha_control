@@ -1,5 +1,5 @@
 import type { Device, DeviceProps, Plan, Rule, Zone } from '../src/model/types';
-import type { RuleTrace } from '../src/live/rules-feed';
+import type { OutsideTrace, RuleTrace } from '../src/live/rules-feed';
 import { fitWallMount } from '../src/geometry/devices';
 import type { PowerFrame, PowerSchema } from '../src/model/power';
 import { rectRoomLevel } from '../test/fixtures';
@@ -490,6 +490,60 @@ const TIMED_INV: Record<string, RuleTrace> = {
   },
 };
 
+/**
+ * Scene `outside`: the room with the ceiling light "Yard light" in the Yard zone and two outside light rules on it:
+ * `rule-yard` "Yard light" (Light sensor, no data = night, after sunset, pause 30 min) and `rule-yard-win` "Yard
+ * evening" (also the window 17:00-23:00, pause 0). Live: night, the yard light on; the evening rule in its window at
+ * twilight (night in 0:42). Scene `outside-paused`: someone switched the light off, paused for 12:34 more. Scene
+ * `outside-day`: day, off. Scene `outside-window`: night, but the evening rule is outside its window.
+ */
+function outsidePlan(): Plan {
+  const p = room();
+  p.levels[0].devices.push({
+    id: 'd-yard-light', name: 'Yard light', invalid: false, bindings: { control: 'light.yard' },
+    placement: { mode: 'free', x: 2000, y: 4200, rotation: 0 },
+    props: { kind: 'ceiling_light', shape: 'round', diameter: 300, length: 600, width: 100, poolRadius: null },
+  });
+  const fixed = { combine: 'any' as const, inputs: [], onDelay: 0, offDelay: 0, onTrue: [], onFalse: [] };
+  p.rules!.push(
+    { id: 'rule-yard', name: 'Yard light', zoneId: 'z-yard', ...fixed, outside: { light: 'd-yard-light', sensor: 'd-lux', noDataNight: true, afterSunset: true, pause: 30 } },
+    { id: 'rule-yard-win', name: 'Yard evening', zoneId: 'z-yard', ...fixed, outside: { light: 'd-yard-light', sensor: 'd-lux', afterSunset: true, window: { from: '17:00', to: '23:00' }, pause: 0 } },
+  );
+  return p;
+}
+
+const outsideTrace = (o: Partial<OutsideTrace>, over: Partial<RuleTrace> = {}): RuleTrace => ({
+  status: 'ok', verdict: true, unknownInputs: 0,
+  inputs: [{ label: 'Light sensor', value: o.daylight === 'night', detail: o.detail ?? '' }, { label: 'Sun', value: o.sun === 'below', detail: `${o.sun} horizon` }],
+  outside: { daylight: 'night', detail: '5 lx', sun: 'below', window: null, light: 'on', ...o },
+  ...over,
+});
+const YARD_NIGHT = outsideTrace({}, { last: { action: 'on', target: 'Yard light', at: at(19, 42), reason: 'became true: Light sensor night, 5 lx, Sun below horizon' } });
+const YARD_EVENING = outsideTrace(
+  { daylight: 'twilight', detail: '12 lx (night in 1:00)', until: Date.now() + 42_000, window: true, windowUntil: Date.now() + 2 * 3600_000 + 754_000, light: 'on' },
+  { verdict: false, last: { action: 'off', target: 'Yard light', at: at(19, 42), reason: 'kept on by Yard light', sent: false } },
+);
+const OUTSIDE_RULES: Record<string, RuleTrace> = { ...ROOM_RULES, 'rule-yard': YARD_NIGHT, 'rule-yard-win': YARD_EVENING };
+const OUTSIDE_PAUSED: Record<string, RuleTrace> = {
+  ...OUTSIDE_RULES,
+  'rule-yard': outsideTrace({ detail: '4 lx', pausedUntil: Date.now() + 754_000, light: 'off' }, {
+    last: { action: 'off', target: 'Yard light', at: Date.now() - 1_046_000, reason: 'switched elsewhere: paused 30 min', sent: false },
+  }),
+};
+const OUTSIDE_DAY: Record<string, RuleTrace> = {
+  ...OUTSIDE_RULES,
+  'rule-yard': outsideTrace({ daylight: 'day', detail: '1240 lx', sun: 'above', light: 'off' }, {
+    verdict: false, last: { action: 'off', target: 'Yard light', at: at(7, 12), reason: 'became false: Light sensor day, 1240 lx' },
+  }),
+  'rule-yard-win': outsideTrace({ daylight: 'day', detail: '1240 lx', sun: 'above', window: false, windowUntil: Date.now() + 9 * 3600_000, light: 'off' }, { verdict: false }),
+};
+const OUTSIDE_WINDOW: Record<string, RuleTrace> = {
+  ...OUTSIDE_RULES,
+  'rule-yard-win': outsideTrace({ window: false, windowUntil: Date.now() + 17 * 3600_000 + 754_000 }, {
+    verdict: false, last: { action: 'off', target: 'Yard light', at: at(23, 0), reason: 'kept on by Yard light', sent: false },
+  }),
+};
+
 const equipment = (id: string, name: string, placement: Device['placement'], bindings: Device['bindings'],
   flags: { inverter?: true; controllable?: true } = {}): Device => ({
   id, name, invalid: false, bindings, placement,
@@ -657,4 +711,8 @@ export const SCENES: Record<string, Scene> = {
   'timed-run': { plans: [timedPlan()], rulesFrame: TIMED_RUN },
   'timed-else': { plans: [timedPlan()], rulesFrame: TIMED_ELSE },
   'timed-inv': { plans: [timedPlan()], rulesFrame: TIMED_INV },
+  outside: { plans: [outsidePlan()], rulesFrame: OUTSIDE_RULES },
+  'outside-paused': { plans: [outsidePlan()], rulesFrame: OUTSIDE_PAUSED },
+  'outside-day': { plans: [outsidePlan()], rulesFrame: OUTSIDE_DAY },
+  'outside-window': { plans: [outsidePlan()], rulesFrame: OUTSIDE_WINDOW },
 };

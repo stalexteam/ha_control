@@ -415,17 +415,11 @@ describe('Rule dialog', () => {
       expect(el.ruleDraft!.focused).toBe('gate-input');
     });
 
-    it('Timer and Outside light templates follow the model shapes', async () => {
+    it('the Timer template follows the model shape; the rail has no Outside light condition template', async () => {
       const el = await open([]);
       click(el, 300, 300); // Main
       await el.updateComplete;
-      await press(el, 'button[data-template="outside"]');
-      expect(q<HTMLInputElement>(el, '[data-field="name"]').value).toBe('Outside light Main');
-      expect(q<HTMLSelectElement>(el, '[data-field="combine"]').value).toBe('all');
-      expect(q<HTMLSelectElement>(el, '[data-field="input-0"] [data-part="daylight"]').value).toBe('d-lux');
-      expect(q<HTMLSelectElement>(el, '[data-field="input-0"] [data-part="is"]').value).toBe('night');
-      expect(el.ruleDraft!.rule.gate).toEqual({ source: { held: { sources: [], state: 'any', seconds: 1800 } } });
-      await press(el, 'button[data-action="rule-cancel"]');
+      expect(el.shadowRoot!.querySelector('button[data-template="outside"]')).toBeNull();
       await press(el, 'button[data-template="timer"]');
       expect(q<HTMLInputElement>(el, '[data-field="name"]').value).toBe('Unchanged 30 min');
       expect(el.ruleDraft!.rule.inputs).toEqual([{ source: { held: { sources: [], state: 'any', seconds: 1800 } } }]);

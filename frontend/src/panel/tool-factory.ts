@@ -25,7 +25,7 @@ export const BINDING_TOOL_IDS: ToolId[] = ['binding-select'];
 export const POWER_TOOL_IDS: ToolId[] = ['power-select', 'power-device', 'power-bus', 'power-battery', 'power-pv',
   'power-transfer', 'power-remainder'];
 
-/** The Automation step's only tool picks a zone; its templates (Condition, Timer, Outside light) are rail buttons, not tools. */
+/** The Automation step's only tool picks a zone; its templates (Condition, Timer) are rail buttons, not tools. */
 export const AUTOMATION_TOOL_IDS: ToolId[] = ['zone-pick'];
 
 /** Plan step single-key shortcuts (the letter of the physical key, e.code `Key<letter>`); other steps have none. */

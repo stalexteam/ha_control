@@ -49,6 +49,31 @@ export function keptOn(l: RuleLast): boolean {
   return l.sent === false && /^(kept|already) on by /.test(l.reason);
 }
 
+/**
+ * An entry of someone else switching the device (`sent: false`): a timed switch run that ended
+ * (`ended: switched elsewhere`) or an outside light rule that pauses (`switched elsewhere: paused 30 min`).
+ */
+export function switchedElsewhere(l: RuleLast): boolean {
+  return l.sent === false && (l.reason === SWITCHED_ELSEWHERE || l.reason.startsWith('switched elsewhere'));
+}
+
+/**
+ * An outside light rule's state: `daylight` the debounced state of its sensor (null = no data), `detail` the reading
+ * with the pending change ("5 lx (night in 1:00)"), `until` = epoch ms of that change (only while pending); `sun`
+ * null without "Only after sunset" or without data; `window` null without a time window, `windowUntil` = epoch ms of
+ * its next boundary; `pausedUntil` = epoch ms when the manual pause ends (only while paused); `light` null = no data.
+ */
+export interface OutsideTrace {
+  daylight: 'night' | 'twilight' | 'day' | null;
+  detail: string;
+  until?: number;
+  sun: 'below' | 'above' | null;
+  window: boolean | null;
+  windowUntil?: number;
+  pausedUntil?: number;
+  light: 'on' | 'off' | null;
+}
+
 /** A timed switch rule's run: `until` = epoch ms of its end (only while running); `device` null = no data. */
 export interface TimedTrace { running: boolean; until?: number; device: 'on' | 'off' | null }
 
@@ -75,6 +100,8 @@ export interface RuleTrace {
   leak?: { valves: LeakValveTrace[] };
   /** Timed switch rule only. */
   timed?: TimedTrace;
+  /** Outside light rule only. */
+  outside?: OutsideTrace;
 }
 
 /** One `plan_studio/rules/subscribe` event: `full` replaces the map, otherwise the changed rules merge into it. */

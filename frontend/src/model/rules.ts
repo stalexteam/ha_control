@@ -302,24 +302,6 @@ export function timerTemplate(_plan: { levels: Level[] }, zoneId: Id | null, dev
   return rule;
 }
 
-/** The "Outside light" template: night (daylight + sun + time window), gated by the light unchanged for 30 min. The owner picks the light. */
-export function outsideLightTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
-  const rule = newRule(zoneId);
-  rule.name = zoneId !== null && zoneName ? `Outside light ${zoneName}` : 'Outside light';
-  rule.combine = 'all';
-  const level = zoneId === null ? undefined : plan.levels.find(l => l.zones.some(z => z.id === zoneId));
-  const sensor = level
-    ? zoneMembers(level, zoneId as Id).find(m => m.participates && m.device.props.kind === 'illuminance_sensor')?.device.id
-    : undefined;
-  rule.inputs = [
-    { source: { daylight: sensor ?? '', is: 'night' } },
-    { source: { sun: true } },
-    { source: { time: { from: '17:00', to: '01:00' } } },
-  ];
-  rule.gate = { source: { held: { sources: [], state: 'any', seconds: HELD_30_MIN } } };
-  return rule;
-}
-
 const INPUT_KINDS = new Set(['leak_sensor', 'motion_sensor', 'ceiling_light', 'wall_light', 'socket', 'exhaust_fan', 'equipment', 'wall_switch', 'valve']);
 export const isRuleInputDevice = (d: Device): boolean => INPUT_KINDS.has(d.props.kind);
 

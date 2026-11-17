@@ -10,9 +10,9 @@ const ICONS: Record<RuleTemplate, string> = {
 };
 
 /** Condition templates: one rail button each. */
-const CONDITION_TEMPLATES = ['condition', 'timer', 'outside'] as const;
+const CONDITION_TEMPLATES = ['condition', 'timer'] as const;
 /** Purpose-built automations, each with its own dialog: listed in the rail's "Automations" menu, in this order. */
-export const AUTOMATIONS: readonly RuleTemplate[] = ['vent', 'boiler', 'leak', 'timed'];
+export const AUTOMATIONS: readonly RuleTemplate[] = ['vent', 'boiler', 'leak', 'timed', 'outside'];
 
 const icon = (d: string): TemplateResult => html`<svg class="ticon" viewBox="0 0 24 24" aria-hidden="true">${svg`<path d=${d}></path>`}</svg>`;
 
