@@ -1386,3 +1386,124 @@ def test_outside_light_after_an_ha_restart_at_night_turns_on_at_once(late):
         w.t = 1100
         w.set("switch.ext", "off")
     assert w.calls == [ON]
+
+
+# --- wet zone ventilation -------------------------------------------------------
+
+WC = dev("wc", "climate_sensor", "WC", temperature="sensor.wc_t", humidity="sensor.wc_h")
+MAIN = dev("main", "climate_sensor", "Main", temperature="sensor.m_t", humidity="sensor.m_h")
+FAN = dev("fan", "exhaust_fan", "Fan", control="switch.fan")
+
+
+def vent_rule(above=9, below=5, run_on=600, **extra):
+    return rule("r", [], on_true=[("fan", "on")], on_false=[("fan", "off")], off_delay=run_on,
+                vent={"sensor": "wc", "than": "main", "above": above, "below": below}, **extra)
+
+
+def vent_world(wc=(24, 80), main=(22, 50), **extra):
+    w = World(sensor__wc_t=(str(wc[0]), {"unit_of_measurement": "°C"}), sensor__wc_h=(str(wc[1]), {"unit_of_measurement": "%"}),
+              sensor__m_t=(str(main[0]), {"unit_of_measurement": "°C"}), sensor__m_h=(str(main[1]), {"unit_of_measurement": "%"}),
+              switch__fan="off", **extra)
+    w.engine.load_plans([plan([WC, MAIN, FAN], [vent_rule()])])
+    return w
+
+
+def test_vent_wet_zone_turns_the_fan_on_and_names_the_trace():
+    w = vent_world()
+    t = trace(w)
+    assert t["verdict"] is True and w.calls == [("switch", "turn_on", "switch.fan")]
+    assert len(t["inputs"]) == 1 and t["inputs"][0]["label"] == "WC vs Main" and t["inputs"][0]["value"] is True
+    assert t["inputs"][0]["detail"].startswith("17.4 / 9.7 g/m³ (+") and t["inputs"][0]["detail"].endswith(" %)")
+
+
+def test_vent_between_thresholds_keeps_state_and_off_runs_on():
+    w = vent_world()
+    w.set("sensor.wc_h", "48")  # ratio between 1.05 and 1.09: keeps on
+    assert trace(w)["verdict"] is True
+    w.set("sensor.wc_h", "40")  # clearly below
+    assert trace(w)["inputs"][0]["value"] is False and trace(w)["verdict"] is True  # run-on
+    assert trace(w)["pending"]["to"] is False
+    w.advance(1000.0 + 599)
+    assert trace(w)["verdict"] is True
+    w.advance(1000.0 + 600)
+    assert trace(w)["verdict"] is False and w.calls[-1] == ("switch", "turn_off", "switch.fan")
+
+
+def test_vent_between_at_start_is_false_and_off_fires_at_start():
+    w = vent_world(wc=(22, 53))
+    assert trace(w)["inputs"][0]["value"] is False
+    assert trace(w)["verdict"] is False and w.calls == [("switch", "turn_off", "switch.fan")]
+
+
+@pytest.mark.parametrize("eid", ["sensor.wc_t", "sensor.wc_h", "sensor.m_t", "sensor.m_h"])
+def test_vent_each_entity_triggers_and_unknown_blocks(eid):
+    w = vent_world()
+    n = len(w.calls)
+    w.set(eid, "unavailable")
+    t = trace(w)
+    assert t["inputs"][0]["value"] is None and t["inputs"][0]["detail"] == "unavailable"
+    assert t["unknownInputs"] == 1 and t["verdict"] is True and len(w.calls) == n
+    w.set(eid, "unknown")
+    assert trace(w)["inputs"][0]["detail"] == "unknown"
+    w.set(eid, "23" if eid.endswith("t") else "80")
+    assert trace(w)["inputs"][0]["value"] is True
+
+
+def test_vent_entity_ids_cover_all_four_and_the_fan():
+    w = vent_world()
+    assert w.engine.entity_ids() == {"sensor.wc_t", "sensor.wc_h", "sensor.m_t", "sensor.m_h", "switch.fan"}
+
+
+def test_vent_fahrenheit_gives_the_same_verdict():
+    w = vent_world()
+    f = (22 * 9 / 5 + 32)
+    w.set("sensor.m_t", str(f), {"unit_of_measurement": "°F"})
+    w.set("sensor.wc_t", str(24 * 9 / 5 + 32), {"unit_of_measurement": "°F"})
+    assert trace(w)["inputs"][0]["value"] is True
+    assert trace(w)["inputs"][0]["detail"].startswith("17.4 / 9.7")
+
+
+@pytest.mark.parametrize("eid,state,attrs,detail", [
+    ("sensor.wc_t", "24", {"unit_of_measurement": "K"}, "not °C"),
+    ("sensor.wc_h", "80", {}, "not %"),
+    ("sensor.wc_h", "120", {"unit_of_measurement": "%"}, "not %"),
+    ("sensor.m_t", "abc", {"unit_of_measurement": "°C"}, "no data"),
+    ("sensor.m_h", "nan", {"unit_of_measurement": "%"}, "no data"),
+])
+def test_vent_unknown_causes(eid, state, attrs, detail):
+    w = vent_world()
+    w.set(eid, state, attrs)
+    assert trace(w)["inputs"][0]["value"] is None and trace(w)["inputs"][0]["detail"] == detail
+
+
+def test_vent_missing_entity_and_missing_device():
+    w = World(sensor__wc_t=("24", {"unit_of_measurement": "°C"}), sensor__wc_h=("80", {"unit_of_measurement": "%"}),
+              sensor__m_t=("22", {"unit_of_measurement": "°C"}), switch__fan="off")
+    w.engine.load_plans([plan([WC, MAIN, FAN], [vent_rule()])])
+    assert trace(w)["inputs"][0]["detail"] == "missing" and trace(w)["verdict"] is None
+    w.engine.load_plans([plan([WC, FAN], [vent_rule()])])
+    assert trace(w)["status"] == "error" and trace(w)["reason"] == "device missing"
+    w.engine.load_plans([plan([WC, MAIN], [vent_rule()])])
+    assert trace(w)["status"] == "error" and trace(w)["reason"] == "target missing"
+
+
+def test_vent_zero_humidity_reference_is_unknown():
+    w = vent_world(main=(22, 0))
+    assert trace(w)["inputs"][0]["value"] is None
+
+
+def test_vent_rule_is_an_input_of_another_rule():
+    w = vent_world(binary_sensor__x="off")
+    x = dev("x", "motion_sensor", "X", motion="binary_sensor.x")
+    other = rule("q", [ref("r")])
+    w.engine.load_plans([plan([WC, MAIN, FAN, x], [vent_rule(), other])])
+    assert trace(w, "q")["verdict"] is True
+
+
+def test_vent_changed_params_restart_and_unchanged_keep_state():
+    w = vent_world()
+    w.set("sensor.wc_h", "48")
+    w.engine.load_plans([plan([WC, MAIN, FAN], [vent_rule(name="renamed")])])
+    assert trace(w)["verdict"] is True and trace(w)["inputs"][0]["value"] is True  # kept the memory
+    w.engine.load_plans([plan([WC, MAIN, FAN], [vent_rule(above=9, below=5.5)])])
+    assert trace(w)["inputs"][0]["value"] is False  # restarted: between at start = false

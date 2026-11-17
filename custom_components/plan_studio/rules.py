@@ -130,6 +130,37 @@ def _span(elapsed: float, total: int) -> str:
     return f"{int(elapsed)} / {total} s"
 
 
+def _absolute_humidity(device: dict, lookup: Lookup) -> "tuple[float | None, str]":
+    """(g/m3, "") of a climate sensor, or (None, the cause) when its reading is unusable."""
+    reads = []
+    for role in ("temperature", "humidity"):
+        eid = _bound(device, role)
+        st = lookup(eid) if eid else None
+        if st is None:
+            return None, "missing"
+        if st[0] in ("unknown", "unavailable"):
+            return None, st[0]
+        reads.append(st)
+    (t_raw, t_attrs), (h_raw, h_attrs) = reads
+    unit = (t_attrs or {}).get("unit_of_measurement")
+    if unit not in ("°C", "°F"):
+        return None, "not °C"
+    if (h_attrs or {}).get("unit_of_measurement") != "%":
+        return None, "not %"
+    try:
+        t, rh = float(t_raw), float(h_raw)
+    except ValueError:
+        return None, "no data"
+    if not (math.isfinite(t) and math.isfinite(rh)):
+        return None, "no data"
+    if not 0 <= rh <= 100:
+        return None, "not %"
+    if unit == "°F":
+        t = (t - 32) * 5 / 9
+    ps = 6.112 * math.exp(17.62 * t / (243.12 + t))
+    return 216.7 * (rh / 100 * ps) / (273.15 + t), ""
+
+
 def _target(device: dict | None, do: str) -> "tuple[str, str, str] | None":
     """(domain, service, entity id) of one action, or None when the target cannot take it."""
     if device is None:
@@ -170,6 +201,8 @@ class _Input:
         self.rule: str | None = None
         self.kind = self.eid = None
         self.sources: list[_Input] = []  # held
+        self.reads: list[str] = []  # the entities whose change re-evaluates the input
+        self.pair: "tuple[dict, dict] | None" = None  # vent: the two climate sensors
         # runtime state, kept across a reload that leaves the rule unchanged
         self.timer: "tuple[float, Callable[[], None]] | None" = None  # time / held: (due epoch, cancel)
         self.prev: bool | None = None  # light: the value kept between the thresholds
@@ -183,6 +216,18 @@ class _Input:
             self.missing = self.rule not in rule_names
             self.label = rule_names.get(self.rule) or self.rule
             self.sig: tuple = ("rule", self.rule)
+        elif "vent" in src:
+            self.type = "vent"
+            v = src["vent"]
+            devs = [devices.get(v.get(k)) for k in ("sensor", "than")]
+            self.missing = any(d is None or _kind(d) != "climate_sensor" for d in devs)
+            self.label = " vs ".join(_label(d, str(v.get(k))) for d, k in zip(devs, ("sensor", "than")))
+            if not self.missing:
+                self.pair = (devs[0], devs[1])
+                self.reads = [e for d in devs for e in (_bound(d, "temperature"), _bound(d, "humidity")) if e]
+            self.above = float(v["above"]) if isinstance(v.get("above"), (int, float)) else 0.0
+            self.below = float(v["below"]) if isinstance(v.get("below"), (int, float)) else 0.0
+            self.sig = ("vent", v.get("sensor"), v.get("than"), self.above, self.below, tuple(self.reads))
         elif "light" in src:
             self.type = "light"
             did = src["light"] if isinstance(src["light"], str) else ""
@@ -196,6 +241,7 @@ class _Input:
             self.hyst = float(hyst) if isinstance(hyst, (int, float)) else 0.0
             self.dark = src.get("unknownDark") is True
             self.sig = ("light", did, self.eid, self.dark)
+            self.reads = [self.eid] if self.eid else []
         elif src.get("sun") is True:
             self.type, self.eid, self.label, self.sig = "sun", SUN, "Sun", ("sun",)
         elif isinstance(src.get("time"), dict):
@@ -223,6 +269,9 @@ class _Input:
                 self.kind = _kind(device)
                 self.eid = _bound(device, INPUT_ROLE.get(self.kind or ""))
             self.sig = ("device", did, self.kind, self.eid)
+            self.reads = [self.eid] if self.eid else []
+        if self.type == "sun":
+            self.reads = [SUN]
 
     def parts(self) -> "list[_Input]":
         """The inputs that read a device or a rule: the held sources, or the input itself."""
@@ -269,7 +318,9 @@ class _Rule:
         self.name = raw.get("name") if isinstance(raw.get("name"), str) else raw["id"]
         self.enabled = raw.get("enabled") is not False
         self.mode = raw.get("combine") if raw.get("combine") in ("all", "any") else "any"
-        self.inputs = [_Input(i, devices, rule_names) for i in raw.get("inputs") or [] if isinstance(i, dict)]
+        vent = raw.get("vent")
+        raw_inputs = [{"source": {"vent": vent}}] if isinstance(vent, dict) else raw.get("inputs") or []
+        self.inputs = [_Input(i, devices, rule_names) for i in raw_inputs if isinstance(i, dict)]
         self.gate = _Input(raw["gate"], devices, rule_names) if isinstance(raw.get("gate"), dict) else None
         self.all_inputs = self.inputs + ([self.gate] if self.gate is not None else [])
         self.on_true = [_Action(a, devices) for a in raw.get("onTrue") or [] if isinstance(a, dict)]
@@ -428,8 +479,9 @@ class RuleEngine:
                 visit(key)
         for key, rule in self._rules.items():
             for i in (p for top in rule.all_inputs for p in top.parts()):
-                if i.eid is not None and key not in self._readers.get(i.eid, []):
-                    self._readers.setdefault(i.eid, []).append(key)
+                for eid in i.reads:
+                    if key not in self._readers.get(eid, []):
+                        self._readers.setdefault(eid, []).append(key)
             for a in rule.on_true + rule.on_false if rule.enabled else []:
                 if a.call is not None and key not in self._targets.get(a.call[2], []):
                     self._targets.setdefault(a.call[2], []).append(key)
@@ -497,11 +549,30 @@ class RuleEngine:
             return self._window(i, now)
         if i.missing:
             return None, "missing", None
+        if i.type == "vent":
+            return (*self._vent(i), None)
         if i.type == "light":
             return (*self._light(i), None)
         if i.type == "sun":
             return (*_read_sun(self._lookup), None)
         return (*_read(i.kind, i.eid, self._lookup), None)
+
+    def _vent(self, i: _Input) -> "tuple[bool | None, str]":
+        """The sensor's absolute humidity against the other's: above 1 + above %: true; below 1 + below %: false;
+        in between: the previous value."""
+        ah = [_absolute_humidity(d, self._lookup) for d in i.pair or ()]
+        for _, cause in ah:
+            if cause:
+                return None, cause
+        a, b = ah[0][0], ah[1][0]
+        if b <= 0:
+            return None, "no data"
+        r = a / b
+        if r > 1 + i.above / 100:
+            i.prev = True
+        elif r < 1 + i.below / 100 or i.prev is None:
+            i.prev = False
+        return i.prev, f"{a:.1f} / {b:.1f} g/m³ ({(r - 1) * 100:+.0f} %)"
 
     def _light(self, i: _Input) -> "tuple[bool | None, str]":
         """Below the threshold: true; above it plus the hysteresis: false; in between: the previous value."""
