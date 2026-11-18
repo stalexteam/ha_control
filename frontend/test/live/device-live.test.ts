@@ -130,3 +130,13 @@ describe('illuminance sensor daylight bubble', () => {
     expect(text(sensor({}), {})).toEqual([]);
   });
 });
+
+describe('deviceLive: a virtual switch', () => {
+  const v = dev({ kind: 'virtual_switch' }, { control: 'virtual.d1' });
+  it('reads the merged virtual.<id> entry like a socket: on, off, no data; no timer', () => {
+    expect(deviceLive(v, { 'virtual.d1': st('on') })).toEqual({ look: 'on' });
+    expect(deviceLive(v, { 'virtual.d1': st('off') })).toEqual({ look: 'off' });
+    expect(deviceLive(v, {})).toEqual({ look: 'no-data' });
+    expect(deviceLive(dev({ kind: 'virtual_switch' }), { 'virtual.d1': st('on') })).toEqual({ look: 'none' });
+  });
+});

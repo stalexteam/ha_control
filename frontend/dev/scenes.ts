@@ -8,7 +8,7 @@ import { rectRoomLevel } from '../test/fixtures';
  * A named dev-harness state: the plans seeded into the mock store, the power and rules frames the mock answers with,
  * and live states replacing the demo sample's.
  */
-export interface Scene { plans: Plan[]; powerFrame?: PowerFrame; rulesFrame?: Record<string, RuleTrace>; states?: Record<string, unknown> }
+export interface Scene { plans: Plan[]; powerFrame?: PowerFrame; rulesFrame?: Record<string, RuleTrace>; states?: Record<string, unknown>; virtualStates?: Record<string, 'on' | 'off'> }
 
 function room(): Plan {
   const level = rectRoomLevel(4000, 3000, 100);
@@ -637,6 +637,28 @@ const MOTION_LIGHT_NOSENSORS = motionLightTrace(
   { sensors: [], motion: false, dark: null, light: 'off' },
   { verdict: null, inputs: [], last: undefined },
 );
+/**
+ * Scenes `motionlight-sleep` / `-sleep-off`: the rule is "Blocked while Sleep is on" (Sleep = the virtual switch on the plan, bound to
+ * its own entity). `-sleep`: Sleep is on, the rule is blocked, the light was turned off by the block. `-sleep-off`: Sleep is off, nothing blocks.
+ */
+function sleepPlan(): Plan {
+  const p = motionLightPlan();
+  p.levels[0].devices.push({
+    id: 'd-sleep', name: 'Sleep', invalid: false, bindings: { control: 'virtual.d-sleep' },
+    placement: { mode: 'free', x: 3200, y: 2400, rotation: 0 }, props: { kind: 'virtual_switch' },
+  });
+  p.rules!.find(r => r.id === 'rule-ml')!.motionLight!.blocker = { device: 'd-sleep', is: 'on' };
+  return p;
+}
+const MOTION_LIGHT_SLEEP = motionLightTrace(
+  { blocked: true, motion: true, light: 'off', blocker: { name: 'Sleep', state: 'on', is: 'on' } },
+  { verdict: false, last: { action: 'off', target: 'Ceiling light', at: at(23, 2), reason: 'blocked' } },
+);
+const MOTION_LIGHT_SLEEP_OFF = motionLightTrace(
+  { blocker: { name: 'Sleep', state: 'off', is: 'on' } },
+  { last: { action: 'on', target: 'Ceiling light', at: at(7, 5), reason: 'unblocked: motion' } },
+);
+
 const MOTION_LIGHT_WAITING = motionLightTrace(
   { waiting: true, motion: true, light: 'off', sensors: [{ id: 'd-motion', name: 'Motion sensor', state: 'on' }, { id: 'd-motion-hall', name: 'Motion hall', state: 'off' }] },
   { verdict: false, last: { action: 'off', target: 'Ceiling light', at: at(21, 44), reason: 'switched off elsewhere: waits for new motion', sent: false } },
@@ -876,6 +898,8 @@ export const SCENES: Record<string, Scene> = {
   'motionlight-nobutton': { plans: [motionLightVariant(m => { m.buttons = []; m.autoAfter = 0; })], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_AUTO } },
   'motionlight-nosensors': { plans: [motionLightVariant(m => { m.sensors = []; })], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_NOSENSORS } },
   'motionlight-waiting': { plans: [motionLightPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_WAITING } },
+  'motionlight-sleep': { plans: [sleepPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_SLEEP }, virtualStates: { 'd-sleep': 'on' } },
+  'motionlight-sleep-off': { plans: [sleepPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_SLEEP_OFF }, virtualStates: { 'd-sleep': 'off' } },
   beurer: { plans: [beurerPlan()], rulesFrame: BEURER_RULES },
   'beurer-cycle': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ cycleAt: undefined, pausedUntil: Date.now() + 3_000, heater: 'off' }) } },
   'beurer-kept': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ watts: null, detail: 'no data, kept', keptUntil: Date.now() + 252_000 }, { pending: { to: false, at: Date.now() + 45_000 } }) } },

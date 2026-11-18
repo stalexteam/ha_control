@@ -22,13 +22,13 @@ export class MetaSource {
   private base: { states: States; meta: HaMeta } | null = null;
   private merged: { base: HaMeta; regs: Registries | null; meta: HaMeta } | null = null;
 
-  constructor(private readonly h: Pick<PlanStudioPanel, 'hass' | 'requestUpdate'>) {}
+  constructor(private readonly h: Pick<PlanStudioPanel, 'hass' | 'requestUpdate'> & { liveStates?: States }) {}
 
   /** A registry load is in progress. */
   get loading(): boolean { return this.pending; }
 
   get(): HaMeta {
-    const states = this.h.hass?.states;
+    const states = this.h.liveStates ?? this.h.hass?.states;
     const b = this.base;
     if (!b || !sameStructure(b.states, states)) this.base = { states, meta: metaFromStates(states) };
     else b.states = states;

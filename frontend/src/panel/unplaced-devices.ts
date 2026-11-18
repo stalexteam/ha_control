@@ -10,10 +10,10 @@ export function unplacedDevices(level: Level): Device[] {
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }
 
-/** A new equipment device that is not on the plan, named "Device N" with the smallest N no equipment device has. */
-export function newUnplacedDevice(level: Level): { level: Level; id: Id } {
-  const names = level.devices.filter(d => d.props.kind === 'equipment').map(d => d.name);
-  return addUnplacedDevice(level, nextFreeName(t('device.equipment'), names));
+/** A new device that is not on the plan, named "Device N" (or "Virtual switch N") with the smallest N no device of that kind has. */
+export function newUnplacedDevice(level: Level, kind: 'equipment' | 'virtual_switch' = 'equipment'): { level: Level; id: Id } {
+  const names = level.devices.filter(d => d.props.kind === kind).map(d => d.name);
+  return addUnplacedDevice(level, nextFreeName(t(`device.${kind}`), names), kind);
 }
 
 /** What an equipment device is: "Inverter" with that flag, otherwise its role by what is bound; '' for other kinds. */
@@ -36,6 +36,8 @@ export interface UnplacedListOpts {
   onPick(id: Id): void;
   /** "New device": adds one (see newUnplacedDevice) and selects it. */
   onNew(): void;
+  /** "New virtual switch": the same for a virtual switch. */
+  onNewVirtual(): void;
 }
 
 /** Equipment step with nothing selected: the devices not on the plan (a row selects its device) and "New device". */
@@ -44,11 +46,14 @@ export function renderUnplacedDevices(o: UnplacedListOpts): TemplateResult {
   return html`<section class="unplaced" data-list="unplaced">
     <div class="uhead">
       <h4>${t('devices.unplaced')}</h4>
-      <button class="btn" data-action="new-device" @click=${() => o.onNew()}>${t('devices.new')}</button>
+      <span class="uacts">
+        <button class="btn" data-action="new-device" @click=${() => o.onNew()}>${t('devices.new')}</button>
+        <button class="btn" data-action="new-virtual-switch" @click=${() => o.onNewVirtual()}>${t('devices.newVirtual')}</button>
+      </span>
     </div>
     ${list.length === 0 ? nothing : html`<div class="pdevs">
       ${list.map(d => html`<button class="pdev" data-id=${d.id} @click=${() => o.onPick(d.id)}>
-        <span class="name">${d.name}</span><span class="kind">${deviceRoleLabel(d)}</span>
+        <span class="name">${d.name}</span><span class="kind">${deviceRoleLabel(d) || t(`device.${d.props.kind}`)}</span>
       </button>`)}
     </div>`}
   </section>`;

@@ -45,7 +45,7 @@ import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { ruleModeBubbles } from '../live/rule-mode';
 import { RulesFeed, type RuleTrace } from '../live/rules-feed';
-import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakProtectionTemplate, ventTemplate, isVentRule, isLeakRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isTimedRule, timedTemplate, newRule, isOutsideRule, outsideTemplate, isMotionLightRule, isMotionButton, motionLightTemplate, isBeurerRule, beurerTemplate, isControlRule, controlTemplate, controlActionsFor, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
+import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakProtectionTemplate, ventTemplate, isVentRule, isLeakRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isTimedRule, timedTemplate, newRule, isOutsideRule, outsideTemplate, isMotionLightRule, isMotionButton, isBlocker, motionLightTemplate, isBeurerRule, beurerTemplate, isControlRule, controlTemplate, controlActionsFor, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import { renderAutomationsMenu, type RuleTemplate } from './rule-templates';
 import { renderRuleDialog, type RuleDialogOpts, type RuleDraft } from './rule-dialog';
 import { renderVentDialog } from './vent-dialog';
@@ -66,6 +66,7 @@ import { PowerFeed, powerPayload } from '../live/power-feed';
 import { deviceLive, liveBubbles } from '../live/device-live';
 import { DeviceEventTracker, eventSources } from '../live/device-events';
 import { EntityFeed } from '../live/entity-feed';
+import { VirtualFeed } from '../live/virtual-feed';
 import { UpdateCheck } from '../live/update-check';
 
 /** The integration version this bundle was built from (Vite `define`, from manifest.json). */
@@ -149,6 +150,8 @@ export class PlanStudioPanel extends LitElement {
   readonly feed = new ContainerFeed(this, () => this.hass?.connection);
   /** Live traces of the saved rules (subscribed only in the Automation step of an attached panel). */
   readonly rulesFeed = new RulesFeed(this, () => this.hass?.connection);
+  /** The states of the plan's virtual switches (kept by the integration); `liveStates` merges them into hass.states. */
+  readonly virtualFeed = new VirtualFeed(this, () => this.hass?.connection);
   /** Live values of the schematic draft (subscribed only in the Power step of an attached panel). */
   readonly powerFeed = new PowerFeed(this, () => this.hass?.connection);
 
@@ -172,7 +175,10 @@ export class PlanStudioPanel extends LitElement {
   get tickerOn(): boolean { return this.ticker !== null; }
 
   /** Binding status of a device, from live states. Until the registries are loaded no entity is Missing (its presence is unknown). */
-  readonly bindStatus = (d: Device): BindStatus => bindingStatus(d, eid => presence(this.haMeta.get(), eid, this.hass?.states));
+  readonly bindStatus = (d: Device): BindStatus => bindingStatus(d, eid => presence(this.haMeta.get(), eid, this.liveStates));
+
+  /** hass.states plus the virtual switches (`virtual.<device id>`): every reader of live states takes these. */
+  get liveStates(): HassLike['states'] { return this.virtualFeed.merge(this.hass?.states); }
 
   doSave(): Promise<void> { return this.session.doSave(); }
 
@@ -214,6 +220,7 @@ export class PlanStudioPanel extends LitElement {
     this.feed.watch(this.plan?.id ?? null); // re-attached: subscribe again (no-op before the first load)
     this.watchPower();
     this.watchRules();
+    this.watchVirtual();
     this.watchEntities();
     this.updateCheck.watch();
   }
@@ -235,6 +242,7 @@ export class PlanStudioPanel extends LitElement {
     this.powerFeed.stop();
     this.hint.hide();
     this.rulesFeed.stop();
+    this.virtualFeed.stop();
     this.entityFeed.stop();
     this.stopTicker();
   }
@@ -247,7 +255,7 @@ export class PlanStudioPanel extends LitElement {
     this.watchEntities();
     if (changed.has('hass') && this.isConnected) this.updateCheck.watch(); // hass may arrive after the element is attached
     if (cur && this.hass && (changed.has('hass') || cur !== this.trackedLevel)) {
-      this.events.update(cur, this.entityFeed.overlay(this.hass.states), Date.now());
+      this.events.update(cur, this.entityFeed.overlay(this.liveStates!), Date.now());
     }
     this.trackedLevel = cur;
     const sized = this.size.w > 0 && this.size.h > 0;
@@ -257,12 +265,19 @@ export class PlanStudioPanel extends LitElement {
     this.feed.watch(this.isConnected ? this.plan?.id ?? null : null);
     this.watchPower();
     this.watchRules();
+    this.watchVirtual();
     this.hint.sync(); // closes when the step changed or the block went; follows an edited binding
   }
 
   /** The rules feed watches the open plan in the Binding (mode bubbles) and Automation steps of an attached panel. */
   private watchRules(): void {
     this.rulesFeed.watch(this.isConnected && (this.mode === 'automation' || this.mode === 'binding') ? this.plan?.id ?? null : null);
+  }
+
+  /** The virtual feed watches the open plan while it has a virtual switch (any step: the Binding look, the rule dialogs, the Automation step). */
+  private watchVirtual(): void {
+    const any = this.isConnected && !!this.plan && this.planLevels().some(l => l.devices.some(d => d.props.kind === 'virtual_switch'));
+    this.virtualFeed.watch(any ? this.plan!.id : null);
   }
 
   /** The entity feed watches the open level's event sources in the Binding and Automation steps of an attached panel. */
@@ -274,7 +289,7 @@ export class PlanStudioPanel extends LitElement {
   /** Every entity feed message: the tracker sees each value, even one the next message replaces at once. */
   private onEntities(): void {
     const level = this.history?.current.level;
-    if (level && this.hass) this.events.update(level, this.entityFeed.overlay(this.hass.states), Date.now());
+    if (level && this.hass) this.events.update(level, this.entityFeed.overlay(this.liveStates!), Date.now());
     this.requestUpdate();
   }
 
@@ -289,7 +304,7 @@ export class PlanStudioPanel extends LitElement {
     const level = this.history?.current.level;
     const now = Date.now();
     const need = this.isConnected && (this.mode === 'binding' || this.mode === 'automation') && !!level && !!this.hass && level.devices.some(d =>
-      deviceLive(d, this.hass!.states).timerSince !== undefined || this.events.event(d.id, now) !== null
+      deviceLive(d, this.liveStates).timerSince !== undefined || this.events.event(d.id, now) !== null
       || this.events.leaving(d.id, now).length > 0);
     const tr = this.modal && this.ruleDraft ? this.shownRuleTrace(this.ruleDraft.rule) : undefined;
     const countdown = !!tr && (!!tr.pending || tr.inputs.some(i => i.until !== undefined && i.until > now) || (tr.gate?.until ?? 0) > now
@@ -492,7 +507,9 @@ export class PlanStudioPanel extends LitElement {
       id => devices.some(x => x.id === id && controlActionsFor(x).length > 0),
       id => devices.some(x => x.id === id && ruleActionsFor(x).includes('on') && ruleActionsFor(x).includes('off')),
       id => devices.some(x => x.id === id && x.props.kind === 'motion_sensor'),
-      id => devices.some(x => x.id === id && isMotionButton(x)));
+      id => devices.some(x => x.id === id && isMotionButton(x)),
+      id => devices.some(x => x.id === id && x.props.kind === 'virtual_switch'),
+      id => devices.some(x => x.id === id && isBlocker(x)));
     if (isBoilerRule(rule)) {
       return renderBoilerDialog({
         draft: d,
@@ -553,6 +570,7 @@ export class PlanStudioPanel extends LitElement {
         sensors: devices.filter(x => x.props.kind === 'motion_sensor'),
         daylightSensors: devices.filter(x => x.props.kind === 'illuminance_sensor'),
         buttons: devices.filter(isMotionButton),
+        blockers: devices.filter(isBlocker),
         deviceById: id => devices.find(x => x.id === id),
         zones, problems, trace, note, now: Date.now(),
         onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
@@ -593,7 +611,7 @@ export class PlanStudioPanel extends LitElement {
       lightSensors: devices.filter(x => x.props.kind === 'illuminance_sensor'),
       lightUnit: id => {
         const eid = devices.find(x => x.id === id)?.bindings?.illuminance;
-        const st = eid ? (this.hass?.states as Record<string, { attributes?: { unit_of_measurement?: string } }> | undefined)?.[eid] : undefined;
+        const st = eid ? (this.liveStates as Record<string, { attributes?: { unit_of_measurement?: string } }> | undefined)?.[eid] : undefined;
         return st?.attributes?.unit_of_measurement;
       },
       actionDevices: devices.filter(x => ruleActionsFor(x).length > 0),
@@ -841,7 +859,7 @@ export class PlanStudioPanel extends LitElement {
     const s = this.save;
     const power = this.mode === 'power';
     const now = Date.now();
-    const states = this.hass?.states;
+    const states = this.liveStates;
     return html`
       <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : power ? ' power' : this.mode === 'automation' ? ' automation' : ''}"
         style=${paletteVars(pal)} ?data-update=${this.updateCheck.serverVersion !== null}

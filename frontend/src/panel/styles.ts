@@ -259,7 +259,8 @@ export const panelStyles = css`
   .member input[type="checkbox"] { margin: 0; }
   /* Equipment properties with nothing selected: the devices not on the plan (rows styled as .pdev). */
   .unplaced { margin-top: 16px; padding-top: 10px; border-top: 1px solid var(--ch-divider); }
-  .uhead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  .uhead { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .uacts { display: flex; flex-wrap: wrap; gap: 6px; }
   .uhead h4 { margin: 0; }
   /* Power properties: the Device tool's list, read-only bindings, the action buttons. */
   .pdevs { display: flex; flex-direction: column; margin: 8px -12px 0; }

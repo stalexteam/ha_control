@@ -329,6 +329,11 @@ export function renderEquipmentProps(o: EquipmentPropsOpts): TemplateResult {
         o.commit(made.level);
         o.pickDevice(made.id);
       },
+      onNewVirtual: () => {
+        const made = newUnplacedDevice(level, 'virtual_switch');
+        o.commit(made.level);
+        o.pickDevice(made.id);
+      },
     })}
   </div>`;
 }

@@ -77,7 +77,7 @@ export type SwitchKind = 'wall_switch' | 'smart_button';
 export const isSwitchKind = (kind: DeviceKind): kind is SwitchKind => kind === 'wall_switch' || kind === 'smart_button';
 /** True for the input-container kinds. */
 export const isContainerKind = (kind: DeviceKind): kind is ContainerKind => kind === 'wall_switch' || kind === 'smart_button' || kind === 'valve';
-export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | ContainerKind | 'socket' | 'equipment' | 'climate_sensor' | 'exhaust_fan' | 'leak_sensor';
+export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | ContainerKind | 'socket' | 'equipment' | 'climate_sensor' | 'exhaust_fan' | 'leak_sensor' | 'virtual_switch';
 export type DevicePlacement =
   | { mode: 'wall'; wallId: Id; side: Side; offset: number; aim?: number } // offset: along axis from node A to device centre; aim: degrees off the face normal, counter-clockwise on screen, integer -90..90 (default 0)
   | { mode: 'free'; x: number; y: number; rotation: number } // rotation in degrees
@@ -95,6 +95,8 @@ export type DeviceProps =
   // Daylight thresholds (see model/daylight.ts); a missing field = its default.
   | { kind: 'illuminance_sensor'; nightBelow?: number; dayAbove?: number; sunNight?: number; sunDay?: number; debounce?: number }
   | { kind: 'socket' } | { kind: 'climate_sensor' } | { kind: 'leak_sensor' }
+  // A state the integration keeps (on / off, never sent to Home Assistant); its only binding is `control` = virtual.<device id>.
+  | { kind: 'virtual_switch' }
   // inverter: Power is replaced by Input / Output power; controllable: Plan Studio may switch its control.
   // A missing flag means false. Shape, size, icon and label matter only while the device is on the plan.
   | { kind: 'equipment'; shape: 'rect' | 'circle'; width: number; depth: number; diameter: number;
@@ -181,8 +183,8 @@ export interface Rule {
   outside?: { light: Id; sensor: Id; noDataNight?: true; afterSunset?: true; window?: { from: string; to: string }; pause: number };
   /** Beurer heater: a heating pad (heater) is kept on while a power source draws above `above` W, off `offDelay` s after it stops, re-powered every `every` min (0 = never) and kept at least `keep` min (0 = none); inputs/actions stay empty. */
   beurer?: { heater: Id; source: Id; above: number; keep: number; every: number };
-  /** Light motion control: motion sensors switch one light (on / off after `offDelay` s without motion, at least `minOn` s on), optionally only while the daylight sensor reads night / dark; buttons set manual / auto, `autoAfter` min (0 = never) returns to auto; inputs/actions stay empty. */
-  motionLight?: { light: Id; sensors: Id[]; daylight?: { sensor: Id; is: 'night' | 'dark' }; minOn: number; buttons: Id[]; autoAfter: number };
+  /** Light motion control: motion sensors switch one light (on / off after `offDelay` s without motion, at least `minOn` s on), optionally only while the daylight sensor reads night / dark (the light also goes off when it turns day / light); `blocker` blocks the rule while that on/off device reads `is` (the light goes off, motion does nothing; manual is not blocked); buttons set manual / auto, `autoAfter` min (0 = never) returns to auto; inputs/actions stay empty. */
+  motionLight?: { light: Id; sensors: Id[]; daylight?: { sensor: Id; is: 'night' | 'dark' }; minOn: number; buttons: Id[]; autoAfter: number; blocker?: { device: Id; is: 'on' | 'off' } };
   /** Load control, the event twin of the condition rule: each source gives events (a button its intents, a condition input its on / off edges) and the event runs its action list; `gate` is "Act only when"; inputs/actions stay empty and there are no delays. */
   control?: { sources: ControlSource[]; on: ControlAction[]; off: ControlAction[]; toggle: ControlAction[] };
 }
@@ -227,6 +229,7 @@ export const DEVICE_PLACEMENTS: Record<DeviceKind, ('wall' | 'free')[]> = {
   leak_sensor: ['free', 'wall'],
   smart_button: ['wall', 'free'],
   socket: ['wall'],
+  virtual_switch: ['free', 'wall'],
   equipment: ['free', 'wall'],
   climate_sensor: ['free', 'wall'],
   exhaust_fan: ['wall'],
@@ -260,6 +263,16 @@ export function deviceDefaults(kind: DeviceKind, mode: 'wall' | 'free'): DeviceP
     default:
       return { kind };
   }
+}
+
+/** The synthetic entity of a virtual switch (the integration's `virtual.<device id>`): its only binding, as `control`. */
+export const virtualEntity = (deviceId: Id): string => `virtual.${deviceId}`;
+
+/** A virtual switch's bindings are exactly `control: virtual.<its id>` (the integration refuses any other); same device when they are. */
+function pinVirtual(d: Device): Device {
+  if (d.props.kind !== 'virtual_switch') return d;
+  const b = d.bindings;
+  return b && Object.keys(b).length === 1 && b.control === virtualEntity(d.id) ? d : { ...d, bindings: { control: virtualEntity(d.id) } };
 }
 
 /** Legacy equipment `symbol` -> MDI icon (stage 2a plans). */
@@ -343,6 +356,6 @@ function dropDefaultOutput(d: Device): Device {
 export function normalizeLevel(level: Level): Level {
   if (!level.devices) return { ...level, devices: [] };
   const devices = level.devices.map(d =>
-    sanitizeBindings(dropClimateZoneIds(dropDefaultOutput(completeContainer(migrateSwitch(migrateEquipment(d)))))));
+    pinVirtual(sanitizeBindings(dropClimateZoneIds(dropDefaultOutput(completeContainer(migrateSwitch(migrateEquipment(d))))))));
   return devices.some((d, i) => d !== level.devices[i]) ? { ...level, devices } : level;
 }

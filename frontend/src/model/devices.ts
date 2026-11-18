@@ -1,7 +1,7 @@
 import { newId } from './ids';
 import {
   AIM_MAX, DEVICE_PLACEMENTS, defaultsMode, deviceDefaults,
-  type BindingRole, type Device, type DevicePlacement, type DeviceProps, type Id, type Level, type SwitchKind, isSwitchKind,
+  type BindingRole, type Device, type DeviceKind, type DevicePlacement, type DeviceProps, type Id, type Level, type SwitchKind, isSwitchKind, virtualEntity,
 } from './types';
 import { sanitizeBindings } from './bindings';
 import { wallLen } from '../geometry/walls';
@@ -31,13 +31,17 @@ export function addDevice(
   level: Level, props: DeviceProps, placement: DevicePlacement, name: string,
 ): { level: Level; deviceId: Id | null } {
   if (!fits(level, props, placement)) return { level, deviceId: null };
-  const d: Device = { id: newId(), name, placement, props, invalid: false };
+  const id = newId();
+  const d: Device = { id, name, placement, props, invalid: false };
+  if (props.kind === 'virtual_switch') d.bindings = { control: virtualEntity(id) };
   return { level: withDevices(level, [...level.devices, d]), deviceId: d.id };
 }
 
-/** A new equipment device that is not on the plan, with the free defaults. */
-export function addUnplacedDevice(level: Level, name: string): { level: Level; id: Id } {
-  const d: Device = { id: newId(), name, placement: { mode: 'none' }, props: deviceDefaults('equipment', 'free'), invalid: false };
+/** A new device that is not on the plan, with the free defaults: equipment, or a virtual switch (bound to its own entity). */
+export function addUnplacedDevice(level: Level, name: string, kind: Extract<DeviceKind, 'equipment' | 'virtual_switch'> = 'equipment'): { level: Level; id: Id } {
+  const id = newId();
+  const d: Device = { id, name, placement: { mode: 'none' }, props: deviceDefaults(kind, 'free'), invalid: false };
+  if (kind === 'virtual_switch') d.bindings = { control: virtualEntity(id) };
   return { level: withDevices(level, [...level.devices, d]), id: d.id };
 }
 

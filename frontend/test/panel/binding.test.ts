@@ -353,6 +353,7 @@ describe('dev harness mock', () => {
     const hass = createMockHass({ demo: true });
     const meta = mergeMeta(metaFromStates(hass.states), await loadRegistries(hass));
     for (const kind of Object.keys(ROLE_SPECS) as DeviceKind[]) {
+      if (kind === 'virtual_switch') continue; // its entity is virtual.<id>, kept by the integration: no HA entity to pick
       for (const spec of ROLE_SPECS[kind]) expect(candidates(meta, spec, false).length, `${kind}.${spec.role}`).toBeGreaterThan(0);
     }
   });

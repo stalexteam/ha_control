@@ -68,7 +68,7 @@ export function deviceLive(d: Device, states: HassStates): DeviceLive {
   const ON = ['on'], OFF = ['off'];
   switch (kind) {
     case 'ceiling_light': case 'wall_light': case 'exhaust_fan': timer = true; // falls through
-    case 'socket': case 'equipment': {
+    case 'socket': case 'equipment': case 'virtual_switch': {
       hasControl = !!b.control;
       read(b.control, ON, OFF);
       break;

@@ -420,7 +420,7 @@ export function normalizePower(raw: unknown, g: GeoCtx): PowerSchema | undefined
 export function placeableDevices(level: Level, power: PowerSchema): Device[] {
   const placed = new Set(power.blocks.flatMap(b => (b.kind === 'device' ? [b.deviceId] : [])));
   return level.devices
-    .filter(d => !placed.has(d.id) && (d.props.kind === 'socket' || d.props.kind === 'equipment'
+    .filter(d => !placed.has(d.id) && d.props.kind !== 'virtual_switch' && (d.props.kind === 'socket' || d.props.kind === 'equipment'
       || !!d.bindings?.power || !!d.bindings?.control))
     .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 }

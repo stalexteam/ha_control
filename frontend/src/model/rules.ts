@@ -70,7 +70,7 @@ export function ruleCycle(rules: Rule[], candidate: Rule): Id[] | null {
   return null;
 }
 
-export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'daylight' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto' | 'leak' | 'timed' | 'outside' | 'beurer' | 'control' | 'motionLight';
+export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'daylight' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto' | 'leak' | 'timed' | 'outside' | 'beurer' | 'control' | 'motionLight' | 'virtual-read';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
@@ -112,6 +112,8 @@ const delayOk = (n: unknown): boolean => Number.isInteger(n) && (n as number) >=
  * wall switch / motion sensor and a device taking 'on' and 'off' (control rules); default = any existing device.
  * `motionLightExists` / `motionSensorExists` / `motionButtonExists` (optional) tell whether an id is a device taking 'on' and 'off' / a motion sensor /
  * a smart button or a wall switch with a state entity (motion light rules; the daylight sensor is checked with `lightSensorExists`); default = any existing device.
+ * `isVirtual` (optional) tells whether an id is a virtual switch: a rule must not switch one it reads as an input ('virtual-read'); default = none.
+ * `blockerExists` (optional) tells whether an id is a device taking 'on' and 'off' (a motion light rule's blocker); default = any existing device.
  */
 export function ruleProblems(
   rules: Rule[], r: Rule, deviceExists: (id: Id) => boolean, actionsOf?: (id: Id) => RuleDo[] | undefined,
@@ -133,6 +135,8 @@ export function ruleProblems(
   motionLightExists?: (id: Id) => boolean,
   motionSensorExists?: (id: Id) => boolean,
   motionButtonExists?: (id: Id) => boolean,
+  isVirtual?: (id: Id) => boolean,
+  blockerExists?: (id: Id) => boolean,
 ): RuleProblem[] {
   const out: RuleProblem[] = [];
   if (!r.name.trim()) out.push('name');
@@ -152,7 +156,8 @@ export function ruleProblems(
     || (r.outside && (!(outsideLightExists ?? deviceExists)(r.outside.light) || !(lightSensorExists ?? deviceExists)(r.outside.sensor)))
     || (r.beurer && (!(heaterExists ?? deviceExists)(r.beurer.heater) || !(powerSourceExists ?? deviceExists)(r.beurer.source)))
     || (r.motionLight && (!(motionLightExists ?? deviceExists)(r.motionLight.light) || r.motionLight.sensors.some(id => !(motionSensorExists ?? deviceExists)(id))
-      || r.motionLight.buttons.some(id => !(motionButtonExists ?? deviceExists)(id)) || (r.motionLight.daylight && !(lightSensorExists ?? deviceExists)(r.motionLight.daylight.sensor))))
+      || r.motionLight.buttons.some(id => !(motionButtonExists ?? deviceExists)(id)) || (r.motionLight.daylight && !(lightSensorExists ?? deviceExists)(r.motionLight.daylight.sensor))
+      || (r.motionLight.blocker && !(blockerExists ?? deviceExists)(r.motionLight.blocker.device))))
     || ctlButtons.some(id => !(controlSourceExists ?? deviceExists)(id)) || ctlTargets.some(a => !(controlLoadExists ?? deviceExists)(a.device))) out.push('device-missing');
   const known = new Set(rules.map(x => x.id));
   if (ruleRefs(r).some(id => id !== r.id && !known.has(id))) out.push('rule-missing');
@@ -170,10 +175,20 @@ export function ruleProblems(
   if (r.beurer && beurerProblem(r, r.beurer)) out.push('beurer');
   if (r.control && controlProblem(r, r.control)) out.push('control');
   if (r.motionLight && motionLightProblem(r, r.motionLight)) out.push('motionLight');
+  if (isVirtual && readsWhatItSwitches(r, isVirtual)) out.push('virtual-read');
   if (r.boiler?.button && buttonAutoOk && !out.includes('device-missing') && !buttonAutoOk(r.boiler.button)) out.push('boiler-auto');
   if (actionsOf && [...r.onTrue, ...r.onFalse].some(a => { const ok = actionsOf(a.device); return ok !== undefined && !ok.includes(a.do); })) out.push('action');
   if (ctl && ctlTargets.some(a => !CONTROL_DOS.includes(a.do) || (actionsOf && !controlDoOk(a.do, actionsOf(a.device))))) out.push('action');
   return out;
+}
+
+/**
+ * The integration refuses a rule that switches a virtual switch it reads as a DIRECT device input (with or without NOT): it
+ * would flip at loop speed. A Held source, the gate and a real device are not refused.
+ */
+function readsWhatItSwitches(r: Rule, isVirtual: (id: Id) => boolean): boolean {
+  const read = new Set(r.inputs.flatMap(i => ('device' in i.source ? [i.source.device] : [])));
+  return [...r.onTrue, ...r.onFalse].some(a => isVirtual(a.device) && read.has(a.device));
 }
 
 /** A vent rule's fixed shape and data bounds; true = violated. */
@@ -345,8 +360,13 @@ function motionLightProblem(r: Rule, m: NonNullable<Rule['motionLight']>): boole
   if (typeof m.light !== 'string' || m.light === '' || !list(m.sensors) || !list(m.buttons)) return true;
   if (m.sensors.includes(m.light) || m.buttons.includes(m.light)) return true;
   if (m.daylight !== undefined && (typeof m.daylight !== 'object' || m.daylight === null || typeof m.daylight.sensor !== 'string' || m.daylight.sensor === '' || (m.daylight.is !== 'night' && m.daylight.is !== 'dark'))) return true;
+  const b = m.blocker;
+  if (b !== undefined && (typeof b !== 'object' || b === null || typeof b.device !== 'string' || b.device === '' || b.device === m.light || (b.is !== 'on' && b.is !== 'off'))) return true;
   return !Number.isInteger(m.minOn) || m.minOn < 0 || m.minOn > 3600 || !Number.isInteger(m.autoAfter) || m.autoAfter < 0 || m.autoAfter > 1440;
 }
+
+/** A device that can block a light motion control rule: one that is switched on and off (a lamp, a socket, a fan, a virtual switch). */
+export const isBlocker = (d: Device): boolean => { const a = ruleActionsFor(d); return a.includes('on') && a.includes('off'); };
 
 export const isMotionLightRule = (r: Rule): boolean => r.motionLight !== undefined;
 
@@ -457,14 +477,14 @@ export function timerTemplate(_plan: { levels: Level[] }, zoneId: Id | null, dev
   return rule;
 }
 
-const INPUT_KINDS = new Set(['leak_sensor', 'motion_sensor', 'ceiling_light', 'wall_light', 'socket', 'exhaust_fan', 'equipment', 'wall_switch', 'valve']);
+const INPUT_KINDS = new Set(['leak_sensor', 'motion_sensor', 'ceiling_light', 'wall_light', 'socket', 'exhaust_fan', 'equipment', 'wall_switch', 'valve', 'virtual_switch']);
 export const isRuleInputDevice = (d: Device): boolean => INPUT_KINDS.has(d.props.kind);
 
 export function ruleActionsFor(d: Device): RuleDo[] {
   const p = d.props;
   if (p.kind === 'valve') return ['close'];
   if (p.kind === 'equipment') return p.controllable === true ? ['on', 'off'] : [];
-  if (p.kind === 'ceiling_light' || p.kind === 'wall_light' || p.kind === 'socket' || p.kind === 'exhaust_fan') return ['on', 'off'];
+  if (p.kind === 'ceiling_light' || p.kind === 'wall_light' || p.kind === 'socket' || p.kind === 'exhaust_fan' || p.kind === 'virtual_switch') return ['on', 'off'];
   return [];
 }
 

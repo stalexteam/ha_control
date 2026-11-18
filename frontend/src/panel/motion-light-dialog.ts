@@ -17,6 +17,8 @@ export interface MotionLightDialogOpts {
   sensors: Device[];
   daylightSensors: Device[];
   buttons: Device[];
+  /** Devices that can be switched on and off (and read as on / off): the blocker's choices; the light itself is left out. */
+  blockers: Device[];
   deviceById(id: Id): Device | undefined;
   zones: { id: Id; name: string }[];
   problems: RuleProblem[];
@@ -40,8 +42,9 @@ function problemTexts(o: MotionLightDialogOpts): { key: string; text: string }[]
   if (!c.light) hints.push({ key: 'pick-light', text: t('motionLight.problem.light') });
   const out = [...hints];
   const missing = (c.light && !o.lights.some(d => d.id === c.light)) || c.sensors.some(id => !o.sensors.some(d => d.id === id))
-    || c.buttons.some(id => !o.buttons.some(d => d.id === id)) || (c.daylight && !o.daylightSensors.some(d => d.id === c.daylight!.sensor));
+    || c.buttons.some(id => !o.buttons.some(d => d.id === id)) || (c.daylight && !o.daylightSensors.some(d => d.id === c.daylight!.sensor)) || (c.blocker && !o.blockers.some(d => d.id === c.blocker!.device));
   const shapeOk = !c.sensors.includes(c.light) && !c.buttons.includes(c.light)
+    && c.blocker?.device !== c.light
     && [c.minOn, c.autoAfter].every(Number.isInteger) && c.minOn >= 0 && c.minOn <= 3600 && c.autoAfter >= 0 && c.autoAfter <= 1440;
   for (const p of o.problems) {
     if (p === 'device-missing' && !missing) continue; // only empty values: the hints say it
@@ -74,6 +77,8 @@ export function renderMotionLightDialog(o: MotionLightDialogOpts): TemplateResul
   const noToggle = c.buttons.some(id => { const b = o.buttons.find(x => x.id === id); return b?.props.kind === 'wall_switch' && !b.props.autoByDoubleToggle; });
   const d = c.daylight;
   const known = !d || o.daylightSensors.some(x => x.id === d.sensor);
+  const bk = c.blocker;
+  const bkKnown = !bk || o.blockers.some(x => x.id === bk.device);
   return renderPurposeDialog({
     prefix: 'motionlight', title: t('motionLight.title'), hint: t('motionLight.hint'), rule: r, zones: o.zones, problems: o.problems,
     texts: problemTexts(o), onChange: o.onChange, onOk: o.onOk, onCancel: o.onCancel,
@@ -109,6 +114,27 @@ export function renderMotionLightDialog(o: MotionLightDialogOpts): TemplateResul
             <option value="dark">${t('motionLight.isDark')}</option>
           </select>` : nothing}
       </div>
+
+      <label class="rlabel">${t('motionLight.blocker')}</label>
+      <div class="vnums">
+        <select data-field="motionlight-blocker" data-value=${bk?.device ?? ''}
+          @change=${(e: Event) => {
+            const id = (e.target as HTMLSelectElement).value;
+            const { blocker: _drop, ...rest } = c;
+            set(id === '' ? rest : { ...rest, blocker: { device: id, is: bk?.is ?? 'on' } });
+          }}>
+          <option value="">${t('motionLight.blockerNone')}</option>
+          ${bkKnown ? nothing : html`<option value=${bk!.device}>${t('rules.missingDevice')}</option>`}
+          ${o.blockers.filter(x => x.id !== c.light).map(x => html`<option value=${x.id}>${x.name}</option>`)}
+        </select>
+        ${bk ? html`
+          <select data-field="motionlight-blocker-is" data-value=${bk.is}
+            @change=${(e: Event) => set({ ...c, blocker: { ...bk, is: (e.target as HTMLSelectElement).value as 'on' | 'off' } })}>
+            <option value="on">${t('motionLight.blockerIsOn')}</option>
+            <option value="off">${t('motionLight.blockerIsOff')}</option>
+          </select>` : nothing}
+      </div>
+      ${bk ? html`<span class="muted">${t('motionLight.blockerNote')}</span>` : nothing}
 
       ${field('off', t('motionLight.off'), r.offDelay, 0, RULE_DELAY_MAX, n => o.onChange({ ...r, offDelay: n }), t('motionLight.offNote'))}
       ${field('minon', t('motionLight.minOn'), c.minOn, 0, 3600, n => set({ ...c, minOn: n }))}

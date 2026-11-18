@@ -318,6 +318,11 @@ describe('Light motion control form', () => {
       [{ action: 'off', reason: 'back to auto: no motion' }, /^Ceiling light turned off .*21.46.* \(back to auto: no motion\)$/],
       [{ action: 'off', reason: 'back to auto: not dark' }, /^Ceiling light turned off .*21.46.* \(back to auto: it is light\)$/],
       [{ action: 'on', reason: 'back to auto: motion' }, /^Ceiling light turned on .*21.46.* \(back to auto: motion\)$/],
+      [{ action: 'off', reason: 'blocked' }, /^Ceiling light turned off .*21.46.* \(blocked\)$/],
+      [{ action: 'on', reason: 'unblocked: motion' }, /^Ceiling light turned on .*21.46.* \(unblocked: motion\)$/],
+      [{ action: 'off', reason: 'unblocked: no motion' }, /^Ceiling light turned off .*21.46.* \(unblocked: no motion\)$/],
+      [{ action: 'off', reason: 'unblocked: not dark' }, /^Ceiling light turned off .*21.46.* \(unblocked: not dark\)$/],
+      [{ action: 'off', reason: 'daylight' }, /^Ceiling light turned off .*21.46.* \(daylight\)$/],
       [{ action: 'on', reason: 'button: manual' }, /^Ceiling light manual .*21.46.* \(button\)$/],
       [{ action: 'off', reason: 'button: manual', sent: false }, /^Ceiling light manual .*21.46.* \(button\)$/],
       [{ action: 'off', reason: 'switched off elsewhere: waits for new motion', sent: false }, /^Ceiling light switched off elsewhere .*21.46.*: waits for new motion$/],
@@ -335,5 +340,85 @@ describe('Light motion control form', () => {
       await selectZone(el, 'r0');
       expect(el.shadowRoot!.querySelector('.rrow[data-id="rule-ml"] .rlast')!.textContent).toMatch(re);
     }
+  });
+});
+
+describe('Light motion control blocker', () => {
+  beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
+  const addSleep = (p: Plan) => p.levels[0].devices.push({
+    id: 'd-sleep', name: 'Sleep', invalid: false, bindings: { control: 'virtual.d-sleep' },
+    placement: { mode: 'none' }, props: { kind: 'virtual_switch' },
+  });
+
+  it('the form order: Only when dark, then Blocked while (device, is), then Off after; defaults: never, is on', async () => {
+    const el = await open([], addSleep);
+    await selectZone(el, 'r0');
+    await pickAutomation(el, 'motionLight');
+    const fields = [...el.shadowRoot!.querySelectorAll('.rule-backdrop .rsettings [data-field]')].map(f => f.getAttribute('data-field'));
+    const wanted = ['motionlight-daylight', 'motionlight-is', 'motionlight-blocker', 'motionlight-off'];
+    expect(fields.filter(f => wanted.includes(f!))).toEqual(wanted);
+    expect(q(el, '.rsettings').textContent).toContain('Blocked while');
+    expect(q<HTMLSelectElement>(el, '[data-field="motionlight-blocker"]').value).toBe('');
+    expect(q<HTMLSelectElement>(el, '[data-field="motionlight-blocker"] option').textContent).toBe('— (never)');
+    expect(el.shadowRoot!.querySelector('.rule-backdrop [data-field="motionlight-blocker-is"]')).toBeNull();
+    expect('blocker' in motion(el)).toBe(false);
+  });
+
+  it('lists the on / off devices and virtual switches but not the light; a pick writes {device, is: on}, the second select switches to off, never removes it', async () => {
+    const el = await open([], addSleep);
+    await selectZone(el, 'r0');
+    await pickAutomation(el, 'motionLight');
+    const opts = options(el, 'motionlight-blocker');
+    expect(opts[0]).toBe('');
+    expect(opts).toContain('d-sleep');
+    expect(opts).not.toContain('d-light'); // the rule's own light
+    expect(opts).not.toContain('d-motion'); // not an on / off device
+    await set(el, '[data-field="motionlight-blocker"]', 'd-sleep', 'change');
+    expect(motion(el).blocker).toEqual({ device: 'd-sleep', is: 'on' });
+    expect(q<HTMLSelectElement>(el, '[data-field="motionlight-blocker-is"]').value).toBe('on');
+    expect([...q<HTMLSelectElement>(el, '[data-field="motionlight-blocker-is"]').options].map(o => o.textContent)).toEqual(['is on', 'is off']);
+    await set(el, '[data-field="motionlight-blocker-is"]', 'off', 'change');
+    expect(motion(el).blocker).toEqual({ device: 'd-sleep', is: 'off' });
+    expect(q(el, '[data-block="motionlight-blocker"]').textContent).toContain('Sleep is off');
+    expect(problems(el)).toEqual([]);
+    await set(el, '[data-field="motionlight-blocker"]', '', 'change');
+    expect('blocker' in motion(el)).toBe(false);
+    expect(el.shadowRoot!.querySelector('.rule-backdrop [data-field="motionlight-blocker-is"]')).toBeNull();
+    await press(el, 'button[data-action="rule-ok"]');
+    expect('blocker' in el.rules[0].motionLight!).toBe(false);
+  });
+
+  it('a saved rule shows its blocker; the diagram says blocked by Sleep while blocked and the state otherwise', async () => {
+    let el = await open(undefined, undefined, 'motionlight-sleep');
+    await edit(el);
+    expect(q<HTMLSelectElement>(el, '[data-field="motionlight-blocker"]').value).toBe('d-sleep');
+    expect(q<HTMLSelectElement>(el, '[data-field="motionlight-blocker-is"]').value).toBe('on');
+    expect(q(el, '[data-block="motionlight-blocker"]').textContent).toContain('blocked by Sleep');
+    expect(flow(el)).toContain('last: turned off');
+    expect(flow(el)).toContain('(blocked)');
+    document.body.innerHTML = ''; localStorage.clear();
+    el = await open(undefined, undefined, 'motionlight-sleep-off');
+    await edit(el);
+    expect(q(el, '[data-block="motionlight-blocker"]').textContent).not.toContain('blocked by');
+    expect(q(el, '[data-block="motionlight-blocker"]').textContent).toContain('Sleep is on');
+    expect(q(el, '[data-block="motionlight-blocker"]').textContent).toContain('now off');
+    expect(flow(el)).toContain('(unblocked: motion)');
+  });
+
+  it('a deleted blocker device stays as a missing entry and blocks OK', async () => {
+    const el = await open(undefined, p => { p.levels[0].devices = p.levels[0].devices.filter(d => d.id !== 'd-sleep'); }, 'motionlight-sleep');
+    await edit(el);
+    expect(problems(el)).toEqual(['A device of this rule is no longer on the plan.']);
+    expect(okBtn(el).disabled).toBe(true);
+  });
+
+  it('the diagram and the hint no longer say the daylight applies to switching on only', async () => {
+    const el = await open([]);
+    await selectZone(el, 'r0');
+    await pickAutomation(el, 'motionLight');
+    expect(q(el, '[data-block="motionlight-wants"]').textContent).toContain('off at once when daylight comes');
+    expect(q(el, '.pdlg').textContent).toContain('the light goes off at once');
+    await set(el, '[data-field="motionlight-daylight"]', '', 'change');
+    expect(q(el, '[data-block="motionlight-wants"]').textContent).not.toContain('daylight');
   });
 });

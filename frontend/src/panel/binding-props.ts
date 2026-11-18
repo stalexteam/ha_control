@@ -4,7 +4,7 @@ import {
   activeRoleSpecs, alsoBoundTo, countNotBound, isTriggerRole, setBinding, type BindStatus, type RoleSpec,
 } from '../model/bindings';
 import { candidates } from '../binding/candidates';
-import { presence, type HaMeta, type States } from '../binding/ha-meta';
+import { presence, stateOf, type HaMeta, type States } from '../binding/ha-meta';
 import '../binding/entity-combo';
 import { setDeviceProps } from '../model/devices';
 import { deviceNameRow } from './device-props';
@@ -91,6 +91,16 @@ function outputLine(o: BindingPropsOpts, d: Device): TemplateResult | typeof not
   return text === null ? nothing : html`<p class="note" data-field="output">${text}</p>`;
 }
 
+/**
+ * A virtual switch has no binding to choose: its entity is fixed (`virtual.<id>`). The line shows its live state, kept by
+ * the integration; "Not saved yet" while the saved plan has no such device.
+ */
+function virtualFields(o: BindingPropsOpts, d: Device): TemplateResult {
+  const s = d.bindings?.control ? stateOf(o.states, d.bindings.control) : null;
+  return html`<p class="note" data-field="virtual-state">${s === null ? t('output.notSaved') : t('virtual.state').replace('{s}', s)}</p>
+    <p class="muted" data-note="virtual-hint">${t('virtual.hint')}</p>`;
+}
+
 /** Notes under a bound field: missing or unavailable in HA, and the other devices bound to the same entity (or trigger). */
 function notes(o: BindingPropsOpts, d: Device, role: BindingRole, eid: string): TemplateResult {
   const p = presence(o.meta, eid, o.states);
@@ -148,7 +158,8 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
       <h4>${deviceTitle(d)}</h4>
       ${deviceNameRow(d, name => o.commit(setDeviceProps(o.level, d.id, {}, name)))}
       ${outputLine(o, d)}
-      ${activeRoleSpecs(d).map(spec => html`${roleField(o, d, spec)}${containerFlags(o, d, spec.role)}`)}
+      ${d.props.kind === 'virtual_switch' ? virtualFields(o, d)
+        : activeRoleSpecs(d).map(spec => html`${roleField(o, d, spec)}${containerFlags(o, d, spec.role)}`)}
       ${containerFields(d)}
       ${daylightFields(o, d)}`
     : html`<p class="muted">${t('binding.pick')}</p>`}

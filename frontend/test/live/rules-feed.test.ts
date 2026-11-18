@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { RulesFeed, notConfirmed, type RuleLast, type RuleTrace } from '../../src/live/rules-feed';
+import { RulesFeed, notConfirmed, wordErrors, type RuleLast, type RuleTrace } from '../../src/live/rules-feed';
 import { t } from '../../src/i18n';
 import { RETRY_MAX, RETRY_MS } from '../../src/live/container-feed';
 import type { HassLike } from '../../src/api';
@@ -143,5 +143,15 @@ describe('RulesFeed', () => {
     await vi.advanceTimersByTimeAsync(RETRY_MS);
     expect(c.subs).toHaveLength(2);
     feed.stop();
+  });
+});
+
+describe('wordErrors: the virtual switch loop', () => {
+  it('words the status reason and the entry error of a loop the integration broke', () => {
+    const tr: RuleTrace = { status: 'error', reason: 'virtual switch loop', verdict: null, inputs: [], unknownInputs: 0,
+      last: { action: 'off', target: 'Sleep', at: 1, reason: 'toggle', error: 'virtual switch loop' } };
+    const out = wordErrors(tr);
+    expect(out.reason).toBe('virtual switch loop: changes refused for 10 s');
+    expect(out.last?.error).toBe('virtual switch loop: changes refused for 10 s');
   });
 });

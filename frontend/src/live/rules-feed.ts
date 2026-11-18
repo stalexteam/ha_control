@@ -50,7 +50,7 @@ export interface RuleLast { action: 'on' | 'off' | 'open' | 'close'; target: str
  * The server's entry errors the panel words itself (status reason and `RuleLast.error`); any other error ("target
  * unavailable", "service failed", "waiting for target", ...) is shown as the server sends it.
  */
-const ERROR_WORDS = new Map([['not confirmed', 'rules.error.notConfirmed']]);
+const ERROR_WORDS = new Map([['not confirmed', 'rules.error.notConfirmed'], ['virtual switch loop', 'rules.error.virtualLoop']]);
 
 /** The trace with the server's error codes worded for the panel. */
 export function wordErrors(tr: RuleTrace): RuleTrace {
@@ -74,12 +74,15 @@ export function keptOn(l: RuleLast): boolean {
 }
 
 /** The mode changes of a light motion control rule by their exact `RuleLast.reason`; the row and the diagram word them from this one list. */
-export type MotionModeLast = 'auto' | 'autoAgain' | 'manualButton' | 'releasedOff' | 'found' | 'autoOff' | 'autoOffLight' | 'autoOn';
+export type MotionModeLast = 'auto' | 'autoAgain' | 'manualButton' | 'releasedOff' | 'found' | 'autoOff' | 'autoOffLight' | 'autoOn'
+  | 'blocked' | 'unblockedOn' | 'unblockedOff' | 'unblockedLight' | 'daylight';
 export const MOTION_MODE_REASONS: Record<string, MotionModeLast> = {
   'button: auto': 'auto', 'auto again': 'autoAgain', 'button: manual': 'manualButton',
   'switched off elsewhere: waits for new motion': 'releasedOff', 'found on': 'found',
   // the command sent on entering auto (a fresh decision)
   'back to auto: no motion': 'autoOff', 'back to auto: not dark': 'autoOffLight', 'back to auto: motion': 'autoOn',
+  // the blocker and the daylight
+  'blocked': 'blocked', 'unblocked: motion': 'unblockedOn', 'unblocked: no motion': 'unblockedOff', 'unblocked: not dark': 'unblockedLight', 'daylight': 'daylight',
 };
 
 /** Which mode change an entry of a light motion control rule is (undefined = a plain command or other entry). */
@@ -155,6 +158,10 @@ export interface MotionLightTrace {
   autoAt?: number;
   /** The rule let a light go that was switched off elsewhere and waits for new motion. */
   waiting?: true;
+  /** The blocker blocks the rule (auto only): the light is off and motion does nothing. */
+  blocked?: true;
+  /** The blocker device: its name, its own reading (null = no data) and the state that blocks. */
+  blocker?: { name: string; state: 'on' | 'off' | null; is: 'on' | 'off' };
 }
 
 /** A timed switch rule's run: `until` = epoch ms of its end (only while running); `device` null = no data. */

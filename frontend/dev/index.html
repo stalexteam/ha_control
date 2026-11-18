@@ -71,7 +71,7 @@
         readings: (ids, now) => Object.fromEntries(ids.map((id, i) => [id, i % 3 === 2 ? { last: null, period: null, count: 0 }
           : { last: now - 1000 - 1500 * i, period: 5000 * (i + 1), count: 12 }])),
         ...(scene ? {
-          storage: memoryStorage({ [STORAGE_KEY]: JSON.stringify({ plans }) }), powerFrame: scene.powerFrame, rulesFrame: scene.rulesFrame,
+          storage: memoryStorage({ [STORAGE_KEY]: JSON.stringify({ plans }) }), powerFrame: scene.powerFrame, rulesFrame: scene.rulesFrame, virtualStates: scene.virtualStates,
           states: scene.states,
         } : {}),
       });

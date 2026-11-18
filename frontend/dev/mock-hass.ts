@@ -45,14 +45,14 @@ function notConfiguredStates(plan: Plan | undefined): Record<string, ContainerSt
  * expected_revision is a conflict even with force.
  * `plan_studio/containers/subscribe` answers once with a full snapshot: every container of the stored plan as error,
  * not configured. `plan_studio/rules/subscribe` answers once with a full snapshot of `rulesFrame` (none by default).
- * `plan_studio/power/subscribe` answers once with `powerFrame` (an empty frame by default), and
+ * `plan_studio/virtual/subscribe` answers once with `virtualStates`. `plan_studio/power/subscribe` answers once with `powerFrame` (an empty frame by default), and
  * `plan_studio/power/set_position` resolves `{}`; `plan_studio/info` answers `serverVersion` and `plan_studio/readings/get` answers `readings` (unknown command without them). Other subscriptions are unknown.
  * With `demo` it also has live states and answers the entity, device and area registry commands with a small
  * sample (dev harness); without it those commands are unknown, so tests bring their own HA data.
  */
 export function createMockHass(
   opts: {
-    darkMode?: boolean; storage?: Storage; demo?: boolean; powerFrame?: PowerFrame; rulesFrame?: Record<string, RuleTrace>;
+    darkMode?: boolean; storage?: Storage; /** Answer of `plan_studio/virtual/subscribe`: device id -> on / off (none by default). */ virtualStates?: Record<string, 'on' | 'off'>; demo?: boolean; powerFrame?: PowerFrame; rulesFrame?: Record<string, RuleTrace>;
     /** With `demo`: states replacing the sample's (a scene's live values). */
     states?: Record<string, unknown>;
     /** Answer of `plan_studio/info` (the reload notice shows when it differs from the bundle's version); absent: unknown command. */
@@ -125,6 +125,8 @@ export function createMockHass(
           first = structuredClone(opts.powerFrame ?? { wires: {}, blocks: {} });
         } else if (msg.type === 'plan_studio/rules/subscribe') {
           first = { full: true, rules: structuredClone(opts.rulesFrame ?? {}) };
+        } else if (msg.type === 'plan_studio/virtual/subscribe') {
+          first = { states: structuredClone(opts.virtualStates ?? {}) };
         } else {
           return fail('unknown_command', `Unknown command ${String(msg.type)}`);
         }

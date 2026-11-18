@@ -29,7 +29,7 @@ function bindingSide(h: PlanStudioPanel, level: Level): TemplateResult {
   const s = h.selection;
   return renderBindingProps({
     level, device: s?.kind === 'device' ? level.devices.find(x => x.id === s.id) ?? null : null,
-    meta: h.haMeta.get(), states: h.hass?.states, status: h.bindStatus,
+    meta: h.haMeta.get(), states: h.liveStates, status: h.bindStatus,
     showAll: h.showAll, onShowAll: role => { h.showAll = { ...h.showAll, [role]: !h.showAll[role] }; },
     commit: next => h.commit(next), onNextUnbound: () => h.nextUnboundDevice(),
     notice: h.notice, fieldNotice: h.fieldNotice, setFieldNotice: msg => { h.fieldNotice = msg; },
@@ -49,7 +49,7 @@ export function renderSide(h: PlanStudioPanel, level: Level): TemplateResult {
   }
   if (h.mode === 'power') {
     return renderPowerProps({
-      power: h.power, level, selection: h.selection, meta: h.haMeta.get(), states: h.hass?.states, frame: h.powerFeed.frame,
+      power: h.power, level, selection: h.selection, meta: h.haMeta.get(), states: h.liveStates, frame: h.powerFeed.frame,
       notice: h.notice, feedError: h.powerFeed.error, toolId: h.toolId, placeDeviceId: h.placeDeviceId, onPlaceDevice: id => h.armDevice(id),
       commit: (next, power) => h.commit(next, power), commitPower: next => h.commitPower(next),
       setPosition: (id, p) => h.setPowerPosition(id, p),

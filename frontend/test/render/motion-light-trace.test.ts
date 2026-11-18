@@ -63,7 +63,7 @@ describe('light motion control diagram', () => {
     expect([...ys].sort((a, b) => a - b)).toEqual(ys);
     expect(text(host, 'motionlight-sensor:s1')).toBe('Motion kitchen | Motion sensor');
     expect(text(host, 'motionlight-daylight')).toBe('Daylight | LightSensor | is dark');
-    expect(text(host, 'motionlight-wants')).toBe('Wants | on at motion when dark, off 3:00 after it ends, at least 1:00 on');
+    expect(text(host, 'motionlight-wants')).toBe('Wants | on at motion when dark, off 3:00 after it ends, at least 1:00 on | off at once when daylight comes');
     expect(text(host, 'motionlight-mode')).toBe('Mode | back to auto: a button\'s Auto action');
     expect(text(host, 'motionlight-light')).toBe('Kitchen light | on / off');
     expect(host.querySelector('.fc-blk.on, .fc-blk.off, .fc-blk.nodata')).toBeNull();
@@ -73,7 +73,7 @@ describe('light motion control diagram', () => {
     const { host } = draw({ rule: { ...bare, offDelay: 180 } });
     expect(order(host)).toEqual(['motionlight-sensor:s1', 'motionlight-wants', 'motionlight-mode', 'motionlight-light']);
     expect(text(host, 'motionlight-wants')).toBe('Wants | on at motion, off 3:00 after it ends');
-    expect(text(draw({ rule: { ...rule, motionLight: { ...rule.motionLight!, minOn: 0 } } }).host, 'motionlight-wants')).toBe('Wants | on at motion when dark, off 3:00 after it ends');
+    expect(text(draw({ rule: { ...rule, motionLight: { ...rule.motionLight!, minOn: 0 } } }).host, 'motionlight-wants')).toBe('Wants | on at motion when dark, off 3:00 after it ends | off at once when daylight comes');
   });
 
   it('more than three blocks wrap into rows of three, a trunk beside them runs down to Wants', () => {
@@ -123,7 +123,7 @@ describe('light motion control diagram', () => {
     expect(cls(host, 'motionlight-sensor:s1')).toContain('off');
     expect(text(host, 'motionlight-daylight')).toBe('Daylight: night | LightSensor | 5 lx');
     expect(cls(host, 'motionlight-daylight')).toContain('on');
-    expect(text(host, 'motionlight-wants')).toBe('Wants: on | on at motion when dark, off 3:00 after it ends, at least 1:00 on | off in 2:41 | minimum on 0:38');
+    expect(text(host, 'motionlight-wants')).toBe('Wants: on | on at motion when dark, off 3:00 after it ends, at least 1:00 on | off at once when daylight comes | off in 2:41 | minimum on 0:38');
     expect(cls(host, 'motionlight-wants')).toContain('on');
     expect(text(host, 'motionlight-mode')).toBe('Mode: auto');
     expect(text(host, 'motionlight-light')).toMatch(/^Kitchen light \| state: on \| last: turned on .*19.42.* \(became true\)$/);
@@ -154,7 +154,7 @@ describe('light motion control diagram', () => {
     const { host } = draw({ trace: live({ mode: 'manual', autoAt: NOW + 754_000 }, { verdict: null, last: { action: 'on', target: 'Kitchen light', at: at(19, 43), reason: 'button: manual' } }) });
     expect(text(host, 'motionlight-mode')).toBe('Mode: manual | auto again in 12:34');
     expect(cls(host, 'motionlight-mode')).toContain('off');
-    expect(text(host, 'motionlight-wants')).toBe('Wants | on at motion when dark, off 3:00 after it ends, at least 1:00 on');
+    expect(text(host, 'motionlight-wants')).toBe('Wants | on at motion when dark, off 3:00 after it ends, at least 1:00 on | off at once when daylight comes');
     expect(cls(host, 'motionlight-wants')).not.toContain('nodata');
     expect(text(host, 'motionlight-light')).toBe(`Kitchen light | state: on | last: manual ${clock(at(19, 43))} (button)`);
   });
@@ -204,5 +204,46 @@ describe('light motion control diagram', () => {
     expect(motionLightFocus('motionlight-wants')).toBe('motionlight-off');
     expect(motionLightFocus('motionlight-mode')).toBe('motionlight-buttons');
     expect(motionLightFocus('motionlight-light')).toBe('motionlight-light');
+  });
+
+  describe('the blocker', () => {
+    const blk: Rule = { ...rule, motionLight: { ...rule.motionLight!, blocker: { device: 'sleep', is: 'on' } } };
+    const nm: Record<string, string> = { ...names, sleep: 'Sleep' };
+    const drawB = (over: Partial<MotionLightTraceOpts> = {}) => draw({ rule: blk, deviceName: id => nm[id] ?? 'Choose...', ...over });
+
+    it('parameters only: a block after the Daylight block names the device and the blocking state', () => {
+      const { host } = drawB();
+      expect(order(host)).toEqual(['motionlight-sensor:s1', 'motionlight-sensor:s2', 'motionlight-daylight', 'motionlight-blocker', 'motionlight-wants', 'motionlight-mode', 'motionlight-light']);
+      expect(text(host, 'motionlight-blocker')).toBe('Blocked while | Sleep is on');
+      expect(motionLightFocus('motionlight-blocker')).toBe('motionlight-blocker');
+      const off = draw({ rule: { ...blk, motionLight: { ...blk.motionLight!, blocker: { device: 'sleep', is: 'off' } } }, deviceName: id => nm[id] ?? '' });
+      expect(text(off.host, 'motionlight-blocker')).toBe('Blocked while | Sleep is off');
+      expect(draw().host.querySelector('[data-block="motionlight-blocker"]')).toBeNull();
+    });
+
+    it('while blocked it says blocked by <name>; otherwise its state is shown', () => {
+      const blocked = drawB({ trace: live({ blocked: true, motion: true, light: 'off', blocker: { name: 'Sleep', state: 'on', is: 'on' } }, { verdict: false }) }).host;
+      expect(text(blocked, 'motionlight-blocker')).toBe('blocked by Sleep');
+      expect(cls(blocked, 'motionlight-blocker').contains('ok')).toBe(false);
+      const free = drawB({ trace: live({ blocker: { name: 'Sleep', state: 'off', is: 'on' } }) }).host;
+      expect(text(free, 'motionlight-blocker')).toBe('Blocked while | Sleep is on | now off');
+      const nodata = drawB({ trace: live({ blocker: { name: 'Sleep', state: null, is: 'on' } }) }).host;
+      expect(text(nodata, 'motionlight-blocker')).toBe('Blocked while | Sleep is on | now no data');
+    });
+
+    it('a click focuses the form field; the new reasons are worded', () => {
+      const { host, onFocus } = drawB();
+      (host.querySelector('[data-block="motionlight-blocker"]') as SVGElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      expect(onFocus).toHaveBeenCalledWith('motionlight-blocker');
+      const last = (reason: string, action: 'on' | 'off') => text(drawB({ trace: live({}, { last: { action, target: 'Kitchen light', at: at(7, 5), reason } }) }).host, 'motionlight-light');
+      expect(last('blocked', 'off')).toContain(`last: turned off ${clock(at(7, 5))} (blocked)`);
+      expect(last('unblocked: motion', 'on')).toContain(`last: turned on ${clock(at(7, 5))} (unblocked: motion)`);
+      expect(last('unblocked: no motion', 'off')).toContain('(unblocked: no motion)');
+      expect(last('unblocked: not dark', 'off')).toContain('(unblocked: not dark)');
+      expect(last('daylight', 'off')).toContain(`last: turned off ${clock(at(7, 5))} (daylight)`);
+      for (const r of ['blocked', 'unblocked: motion', 'unblocked: no motion', 'unblocked: not dark', 'daylight']) {
+        expect(motionModeLast({ action: 'off', target: 'x', at: 0, reason: r })).toBeDefined();
+      }
+    });
   });
 });

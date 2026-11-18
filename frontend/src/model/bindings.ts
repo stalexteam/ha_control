@@ -43,6 +43,8 @@ export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
   // Active roles depend on the flags: see activeRoleSpecs.
   smart_button: [trigger('on'), trigger('off'), trigger('auto')],
   socket: [{ role: 'control', domains: ['switch'], primary: true }, POWER],
+  // Fixed by the device (virtual.<id>, see virtualEntity); never chosen, so the Binding step shows no field for it.
+  virtual_switch: [{ role: 'control', domains: ['virtual'], primary: true }],
   exhaust_fan: [{ role: 'control', domains: ['switch', 'fan'], primary: true }],
   // Every role optional (a dummy has none); active roles depend on the inverter flag: see activeRoleSpecs.
   equipment: [{ role: 'control', domains: ['switch'], primary: false }, POWER, VOLTAGE, POWER_IN, POWER_OUT],
@@ -80,7 +82,7 @@ function validRoles(d: Device): ReadonlySet<BindingRole> {
 
 export function setBinding(level: Level, deviceId: Id, role: BindingRole, entityId: string | null): Level {
   const d = level.devices.find(x => x.id === deviceId);
-  if (!d || !validRoles(d).has(role)) return level;
+  if (!d || !validRoles(d).has(role) || d.props.kind === 'virtual_switch') return level;
   const cur = d.bindings?.[role];
   if (entityId === null || entityId === '') {
     if (cur === undefined) return level;

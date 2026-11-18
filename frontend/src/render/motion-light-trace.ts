@@ -38,7 +38,8 @@ const GAP = 12, PER_ROW = 3;
 
 /** The mode changes of this kind are worded as what they are; every other entry goes through the shared wording. */
 const MODE_LAST = { auto: 'lastAuto', autoAgain: 'lastAutoAgain', manualButton: 'lastManualButton', releasedOff: 'lastReleased', found: 'lastFound',
-  autoOff: 'lastAutoOff', autoOffLight: 'lastAutoOffLight', autoOn: 'lastAutoOn' };
+  autoOff: 'lastAutoOff', autoOffLight: 'lastAutoOffLight', autoOn: 'lastAutoOn',
+  blocked: 'lastBlocked', unblockedOn: 'lastUnblockedOn', unblockedOff: 'lastUnblockedOff', unblockedLight: 'lastUnblockedLight', daylight: 'lastDaylight' };
 const motionLast = (l: RuleLast): string => {
   const mode = motionModeLast(l);
   return mode ? t(`motionLight.flow.${MODE_LAST[mode]}`).replace('{at}', clock(l.at)).replace('{s}', l.action) : lastLine(l);
@@ -82,6 +83,20 @@ export function renderMotionLightTrace(o: MotionLightTraceOpts): TemplateResult 
     });
   }
 
+  // The blocker is an input like the sensors: while blocked it says by whom, otherwise its state and what blocks.
+  const bk = cfg.blocker;
+  if (bk) {
+    const name = o.deviceName(bk.device);
+    const is = t(bk.is === 'on' ? 'motionLight.blockerIsOn' : 'motionLight.blockerIsOff');
+    const blocked = ml?.blocked === true;
+    const now = ml?.blocker ? ml.blocker.state ?? t('motionLight.flow.noData') : undefined;
+    items.push({
+      field: 'motionlight-blocker', cls: ml ? tone(!blocked) : '',
+      lines: blocked ? [t('motionLight.flow.blocked').replace('{name}', name)]
+        : [t('motionLight.blocker'), `${name} ${is}`, ...(now !== undefined ? [t('motionLight.flow.blockerNow').replace('{s}', now)] : [])],
+    });
+  }
+
   // The "no motion sensors" note is long: it gets a row of its own (the Daylight block below it).
   const perRow = cfg.sensors.length === 0 ? 1 : Math.min(PER_ROW, items.length);
   const bw = (MW - (perRow - 1) * GAP) / perRow;
@@ -111,6 +126,7 @@ export function renderMotionLightTrace(o: MotionLightTraceOpts): TemplateResult 
 
   const rule = t('motionLight.flow.rule').replace('{dark}', d ? t('motionLight.flow.ruleDark') : '').replace('{d}', countdown(o.rule.offDelay))
     + (cfg.minOn > 0 ? t('motionLight.flow.ruleMin').replace('{d}', countdown(cfg.minOn)) : '');
+  const day = d ? t('motionLight.flow.ruleDay') : null;
   const manual = ml?.mode === 'manual';
   const quiet = manual || cfg.sensors.length === 0; // no verdict in manual, nor in an auto without motion sensors
   add({
@@ -118,6 +134,7 @@ export function renderMotionLightTrace(o: MotionLightTraceOpts): TemplateResult 
     lines: [
       ml && !quiet ? `${t('motionLight.flow.wants')}: ${tr!.verdict === null ? word(null) : tr!.verdict ? 'on' : 'off'}` : t('motionLight.flow.wants'),
       rule,
+      ...(day ? [day] : []),
       ...(ml?.offAt !== undefined && !quiet ? [t('motionLight.flow.offIn').replace('{t}', left(ml.offAt, o.now))] : []),
       ...(ml?.minUntil !== undefined && !quiet ? [t('motionLight.flow.minOn').replace('{t}', left(ml.minUntil, o.now))] : []),
       ...(ml?.waiting && !quiet ? [t('motionLight.flow.waiting')] : []),
