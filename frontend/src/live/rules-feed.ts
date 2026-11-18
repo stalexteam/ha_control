@@ -163,6 +163,13 @@ export interface MotionLightTrace {
   blocked?: true;
   /** The blocker device: its name, its own reading (null = no data) and the state that blocks. */
   blocker?: { name: string; state: 'on' | 'off' | null; is: 'on' | 'off' };
+  /** Presence hold: nobody has left; the hold ends at epoch ms `holdUntil` unless a neighbour sees motion. */
+  present?: true;
+  holdUntil?: number;
+  /** The neighbour sensor whose motion ended the hold (its device name); the off delay runs. */
+  left?: string;
+  /** The neighbour sensors the engine uses (only with presence). */
+  neighbours?: { id: Id; name: string }[];
 }
 
 /** A timed switch rule's run: `until` = epoch ms of its end (only while running); `device` null = no data. */

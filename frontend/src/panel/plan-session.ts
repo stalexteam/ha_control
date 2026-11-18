@@ -4,6 +4,7 @@ import { History } from '../editor/history';
 import { defaultPower, normalizePower, type PlanDoc } from '../model/power';
 import { markSwitchesMigrated, migrateDevices } from '../model/migrate-devices';
 import { migrateControl } from '../model/rules';
+import { withNeighbours } from '../model/neighbours';
 import type { Draft } from '../editor/draft';
 import { deletePlan, getPlan, listPlans, type PlanSummary } from '../api';
 import { t } from '../i18n';
@@ -243,7 +244,9 @@ export class PlanSession {
     const { level, power, rules } = this.h.history!.current;
     const levels = plan.levels.map((l, i) => (i === 0 ? markSwitchesMigrated(level) : l));
     const { power: _drop, rules: _dropRules, ...rest } = plan;
-    return { ...rest, levels, ...(power ? { power } : {}), ...(rules ? { rules } : {}), revision: this.h.save.baseRevision ?? 0 };
+    // Light motion control neighbours come from the plan being saved (the edited level in place of the stored one).
+    const derived = rules ? withNeighbours(rules, levels) : undefined;
+    return { ...rest, levels, ...(power ? { power } : {}), ...(derived ? { rules: derived } : {}), revision: this.h.save.baseRevision ?? 0 };
   }
 
   /** After a save: the rules of the plan that was sent are the saved ones when it succeeded. */

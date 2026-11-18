@@ -633,6 +633,15 @@ function motionLightVariant(edit: (m: NonNullable<Rule['motionLight']>) => void)
   edit(p.rules!.find(r => r.id === 'rule-ml')!.motionLight!);
   return p;
 }
+/** Scene `motionlight-presence`: the rule keeps the light on while someone is present; the zone Hall behind a door in the east wall has a motion sensor. */
+function motionLightPresence(): Plan {
+  const p = motionLightVariant(m => { m.presence = true; m.neighbours = ['d-motion-east']; });
+  const l = p.levels[0];
+  l.openings.push({ id: 'o-east', wallId: 'w1', kind: 'door', offset: 1200, width: 900, invalid: false });
+  l.zones.push({ id: 'z-hall', name: 'Hall', invalid: false, shape: { kind: 'polygon', vertices: [[4100, 50], [6000, 50], [6000, 2950], [4100, 2950]].map(([x, y]) => ({ kind: 'free' as const, x, y })) } });
+  l.devices.push({ id: 'd-motion-east', name: 'Motion east', invalid: false, bindings: { motion: 'binary_sensor.east_motion' }, placement: { mode: 'free', x: 5000, y: 1500, rotation: 0 }, props: { kind: 'motion_sensor', zoneAngle: 110, zoneRange: 3000 } });
+  return p;
+}
 const MOTION_LIGHT_NOSENSORS = motionLightTrace(
   { sensors: [], motion: false, dark: null, light: 'off' },
   { verdict: null, inputs: [], last: undefined },
@@ -944,6 +953,7 @@ export const SCENES: Record<string, Scene> = {
   'motionlight-manual': { plans: [motionLightPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_MANUAL } },
   'motionlight-nobutton': { plans: [motionLightVariant(m => { m.buttons = []; m.autoAfter = 0; })], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_AUTO } },
   'motionlight-nosensors': { plans: [motionLightVariant(m => { m.sensors = []; })], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_NOSENSORS } },
+  'motionlight-presence': { plans: [motionLightPresence()], rulesFrame: { ...ROOM_RULES, 'rule-ml': motionLightTrace({ present: true, holdUntil: Date.now() + 1_632_000, neighbours: [{ id: 'd-motion-east', name: 'Motion east' }] }, { pending: undefined, last: undefined }) } },
   'motionlight-waiting': { plans: [motionLightPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_WAITING } },
   'motionlight-sleep': { plans: [sleepPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_SLEEP }, virtualStates: { 'd-sleep': 'on' } },
   'motionlight-sleep-off': { plans: [sleepPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_SLEEP_OFF }, virtualStates: { 'd-sleep': 'off' } },

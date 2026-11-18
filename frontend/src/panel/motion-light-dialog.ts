@@ -8,6 +8,7 @@ import { renderMotionLightTrace } from '../render/motion-light-trace';
 import { renderPurposeDialog } from './purpose-dialog';
 import { chips } from './leak-dialog';
 import { num, pick } from './outside-dialog';
+import type { NeighbourZone } from '../model/neighbours';
 import { t } from '../i18n';
 
 export interface MotionLightDialogOpts {
@@ -21,6 +22,8 @@ export interface MotionLightDialogOpts {
   blockers: Device[];
   deviceById(id: Id): Device | undefined;
   zones: { id: Id; name: string }[];
+  /** The neighbours the draft plan gives the rule's zone (read-only note; the rule gets them at Save). */
+  neighbours: NeighbourZone[];
   problems: RuleProblem[];
   /** Live trace; only given for a saved unchanged rule. */
   trace: RuleTrace | undefined;
@@ -140,6 +143,14 @@ export function renderMotionLightDialog(o: MotionLightDialogOpts): TemplateResul
       ${field('minon', t('motionLight.minOn'), c.minOn, 0, 3600, n => set({ ...c, minOn: n }))}
 
       ${c.buttons.length > 0 ? field('autoafter', t('motionLight.autoAfter'), c.autoAfter, 0, 1440, n => set({ ...c, autoAfter: n }), t('motionLight.autoAfterNote')) : nothing}
+      <label class="rnot rcheck"><input type="checkbox" data-field="motionlight-presence" .checked=${c.presence === true}
+        @change=${(e: Event) => {
+          const { presence: _p, neighbours: _n, ...rest } = c;
+          set((e.target as HTMLInputElement).checked ? { ...rest, presence: true } : rest);
+        }} /> ${t('motionLight.presence')}</label>
+      ${c.presence === true ? html`<span class="muted" data-note="motionlight-neighbours">${o.neighbours.length > 0
+        ? t('motionLight.neighbours').replace('{list}', () => o.neighbours.map(n => `${n.zone.name} — ${n.sensors.map(s => s.name).join(', ')}`).join('; '))
+        : t('motionLight.noNeighbours')}</span>` : nothing}
       ${noAuto ? html`<p class="muted" data-note="motionlight-noauto">${t('motionLight.noAutoNote')}</p>` : nothing}`,
     diagram: renderMotionLightTrace({
       rule: r, deviceName: name,

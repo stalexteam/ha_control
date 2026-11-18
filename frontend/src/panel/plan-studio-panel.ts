@@ -56,6 +56,7 @@ import { renderOutsideDialog } from './outside-dialog';
 import { OUTSIDE_FOCUS } from '../render/outside-trace';
 import { renderBeurerDialog } from './beurer-dialog';
 import { renderMotionLightDialog } from './motion-light-dialog';
+import { planNeighbours } from '../model/neighbours';
 import { motionLightFocus } from '../render/motion-light-trace';
 import { BEURER_FOCUS } from '../render/beurer-trace';
 import { renderControlDialog } from './control-dialog';
@@ -573,6 +574,7 @@ export class PlanStudioPanel extends LitElement {
         blockers: devices.filter(isBlocker),
         deviceById: id => devices.find(x => x.id === id),
         zones, problems, trace, note, now: Date.now(),
+        neighbours: planNeighbours(levels, rule.zoneId, rule.motionLight!.sensors),
         onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
         onFocus: f => this.focusRuleField(f, motionLightFocus(f)),
         onOk: () => this.commitRuleDraft(),

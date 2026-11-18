@@ -5,6 +5,7 @@ import { createMockHass, STORAGE_KEY } from '../../dev/mock-hass';
 import { SCENES } from '../../dev/scenes';
 import type { Plan, Rule } from '../../src/model/types';
 import type { PlanStudioPanel } from '../../src/panel/plan-studio-panel';
+import type { MotionLightTrace } from '../../src/live/rules-feed';
 
 async function open(rules?: Rule[], mutate?: (p: Plan) => void, scene = 'motionlight'): Promise<PlanStudioPanel> {
   const plan: Plan = structuredClone(SCENES[scene].plans[0]);
@@ -420,5 +421,80 @@ describe('Light motion control blocker', () => {
     expect(q(el, '.pdlg').textContent).toContain('the light goes off at once');
     await set(el, '[data-field="motionlight-daylight"]', '', 'change');
     expect(q(el, '[data-block="motionlight-wants"]').textContent).not.toContain('daylight');
+  });
+
+  describe('presence hold', () => {
+    /** The room's east wall w1 gets a door; the zone Hall lies behind it with its own motion sensor. */
+    const withHall = (door: boolean) => (p: Plan) => {
+      const l = p.levels[0];
+      if (door) l.openings.push({ id: 'o-east', wallId: 'w1', kind: 'door', offset: 1200, width: 900, invalid: false });
+      l.zones.push({ id: 'z-hall', name: 'Hall', invalid: false, shape: { kind: 'polygon', vertices: [[4100, 50], [6000, 50], [6000, 2950], [4100, 2950]].map(([x, y]) => ({ kind: 'free' as const, x, y })) } });
+      l.devices.push({ id: 'd-motion-east', name: 'Motion east', invalid: false, bindings: { motion: 'binary_sensor.east_motion' }, placement: { mode: 'free', x: 5000, y: 1500, rotation: 0 }, props: { kind: 'motion_sensor', zoneAngle: 110, zoneRange: 3000 } });
+    };
+    const box = (el: PlanStudioPanel) => q<HTMLInputElement>(el, '[data-field="motionlight-presence"]');
+    const note = (el: PlanStudioPanel) => el.shadowRoot!.querySelector('.rule-backdrop [data-note="motionlight-neighbours"]');
+
+    it('one checkbox, off by default with no note; ticking shows the neighbours the plan gives, unticking drops presence', async () => {
+      const el = await open([], withHall(true));
+      await selectZone(el, 'r0');
+      await pickAutomation(el, 'motionLight');
+      expect(box(el).checked).toBe(false);
+      expect(q(el, '.rsettings').textContent).toContain('Keep on while someone is present');
+      expect(note(el)).toBeNull();
+      box(el).checked = true;
+      box(el).dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      await el.updateComplete;
+      expect(motion(el).presence).toBe(true);
+      expect(note(el)!.textContent).toBe('Neighbours: Hall — Motion east');
+      box(el).checked = false;
+      box(el).dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      await el.updateComplete;
+      expect(motion(el)).not.toHaveProperty('presence');
+      expect(note(el)).toBeNull();
+    });
+
+    it('without a neighbouring zone (no door) or without a zone the note says it has no effect', async () => {
+      for (const zone of ['r0', null]) {
+        document.body.innerHTML = ''; localStorage.clear();
+        const el = await open([], withHall(zone === 'r0' ? false : true));
+        await selectZone(el, zone);
+        await pickAutomation(el, 'motionLight');
+        box(el).checked = true;
+        box(el).dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+        await el.updateComplete;
+        expect(note(el)!.textContent).toBe('No neighbouring zone with a motion sensor on the plan: this has no effect.');
+      }
+    });
+
+    it('the Save sends the sorted neighbours of the plan being saved and follows a sensor moved to another zone; the dialog still sees the rule as saved', async () => {
+      const el = await open([], withHall(true));
+      await selectZone(el, 'r0');
+      await pickAutomation(el, 'motionLight');
+      box(el).checked = true;
+      box(el).dispatchEvent(new Event('change', { bubbles: true, composed: true }));
+      await press(el, 'button[data-action="rule-ok"]');
+      expect(el.rules[0].motionLight).not.toHaveProperty('neighbours'); // derived at Save, never edited
+      expect(el.session.currentPlan().rules![0].motionLight).toMatchObject({ presence: true, neighbours: ['d-motion-east'] });
+      el.commit({ ...el.level!, devices: el.level!.devices.map(d => (d.id === 'd-motion-east' ? { ...d, placement: { mode: 'free' as const, x: 2000, y: 1500, rotation: 0 } } : d)) });
+      expect(el.session.currentPlan().rules![0].motionLight!.neighbours).toEqual([]);
+    });
+
+    it('the diagram says held with the countdown, and who left', async () => {
+      const base = SCENES.motionlight.rulesFrame!['rule-ml'];
+      const frame = (m: Partial<MotionLightTrace>) => ({ ...SCENES.motionlight.rulesFrame, 'rule-ml': { ...base, motionLight: { ...base.motionLight!, present: true, ...m } } }) as never;
+      for (const [m, text] of [
+        [{ holdUntil: Date.now() + 1_620_500 }, 'held: nobody left (until 27:'],
+        [{ left: 'Motion Transit', offAt: Date.now() + 160_000 }, 'left: Motion Transit'],
+      ] as const) {
+        document.body.innerHTML = ''; localStorage.clear();
+        const plan: Plan = structuredClone(SCENES.motionlight.plans[0]);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { [plan.id]: plan } }));
+        const el = await mount(createMockHass({ rulesFrame: frame(m) }));
+        el.setMode('automation');
+        await vi.waitFor(() => expect(el.rulesFeed.ready).toBe(true));
+        await edit(el);
+        expect(flow(el)).toContain(text);
+      }
+    });
   });
 });

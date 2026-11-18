@@ -534,4 +534,11 @@ export function ruleActionsFor(d: Device): RuleDo[] {
 }
 
 /** Same content, whatever the key order (a dialog copy edited back to the saved values is equal). */
-export const ruleEqual = (a: Rule, b: Rule): boolean => jsonEqual(a, b);
+export const ruleEqual = (a: Rule, b: Rule): boolean => jsonEqual(noNeighbours(a), noNeighbours(b));
+
+/** The rule without its derived `motionLight.neighbours` (written at Save, never edited: not a difference). */
+function noNeighbours(r: Rule): Rule {
+  if (!r.motionLight || r.motionLight.neighbours === undefined) return r;
+  const { neighbours: _derived, ...rest } = r.motionLight;
+  return { ...r, motionLight: rest };
+}

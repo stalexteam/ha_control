@@ -137,6 +137,8 @@ export function renderMotionLightTrace(o: MotionLightTraceOpts): TemplateResult 
       ...(day ? [day] : []),
       ...(ml?.offAt !== undefined && !quiet ? [t('motionLight.flow.offIn').replace('{t}', left(ml.offAt, o.now))] : []),
       ...(ml?.minUntil !== undefined && !quiet ? [t('motionLight.flow.minOn').replace('{t}', left(ml.minUntil, o.now))] : []),
+      ...(ml?.present && ml.holdUntil !== undefined && !quiet ? [t('motionLight.flow.held').replace('{until}', left(ml.holdUntil, o.now))] : []),
+      ...(ml?.left !== undefined && !quiet ? [t('motionLight.flow.left').replace('{name}', () => ml.left!)] : []),
       ...(ml?.waiting && !quiet ? [t('motionLight.flow.waiting')] : []),
     ],
   });
