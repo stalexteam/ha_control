@@ -97,3 +97,37 @@ describe('panel live state per step', () => {
     expect(subs[0].unsub).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('mode bubble', () => {
+  beforeEach(() => { localStorage.clear(); document.body.innerHTML = ''; });
+
+  it('shows auto: on first in the stack in Binding, keeps the element across frames, drops it in manual', async () => {
+    const { SCENES } = await import('../../dev/scenes');
+    const { STORAGE_KEY } = await import('../../dev/mock-hass');
+    const plan = structuredClone(SCENES.motionlight.plans[0]);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { [plan.id]: plan } }));
+    const base = createMockHass();
+    let push: ((ev: unknown) => void) | undefined;
+    const conn = { ...base.connection, subscribeMessage: ((cb: (ev: unknown) => void, msg: { type: string }, o: unknown) => {
+      if (msg.type === 'plan_studio/rules/subscribe') { push = cb; return Promise.resolve(() => Promise.resolve()); }
+      return base.connection.subscribeMessage!(cb as never, msg as never, o as never);
+    }) as never };
+    const trace = (mode: string) => ({ status: 'ok', verdict: true, unknownInputs: 0, inputs: [], motionLight: { mode, motion: true, sensors: [], dark: true, light: 'on' } });
+    const el = await mount({ ...base, connection: conn });
+    el.setMode('binding');
+    await el.updateComplete;
+    await vi.waitFor(() => expect(push).toBeTruthy());
+    const stack = () => [...el.shadowRoot!.querySelectorAll('g.bubbles g.device-bubbles[data-id="d-light"] .bubble')];
+    expect(stack()).toEqual([]);
+    push!({ full: true, rules: { 'rule-ml': trace('auto') } });
+    await el.updateComplete;
+    expect(stack().map(b => b.textContent?.trim())[0]).toBe('auto: on');
+    const first = stack()[0];
+    push!({ full: true, rules: { 'rule-ml': trace('auto') } });
+    await el.updateComplete;
+    expect(stack()[0]).toBe(first);
+    push!({ full: true, rules: { 'rule-ml': trace('manual') } });
+    await el.updateComplete;
+    expect(stack().map(b => b.textContent?.trim())).not.toContain('auto: on');
+  });
+});

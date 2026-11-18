@@ -41,6 +41,7 @@ import { EditorInput } from './input';
 import { renderActiveDialog, renderDraftBanner, type Dialog } from './dialogs';
 import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
+import { ruleModeBubbles } from '../live/rule-mode';
 import { RulesFeed, type RuleTrace } from '../live/rules-feed';
 import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakProtectionTemplate, ventTemplate, isVentRule, isLeakRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isTimedRule, timedTemplate, newRule, isOutsideRule, outsideTemplate, isMotionLightRule, motionLightTemplate, isBeurerRule, beurerTemplate, isControlRule, controlTemplate, controlActionsFor, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import { renderAutomationsMenu, type RuleTemplate } from './rule-templates';
@@ -236,9 +237,9 @@ export class PlanStudioPanel extends LitElement {
     this.watchRules();
   }
 
-  /** The rules feed watches the open plan in the Automation step of an attached panel. */
+  /** The rules feed watches the open plan in the Binding (mode bubbles) and Automation steps of an attached panel. */
   private watchRules(): void {
-    this.rulesFeed.watch(this.isConnected && this.mode === 'automation' ? this.plan?.id ?? null : null);
+    this.rulesFeed.watch(this.isConnected && (this.mode === 'automation' || this.mode === 'binding') ? this.plan?.id ?? null : null);
   }
 
   /** The entity feed watches the open level's event sources in the Binding and Automation steps of an attached panel. */
@@ -835,7 +836,7 @@ export class PlanStudioPanel extends LitElement {
                 const live = deviceLive(d, states);
                 const ev = this.events.event(d.id, now);
                 return {
-                  shown: [...liveBubbles(live, d, now), ...(ev ? [{ text: ev.text, tone: 'event' as const, key: ev.at }] : [])],
+                  shown: [...ruleModeBubbles(this.session.savedRules, id => this.rulesFeed.trace(id), d.id), ...liveBubbles(live, d, now), ...(ev ? [{ text: ev.text, tone: 'event' as const, key: ev.at }] : [])],
                   leaving: this.events.leaving(d.id, now),
                 };
               },

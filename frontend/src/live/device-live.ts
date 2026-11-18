@@ -8,7 +8,7 @@ import { t } from '../i18n';
 export type HassStates = Record<string, unknown> | undefined;
 /** 'none': the kind has no live look or its driving role is unbound; 'active': motion detected / leak wet. */
 export type LiveLook = 'none' | 'on' | 'off' | 'no-data' | 'active';
-export type BubbleTone = 'device' | 'motion' | 'leak' | 'event';
+export type BubbleTone = 'device' | 'motion' | 'leak' | 'event' | 'mode';
 /** key: set on an action bubble (its time), so a replaced one is drawn anew and pops again. */
 export interface LiveBubble { text: string; tone: BubbleTone; key?: number }
 /**

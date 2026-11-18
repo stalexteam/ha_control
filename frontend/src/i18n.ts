@@ -532,6 +532,8 @@ const en: Dict = {
   'rules.unsaved': 'Not saved yet',
   'rules.unsavedChanges': 'Unsaved changes',
   'rules.noTrace': 'Waiting for live state',
+  'live.mode.autoOn': 'auto: on',
+  'live.mode.autoOff': 'auto: off',
   'rules.unknown1': '1 input without data',
   'rules.unknownN': '{n} inputs without data',
   'rules.did.on': 'turned on',

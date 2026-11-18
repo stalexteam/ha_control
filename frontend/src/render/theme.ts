@@ -19,6 +19,8 @@ export interface PlanPalette {
   cone: string;
   /** Motion sensor zones: violet, apart from the light colour. */
   motionCone: string;
+  /** The mode bubble of a rule in auto (calm green, apart from device, motion and event). */
+  modeBubble: string;
   breakLine: string;
   /** Opacity of the layer that is not being edited (walls in equipment mode, devices in plan mode). */
   dimOpacity: number;
@@ -72,6 +74,7 @@ const DARK: PlanPalette = {
   deviceFill: '#1e293b',
   cone: '#fbbf24',
   motionCone: '#a78bfa',
+  modeBubble: '#34d399',
   breakLine: '#94a3b8',
   dimOpacity: 0.35,
   powerLive: '#38bdf8',
@@ -114,6 +117,7 @@ const LIGHT: PlanPalette = {
   deviceFill: '#fffbeb',
   cone: '#d97706',
   motionCone: '#7c3aed',
+  modeBubble: '#047857',
   breakLine: '#7c7368',
   dimOpacity: 0.4,
   powerLive: '#0284c7',
