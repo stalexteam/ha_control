@@ -570,6 +570,7 @@ def test_a_boiler_blackout_off_is_a_safety_command_sent_although_a_pair_rule_hol
     w.set("sensor.grid", "unavailable")
     assert w.calls == [R_OFF] and w.last("b")["reason"] == "blackout" and "sent" not in w.last("b")
     w.set("switch.relay", "off", own=True)
+    w.advance(w.t + 10)  # the readings settle after the relay change (0.23.1): the blackout holds until then
     w.set("sensor.grid", "500", W)  # grid back: after the 15 s wait the boiler heats again
     w.advance(w.t + 15)
     assert w.calls == [R_OFF, R_ON]
@@ -580,6 +581,7 @@ def test_a_boiler_limit_off_is_sent_although_a_pair_rule_holds():
     w.engine.on_intent("p", "bb", {"action": "auto"})
     w.set("switch.relay", "on", own=True)
     w.set("binary_sensor.m", "on")
+    w.advance(w.t + 10)  # the readings settle after the relay change (0.23.1): the limit is judged from then on
     w.calls.clear()
     w.set("sensor.grid", "4000", W)
     assert w.calls == [R_OFF] and w.tr("b")["boiler"]["phase"] == "limit"

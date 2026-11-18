@@ -2324,7 +2324,7 @@ class RuleEngine:
         assert b is not None
         active = rule.enabled and not b.missing
         relay = b.relay_state(self._lookup)
-        if b.relay_changed(relay, own, active):
+        if b.relay_changed(relay, own, active, self._now()):
             b.cmd = None
             self._give_up(b.relay, rule.key)
             if rule.failed is not None and rule.last is not None:

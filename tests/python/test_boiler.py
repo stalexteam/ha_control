@@ -4,6 +4,7 @@ import copy
 
 import pytest
 
+from boiler import Boiler
 from rules import RuleEngine
 from test_rules import World, dev, plan, rule
 
@@ -444,6 +445,7 @@ def test_restored_auto_is_evaluated_once_ha_has_started():
     w.engine.started()  # once
     assert w.calls == [OFF]
     w.set("switch.relay", "off", own=True)
+    w.advance(w.t + 10)  # the readings settle after the relay change (0.23.1): the blackout holds until then
     w.set("sensor.grid", "500", W)
     assert w.b()["phase"] == "waiting"
     w.advance(w.t + 15)
@@ -712,3 +714,221 @@ def test_unload_sends_no_relay_command():
     w = heating()
     w.engine.load_plans([], unload=True)
     assert w.calls == [] and not w.pending()
+
+
+# --- 0.23.1: the readings settle after a relay change (spec §11) --------------------------
+
+def switched_on():
+    """Auto switched the boiler on at 1000 and the relay reported on at once: the settle time runs to 1010."""
+    w = loaded()
+    w.press("auto")
+    w.set("switch.relay", "on", own=True)
+    assert w.calls == [ON] and w.b()["phase"] == "heating"
+    return w
+
+
+def test_grid_report_before_the_boiler_meter_is_not_a_limit():
+    """Review focus 1 (live 10:04:52): the grid meter includes the boiler before its own meter does."""
+    w = switched_on()
+    w.advance(1003.7)
+    w.set("sensor.grid", "2054", W)  # 2054 + 1400 - 0 = 3454 > 3000 with a stale boiler meter
+    assert w.calls == [ON] and w.b()["phase"] == "heating" and w.b()["mode"] == "auto"
+    assert w.b()["until"] == 1060000  # the trace still counts down the 60 s grace
+    w.advance(1003.8)
+    w.set("sensor.bp", "1440", W)  # 2054 + 1400 - 1440 = 2014
+    assert w.calls == [ON] and w.b()["phase"] == "heating"
+    w.advance(1100)
+    assert w.calls == [ON] and w.b()["phase"] == "heating" and w.b()["mode"] == "auto"
+
+
+def test_stale_grid_after_a_button_off_does_not_restart_the_wait():
+    """Review focus 2 (live 10:02:26): the boiler meter drops to 0 W before the grid meter does."""
+    w = heating()
+    w.set("sensor.bp", "1529", W)
+    w.set("sensor.grid", "2110", W)
+    t = w.t
+    w.press("toggle")
+    w.set("switch.relay", "off", own=True)
+    assert w.calls == [OFF] and w.b()["mode"] == "manual"
+    w.advance(t + 2)
+    w.press("auto")
+    assert w.b()["phase"] == "waiting" and w.b()["until"] == int((t + 15) * 1000)
+    w.advance(t + 3)
+    w.set("sensor.bp", "0", W)  # 2110 + 1400 - 0 = 3510 with a stale grid meter
+    r = w.engine.snapshot("p")["r"]
+    assert r["boiler"]["phase"] == "waiting" and r["last"]["reason"] == "button toggle" and w.calls == [OFF]
+    w.advance(t + 4)
+    w.set("sensor.grid", "552", W)
+    w.advance(t + 14.9)
+    assert w.calls == [OFF] and w.b()["phase"] == "waiting"
+    w.advance(t + 15)
+    assert w.calls == [OFF, ON] and w.b()["phase"] == "heating"
+
+
+def test_real_overload_after_the_settle_time_switches_off():
+    """Review focus 3."""
+    w = switched_on()
+    w.set("sensor.bp", "1440", W)
+    w.advance(1010)
+    w.set("sensor.grid", "3500", W)  # 3500 + 1400 - 1440 = 3460 > 3000
+    assert w.calls == [ON, OFF] and w.b()["phase"] == "limit"
+    assert w.engine.snapshot("p")["r"]["last"]["reason"] == "power limit"
+
+
+def test_real_overload_inside_the_settle_time_switches_off_at_its_end():
+    """Review focus 3: judged when the settle time ends, also when no meter reports then."""
+    w = switched_on()
+    w.advance(1003)
+    w.set("sensor.bp", "1440", W)
+    w.set("sensor.grid", "3500", W)  # a real overload: 3460 > 3000
+    assert w.calls == [ON] and w.b()["phase"] == "heating"
+    w.advance(1009.9)
+    assert w.calls == [ON]
+    w.advance(1010)
+    assert w.calls == [ON, OFF] and w.b()["phase"] == "limit"
+    assert w.engine.snapshot("p")["r"]["last"]["reason"] == "power limit"
+
+
+def test_limit_stays_limit_during_the_settle_time():
+    """Review focus 4: a limit in force is neither cleared nor re-judged while the readings settle."""
+    w = heating()  # relay on since 1000, now 1060
+    w.set("sensor.grid", "4200", W)  # 4220 > 3000: a real limit
+    assert w.calls == [OFF] and w.b()["phase"] == "limit"
+    t = w.t
+    w.set("switch.relay", "off", own=True)  # the settle time runs to t + 10
+    w.advance(t + 1)
+    w.set("sensor.bp", "0", W)
+    w.advance(t + 3)
+    w.set("sensor.grid", "1000", W)  # 2400 would clear the limit: not judged yet, the 15 s wait does not start
+    assert w.calls == [OFF] and w.b()["phase"] == "limit" and "until" not in w.b()
+    w.advance(t + 5)
+    w.set("sensor.grid", "4000", W)  # a real overload again
+    w.advance(t + 9.9)
+    assert w.calls == [OFF] and w.b()["phase"] == "limit"
+    w.advance(t + 10)
+    assert w.calls == [OFF] and w.b()["phase"] == "limit"  # judged at the end: still over, nothing to send
+    w.advance(t + 30)
+    w.set("sensor.grid", "800", W)  # the limit clears after the settle time
+    assert w.b()["phase"] == "waiting" and w.b()["until"] == int((t + 45) * 1000)
+    w.advance(t + 44.9)
+    assert w.calls == [OFF]
+    w.advance(t + 45)
+    assert w.calls == [OFF, ON]
+
+
+def test_limit_found_cleared_at_the_end_of_the_settle_time_starts_the_wait_then():
+    w = heating()
+    w.set("sensor.grid", "4200", W)
+    t = w.t
+    w.set("switch.relay", "off", own=True)
+    w.set("sensor.bp", "0", W)
+    w.advance(t + 3)
+    w.set("sensor.grid", "800", W)  # cleared, but only judged at t + 10
+    assert w.b()["phase"] == "limit"
+    w.advance(t + 10)
+    assert w.b()["phase"] == "waiting" and w.b()["until"] == int((t + 25) * 1000)
+    w.advance(t + 24.9)
+    assert w.calls == [OFF]
+    w.advance(t + 25)
+    assert w.calls == [OFF, ON]
+
+
+def test_blackout_inside_the_settle_time_switches_off_at_once():
+    """Review focus 5."""
+    w = switched_on()
+    w.advance(1002)
+    w.set("sensor.grid", "unavailable")
+    assert w.calls == [ON, OFF] and w.b()["phase"] == "blackout"
+    assert w.engine.snapshot("p")["r"]["last"]["reason"] == "blackout"
+
+
+# --- 0.23.1: the pure module ----------------------------------------------------------------
+
+def pure():
+    """An auto boiler with a power limit whose relay was seen switching on at 100."""
+    b = Boiler({"device": "b", "button": "btn", "grid": dict(GRID)}, {"b": BOILER, "btn": BUTTON},
+               {"g": {"id": "g", "kind": "grid", "power": "sensor.grid"}})
+    b.mode = "auto"
+    b.relay_changed("off", True, True, 90.0)
+    b.relay_changed("on", True, True, 100.0)
+    return b
+
+
+def test_pure_limit_is_not_judged_inside_the_settle_time_and_looks_again_at_its_end():
+    b = pure()
+    b.command("on", 99.0)
+    assert b.auto(103.7, 2054.0, 0.0, "on") == (None, "auto")
+    assert b.phase == "heating" and b.until == 110.0
+    assert b.trace(2054.0, 0.0, "on")["until"] == 159000  # the trace keeps the 60 s grace
+
+
+def test_pure_limit_is_judged_once_the_settle_time_is_over():
+    b = pure()
+    b.command("on", 99.0)
+    assert b.auto(110.0, 2054.0, 0.0, "on") == ("off", "power limit")
+    assert b.phase == "limit" and b.holding
+
+
+def test_pure_a_holding_limit_stays_inside_the_settle_time():
+    b = pure()
+    b.relay_changed("off", True, True, 105.0)
+    b.phase, b.holding, b.last_off, b.cmd = "limit", True, 104.0, "off"
+    assert b.auto(108.0, 1000.0, 0.0, "off") == (None, "")
+    assert b.phase == "limit" and b.holding and b.last_off == 104.0 and b.until == 115.0
+    assert "until" not in b.trace(1000.0, 0.0, "off")
+    assert b.auto(115.0, 1000.0, 0.0, "off") == (None, "")
+    assert b.phase == "waiting" and not b.holding and b.last_off == 115.0 and b.until == 130.0
+
+
+def test_pure_waiting_looks_again_no_later_than_the_settle_end():
+    b = pure()
+    b.relay_changed("off", True, True, 100.0)
+    b.command("off", 100.0)
+    assert b.auto(102.0, 2110.0, 0.0, "off") == (None, "")
+    assert b.phase == "waiting" and b.until == 110.0
+    assert b.trace(2110.0, 0.0, "off")["until"] == 115000
+
+
+def test_pure_blackout_is_not_delayed():
+    b = pure()
+    assert b.auto(101.0, None, 0.0, "on") == ("off", "blackout")
+    assert b.phase == "blackout"
+
+
+@pytest.mark.parametrize("readings", [
+    [("on", 100.0)],  # the first reading
+    [("off", 90.0), (None, 95.0), ("on", 100.0)],  # back from no data
+    [("on", 100.0), ("on", 101.0)],  # no change
+])
+def test_pure_no_settle_time_without_a_switch_between_on_and_off(readings):
+    b = Boiler({"device": "b", "button": "btn", "grid": dict(GRID)}, {"b": BOILER, "btn": BUTTON},
+               {"g": {"id": "g", "kind": "grid", "power": "sensor.grid"}})
+    b.mode = "auto"
+    for relay, at in readings:
+        b.relay_changed(relay, True, True, at)
+    assert b.auto(102.0, 2054.0, 0.0, "on") == ("off", "power limit")
+
+
+def test_pure_without_a_power_limit_nothing_changes():
+    b = Boiler({"device": "b", "button": "btn"}, {"b": BOILER, "btn": BUTTON}, {})
+    b.mode = "auto"
+    b.relay_changed("off", True, True, 90.0)
+    b.relay_changed("on", True, True, 100.0)
+    b.command("on", 99.0)
+    assert b.auto(102.0, None, 0.0, "on") == (None, "auto") and b.until == 159.0
+
+
+def test_pure_an_unchanged_save_keeps_the_change_time():
+    old = pure()
+    new = Boiler({"device": "b", "button": "btn", "grid": dict(GRID)}, {"b": BOILER, "btn": BUTTON},
+                 {"g": {"id": "g", "kind": "grid", "power": "sensor.grid"}})
+    new.take(old)
+    assert new.auto(103.0, 2054.0, None, "on") == (None, "auto") and new.until == 110.0
+
+
+def test_unchanged_save_inside_the_settle_time_keeps_it():
+    w = switched_on()
+    w.advance(1003)
+    w.engine.load_plans([boiler_plan()])
+    w.set("sensor.grid", "2054", W)
+    assert w.calls == [ON] and w.b()["phase"] == "heating"

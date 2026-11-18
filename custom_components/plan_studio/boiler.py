@@ -20,6 +20,9 @@ Lookup = Callable[[str], "tuple[str, dict] | None"]
 OFF_WAIT = 15  # s after the rule's last off before it may switch on again
 ON_WAIT = 60  # s after an on before "heating done" may be concluded
 IDLE_W = 1.0  # a boiler drawing no more than this is done heating
+# s after the relay's on <-> off change before the power limit is judged: the grid and the boiler meters report about
+# every 5 s in either order, so right after a switch one of them is stale (spec §11)
+SETTLE = 10
 BUTTONS = ("wall_switch", "smart_button")
 RELAY_DOMAINS = ("light", "switch", "fan")  # entities with turn_on / turn_off
 MODES = ("auto", "manual")
@@ -78,16 +81,18 @@ class Boiler:
         self.cmd: str | None = None  # the last command sent, until the relay moves away from it
         self.last_do: str | None = None  # the last command sent, kept
         self.seen: str | None = None  # the relay's last on / off reading (None after no data)
+        self.switched: float | None = None  # epoch s the relay last changed between on and off (whoever switched it)
         self.sends = 0  # send counter: a late failure or a held call counts only for the latest send
         # derived on every evaluation
-        self.until: float | None = None
+        self.until: float | None = None  # the time to look again (the engine's timer)
+        self.due: float | None = None  # the phase's own deadline (waiting / grace), shown in the trace
         self.timer: "tuple[float, Callable[[], None]] | None" = None
         self.view: dict = {}
 
     def take(self, old: "Boiler") -> None:
         self.mode, self.phase, self.last_on, self.last_off = old.mode, old.phase, old.last_on, old.last_off
         self.holding, self.cmd, self.seen, self.sends = old.holding, old.cmd, old.seen, old.sends
-        self.last_do = old.last_do
+        self.last_do, self.switched = old.last_do, old.switched
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -115,14 +120,16 @@ class Boiler:
     def manual(self) -> None:
         self.mode, self.phase, self.holding = "manual", None, False
 
-    def relay_changed(self, relay: str | None, own: bool, active: bool) -> bool:
+    def relay_changed(self, relay: str | None, own: bool, active: bool, now: float) -> bool:
         """A state change of the relay; True when a human took over (an on <-> off change not caused by Plan Studio
         while auto): the mode becomes manual. A return from no data is never a take-over, nor is a change to the
         rule's outstanding command (HA keeps a call's context only ~5 s; a slow relay confirms later without it).
         own: any Plan Studio context, so another rule switching the relay is not a take-over either (that is a
-        configuration conflict, not a human)."""
-        human = active and self.mode == "auto" and not own and None not in (self.seen, relay) \
-            and relay != self.seen and relay != self.cmd
+        configuration conflict, not a human). An on <-> off change by anyone starts the settle time."""
+        switch = None not in (self.seen, relay) and relay != self.seen
+        if switch:
+            self.switched = now
+        human = active and self.mode == "auto" and not own and switch and relay != self.cmd
         if self.mode == "manual" and self.phase == "done" and relay == "on" and self.seen != "on":
             self.phase = None  # switched on again after heating done: "heating done" no longer describes the relay
         self.seen = relay
@@ -164,11 +171,25 @@ class Boiler:
 
     def auto(self, now: float, grid: float | None, power: float | None, relay: str | None) -> "tuple[str | None, str]":
         """One auto evaluation: (command to send or None, reason); sets the phase and the time to look again."""
+        # the readings settle after the relay switched: the limit is judged again no later than the settle end
+        settle = self.switched + SETTLE if self.limited and self.switched is not None \
+            and now - self.switched < SETTLE else None
+        out = self._auto(now, grid, power, relay, settle is not None)
+        self.due = self.until
+        if settle is not None and self.mode == "auto":
+            self.until = settle if self.until is None else min(self.until, settle)
+        return out
+
+    def _auto(self, now: float, grid: float | None, power: float | None, relay: str | None,
+              settling: bool) -> "tuple[str | None, str]":
         self.until = None
         if self.limited:
             if grid is None:
-                return self._off(now, relay, "blackout", "blackout")
-            if grid + self.nominal - (power or 0.0) > self.limit:
+                return self._off(now, relay, "blackout", "blackout")  # never delayed
+            if settling:
+                if self.holding:
+                    return None, ""  # the off reason in force stays: same phase, the 15 s wait not started yet
+            elif grid + self.nominal - (power or 0.0) > self.limit:
                 return self._off(now, relay, "limit", "power limit")
         if self.holding:
             # the off reason lasted until now (AppDaemon re-sent off every 5 s): the 15 s wait counts from here
@@ -200,6 +221,6 @@ class Boiler:
             "headroom": _w(grid + self.nominal - (power or 0.0)) if grid is not None else None,
             "relay": relay,
         }
-        if self.until is not None:
-            out["until"] = int(self.until * 1000)
+        if self.until is not None and self.due is not None:  # until None: not evaluated in auto this time
+            out["until"] = int(self.due * 1000)
         return out
