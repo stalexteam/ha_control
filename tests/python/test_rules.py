@@ -1679,10 +1679,22 @@ def test_not_confirmed_keeps_a_waiting_entry_and_skips_an_entity_already_there()
 
 
 def test_a_newer_command_to_the_entity_clears_not_confirmed():
+    w = unconfirmed_world(pair=True)
+    w.set("binary_sensor.s", "on")
+    w.engine.command_unconfirmed("switch.sock", ("p", "r"))
+    assert trace(w)["status"] == "error"
+    w.set("binary_sensor.s", "off")  # another state: a new command
+    tr = trace(w)
+    assert w.calls[-1] == ("switch", "turn_off", "switch.sock") and tr["status"] == "ok" and "error" not in tr["last"]
+
+
+def test_an_identical_repeat_of_a_command_not_confirmed_keeps_saying_so_until_the_state_arrives():
     w = unconfirmed_world()
     w.set("binary_sensor.s", "on")
     w.engine.command_unconfirmed("switch.sock", ("p", "r"))
     w.set("binary_sensor.s", "off")
-    w.set("binary_sensor.s", "on")  # fires again: a new on
+    w.set("binary_sensor.s", "on")  # fires again: the same on from the same rule, the device still reads off
     tr = trace(w)
-    assert len(w.calls) == 2 and tr["status"] == "ok" and "error" not in tr["last"]
+    assert len(w.calls) == 2 and tr["status"] == "error" and tr["last"]["error"] == "not confirmed"
+    w.set("switch.sock", "on")
+    assert trace(w)["status"] == "ok" and "error" not in trace(w)["last"]

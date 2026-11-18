@@ -29,6 +29,38 @@ def test_a_newer_command_replaces_the_record():
     assert x.arrived(E, "on", 16.0) is False  # the older command is not ours any more
 
 
+def test_an_identical_repeat_keeps_the_first_send_time_and_the_retried_mark():
+    x = Expected()
+    x.sent(E, "off", 0.0, "b")
+    x.sent(E, "off", 5.0, "b")  # the same state from the same sender
+    assert x.next_at() == 10.0
+    assert x.due(10.0) == [(E, "off", "b", "retry")]
+    x.sent(E, "off", 20.0, "b")
+    assert x.due(30.0) == [] and x.next_at() == 60.0  # retried once only; the 60 s count from the first send
+    x.sent(E, "off", 50.0, "b")
+    assert x.due(60.0) == [(E, "off", "b", "expire")]
+    x.sent(E, "off", 70.0, "b")  # after the expiry: a new record
+    assert x.next_at() == 80.0
+
+
+@pytest.mark.parametrize("state,by", [("on", "b"), ("off", "c")])
+def test_another_state_or_sender_restarts_the_record(state, by):
+    x = Expected()
+    x.sent(E, "off", 0.0, "b")
+    x.due(10.0)
+    x.sent(E, state, 15.0, by)
+    assert x.next_at() == 25.0 and x.due(25.0) == [(E, state, by, "retry")]
+
+
+def test_an_identical_repeat_after_no_data_is_a_fresh_send():
+    x = Expected()
+    x.sent(E, "on", 0.0, "r")
+    x.arrived(E, "unavailable", 5.0)
+    x.sent(E, "on", 50.0, "r")  # the waiting re-send when the device is back: a full 60 s again
+    assert x.next_at() == 60.0
+    assert x.due(60.0) == [(E, "on", "r", "retry")] and x.next_at() == 110.0
+
+
 def test_another_known_state_drops_the_record_without_retry_or_error():
     x = Expected()
     x.sent(E, "on", 0.0, "r1")

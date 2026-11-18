@@ -1867,6 +1867,47 @@ def test_a_no_data_blip_back_in_the_old_state_keeps_the_record(env):
     asyncio.run(go())
 
 
+def test_a_safety_off_the_relay_ignores_is_repeated_and_not_confirmed_60_s_after_the_first(env):
+    async def go():
+        hass, clock = FakeHass(), [5000.0]
+        FakeStore.contents[BOILER_KEY] = {"p1": {"r1": "auto"}}
+        live = await _xstart(env, hass, _boiler_plan(), clock, **BOILER_HEATING)
+        live.engine._now = lambda: clock[0]  # the rule's clock follows the test's too
+        await asyncio.gather(*hass.tasks)
+        assert hass.services.calls == []
+        _boiler_event(env, hass, "sensor.grid", "3200", old="500")  # limit: the safety off, ignored by the relay
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_off"]
+        trace = lambda: live.engine.snapshot("p1")["r1"]  # noqa: E731
+        offs = 1
+        for k in range(1, 6):  # +10 .. +50 s: the off again, no error yet
+            _tick(env, clock, 5000.0 + 10 * k)
+            await asyncio.gather(*hass.tasks)
+            n = len(hass.services.calls)
+            assert n > offs and set(c[1] for c in hass.services.calls) == {"turn_off"}
+            offs = n
+            assert trace()["status"] == "ok"
+        _tick(env, clock, 5060.0)  # 60 s after the first off
+        await asyncio.gather(*hass.tasks)
+        assert trace()["status"] == "error" and trace()["reason"] == "not confirmed"
+        assert trace()["last"]["error"] == "not confirmed" and trace()["last"]["reason"] == "power limit"
+        assert trace()["last"]["at"] == 5060000  # the latest entry
+        _tick(env, clock, 5070.0)  # repeated again: the error stays on the newest entry
+        await asyncio.gather(*hass.tasks)
+        assert trace()["last"]["at"] == 5070000 and trace()["last"]["error"] == "not confirmed"
+        clock[0] = 5072.0
+        _boiler_event(env, hass, "switch.relay", "off", old="on")  # it got through at last
+        assert trace()["status"] == "ok" and "error" not in trace()["last"]
+        assert live.engine.snapshot("p1")["r1"]["boiler"]["mode"] == "auto"
+        n = len(hass.services.calls)
+        for t in (5080.0, 5090.0, 5150.0):
+            _tick(env, clock, t)
+            await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == n  # the repeats stopped
+
+    asyncio.run(go())
+
+
 def test_a_failing_still_wants_is_logged_and_the_other_records_go_on(env, caplog):
     async def go():
         hass, clock = FakeHass(), [0.0]

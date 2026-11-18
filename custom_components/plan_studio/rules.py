@@ -1395,10 +1395,17 @@ class RuleEngine:
     ) -> "bool | None":
         """Every command of the engine: the latest one per entity is kept with the rule and the entry it belongs to
         and how its sender decides (kind, token), for still_wants and command_unconfirmed; it replaces an older one,
-        whose "not confirmed" goes with it. current() is only for a call held until HA has started (live.py)."""
+        whose "not confirmed" goes with it, except to an identical repeat (same sender, same state: the same command
+        still not confirmed, e.g. a boiler's safety off every 10 s), whose entry keeps saying so.
+        current() is only for a call held until HA has started (live.py)."""
+        state, old = expect(domain, service), self._commands.get(eid)
+        still = old is not None and old.by == by and old.state == state and old.entry is not None \
+            and old.entry.get("error") == NOT_CONFIRMED
         self._unmark(eid)
+        if still and entry is not None and "error" not in entry:
+            entry["error"] = NOT_CONFIRMED
         since = {r.key: r.boiler.sends for r in self._rules.values() if r.boiler is not None and r.boiler.relay == eid}
-        self._commands[eid] = _Command(by, entry, expect(domain, service), kind, token, since)
+        self._commands[eid] = _Command(by, entry, state, kind, token, since)
         return self._call(domain, service, eid, on_error=on_error, current=current, by=by)
 
     def _unmark(self, eid: str) -> bool:
