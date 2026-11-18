@@ -2,6 +2,8 @@
 
 import copy
 
+from containers import WallSwitch
+from expected import Expected, expect, passing
 from motion_light import MotionLight
 from rules import RuleEngine
 from test_daylight import sensor
@@ -14,12 +16,21 @@ PIR2 = dev("pir2", "motion_sensor", "Motion 2", motion="binary_sensor.pir2")
 LS = sensor("ls", "LightSensor", debounce=0)
 BTN = dev("btn", "smart_button", "Button", action="sensor.act")
 BTN["props"]["autoEnabled"] = True
-WS = dev("ws", "wall_switch", "Dimmer", state="light.k")
+WS = dev("ws", "wall_switch", "Dimmer", state="light.k")  # the lamp's own relay
 WS["props"]["autoByDoubleToggle"] = True
+WSP = dev("wsp", "wall_switch", "Plain switch", state="light.k")  # the lamp's own relay, no double toggle
+WS2 = dev("ws2", "wall_switch", "Switch 2", state="switch.ws2")  # a relay of its own: a remote for the lamp
+WS2["props"]["autoByDoubleToggle"] = True
+WSX = dev("wsx", "wall_switch", "Unbound switch")  # no state entity
+# the Entrance (live shape): a wall light and a wall switch bound to the same relay, window 3 s
+ENT = dev("ent", "wall_light", "Light entrance", control="switch.entrance")
+SWE = dev("swe", "wall_switch", "Switch entrance", state="switch.entrance")
+SWE["props"].update(autoByDoubleToggle=True, windowSec=3)
 TB = dev("tb", "smart_button", "Timer button", action="sensor.tact")
-DEVICES = [LAMP, LAMP2, PIR1, PIR2, LS, BTN, WS, TB]
+DEVICES = [LAMP, LAMP2, PIR1, PIR2, LS, BTN, WS, WSP, WS2, WSX, ENT, SWE, TB]
 ON, OFF = ("light", "turn_on", "light.k"), ("light", "turn_off", "light.k")
 ON2, OFF2 = ("light", "turn_on", "light.k2"), ("light", "turn_off", "light.k2")
+E_ON, E_OFF = ("switch", "turn_on", "switch.entrance"), ("switch", "turn_off", "switch.entrance")
 DAY, NIGHT, DUSK = lux(100), lux(5), lux(30)
 T0 = 1000.0
 
@@ -83,6 +94,44 @@ class MWorld(World):
 
     def ml(self, rid="m"):
         return self.tr(rid)["motionLight"]
+
+
+class SWorld(MWorld):
+    """MWorld whose wall switches flip as live.py delivers it: a state change is Plan Studio's own by its context or
+    as the first arrival of the state its latest command expects (expected.py, however late); the wall switch
+    containers' intents reach the engine first, then the state change."""
+
+    def __init__(self, switches=(WS,), **states):
+        self.expected = Expected()
+        super().__init__(**states)
+        self.switches = {d["id"]: WallSwitch(d, self.lookup) for d in switches}
+
+    def call(self, domain, service, eid, on_error=None, current=None, by=None):
+        state = expect(domain, service)
+        if state is not None:
+            self.expected.sent(eid, state, self.t, by)
+        return super().call(domain, service, eid, on_error, current, by)
+
+    def change(self, eid, state, ctx=False):
+        """One state change of the entity; ctx: it carries Plan Studio's context."""
+        old, new = self.states.get(eid), (state, {})
+        self.states[eid] = new
+        was = old[0] if old is not None else None
+        own = ctx
+        if was != state:
+            own = self.expected.arrived(eid, state, self.t, back=passing(was)) or own
+        for did, c in self.switches.items():
+            for intent in c.handle(eid, old, new, self.t, own):
+                self.engine.on_intent("p", did, intent)
+        self.engine.handle_state(eid, own=own)
+
+
+def entrance(**states):
+    """The Entrance: Light entrance switched by its own relay "Switch entrance" (the button), two motion sensors, no
+    daylight sensor, off after 180 s, no auto-return."""
+    w = SWorld(switches=(SWE,), **{"switch__entrance": "off", **states})
+    w.load([ml_rule(light="ent", sensors=("pir1", "pir2"), buttons=("swe",))])
+    return w
 
 
 def loaded(rules=None, **states):
@@ -197,11 +246,14 @@ def test_decide_prunes_expired_records():
     assert m.own == [("on", 30), ("off", 35)]
 
 
-def test_ident_and_smart_buttons_only():
+def test_ident_and_button_kinds():
+    """Buttons: smart buttons and wall switches with a bound state entity (spec §12); anything else is missing."""
     m = make()
-    assert m.ident == ("light.k", ("btn",)) and not m.missing and not m.waiting
-    assert MotionLight({"light": "lamp", "sensors": ["pir1"], "buttons": ["ws"]}, {"lamp": LAMP, "pir1": PIR1, "ws": WS},
-                       "light.k").missing
+    assert m.ident == ("light.k", ("btn",)) and not m.missing and not m.waiting and m.relays == set()
+    m = make(buttons=["btn", "ws", "ws2"])
+    assert not m.missing and m.relays == {"ws"}  # only a wall switch over the light's own entity is its relay
+    for bad in ("wsx", "pir1", "lamp2", "nope"):
+        assert make(buttons=[bad]).missing, bad
     assert not MotionLight({"light": "lamp", "sensors": [], "buttons": []}, {"lamp": LAMP}, "light.k").missing
 
 
@@ -1128,7 +1180,7 @@ def test_disabled_or_deleted_sends_nothing():
 
 
 def test_missing_device_is_a_static_problem():
-    for r in (ml_rule(sensors=("nope",)), ml_rule(sensors=("ls",)), ml_rule(buttons=("pir2",)), ml_rule(buttons=("ws",)),
+    for r in (ml_rule(sensors=("nope",)), ml_rule(sensors=("ls",)), ml_rule(buttons=("pir2",)), ml_rule(buttons=("wsx",)),
               ml_rule(daylight=("pir2", "night")), ml_rule(light="nope")):
         w = loaded([r], binary_sensor__pir1="on")
         w.pir("on", 2)
@@ -1160,3 +1212,213 @@ def test_trace_shape():
     w = loaded(binary_sensor__pir1="unavailable", light__k="unavailable")
     assert w.ml() == {"mode": "auto", "motion": False, "sensors": [{"id": "pir1", "name": "Motion 1", "state": None}],
                       "dark": None, "light": None}
+
+
+# --- a wall switch as the button (spec §12) ------------------------------------------------------
+
+def test_entrance_one_flip_is_manual_and_sends_nothing():
+    """Review focus 1: the light's own relay is the button: a hand flip on is manual, nothing is sent, the light stays
+    on and is not "found on"; motion then does nothing."""
+    w = entrance()
+    assert w.tr()["verdict"] is False and w.ml()["mode"] == "auto"
+    w.change("switch.entrance", "on")
+    t = w.tr()
+    assert w.calls == [] and t["motionLight"]["mode"] == "manual" and t["verdict"] is None
+    assert t["last"] == {"action": "on", "target": "Light entrance", "at": T0 * 1000, "reason": "button: manual",
+                         "sent": False}
+    assert t["motionLight"]["light"] == "on" and t["status"] == "ok"
+    assert w.saved[-1] == {"p": {"m": {"mode": "manual", "since": T0, "by": "button"}}}
+    w.advance(T0 + 10)
+    w.pir("on")
+    w.pir("on", 2)
+    w.pir("off")
+    w.pir("off", 2)
+    w.advance(T0 + 3600)
+    t = w.tr()
+    assert w.calls == [] and t["motionLight"]["mode"] == "manual" and t["last"]["reason"] == "button: manual"
+
+
+def test_entrance_flip_off_under_motion_is_manual_and_a_second_flip_is_auto():
+    """Review focus 2: held under motion; a hand flip off: manual, stays off, no wait for new motion; a second flip
+    on within 3 s: auto at once, motion: held, nothing sent."""
+    w = entrance()
+    w.pir("on")
+    assert w.calls == [E_ON]
+    w.change("switch.entrance", "on")  # its confirmation
+    assert w.ml()["mode"] == "auto" and w.tr()["verdict"] is True
+    w.calls.clear()
+    w.advance(T0 + 30)
+    w.change("switch.entrance", "off")  # the person
+    t = w.tr()
+    assert w.calls == [] and t["motionLight"]["mode"] == "manual" and t["verdict"] is None
+    assert "waiting" not in t["motionLight"] and t["motionLight"]["light"] == "off"
+    assert t["last"] == {"action": "off", "target": "Light entrance", "at": (T0 + 30) * 1000,
+                         "reason": "button: manual", "sent": False}
+    w.pir("on")  # the motion continues
+    assert w.calls == [] and w.ml()["light"] == "off"
+    w.advance(T0 + 32)
+    w.change("switch.entrance", "on")  # the second flip within the window: auto
+    t = w.tr()
+    assert w.calls == [] and t["motionLight"]["mode"] == "auto" and t["verdict"] is True
+    assert t["last"]["reason"] == "button: auto" and "waiting" not in t["motionLight"] and w.saved[-1] == {}
+    w.pir("off")
+    w.advance(T0 + 211)
+    assert w.calls == []
+    w.advance(T0 + 212)
+    assert w.calls == [E_OFF] and w.ml()["mode"] == "auto"
+
+
+def test_entrance_double_flip_ending_on_without_motion_switches_off_at_once():
+    """Review focus 2: the double flip ends on, no motion: off at once; the flip's own change is no "found on"."""
+    w = entrance()
+    w.pir("on")
+    w.change("switch.entrance", "on")  # its confirmation
+    w.pir("off")
+    w.calls.clear()
+    w.advance(T0 + 30)
+    w.change("switch.entrance", "off")  # manual
+    w.advance(T0 + 31)
+    w.change("switch.entrance", "on")  # auto
+    t = w.tr()
+    assert w.calls == [E_OFF] and t["motionLight"]["mode"] == "auto" and t["verdict"] is False
+    assert t["last"]["action"] == "off" and t["last"]["reason"] == "back to auto: no motion" and "sent" not in t["last"]
+    w.change("switch.entrance", "off")  # the off arrives
+    t = w.tr()
+    assert w.calls == [E_OFF] and t["motionLight"]["mode"] == "auto" and t["verdict"] is False
+    assert "waiting" not in t["motionLight"] and t["last"]["reason"] == "back to auto: no motion"
+    w.advance(T0 + 3600)
+    assert w.calls == [E_OFF]
+    w.pir("on")
+    assert w.calls == [E_OFF, E_ON]
+
+
+def test_entrance_double_flip_from_off_with_motion_switches_on_at_once():
+    """Review focus 3: off -> on -> off within 3 s with motion: auto, the light switched on at once; the flip's own
+    change is no "switched off elsewhere"."""
+    w = entrance()
+    w.change("switch.entrance", "on")  # manual
+    w.advance(T0 + 10)
+    w.change("switch.entrance", "off")  # outside the window: manual again
+    w.pir("on")
+    assert w.calls == [] and w.ml()["mode"] == "manual"
+    w.advance(T0 + 20)
+    w.change("switch.entrance", "on")
+    w.advance(T0 + 21)
+    w.change("switch.entrance", "off")  # within the window: auto
+    t = w.tr()
+    assert w.calls == [E_ON] and t["motionLight"]["mode"] == "auto" and t["verdict"] is True
+    assert t["last"]["action"] == "on" and t["last"]["reason"] == "back to auto: motion"
+    assert "waiting" not in t["motionLight"]
+    w.advance(T0 + 22)
+    w.change("switch.entrance", "on")  # the on arrives
+    t = w.tr()
+    assert w.calls == [E_ON] and t["motionLight"]["mode"] == "auto" and t["verdict"] is True
+    assert t["last"]["reason"] == "back to auto: motion"
+    w.pir("off")
+    w.advance(T0 + 201)
+    assert w.calls == [E_ON]
+    w.advance(T0 + 202)
+    assert w.calls == [E_ON, E_OFF]
+
+
+def test_entrance_own_commands_are_never_presses():
+    """Review focus 4: the rule's own on / off confirmed 7 s late (no Plan Studio context, the expected state) is no
+    press: the mode stays auto; it does not open the double toggle window either."""
+    w = entrance()
+    w.pir("on")
+    assert w.calls == [E_ON]
+    w.advance(T0 + 7)
+    w.change("switch.entrance", "on")
+    t = w.tr()
+    assert t["motionLight"]["mode"] == "auto" and t["verdict"] is True and t["last"]["reason"].startswith("became true")
+    w.pir("off")
+    w.advance(T0 + 187)
+    assert w.calls == [E_ON, E_OFF]
+    w.advance(T0 + 194)
+    w.change("switch.entrance", "off")
+    t = w.tr()
+    assert t["motionLight"]["mode"] == "auto" and t["verdict"] is False and "waiting" not in t["motionLight"]
+    assert t["last"]["action"] == "off" and w.engine.motion_modes() == {} and w.saved == []
+    w.advance(T0 + 195)
+    w.change("switch.entrance", "on")  # the person, 1 s after the rule's own change: one flip, not a double one
+    t = w.tr()
+    assert t["motionLight"]["mode"] == "manual" and t["last"]["reason"] == "button: manual"
+    assert w.calls == [E_ON, E_OFF]
+
+
+def test_wall_switch_over_another_entity_sets_the_light():
+    """Review focus 5: a wall switch over another relay sets the light to the flipped value (direct command) and
+    manual; its double flip is auto; a change of the light by hand is foreign as usual (held in auto)."""
+    w = SWorld(switches=(WS2,), switch__ws2="off")
+    w.load([ml_rule(buttons=("ws2",))])
+    w.change("switch.ws2", "on")
+    t = w.tr()
+    assert w.calls == [ON] and t["motionLight"]["mode"] == "manual"
+    assert t["last"] == {"action": "on", "target": "Lamp", "at": T0 * 1000, "reason": "button: manual"}
+    w.change("light.k", "on")  # its confirmation
+    assert w.calls == [ON] and w.ml()["mode"] == "manual"
+    w.advance(T0 + 10)
+    w.change("switch.ws2", "off")
+    assert w.calls == [ON, OFF] and w.ml()["mode"] == "manual"
+    w.change("light.k", "off")
+    w.advance(T0 + 20)
+    w.change("switch.ws2", "on")
+    w.change("light.k", "on")
+    w.advance(T0 + 21)
+    w.change("switch.ws2", "off")  # within the window: auto, no motion: off at once
+    t = w.tr()
+    assert w.calls == [ON, OFF, ON, OFF] and t["motionLight"]["mode"] == "auto" and t["verdict"] is False
+    assert t["last"]["reason"] == "back to auto: no motion"
+    w.change("light.k", "off")  # its confirmation
+    w.advance(T0 + 40)
+    w.change("light.k", "on")  # by hand: switched on elsewhere, held
+    t = w.tr()
+    assert t["motionLight"]["mode"] == "auto" and t["verdict"] is True and t["last"]["reason"] == "found on"
+    w.advance(T0 + 220)
+    assert w.calls == [ON, OFF, ON, OFF, OFF]
+
+
+def test_wall_switch_without_double_toggle_stays_manual():
+    """Without "Auto by double toggle" two quick flips are two manual flips."""
+    w = SWorld(switches=(WSP,))
+    w.load([ml_rule(buttons=("wsp",))])
+    w.change("light.k", "on")
+    w.advance(T0 + 1)
+    w.change("light.k", "off")
+    t = w.tr()
+    assert w.calls == [] and t["motionLight"]["mode"] == "manual" and t["verdict"] is None
+    assert t["last"] == {"action": "off", "target": "Lamp", "at": (T0 + 1) * 1000, "reason": "button: manual",
+                         "sent": False}
+    w.pir("on")
+    assert w.calls == [] and w.ml()["mode"] == "manual"
+
+
+def test_wall_switch_flip_while_ha_starts_is_no_press():
+    w = SWorld()
+    w.load([ml_rule(buttons=("ws",))], boot=True)
+    w.change("light.k", "on")
+    assert w.calls == [] and w.ml()["mode"] == "auto" and w.engine.motion_modes() == {}
+    w.engine.started()
+    t = w.tr()
+    assert w.calls == [] and t["motionLight"]["mode"] == "auto" and t["verdict"] is True
+    assert t["last"]["reason"] == "found on"
+    w.advance(T0 + 180)
+    assert w.calls == [OFF]
+
+
+def test_manual_by_a_wall_switch_is_stored_and_restored():
+    w = SWorld()
+    w.load([ml_rule(buttons=("ws",))])
+    w.change("light.k", "on")
+    stored = w.saved[-1]
+    assert stored == {"p": {"m": {"mode": "manual", "since": T0, "by": "button"}}}
+    w = SWorld(light__k="on", binary_sensor__pir1="on")
+    w.load([ml_rule(buttons=("ws",))], boot=True, motion_modes=stored)
+    w.engine.started()
+    assert w.calls == [] and w.ml()["mode"] == "manual" and w.tr()["verdict"] is None
+    w.advance(T0 + 10)
+    w.change("light.k", "off")
+    w.advance(T0 + 11)
+    w.change("light.k", "on")  # a double flip: auto, motion, the light on: held
+    t = w.tr()
+    assert w.calls == [] and t["motionLight"]["mode"] == "auto" and t["verdict"] is True and w.saved[-1] == {}

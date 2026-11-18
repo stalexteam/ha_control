@@ -1,7 +1,7 @@
 """The Light motion control rule: motion sensors (any of them) switch one light while it is dark, with an off delay, a
-minimum on time and a manual / auto mode set by smart buttons only (without a button the rule is always in auto). A
-change of the light made elsewhere never changes the mode: in auto the rule adapts to it. Must not import
-homeassistant.
+minimum on time and a manual / auto mode set by its buttons only: smart buttons and wall switches, also the light's own
+relay (without a button the rule is always in auto). A change of the light made elsewhere never changes the mode: in
+auto the rule adapts to it. Must not import homeassistant.
 
 The rule engine owns the I/O (the sensor and daylight inputs, the holder slots, timers and trace frames); this module
 holds the rule's configuration, its runtime state and the decisions."""
@@ -13,7 +13,7 @@ from typing import Callable
 # entity id -> (state, attributes); None when the entity is missing
 Lookup = Callable[[str], "tuple[str, dict] | None"]
 
-BUTTONS = ("smart_button",)
+BUTTONS = ("smart_button", "wall_switch")
 
 
 def _str(v: object) -> str | None:
@@ -23,6 +23,18 @@ def _str(v: object) -> str | None:
 def _kind(device: "dict | None") -> str | None:
     p = device.get("props") if isinstance(device, dict) else None
     return p.get("kind") if isinstance(p, dict) else None
+
+
+def _state_entity(device: "dict | None") -> str | None:
+    """A wall switch's bound state entity (its flips are its presses)."""
+    b = device.get("bindings") if isinstance(device, dict) else None
+    return _str(b.get("state")) if isinstance(b, dict) else None
+
+
+def _button(device: "dict | None") -> bool:
+    """A smart button, or a wall switch with its state entity bound."""
+    kind = _kind(device)
+    return kind in BUTTONS and (kind != "wall_switch" or _state_entity(device) is not None)
 
 
 def _whole(v: object, top: int) -> int:
@@ -47,7 +59,10 @@ class MotionLight:
         self.missing = light is None \
             or any(_kind(devices.get(s)) != "motion_sensor" for s in self.sensors) \
             or (self.daylight is not None and _kind(devices.get(self.daylight[0])) != "illuminance_sensor") \
-            or any(_kind(devices.get(b)) not in BUTTONS for b in self.buttons)
+            or any(not _button(devices.get(b)) for b in self.buttons)
+        # the wall switch buttons over the light's own entity: a flip of one is the press and the light's change at once
+        self.relays = {b for b in self.buttons if eid is not None and _kind(devices.get(b)) == "wall_switch"
+                       and _state_entity(devices.get(b)) == eid}
         # the mode survives a Save that keeps these
         self.ident = (eid, tuple(self.buttons))
         # runtime state, kept for the same ident
@@ -122,7 +137,8 @@ class MotionLight:
         return max(off_delay, self.on_at + self.min_on - now)
 
     def press(self, intent: dict, light: "str | None") -> "tuple[str | None, str | None]":
-        """A smart button intent: (mode change "manual" | "auto" | None, the state to command | None)."""
+        """A button intent: (mode change "manual" | "auto" | None, the state to command | None). A wall switch's flip
+        over the light's own entity sets the state the light already reads: nothing to command."""
         action = intent.get("action")
         if action == "toggle":
             return "manual", "off" if light == "on" else "on"

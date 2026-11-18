@@ -1994,8 +1994,9 @@ class RuleEngine:
             self._motion_release(rule)
 
     def _motion_press(self, rule: _Rule, intent: dict) -> bool:
-        """A smart button intent of a motion light rule; True when it was taken. toggle / set on / set off: manual with
-        a direct command (own context, never re-sent); auto: auto."""
+        """A button intent of a motion light rule (a smart button or a wall switch); True when it was taken. toggle /
+        set on / set off: manual with a direct command (own context, never re-sent; none for a wall switch over the
+        light's own entity: the light already is as flipped); auto: auto."""
         m = rule.motion_light
         assert m is not None and m.eid is not None
         mode, do = m.press(intent, m.state(self._lookup))
@@ -2441,6 +2442,8 @@ class RuleEngine:
                     continue
                 was = rule.verdict
                 if self._motion_press(rule, intent):
+                    if container_id in m.relays:  # the light's own relay: the change behind this intent is the press
+                        m.seen = m.state(self._lookup)
                     dirty.add(key)
                     if rule.verdict != was:  # moved before the settle: its consumers follow it there
                         dirty.update(self._consumers.get(key, ()))
