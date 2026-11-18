@@ -400,10 +400,14 @@ def test_validate_plan_motion_light_rule():
     base = {"light": "l", "sensors": ["s1"], "minOn": 3600, "buttons": [], "autoAfter": 1440}
     validate_plan({**plan("p"), "rules": [motion_rule(ml=base, offDelay=0)]})
     validate_plan({**plan("p"), "rules": [motion_rule(ml={**base, "daylight": {"sensor": "ls", "is": "night"}}, offDelay=3600)]})
+    # 0.22.1: motion sensors are optional; a rule with a light only is valid
+    validate_plan({**plan("p"), "rules": [motion_rule(ml={**base, "sensors": []})]})
+    validate_plan({**plan("p"), "rules": [motion_rule(ml={"light": "l", "sensors": [], "minOn": 0, "buttons": [], "autoAfter": 0})]})
     good = motion_rule()["motionLight"]
     bad = [
         "x", [], {}, {k: v for k, v in good.items() if k != "autoAfter"}, {k: v for k, v in good.items() if k != "buttons"}, {**good, "x": 1},
-        {**good, "light": ""}, {**good, "light": 3}, {**good, "sensors": []}, {**good, "sensors": "s1"}, {**good, "sensors": ["s1", "s1"]}, {**good, "sensors": ["s1", ""]},
+        {k: v for k, v in good.items() if k != "sensors"},
+        {**good, "light": ""}, {**good, "light": 3}, {**good, "sensors": "s1"}, {**good, "sensors": ["s1", "s1"]}, {**good, "sensors": ["s1", ""]},
         {**good, "buttons": ["b1", "b1"]}, {**good, "buttons": [""]}, {**good, "sensors": ["l"]}, {**good, "buttons": ["l"]},
         {**good, "daylight": "x"}, {**good, "daylight": {"sensor": "ls"}}, {**good, "daylight": {"is": "dark"}}, {**good, "daylight": {"sensor": "", "is": "dark"}},
         {**good, "daylight": {"sensor": "ls", "is": "day"}}, {**good, "daylight": {"sensor": "ls", "is": "dark", "x": 1}},

@@ -68,14 +68,14 @@ describe('Light motion control form', () => {
     expect(q<HTMLSelectElement>(el, '[data-field="motionlight-is"]').value).toBe('dark');
     expect(q<HTMLInputElement>(el, '[data-field="motionlight-off"]').value).toBe('180');
     expect(q<HTMLInputElement>(el, '[data-field="motionlight-minon"]').value).toBe('0');
-    expect(chipIds(el, 'motionlight-buttons')).toEqual(['d-switch-ml', 'd-button-ml']);
+    expect(chipIds(el, 'motionlight-buttons')).toEqual(['d-button-ml']); // smart buttons only (0.22.1)
     expect(q<HTMLInputElement>(el, '[data-field="motionlight-autoafter"]').value).toBe('0');
     expect(problems(el)).toEqual([]);
     expect(q(el, '.fc-note').textContent).toBe('Live state appears after Save');
     await press(el, 'button[data-action="rule-ok"]');
     expect(el.rules[0]).toMatchObject({
       name: 'Light motion control Main', zoneId: 'r0', combine: 'any', inputs: [], onDelay: 0, offDelay: 180, onTrue: [], onFalse: [],
-      motionLight: { light: 'd-light', sensors: ['d-motion', 'd-motion-hall'], daylight: { sensor: 'd-lux', is: 'dark' }, minOn: 0, buttons: ['d-switch-ml', 'd-button-ml'], autoAfter: 0 },
+      motionLight: { light: 'd-light', sensors: ['d-motion', 'd-motion-hall'], daylight: { sensor: 'd-lux', is: 'dark' }, minOn: 0, buttons: ['d-button-ml'], autoAfter: 0 },
     });
   });
 
@@ -153,7 +153,7 @@ describe('Light motion control form', () => {
     expect(okBtn(el).disabled).toBe(true);
   });
 
-  it('removing a sensor chip patches sensors; removing the last one asks for a sensor', async () => {
+  it('removing a sensor chip patches sensors; no motion sensor is valid (0.22.1)', async () => {
     const el = await open([]);
     await selectZone(el, 'r0');
     await pickAutomation(el, 'motionLight');
@@ -161,9 +161,7 @@ describe('Light motion control form', () => {
     expect(motion(el).sensors).toEqual(['d-motion-hall']);
     await press(el, '.rule-backdrop [data-group="motionlight-sensors"] .rchip[data-id="d-motion-hall"] button[data-action="remove"]');
     expect(motion(el).sensors).toEqual([]);
-    expect(okBtn(el).disabled).toBe(true);
-    expect(problems(el)).toEqual(['Add a motion sensor']);
-    expect(q(el, '[data-block="motionlight-sensors"]').textContent).toContain('Add a motion sensor');
+    expect(okBtn(el).disabled).toBe(false);
   });
 
   it('a deleted sensor stays as a marked chip and blocks OK with the missing-device text', async () => {

@@ -111,7 +111,7 @@ const delayOk = (n: unknown): boolean => Number.isInteger(n) && (n as number) >=
  * (beurer rules); default = any existing device. `controlSourceExists` / `controlLoadExists` (optional) tell whether an id is a button /
  * wall switch / motion sensor and a device taking 'on' and 'off' (control rules); default = any existing device.
  * `motionLightExists` / `motionSensorExists` / `motionButtonExists` (optional) tell whether an id is a device taking 'on' and 'off' / a motion sensor /
- * a button or wall switch (motion light rules; the daylight sensor is checked with `lightSensorExists`); default = any existing device.
+ * a smart button (motion light rules; the daylight sensor is checked with `lightSensorExists`); default = any existing device.
  */
 export function ruleProblems(
   rules: Rule[], r: Rule, deviceExists: (id: Id) => boolean, actionsOf?: (id: Id) => RuleDo[] | undefined,
@@ -341,8 +341,8 @@ export const MOTION_LIGHT_DEFAULTS = { offDelay: 180, minOn: 0, autoAfter: 0, is
 function motionLightProblem(r: Rule, m: NonNullable<Rule['motionLight']>): boolean {
   if (r.vent || r.boiler || r.leak || r.timed || r.outside || r.beurer || r.control || r.gate || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
-  const list = (ids: unknown, min: number): ids is Id[] => Array.isArray(ids) && ids.length >= min && ids.every(id => typeof id === 'string' && id !== '') && new Set(ids).size === ids.length;
-  if (typeof m.light !== 'string' || m.light === '' || !list(m.sensors, 1) || !list(m.buttons, 0)) return true;
+  const list = (ids: unknown): ids is Id[] => Array.isArray(ids) && ids.every(id => typeof id === 'string' && id !== '') && new Set(ids).size === ids.length;
+  if (typeof m.light !== 'string' || m.light === '' || !list(m.sensors) || !list(m.buttons)) return true;
   if (m.sensors.includes(m.light) || m.buttons.includes(m.light)) return true;
   if (m.daylight !== undefined && (typeof m.daylight !== 'object' || m.daylight === null || typeof m.daylight.sensor !== 'string' || m.daylight.sensor === '' || (m.daylight.is !== 'night' && m.daylight.is !== 'dark'))) return true;
   return !Number.isInteger(m.minOn) || m.minOn < 0 || m.minOn > 3600 || !Number.isInteger(m.autoAfter) || m.autoAfter < 0 || m.autoAfter > 1440;
@@ -350,7 +350,7 @@ function motionLightProblem(r: Rule, m: NonNullable<Rule['motionLight']>): boole
 
 export const isMotionLightRule = (r: Rule): boolean => r.motionLight !== undefined;
 
-/** The "Light motion control" template: the zone's single participating on/off ceiling / wall light, all its motion sensors, smart buttons and wall switches, the plan's single illuminance sensor (daylight 'dark'); never invents a device. */
+/** The "Light motion control" template: the zone's single participating on/off ceiling / wall light, all its motion sensors and smart buttons, the plan's single illuminance sensor (daylight 'dark'); never invents a device. */
 export function motionLightTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
   const rule = newRule(zoneId);
   rule.name = zoneId !== null && zoneName ? `Light motion control ${zoneName}` : 'Light motion control';
@@ -365,8 +365,7 @@ export function motionLightTemplate(plan: { levels: Level[] }, zoneId: Id | null
     sensors: members.filter(d => d.props.kind === 'motion_sensor').map(d => d.id),
     ...(lux.length === 1 ? { daylight: { sensor: lux[0].id, is: MOTION_LIGHT_DEFAULTS.is } } : {}),
     minOn: MOTION_LIGHT_DEFAULTS.minOn,
-    // A wall switch over another relay would drive this light, so only one over the light's own entity is pre-filled.
-    buttons: members.filter(d => d.props.kind === 'smart_button' || (d.props.kind === 'wall_switch' && !!light?.bindings?.control && d.bindings?.state === light.bindings.control)).map(d => d.id),
+    buttons: members.filter(d => d.props.kind === 'smart_button').map(d => d.id),
     autoAfter: MOTION_LIGHT_DEFAULTS.autoAfter,
   };
   return rule;

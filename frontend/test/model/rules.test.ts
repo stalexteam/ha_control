@@ -264,11 +264,13 @@ describe('rules model', () => {
       expect(probs(ml())).toEqual([]);
       expect(probs(noDay(ml()))).toEqual([]);
       expect(probs(ml({}, { buttons: [] }))).toEqual([]);
+      expect(probs(ml({}, { sensors: [] }))).toEqual([]);
+      expect(probs(noDay(ml({}, { sensors: [], buttons: [] })))).toEqual([]); // a light only
       expect(probs(ml({ offDelay: 0 }, { minOn: 3600, autoAfter: 1440, daylight: { sensor: 'ls', is: 'night' } }))).toEqual([]);
       expect(probs(ml({ offDelay: 3600 }))).toEqual([]);
     });
     it('shape, numbers and duplicates', () => {
-      for (const m of [{ light: '' }, { sensors: [] }, { sensors: ['s1', 's1'] }, { sensors: ['s1', ''] }, { buttons: ['b1', 'b1'] }, { buttons: [''] },
+      for (const m of [{ light: '' }, { sensors: ['s1', 's1'] }, { sensors: ['s1', ''] }, { buttons: ['b1', 'b1'] }, { buttons: [''] },
         { sensors: ['l', 's1'] }, { buttons: ['l'] },
         { daylight: { sensor: 'ls', is: 'day' as unknown as 'dark' } }, { daylight: { sensor: '', is: 'dark' as const } },
         { minOn: -1 }, { minOn: 1.5 }, { minOn: 3601 }, { autoAfter: -1 }, { autoAfter: 1.5 }, { autoAfter: 1441 }])
@@ -310,13 +312,13 @@ describe('rules model', () => {
       expect(r.motionLight).toEqual({ light: 'l', sensors: ['m1', 'm2'], buttons: ['b'], daylight: { sensor: 'ls', is: 'dark' }, minOn: 0, autoAfter: 0 });
       expect(ruleProblems([r], r, exists)).toEqual([]);
     });
-    it('template pre-fills only the wall switches over the own entity of the light', () => {
+    it('template pre-fills only smart buttons, never a wall switch', () => {
       const bind = (d: Device, b: Record<string, string>): Device => ({ ...d, bindings: b });
       const r = motionLightTemplate(lvl([bind(dev('l', 'ceiling_light', 100, 100), { control: 'light.a' }), dev('b', 'smart_button', 400, 400),
         bind(dev('w1', 'wall_switch', 500, 500), { state: 'light.a' }), bind(dev('w2', 'wall_switch', 600, 600), { state: 'switch.other' }), dev('w3', 'wall_switch', 700, 700)]), 'z1', 'Hall');
-      expect(r.motionLight!.buttons).toEqual(['b', 'w1']);
-      const none = motionLightTemplate(lvl([dev('l', 'ceiling_light', 100, 100), dev('b', 'smart_button', 400, 400), bind(dev('w1', 'wall_switch', 500, 500), { state: 'light.a' })]), 'z1', 'Hall');
-      expect(none.motionLight!.buttons).toEqual(['b']);
+      expect(r.motionLight!.buttons).toEqual(['b']);
+      const none = motionLightTemplate(lvl([dev('l', 'ceiling_light', 100, 100), bind(dev('w1', 'wall_switch', 500, 500), { state: 'light.a' })]), 'z1', 'Hall');
+      expect(none.motionLight!.buttons).toEqual([]);
     });
     it('template never invents devices', () => {
       const two = motionLightTemplate(lvl([dev('l', 'ceiling_light', 100, 100), dev('w', 'wall_light', 200, 200), dev('ls', 'illuminance_sensor', 5000, 5000), dev('ls2', 'illuminance_sensor', 6000, 6000)]), 'z1', 'Hall');

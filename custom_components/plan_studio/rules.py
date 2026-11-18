@@ -906,8 +906,9 @@ class RuleEngine:
             o.restore(stored)  # evaluated once the boot phase is over (started())
 
     def _load_motion(self, rule: _Rule, prev: "_Rule | None", motion_modes: "dict | None") -> None:
-        """Keep the mode of the same motion light rule (light entity and buttons unchanged); one not loaded yet takes its
-        stored mode; any other one starts in auto."""
+        """Keep the mode of the same motion light rule (light entity and buttons unchanged; a changed Save ends a wait for
+        new motion); one not loaded yet takes its stored mode when it has a button (without one it is always in auto);
+        any other one starts in auto."""
         m = rule.motion_light
         assert m is not None
         old = prev.motion_light if prev is not None else None
@@ -915,10 +916,12 @@ class RuleEngine:
             old.stop()
             m.take(old)
             rule.last, rule.failed = prev.last, prev.failed
+            if prev.sig != rule.sig:
+                m.waiting = False  # the rule starts anew: it takes the light as it is
             return
         m.seen = m.state(self._lookup)
         stored = self._motion_modes.get(rule.key[0], {}).get(rule.key[1]) if prev is None and motion_modes is not None else None
-        if stored is not None:
+        if stored is not None and m.buttons:
             m.restore(stored["mode"], stored["since"])  # evaluated once the boot phase is over (started())
 
     def _released_runs(self, old: "dict[Key, _Rule]", rules: "dict[Key, _Rule]") -> "list[Timed]":
@@ -1016,7 +1019,7 @@ class RuleEngine:
             if rule.outside is not None and rule.outside.eid:
                 timed.append(rule.outside.eid)  # its light: a manual switch pauses the rule
             if rule.motion_light is not None and rule.motion_light.eid:
-                timed.append(rule.motion_light.eid)  # its light: a manual switch sets manual
+                timed.append(rule.motion_light.eid)  # its light: switched on / off elsewhere
             if rule.beurer is not None and rule.beurer.eid:
                 timed.append(rule.beurer.eid)  # its heater: switched off elsewhere, the power-cycle
             # load control: its devices only so the trace follows them (its input sources are in `reads`)
@@ -1764,10 +1767,10 @@ class RuleEngine:
     # --- light motion control --------------------------------------------------
 
     def _motion(self, rule: _Rule, due: "_Pending | None") -> bool:
-        """Evaluate a motion light rule. In auto it is the condition machinery over its inputs (the light held through
-        the slots; a light found on is held; the off waits for the minimum on time). In manual, while HA starts, disabled
-        or with a static problem it is out of the slots (verdict None, nothing sent); manual arms the auto-return.
-        True when the verdict changed."""
+        """Evaluate a motion light rule. In auto with motion sensors it is the condition machinery over its inputs (the
+        light held through the slots; a light found on is held; the off waits for the minimum on time). In manual, in
+        auto without motion sensors (inert), while HA starts, disabled or with a static problem it is out of the slots
+        (verdict None, nothing sent); manual arms the auto-return. True when the verdict changed."""
         m = rule.motion_light
         assert m is not None
         self._compute(rule)
@@ -1779,8 +1782,8 @@ class RuleEngine:
                 self._motion_auto(rule, "auto again")
             else:
                 self._motion_arm(rule, wake)
-        if not active or m.mode == "manual":
-            if not active:
+        if not active or m.mode == "manual" or not m.sensors:
+            if not active or m.mode == "auto":
                 m.stop()
             rule.cancel()
             rule.open, rule.verdict = False, None
@@ -1798,40 +1801,62 @@ class RuleEngine:
 
     def _motion_hold(self, rule: _Rule, on: bool, note: bool = True) -> None:
         """Take the light's state as the verdict without a command: a light found on is held (its off comes after the
-        off delay; the minimum on time does not apply; recorded as "found on" unless `note` is False), one found off
-        is not."""
+        off delay; the minimum on time does not apply; recorded as "found on" unless `note` is False; it ends a wait for
+        new motion), one found off is not."""
         m = rule.motion_light
         assert m is not None and m.eid is not None
         rule.cancel()
         rule.verdict, m.on_at = on, None
+        if on:
+            m.waiting = False
         self._new_firing(rule)
         self._give_up(m.eid, rule.key)  # a command of the rule still waiting for the light is stale
         if on and note:
             rule.last, rule.failed = {"action": "on", "target": m.label, "at": int(self._now() * 1000),
                                       "reason": "found on", "sent": False}, None
 
-    def _motion_manual(self, rule: _Rule, why: str, action: "str | None", sent: bool = False) -> dict:
-        """Enter (or stay in) manual: out of the slots at once, nothing owed or waiting for the light any more."""
+    def _motion_manual(self, rule: _Rule, action: str, sent: bool) -> dict:
+        """Enter (or stay in) manual by a button press: out of the slots at once, nothing owed or waiting for the light
+        any more."""
         m = rule.motion_light
         assert m is not None and m.eid is not None
-        m.mode, m.since, m.moving, m.on_at, m.skip, m.entered, m.own = "manual", self._now(), False, None, False, False, []
+        m.mode, m.since, m.moving, m.on_at, m.entered, m.own, m.waiting = "manual", self._now(), False, None, False, [], False
         rule.cancel()
         rule.open, rule.verdict = False, None
-        self._give_up(m.eid, rule.key)
-        hold = self._holds.get(m.eid)
-        if hold is not None:
-            hold.owed = None  # the person took over: nothing may switch the light back
-        entry = {"action": action, "target": m.label, "at": int(self._now() * 1000), "reason": why}
+        self._drop_light(rule)  # the person took over: nothing may switch the light back
+        entry = {"action": action, "target": m.label, "at": int(self._now() * 1000), "reason": "button: manual"}
         if not sent:
             entry["sent"] = False
         rule.last, rule.failed = entry, None
         return entry
 
+    def _motion_release(self, rule: _Rule) -> None:
+        """The light was switched off elsewhere while the rule held it (auto): let go and wait for new motion (no
+        switch-on until every motion sensor has been clear once)."""
+        m = rule.motion_light
+        assert m is not None and m.eid is not None
+        rule.cancel()
+        rule.verdict, m.on_at, m.waiting = False, None, True
+        self._new_firing(rule)
+        self._drop_light(rule)
+        rule.last, rule.failed = {"action": "off", "target": m.label, "at": int(self._now() * 1000),
+                                  "reason": "switched off elsewhere: waits for new motion", "sent": False}, None
+
+    def _drop_light(self, rule: _Rule) -> None:
+        """Nothing owed or waiting for a motion light rule's light any more."""
+        m = rule.motion_light
+        assert m is not None and m.eid is not None
+        self._give_up(m.eid, rule.key)
+        hold = self._holds.get(m.eid)
+        if hold is not None:
+            hold.owed = None
+
     def _motion_auto(self, rule: _Rule, why: str) -> None:
-        """Enter auto: the auto rules apply from now on (the evaluation takes the light as it is)."""
+        """Enter auto: the auto rules apply from now on (the evaluation takes the light as it is; a wait for new motion
+        ends)."""
         m = rule.motion_light
         assert m is not None
-        m.mode, m.since, m.moving, m.on_at, m.entered, m.own = "auto", None, False, None, True, []
+        m.mode, m.since, m.moving, m.on_at, m.entered, m.own, m.waiting = "auto", None, False, None, True, [], False
         m.stop()
         rule.cancel()
         rule.verdict = None
@@ -1856,34 +1881,34 @@ class RuleEngine:
         self._flush()
 
     def _motion_light_changed(self, rule: _Rule, confirms: bool) -> None:
-        """A state change of a motion light rule's light, before the evaluation (manual detection uses `confirms`
-        only: a Plan Studio command that does not confirm the slots is a manual switch too)."""
+        """A state change of a motion light rule's light, before the evaluation. It never changes the mode; in auto
+        with motion sensors the rule adapts: switched on elsewhere -> held from now, switched off elsewhere while held
+        -> let go until new motion (a Plan Studio command that does not confirm the slots is foreign too)."""
         m = rule.motion_light
         assert m is not None
         state = m.state(self._lookup)
-        change = m.light_changed(state, confirms, rule.enabled and not m.missing and not self._booting, self._now())
-        if change == "manual":
-            self._motion_manual(rule, "switched elsewhere: manual", state)
-        elif change == "back":
+        change = m.light_changed(state, confirms, rule.enabled and not m.missing and not self._booting,
+                                 rule.verdict is True, self._now())
+        if change == "back":
             rule.cancel()
             rule.verdict = None  # the auto start applies again
         elif change == "found" and rule.verdict is False:
-            self._motion_hold(rule, True)  # switched on by another slot participant: held from now
+            self._motion_hold(rule, True)  # switched on elsewhere: held from now
+        elif change == "released":
+            self._motion_release(rule)
 
-    def _motion_press(self, rule: _Rule, button: str, intent: dict) -> bool:
-        """A button intent of a motion light rule; True when it was taken. toggle / set on / set off: manual with a
-        direct command (own context, never re-sent); auto: auto."""
+    def _motion_press(self, rule: _Rule, intent: dict) -> bool:
+        """A smart button intent of a motion light rule; True when it was taken. toggle / set on / set off: manual with
+        a direct command (own context, never re-sent); auto: auto."""
         m = rule.motion_light
         assert m is not None and m.eid is not None
-        light = m.state(self._lookup)
-        mode, do = m.press(intent, button, light)
+        mode, do = m.press(intent, m.state(self._lookup))
         if mode == "auto":
             self._motion_auto(rule, "button: auto")
             return True
         if mode != "manual":
             return False
-        shown = do or (intent.get("value") if intent.get("action") == "set" else "off" if light == "on" else "on")
-        entry = self._motion_manual(rule, "button: manual", shown, sent=do is not None)
+        entry = self._motion_manual(rule, do or intent["value"], sent=do is not None)
         if do is None:
             return True
         eid = m.eid
@@ -2297,7 +2322,7 @@ class RuleEngine:
                 if key[0] != plan_id or container_id not in m.buttons or not rule.enabled or m.missing or m.eid is None \
                         or self._booting:
                     continue
-                if self._motion_press(rule, container_id, intent):
+                if self._motion_press(rule, intent):
                     dirty.add(key)
                 continue
             c = rule.control
@@ -2407,7 +2432,9 @@ class RuleEngine:
             status, reason = "disabled", None
         else:
             reason = rule.static_reason() or rule.failed or self._hold_reason(rule.key)
-            status = "error" if reason else "waiting" if rule.raw is None and rule.control is None else "ok"
+            # a motion light rule without motion sensors has no want by design (inert in auto), not for lack of data
+            inert = rule.motion_light is not None and not rule.motion_light.sensors
+            status = "error" if reason else "waiting" if rule.raw is None and rule.control is None and not inert else "ok"
         out: dict = {"status": status}
         if reason:
             out["reason"] = reason

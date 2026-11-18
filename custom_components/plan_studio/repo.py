@@ -190,16 +190,17 @@ def _validate_beurer(r: dict, b: object) -> None:
 
 
 def _validate_motion_light(r: dict, m: object) -> None:
-    """A light motion control rule: motion sensors switch one light, offDelay = off after; no inputs, gate, other kinds or actions."""
+    """A light motion control rule: motion sensors (optional) switch one light, smart buttons (optional) set the mode,
+    offDelay = off after; no inputs, gate, other kinds or actions."""
     keys = {"light", "sensors", "minOn", "buttons", "autoAfter"}
     if not isinstance(m, dict) or not keys <= set(m) <= keys | {"daylight"}:
         raise vol.Invalid("rule motionLight needs light, sensors, minOn, buttons, autoAfter and optional daylight")
     if not _is_id(m["light"]):
         raise vol.Invalid("rule motionLight needs a light device id")
-    for key, least in (("sensors", 1), ("buttons", 0)):
+    for key in ("sensors", "buttons"):
         ids = m[key]
-        if not isinstance(ids, list) or len(ids) < least or not all(_is_id(i) for i in ids) or len(set(ids)) != len(ids):
-            raise vol.Invalid(f"rule motionLight {key} needs distinct device ids" + (" (at least one)" if least else ""))
+        if not isinstance(ids, list) or not all(_is_id(i) for i in ids) or len(set(ids)) != len(ids):
+            raise vol.Invalid(f"rule motionLight {key} needs distinct device ids")
         if m["light"] in ids:
             raise vol.Invalid(f"rule motionLight light must not be one of its {key}")
     if "daylight" in m:

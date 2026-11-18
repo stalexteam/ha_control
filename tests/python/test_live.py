@@ -1183,12 +1183,13 @@ def _motion_plan():
     return {
         "id": "p1",
         "levels": [{"devices": [dev("lamp", "ceiling_light", {"control": "light.k"}),
-                                dev("pir", "motion_sensor", {"motion": "binary_sensor.pir"})]}],
+                                dev("pir", "motion_sensor", {"motion": "binary_sensor.pir"}),
+                                dev("btn", "smart_button", {"action": "sensor.act"})]}],
         "rules": [
             {
                 "id": "r1", "name": "Kitchen", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 180,
                 "inputs": [], "onTrue": [], "onFalse": [],
-                "motionLight": {"light": "lamp", "sensors": ["pir"], "minOn": 0, "buttons": [], "autoAfter": 0},
+                "motionLight": {"light": "lamp", "sensors": ["pir"], "minOn": 0, "buttons": ["btn"], "autoAfter": 0},
             }
         ],
     }
@@ -1224,11 +1225,14 @@ def test_motion_manual_switch_saves_the_mode(env):
         hass = FakeHass()
         live = await _mstart(env, hass)
         assert "binary_sensor.pir" in env.tracked[-1]["ids"] and "light.k" in env.tracked[-1]["ids"]
-        _boiler_event(env, hass, "light.k", "on", old="off")  # a person, foreign context
+        _boiler_event(env, hass, "light.k", "on", old="off")  # a person, foreign context: never the mode
+        await asyncio.gather(*hass.tasks)
+        assert _msaves() == [] and live.engine.snapshot("p1")["r1"]["motionLight"]["mode"] == "auto"
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})  # the button: manual
         await asyncio.gather(*hass.tasks)
         (key, saved), = _msaves()
         assert key == MOTION_KEY and saved == live.engine.motion_modes() and saved["p1"]["r1"]["mode"] == "manual"
-        assert hass.services.calls == []
+        assert [c[1] for c in hass.services.calls] == ["turn_off"]
 
     asyncio.run(go())
 
@@ -1237,8 +1241,9 @@ def test_motion_stop_flushes_the_modes_and_an_entry_reload_restores_them(env):
     async def go():
         hass = FakeHass()
         live = await _mstart(env, hass)
-        _boiler_event(env, hass, "light.k", "on", old="off")
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})  # manual
         modes = live.engine.motion_modes()
+        assert modes["p1"]["r1"]["mode"] == "manual"
         n = len(_msaves())
         await live.async_stop()
         assert (MOTION_KEY, modes) in FakeStore.flushed and FakeStore.contents[MOTION_KEY] == modes

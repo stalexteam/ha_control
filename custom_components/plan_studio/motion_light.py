@@ -1,5 +1,6 @@
 """The Light motion control rule: motion sensors (any of them) switch one light while it is dark, with an off delay, a
-minimum on time and a manual / auto mode set by buttons or by switching the light elsewhere. Must not import
+minimum on time and a manual / auto mode set by smart buttons only (without a button the rule is always in auto). A
+change of the light made elsewhere never changes the mode: in auto the rule adapts to it. Must not import
 homeassistant.
 
 The rule engine owns the I/O (the sensor and daylight inputs, the holder slots, timers and trace frames); this module
@@ -12,7 +13,7 @@ from typing import Callable
 # entity id -> (state, attributes); None when the entity is missing
 Lookup = Callable[[str], "tuple[str, dict] | None"]
 
-BUTTONS = ("smart_button", "wall_switch")
+BUTTONS = ("smart_button",)
 
 
 def _str(v: object) -> str | None:
@@ -47,14 +48,6 @@ class MotionLight:
             or any(_kind(devices.get(s)) != "motion_sensor" for s in self.sensors) \
             or (self.daylight is not None and _kind(devices.get(self.daylight[0])) != "illuminance_sensor") \
             or any(_kind(devices.get(b)) not in BUTTONS for b in self.buttons)
-        # wall switches over the light's own entity: their on / off changes are the manual switch itself
-        self.own_switches: set[str] = set()
-        for b in self.buttons:
-            dev = devices.get(b)
-            bindings = dev.get("bindings") if isinstance(dev, dict) else None
-            state = bindings.get("state") if isinstance(bindings, dict) else None
-            if eid is not None and _kind(dev) == "wall_switch" and state == eid:
-                self.own_switches.add(b)
         # the mode survives a Save that keeps these
         self.ident = (eid, tuple(self.buttons))
         # runtime state, kept for the same ident
@@ -63,10 +56,10 @@ class MotionLight:
         self.moving = False  # manual: motion at the previous evaluation (its end is the last motion)
         self.on_at: float | None = None  # when the rule decided to switch the light on (None for a light found on)
         self.seen: str | None = None  # the light's last on / off reading (None after no data)
-        self.skip = False  # the next change of the light is the wall-switch double toggle that returned auto
         self.entered = False  # auto was just entered: its entry stays the last one (no "found on" over it)
-        # the rule's own recent decisions (state, until epoch s): a late echo of one is never a manual switch
+        # the rule's own recent decisions (state, until epoch s): a late echo of one is never a foreign change
         self.own: list[tuple[str, float]] = []
+        self.waiting = False  # switched off elsewhere while held: no switch-on until every motion sensor was clear
         self.timer: "tuple[float, Callable[[], None]] | None" = None  # the auto-return
 
     def inputs(self) -> "list[dict]":
@@ -78,7 +71,7 @@ class MotionLight:
 
     def take(self, old: "MotionLight") -> None:
         self.mode, self.since, self.moving, self.on_at = old.mode, old.since, old.moving, old.on_at
-        self.seen, self.skip, self.entered, self.own = old.seen, old.skip, old.entered, list(old.own)
+        self.seen, self.entered, self.own, self.waiting = old.seen, old.entered, list(old.own), old.waiting
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -106,9 +99,17 @@ class MotionLight:
         n = len(self.sensors)
         return (values[n] if len(values) > n else None) is not False
 
-    def raw(self, values: "list[bool | None]", light_on: bool) -> bool:
-        """Want the light on: motion, and dark unless the light is on already (the block applies to switching on)."""
-        return self.motion(values) and (self.dark(values) or light_on)
+    def raw(self, values: "list[bool | None]", light_on: bool) -> "bool | None":
+        """Want the light on: motion, and dark unless the light is on already (the block applies to switching on).
+        None without motion sensors (auto does nothing). While waiting for new motion: not while the motion lasts; the
+        wait ends once every sensor is clear."""
+        if not self.sensors:
+            return None
+        motion = self.motion(values)
+        if self.waiting:
+            self.waiting = motion
+            return False
+        return motion and (self.dark(values) or light_on)
 
     def off_delay(self, now: float, off_delay: int) -> float:
         """The delay of an off: the off delay, but not before the minimum on time since the rule's on decision."""
@@ -116,17 +117,15 @@ class MotionLight:
             return off_delay
         return max(off_delay, self.on_at + self.min_on - now)
 
-    def press(self, intent: dict, button: str, light: "str | None") -> "tuple[str | None, str | None]":
-        """A button intent: (mode change "manual" | "auto" | None, the state to command | None). Nothing is commanded
-        through a wall switch over the light's own entity: its change is the switch itself."""
-        action, own = intent.get("action"), button in self.own_switches
+    def press(self, intent: dict, light: "str | None") -> "tuple[str | None, str | None]":
+        """A smart button intent: (mode change "manual" | "auto" | None, the state to command | None)."""
+        action = intent.get("action")
         if action == "toggle":
-            return "manual", None if own else "off" if light == "on" else "on"
+            return "manual", "off" if light == "on" else "on"
         if action == "set" and intent.get("value") in ("on", "off"):
             value = intent["value"]
-            return "manual", None if own or light == value else value
+            return "manual", None if light == value else value
         if action == "auto":
-            self.skip = own
             return "auto", None
         return None, None
 
@@ -135,27 +134,27 @@ class MotionLight:
         self.own = [o for o in self.own if o[1] > now]
         self.own.append((state, now + window))
 
-    def light_changed(self, state: "str | None", confirms: bool, active: bool, now: float = 0.0) -> "str | None":
-        """A state change of the light in auto: "manual" for a known -> known change that does not confirm the slots'
-        last command (whatever its context) and is not to a state the rule itself decided within its window (an
-        overtaken command arriving late; every known -> known change uses up the earliest matching decision, confirming
-        or not), "back" for a return from no data (or the wall-switch change behind an auto intent: the auto start
-        applies again, keeping the auto entry), "found" for an off -> on that confirms, else None."""
+    def light_changed(self, state: "str | None", confirms: bool, active: bool, held: bool,
+                      now: float = 0.0) -> "str | None":
+        """A state change of the light; it never changes the mode. In auto with motion sensors: "back" for a return
+        from no data (the auto start applies again); a known -> known change to a state the rule itself decided within
+        its window is its own late echo (every such change uses up the earliest matching decision): None; otherwise
+        "found" for a change to on while the rule does not hold the light (switched on elsewhere, also by another slot
+        participant: held from now) and "released" for a change to off while it holds the light that does not confirm
+        the slots' last command (switched off elsewhere: the rule lets go). Else None (manual, no motion sensors)."""
         was, self.seen = self.seen, state
         self.own = [o for o in self.own if o[1] > now]
-        if not active or self.mode != "auto" or state is None or state == was:
+        if not active or self.mode != "auto" or not self.sensors or state is None or state == was:
             return None
         if was is None:
             return "back"
         mine = next((o for o in self.own if o[0] == state), None)  # in decision order: the earliest
         if mine is not None:
             self.own.remove(mine)
-        if self.skip:
-            self.skip, self.entered = False, True
-            return "back"
-        if not confirms:
-            return None if mine is not None else "manual"
-        return "found" if state == "on" else None
+            return None
+        if state == "on":
+            return None if held else "found"
+        return "released" if held and not confirms else None
 
     def auto_due(self, now: float, motion: bool) -> "float | None":
         """While manual with auto_after > 0: the epoch auto returns at (None while motion lasts); `since` moves only to
@@ -177,6 +176,8 @@ class MotionLight:
             "dark": None if self.daylight is None else self.dark(values),
             "light": light,
         }
+        if self.waiting:
+            out["waiting"] = True
         if off_at is not None:
             out["offAt"] = off_at
         if self.on_at is not None and self.on_at + self.min_on > now:
