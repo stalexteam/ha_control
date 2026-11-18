@@ -2298,3 +2298,59 @@ def test_virtual_subscribe_sends_result_then_the_states_then_every_change(env):
         assert "plan_studio/virtual/subscribe" in env.cmds
 
     asyncio.run(go())
+
+
+async def _drain(hass, rounds=20):
+    """Run the tasks until none is pending; False when they still go on after `rounds` turns (a loop)."""
+    for _ in range(rounds):
+        pending = [t for t in hass.tasks if not t.done()]
+        if not pending:
+            return True
+        await asyncio.gather(*pending)
+    return not [t for t in hass.tasks if not t.done()]
+
+
+def test_a_two_way_link_between_a_virtual_switch_and_a_light_ends(env):
+    async def go():
+        hass = FakeHass()
+        plan = _vplan()
+        plan["levels"][0]["devices"].append(
+            {"id": "lamp", "name": "lamp", "props": {"kind": "ceiling_light"}, "bindings": {"control": "light.k"}})
+
+        def control(rid, source, target):
+            return {"id": rid, "name": rid, "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+                    "inputs": [], "onTrue": [], "onFalse": [],
+                    "control": {"sources": [{"source": {"device": source}}], "on": [{"device": target, "do": "on"}],
+                                "off": [{"device": target, "do": "off"}], "toggle": []}}
+
+        plan["rules"] = [plan["rules"][0], control("a", "sleep", "lamp"), control("b", "lamp", "sleep")]
+        hass.services.known |= {("light", "turn_on"), ("light", "turn_off")}
+        hass.states.d["light.k"] = "off"
+        live = await _vstart(env, hass, plan=plan)
+        assert await _drain(hass)
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})  # Sleep on (load control): the lamp follows
+        assert await _drain(hass)
+        assert live.virtual.state("virtual.sleep") == "on"
+        assert [c[:3] for c in hass.services.calls] == [("light", "turn_on", {"entity_id": "light.k"})]
+        _boiler_event(env, hass, "light.k", "on", ctx=hass.services.calls[-1][4], old="off")  # the lamp confirms
+        assert await _drain(hass)
+        assert live.virtual.state("virtual.sleep") == "on" and len(hass.services.calls) == 1  # a real echo: b is quiet
+        _boiler_event(env, hass, "light.k", "off", old="on")  # a person: Sleep follows, the lamp is not switched again
+        assert await _drain(hass)
+        assert live.virtual.state("virtual.sleep") == "off" and len(hass.services.calls) == 1
+        assert live.engine.snapshot("p1")["a"]["last"]["sent"] is False  # the lamp already read off
+
+    asyncio.run(go())
+
+
+def test_a_due_record_of_a_virtual_switch_reads_its_state_from_the_runtime(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _vstart(env, hass, stored={"p1": {"sleep": "on"}}, clock=clock)
+        await asyncio.gather(*hass.tasks)
+        live._expected.sent("virtual.sleep", "on", 0.0, None)  # a record left behind while it reads on already
+        live._arm()
+        _tick(env, clock, 10.0)
+        assert "virtual.sleep" not in live._expected._records  # confirmed silently: never "not confirmed"
+
+    asyncio.run(go())

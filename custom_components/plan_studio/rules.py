@@ -18,6 +18,7 @@ try:
     from .motion_light import MotionLight
     from .outside import Outside
     from .timed import Timed
+    from .virtual import device_id as virtual_device
 except ImportError:  # pytest: module dir on sys.path
     import daylight
     from beurer import Beurer
@@ -27,6 +28,7 @@ except ImportError:  # pytest: module dir on sys.path
     from motion_light import MotionLight
     from outside import Outside
     from timed import Timed
+    from virtual import device_id as virtual_device
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -2237,7 +2239,8 @@ class RuleEngine:
         """The input sources are evaluated as the condition rule's inputs (timers, NOT); each known false <-> true
         change of one is an event, in rule order. Values are always recorded; nothing fires for a disabled rule, a
         missing button, in a load, while HA starts, or for a device source whose entity change is a load control
-        command arriving (resolved once per state change, for every load control rule)."""
+        command arriving (resolved once per state change, for every load control rule). A virtual switch has no input
+        of its own (every change of it is a rule's): its arriving command is consumed but still an event."""
         c = rule.control
         assert c is not None
         self._compute(rule)
@@ -2254,8 +2257,8 @@ class RuleEngine:
                 if self._echo is None:
                     st = self._lookup(i.eid)
                     self._echo = st is not None and self._echo_take(i.eid, st[0])
-                if self._echo:
-                    continue
+                if self._echo and virtual_device(i.eid) is None:
+                    continue  # a real device's change made by a load control rule: chains do not propagate
             self._control_event(rule, i.label, what)
 
     def _control_event(self, rule: _Rule, source: str, what: str) -> None:

@@ -962,3 +962,41 @@ def test_a_lost_command_is_not_wanted_after_an_opposite_event_or_one_without_the
     w2.press("btn", SET_OFF)  # the latest event does not act on l2
     assert w2.calls == [on("switch.l1"), on("switch.l2"), off("switch.l1")]
     assert w2.engine.still_wants(R, "switch.l2", "on") is False
+
+
+# --- virtual switches --------------------------------------------------------------------------
+
+VS = dev("vs", "virtual_switch", "Sleep", control="virtual.vs")
+
+
+def vs(do):
+    return ("virtual", f"turn_{do}", "virtual.vs")
+
+
+def test_a_virtual_switch_switched_by_a_load_control_rule_is_an_event_for_another():
+    """A virtual switch has no input of its own (every change of it is a rule's): a load control rule reading it gets
+    the event although another load control rule switched it; its echo is consumed, not hidden."""
+    w = loaded([control_rule("a", sources=[btn("btn")], toggle=[("vs", "toggle")]),
+                control_rule("b", sources=[src("vs")], on=[("l1", "on")], off=[("l1", "off")])],
+               devices=DEVICES + [VS], virtual__vs="off")
+    w.press("btn", TOGGLE)
+    assert w.calls == [vs("on")]
+    w.set("virtual.vs", "on", own=True)
+    assert w.calls == [vs("on"), on("switch.l1")] and w.tr("b")["control"]["event"]["what"] == "on"
+    w.press("btn", TOGGLE)  # the echo was consumed: the reading (on) decides
+    w.set("virtual.vs", "off", own=True)
+    assert w.calls == [vs("on"), on("switch.l1"), vs("off"), off("switch.l1")]
+
+
+def test_a_virtual_switch_toggled_twice_in_one_turn_ends_off_and_each_change_is_an_event():
+    w = loaded([control_rule("a", sources=[btn("btn")], toggle=[("vs", "toggle")]),
+                control_rule("b", sources=[src("vs")], on=[("l1", "on")], off=[("l1", "off")])],
+               devices=DEVICES + [VS], virtual__vs="off")
+    w.press("btn", TOGGLE)
+    w.press("btn", TOGGLE)  # the first command is still on its way: the echo is the effective state
+    assert w.calls == [vs("on"), vs("off")]
+    w.set("virtual.vs", "on", own=True)
+    w.set("virtual.vs", "off", own=True)
+    assert w.calls == [vs("on"), vs("off"), on("switch.l1"), off("switch.l1")]
+    w.press("btn", TOGGLE)
+    assert w.calls[-1] == vs("on")  # no echo left behind

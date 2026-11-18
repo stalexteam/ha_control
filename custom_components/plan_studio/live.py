@@ -471,15 +471,15 @@ class LiveRuntime:
             return
         now = self._now()
         for entity_id, state, by, what in self._expected.due(now):
-            st = self._hass.states.get(entity_id)
+            st = self._lookup(entity_id)  # a virtual switch reads from the runtime
             domain = entity_id.split(".", 1)[0]
-            if st is not None and st.state == state:
+            if st is not None and st[0] == state:
                 if what == "retry":
                     self._expected.arrived(entity_id, state, now)  # uses the record up
                 continue
             if what == "retry":
                 svc = service_for(domain, state)
-                if svc is None or st is None or st.state in ("unavailable", "unknown"):
+                if svc is None or st is None or st[0] in ("unavailable", "unknown"):
                     continue
                 try:
                     wanted = self.engine.still_wants(by, entity_id, state)

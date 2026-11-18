@@ -532,3 +532,32 @@ def test_validate_plan_virtual_switch_binds_only_its_synthetic_entity():
             validate_plan(with_devices(vswitch(bindings=bad) if bad is not None else {**vswitch(), "bindings": None}))
     with pytest.raises(vol.Invalid, match="virtual switch"):
         validate_plan(with_devices({**vswitch(), "id": ""}))
+
+
+def test_validate_plan_only_a_virtual_switch_binds_a_virtual_entity():
+    for bindings in ({"control": "virtual.s1"}, {"power": "virtual.s1"}, {"state": "virtual.x"}, {"control": "virtual."}):
+        with pytest.raises(vol.Invalid, match="only a virtual switch binds a virtual entity"):
+            validate_plan(with_devices(vswitch("s1"), {"id": "x", "props": {"kind": "socket"}, "bindings": bindings}))
+    with pytest.raises(vol.Invalid, match="only a virtual switch binds a virtual entity"):
+        validate_plan(with_devices({"id": "x", "bindings": {"control": "virtual.x"}}))  # no kind at all
+    validate_plan(with_devices({"id": "x", "props": {"kind": "socket"}, "bindings": {"control": "switch.virtual_x"}}))
+
+
+def test_validate_plan_rule_must_not_switch_a_virtual_switch_it_reads():
+    base = with_devices(vswitch("s1"), {"id": "x", "props": {"kind": "socket"}, "bindings": {"control": "switch.x"}})
+    for kw in (
+        {"inputs": [{"source": {"device": "s1"}, "not": True}],
+         "onTrue": [{"device": "s1", "do": "on"}], "onFalse": [{"device": "s1", "do": "off"}]},
+        {"inputs": [{"source": {"device": "d1"}}, {"source": {"device": "s1"}}], "onTrue": [],
+         "onFalse": [{"device": "s1", "do": "on"}]},
+    ):
+        with pytest.raises(vol.Invalid, match="must not switch a virtual switch it reads as an input"):
+            validate_plan({**base, "rules": [rule(**kw)]})
+    # a real device may switch what it reads (auto-off); a held source or the gate over a virtual switch is no loop
+    for kw in (
+        {"inputs": [{"source": {"device": "x"}}], "onTrue": [{"device": "x", "do": "off"}]},
+        {"inputs": [held(sources=[{"device": "s1"}], state="on")], "onTrue": [{"device": "s1", "do": "off"}]},
+        {"gate": {"source": {"device": "s1"}}, "onTrue": [{"device": "s1", "do": "off"}]},
+        {"inputs": [{"source": {"device": "s1"}}], "onTrue": [{"device": "x", "do": "on"}]},
+    ):
+        validate_plan({**base, "rules": [rule(**kw)]})

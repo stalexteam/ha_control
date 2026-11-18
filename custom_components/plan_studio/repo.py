@@ -11,10 +11,10 @@ import voluptuous as vol
 
 try:
     from .migrate import migrate_plan, CURRENT_SCHEMA
-    from .virtual import KIND as VIRTUAL_KIND, entity_id as virtual_entity
+    from .virtual import KIND as VIRTUAL_KIND, PREFIX as VIRTUAL_PREFIX, entity_id as virtual_entity
 except ImportError:  # pytest: module dir on sys.path
     from migrate import migrate_plan, CURRENT_SCHEMA
-    from virtual import KIND as VIRTUAL_KIND, entity_id as virtual_entity
+    from virtual import KIND as VIRTUAL_KIND, PREFIX as VIRTUAL_PREFIX, entity_id as virtual_entity
 
 MAX_PLAN_BYTES = 5 * 1024 * 1024
 
@@ -342,16 +342,36 @@ def _validate_rules(rules: object) -> None:
             visit(rid)
 
 
-def _validate_devices(levels: list) -> None:
-    """A virtual switch binds exactly its synthetic entity (control = virtual.<its id>); other kinds are not checked."""
+def _validate_devices(levels: list) -> set[str]:
+    """A virtual switch binds exactly its synthetic entity (control = virtual.<its id>) and no other device binds a
+    virtual entity; other bindings are not checked. Returns the virtual switch ids."""
+    out: set[str] = set()
     for level in levels:
         devices = level.get("devices") if isinstance(level, dict) else None
         for d in devices if isinstance(devices, list) else []:
-            props = d.get("props") if isinstance(d, dict) else None
-            if not isinstance(props, dict) or props.get("kind") != VIRTUAL_KIND:
+            if not isinstance(d, dict):
                 continue
-            if not _is_id(d.get("id")) or d.get("bindings") != {"control": virtual_entity(d["id"])}:
-                raise vol.Invalid("a virtual switch binds only control = virtual.<its device id>")
+            props = d.get("props")
+            if isinstance(props, dict) and props.get("kind") == VIRTUAL_KIND:
+                if not _is_id(d.get("id")) or d.get("bindings") != {"control": virtual_entity(d["id"])}:
+                    raise vol.Invalid("a virtual switch binds only control = virtual.<its device id>")
+                out.add(d["id"])
+                continue
+            bindings = d.get("bindings")
+            values = bindings.values() if isinstance(bindings, dict) else ()
+            if any(isinstance(v, str) and v.startswith(VIRTUAL_PREFIX) for v in values):
+                raise vol.Invalid("only a virtual switch binds a virtual entity (virtual.<id>)")
+    return out
+
+
+def _validate_virtual_reads(rules: list, virtual: set[str]) -> None:
+    """A rule must not switch a virtual switch it reads as a direct input: the switch changes at once, so its own
+    command would flip its verdict again at once, forever. A held source or the gate over it is no such loop."""
+    for r in rules:
+        read = {i["source"]["device"] for i in r["inputs"] if "device" in i["source"]}
+        switched = {a["device"] for key in ("onTrue", "onFalse") for a in r[key]}
+        if read & switched & virtual:
+            raise vol.Invalid("a rule must not switch a virtual switch it reads as an input")
 
 
 def validate_plan(plan: dict) -> None:
@@ -369,13 +389,14 @@ def validate_plan(plan: dict) -> None:
     levels = plan.get("levels")
     if not isinstance(levels, list) or not levels:
         raise vol.Invalid("levels must be a non-empty list")
-    _validate_devices(levels)
+    virtual = _validate_devices(levels)
     if "power" in plan:
         power = plan["power"]
         if not isinstance(power, dict) or not all(isinstance(power.get(k), list) for k in ("blocks", "wires")):
             raise vol.Invalid("power must have blocks and wires lists")
     if "rules" in plan:
         _validate_rules(plan["rules"])
+        _validate_virtual_reads(plan["rules"], virtual)
     try:
         size = len(json.dumps(plan).encode("utf-8"))
     except (TypeError, ValueError) as err:
