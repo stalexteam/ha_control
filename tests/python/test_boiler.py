@@ -351,6 +351,49 @@ def test_wall_switch_over_the_relay_set_from_a_toggle_is_manual_without_a_call()
     assert w.calls == [] and w.b()["mode"] == "manual"
 
 
+def wall_button_heating_off(**states):
+    """A boiler whose button is a wall switch over the relay; the relay seen on, grid 2110, boiler 1529, manual."""
+    w = loaded([boiler_rule(button="ws")], sensor__bp=("1529", W), sensor__grid=("2110", W), **states)
+    w.set("switch.relay", "on")  # seen on (manual: not a take-over)
+    w.advance(1100)  # long after that switch
+    assert w.b()["mode"] == "manual" and w.calls == []
+    return w
+
+
+def test_wall_switch_button_toggle_starts_the_settle_time():
+    """Fix round 1: the runtime delivers the wall switch's intent before the relay's state change."""
+    w = wall_button_heating_off()
+    w.states["switch.relay"] = ("off", {})  # the hand switches it off
+    w.press("set", "off", button="ws")
+    w.engine.handle_state("switch.relay", own=False)
+    w.advance(1101)
+    w.states["switch.relay"] = ("on", {})  # 1 s later on again: the double toggle
+    w.press("auto", button="ws")
+    w.engine.handle_state("switch.relay", own=False)
+    assert w.b()["mode"] == "auto" and w.calls == []
+    w.set("sensor.bp", "0", W)  # 2110 + 1400 - 0 = 3510 with a stale grid meter
+    assert w.calls == [] and w.b()["phase"] == "heating"
+    w.advance(1105)
+    w.set("sensor.bp", "1440", W)
+    w.set("sensor.grid", "5000", W)  # a real overload: 4960 > 3000
+    w.advance(1110.9)
+    assert w.calls == []
+    w.advance(1111)
+    assert w.calls == [OFF] and w.b()["phase"] == "limit"
+    assert w.engine.snapshot("p")["r"]["last"]["reason"] == "power limit"
+
+
+def test_wall_switch_button_toggled_from_no_data_starts_no_settle_time():
+    w = wall_button_heating_off()
+    w.set("switch.relay", "unavailable")
+    w.states["switch.relay"] = ("on", {})  # back from no data with the toggle
+    w.press("auto", button="ws")
+    w.engine.handle_state("switch.relay", own=False)
+    assert w.b()["mode"] == "auto" and w.calls == []
+    w.set("sensor.bp", "0", W)  # 3510: judged at once
+    assert w.calls == [OFF] and w.b()["phase"] == "limit"
+
+
 def test_wall_switch_double_toggle_auto_is_not_undone_by_its_own_change():
     w = loaded([boiler_rule(button="ws")], switch__relay="on")
     w.states["switch.relay"] = ("off", {})

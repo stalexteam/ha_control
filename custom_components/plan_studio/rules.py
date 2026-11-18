@@ -2391,7 +2391,7 @@ class RuleEngine:
             taken, do, why = b.press(intent, relay, self._now())
             if not taken:
                 continue
-            b.seen = relay  # a wall switch over the relay: the change behind this intent is no take-over
+            b.see(relay, self._now())  # a wall switch over the relay: the change behind this intent is no take-over
             if do is not None:
                 self._boiler_send(rule, do, why)
             dirty.add(key)

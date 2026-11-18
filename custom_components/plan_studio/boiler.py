@@ -120,19 +120,26 @@ class Boiler:
     def manual(self) -> None:
         self.mode, self.phase, self.holding = "manual", None, False
 
+    def see(self, relay: str | None, now: float) -> bool:
+        """Take a relay reading; True for a change between on and off, which starts the settle time (not a return from
+        no data, not the same state)."""
+        switch = None not in (self.seen, relay) and relay != self.seen
+        if switch:
+            self.switched = now
+        self.seen = relay
+        return switch
+
     def relay_changed(self, relay: str | None, own: bool, active: bool, now: float) -> bool:
         """A state change of the relay; True when a human took over (an on <-> off change not caused by Plan Studio
         while auto): the mode becomes manual. A return from no data is never a take-over, nor is a change to the
         rule's outstanding command (HA keeps a call's context only ~5 s; a slow relay confirms later without it).
         own: any Plan Studio context, so another rule switching the relay is not a take-over either (that is a
         configuration conflict, not a human). An on <-> off change by anyone starts the settle time."""
-        switch = None not in (self.seen, relay) and relay != self.seen
-        if switch:
-            self.switched = now
+        redone = self.mode == "manual" and self.phase == "done" and relay == "on" and self.seen != "on"
+        switch = self.see(relay, now)
         human = active and self.mode == "auto" and not own and switch and relay != self.cmd
-        if self.mode == "manual" and self.phase == "done" and relay == "on" and self.seen != "on":
+        if redone:
             self.phase = None  # switched on again after heating done: "heating done" no longer describes the relay
-        self.seen = relay
         if human:
             self.manual()
         return human
