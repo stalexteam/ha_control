@@ -919,3 +919,16 @@ def test_a_control_rule_reads_unknown_as_an_input():
     cond = rule("c", [{"source": {"rule": "r"}}], name="Reads control")
     w = loaded([r, cond])
     assert w.tr("c")["inputs"][0]["value"] is None
+
+
+def test_a_direct_command_never_confirmed_shows_not_confirmed_until_the_load_arrives():
+    w = loaded()
+    w.press("btn", SET_ON)
+    assert w.calls == [on("switch.l1"), on("switch.l2")] and w.by == ("p", "r")
+    w.engine.command_unconfirmed("switch.l2", ("p", "r"))
+    tr = w.tr()
+    assert tr["status"] == "error" and tr["reason"] == "not confirmed"
+    assert tr["last"]["error"] == "not confirmed" and tr["last"]["target"] == "Lamp 2"
+    w.set("switch.l2", "on")
+    tr = w.tr()
+    assert tr["status"] == "ok" and "error" not in tr["last"]

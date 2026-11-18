@@ -14,6 +14,7 @@ try:
     from .beurer import Beurer
     from .boiler import MODES, Boiler, watts
     from .control import ECHO, Control
+    from .expected import expect
     from .motion_light import MotionLight
     from .outside import Outside
     from .timed import Timed
@@ -22,6 +23,7 @@ except ImportError:  # pytest: module dir on sys.path
     from beurer import Beurer
     from boiler import MODES, Boiler, watts
     from control import ECHO, Control
+    from expected import expect
     from motion_light import MotionLight
     from outside import Outside
     from timed import Timed
@@ -57,6 +59,7 @@ VALVE_SERVICES = {
 # static error reasons, most important first
 STATIC_REASONS = ("cycle", "device missing", "rule missing", "target missing")
 WAITING = "waiting for target"
+NOT_CONFIRMED = "not confirmed"  # the device never reached the state of a command (live.py gives it up)
 ON_WAY = 10  # s an unconfirmed on of a shared device counts as on its way
 SUN = "sun.sun"
 SUN_STATES = {"below_horizon": (True, "below horizon"), "above_horizon": (False, "above horizon")}
@@ -649,7 +652,7 @@ class RuleEngine:
         self,
         lookup: Lookup,
         now: Callable[[], float],
-        call: Callable[..., None],  # call(domain, service, entity_id, on_error=cb(str), current=() -> bool)
+        call: Callable[..., None],  # call(domain, service, entity_id, on_error=cb(str), current=() -> bool, by=rule key)
         schedule: Callable[[float, Callable[[], None]], Callable[[], None]],
         *,
         local: "Callable[[float], datetime]" = lambda t: datetime.fromtimestamp(t, timezone.utc),
@@ -694,6 +697,8 @@ class RuleEngine:
         self._echoes: dict[str, list[tuple[str, float]]] = {}
         self._trigger: str | None = None  # the entity whose state change is being settled (handle_state)
         self._echo: bool | None = None  # whether that change is a load control command arriving; None: not asked yet
+        # per entity its latest command until it reads the commanded state: (rule, its entry, the state), see _command
+        self._commands: dict[str, tuple["Key | None", "dict | None", "str | None"]] = {}
 
     # --- loading -------------------------------------------------------------
 
@@ -851,7 +856,7 @@ class RuleEngine:
             _LOGGER.warning("boiler relay %s: turn_off failed: %s", relay, err)
 
         try:
-            self._call(relay.split(".", 1)[0], "turn_off", relay, on_error=on_error, current=lambda: True)
+            self._command(relay.split(".", 1)[0], "turn_off", relay, by=None, entry=None, on_error=on_error)
         except Exception as err:  # noqa: BLE001 - a failing relay must not stop the engine
             _LOGGER.warning("boiler relay %s: turn_off failed: %s", relay, err)
 
@@ -954,7 +959,7 @@ class RuleEngine:
             _LOGGER.warning("timed switch %s: turn_%s failed: %s", t.eid, t.final, err)
 
         try:
-            self._call(t.eid.split(".", 1)[0], f"turn_{t.final}", t.eid, on_error=on_error, current=lambda: True)
+            self._command(t.eid.split(".", 1)[0], f"turn_{t.final}", t.eid, by=None, entry=None, on_error=on_error)
         except Exception as err:  # noqa: BLE001 - a failing device must not stop the engine
             _LOGGER.warning("timed switch %s: turn_%s failed: %s", t.eid, t.final, err)
 
@@ -1363,6 +1368,24 @@ class RuleEngine:
                 self._send(rule, sent)
         self._refresh(rule)
 
+    def _command(
+        self, domain: str, service: str, eid: str, *, by: "Key | None", entry: "dict | None",
+        on_error: Callable[..., None], current: Callable[[], bool] = lambda: True,
+    ) -> "bool | None":
+        """Every command of the engine: the latest one per entity is kept with the rule and the entry it belongs to,
+        for command_unconfirmed; it replaces an older one, whose "not confirmed" goes with it."""
+        self._unmark(eid)
+        self._commands[eid] = (by, entry, expect(domain, service))
+        return self._call(domain, service, eid, on_error=on_error, current=current, by=by)
+
+    def _unmark(self, eid: str) -> bool:
+        """Forget the entity's latest command; True when its entry said "not confirmed" (that error is removed)."""
+        cmd = self._commands.pop(eid, None)
+        if cmd is None or cmd[1] is None or cmd[1].get("error") != NOT_CONFIRMED:
+            return False
+        del cmd[1]["error"]
+        return True
+
     def _send(self, rule: _Rule, sent: _Sent) -> None:
         """Call one action of the rule's latest firing; an unavailable target or a failed call marks it waiting."""
         seq = rule.seq
@@ -1371,8 +1394,8 @@ class RuleEngine:
         sent.waiting = None
         sent.entry.pop("error", None)
         try:
-            held = self._call(
-                *sent.action.call,
+            held = self._command(
+                *sent.action.call, by=rule.key, entry=sent.entry,
                 on_error=lambda err, why="service failed": self._failed(rule, seq, sent, attempt, why),
                 current=lambda: self._current(rule, seq) is not None,
             )
@@ -1544,8 +1567,8 @@ class RuleEngine:
         st = self._lookup(eid)
         hold.confirmed, hold.sent_at = st is not None and st[0] == hold.cmd, self._now()
         try:
-            held = self._call(
-                eid.split(".", 1)[0], f"turn_{hold.cmd}", eid,
+            held = self._command(
+                eid.split(".", 1)[0], f"turn_{hold.cmd}", eid, by=hold.by, entry=hold.entry,
                 on_error=lambda err, why="service failed": self._hold_failed(eid, hold, attempt, why),
                 current=lambda: self._holds.get(eid) is hold and hold.attempt == attempt,
             )
@@ -1959,7 +1982,7 @@ class RuleEngine:
             self._flush()
 
         try:
-            held = self._call(eid.split(".", 1)[0], f"turn_{do}", eid, on_error=on_error, current=lambda: True)
+            held = self._command(eid.split(".", 1)[0], f"turn_{do}", eid, by=rule.key, entry=entry, on_error=on_error)
         except Exception as err:  # noqa: BLE001 - a failing light must not stop the engine
             _LOGGER.warning("rule %s: turn_%s %s failed: %s", rule.name, do, eid, err)
             entry["error"] = "service failed"
@@ -2027,7 +2050,7 @@ class RuleEngine:
             entry = {"action": do, "target": b.label, "at": int(now * 1000), "reason": why}
             if do == "off":
                 self._give_up(b.eid)  # a waiting on is not re-sent inside the pause
-                self._beurer_off(b.eid)
+                self._beurer_off(b.eid, rule.key, entry)
                 rule.last = entry
             elif self._holders(b.eid):
                 self._hold_send(b.eid, "on", rule, entry)
@@ -2041,13 +2064,13 @@ class RuleEngine:
             key = rule.key
             b.timer = (wake, self._schedule(max(0.0, wake - now), lambda: self._beurer_wake(key, b)))
 
-    def _beurer_off(self, eid: str) -> None:
+    def _beurer_off(self, eid: str, by: Key, entry: dict) -> None:
         """The power-cycle's off (own context); a failure is only logged: the pause end reads the heater anyway."""
         def on_error(err: str, why: str = "service failed") -> None:
             _LOGGER.warning("beurer heater %s: turn_off failed: %s", eid, err)
 
         try:
-            self._call(eid.split(".", 1)[0], "turn_off", eid, on_error=on_error, current=lambda: True)
+            self._command(eid.split(".", 1)[0], "turn_off", eid, by=by, entry=entry, on_error=on_error)
         except Exception as err:  # noqa: BLE001 - a failing heater must not stop the engine
             _LOGGER.warning("beurer heater %s: turn_off failed: %s", eid, err)
 
@@ -2206,7 +2229,7 @@ class RuleEngine:
             self._flush()
 
         try:
-            self._call(domain, service, eid, on_error=on_error, current=lambda: True)
+            self._command(domain, service, eid, by=rule.key, entry=entry, on_error=on_error)
         except Exception as err:  # noqa: BLE001 - one failing device must not stop the others
             _LOGGER.warning("rule %s: %s.%s %s failed: %s", rule.name, domain, service, eid, err)
             entry["error"] = "service failed"
@@ -2331,8 +2354,8 @@ class RuleEngine:
             self._flush()
 
         try:
-            held = self._call(relay.split(".", 1)[0], f"turn_{do}", relay, on_error=on_error,
-                              current=lambda: current() is not None)
+            held = self._command(relay.split(".", 1)[0], f"turn_{do}", relay, by=key, entry=entry, on_error=on_error,
+                                 current=lambda: current() is not None)
         except Exception as err:  # noqa: BLE001 - a failing relay must not stop the engine
             _LOGGER.warning("rule %s: turn_%s %s failed: %s", rule.name, do, relay, err)
             rule.failed, entry["error"] = "service failed", WAITING
@@ -2445,11 +2468,15 @@ class RuleEngine:
     def handle_state(self, entity_id: str, own: bool = False) -> None:
         """own: the change carries any Plan Studio context (a call of any rule). So another rule switching a boiler
         relay is not a take-over of that boiler (a configuration conflict, not a human)."""
+        st = self._lookup(entity_id)
+        cmd = self._commands.get(entity_id)
+        cleared = cmd is not None and st is not None and st[0] == cmd[2] and self._unmark(entity_id)  # it got there
         keys = self._readers.get(entity_id)
         if not keys and entity_id not in self._targets:
+            if cleared:
+                self._flush()
             return
         hold = self._holds.get(entity_id)
-        st = self._lookup(entity_id)
         confirms = False  # the change confirms the slots' last command (any context, any delay)
         if hold is not None and st is not None and st[0] == hold.cmd:
             confirms, hold.confirmed = not hold.confirmed, True
@@ -2486,6 +2513,21 @@ class RuleEngine:
         self._resend(entity_id)  # after the inputs: a newer firing has already dropped stale waiting actions
         self._flush()
 
+    def command_unconfirmed(self, entity_id: str, by: object) -> None:
+        """The device never confirmed the latest command to the entity (live.py gives it up 60 s after the send): the
+        entry of the rule `by` that sent it says "not confirmed" (status error) until the entity reaches the commanded
+        state or another command is sent to it. An entry that already says why it did not get through keeps that."""
+        cmd = self._commands.get(entity_id)
+        if by is None or cmd is None or cmd[0] != by or cmd[1] is None:
+            return  # another sender's or a newer command, or one without a rule (a released relay)
+        rule, entry, st = self._rules.get(cmd[0]), cmd[1], self._lookup(entity_id)
+        if rule is None or "error" in entry or (st is not None and st[0] == cmd[2]):
+            return
+        entry["error"] = NOT_CONFIRMED
+        if any(e is entry for e in rule.entries):
+            rule.last = next(e for e in rule.entries if "error" in e)  # the first entry with an error, as _refresh picks
+        self._flush()
+
     def entity_ids(self) -> "set[str]":
         """Inputs of every rule and action targets of enabled rules."""
         return set(self._readers) | set(self._targets)
@@ -2496,7 +2538,8 @@ class RuleEngine:
         if not rule.enabled:
             status, reason = "disabled", None
         else:
-            reason = rule.static_reason() or rule.failed or self._hold_reason(rule.key)
+            reason = rule.static_reason() or rule.failed or self._hold_reason(rule.key) or (
+                NOT_CONFIRMED if rule.last is not None and rule.last.get("error") == NOT_CONFIRMED else None)
             # a motion light rule without motion sensors has no want by design (inert in auto), not for lack of data
             inert = rule.motion_light is not None and not rule.motion_light.sensors
             status = "error" if reason else "waiting" if rule.raw is None and rule.control is None and not inert else "ok"

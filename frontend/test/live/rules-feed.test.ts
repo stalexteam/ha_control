@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { RulesFeed, type RuleTrace } from '../../src/live/rules-feed';
+import { RulesFeed, notConfirmed, type RuleLast, type RuleTrace } from '../../src/live/rules-feed';
+import { t } from '../../src/i18n';
 import { RETRY_MAX, RETRY_MS } from '../../src/live/container-feed';
 import type { HassLike } from '../../src/api';
 
@@ -67,6 +68,28 @@ describe('RulesFeed', () => {
     c.subs[0].push({ full: true, rules: { c: ok } });
     expect(feed.trace('a')).toBeUndefined();
     expect(feed.trace('c')).toEqual(ok);
+  });
+
+  it('words a command the device never confirmed (status reason and last entry); other errors stay as sent', async () => {
+    const c = fakeConnection();
+    const feed = new RulesFeed(host(), () => c.connection);
+    feed.watch('P1');
+    await c.settle();
+    const last: RuleLast = { action: 'on', target: 'Light', at: 1, reason: 'became true: Leak wet' };
+    c.subs[0].push({ full: true, rules: {
+      a: { ...ok, status: 'error', reason: 'not confirmed', last: { ...last, error: 'not confirmed' } },
+      b: { ...ok, status: 'error', reason: 'target unavailable', last: { ...last, error: 'waiting for target' } },
+    } });
+    expect(feed.trace('a')?.reason).toBe('not confirmed by the device');
+    expect(feed.trace('a')?.last?.error).toBe('not confirmed by the device');
+    expect(notConfirmed(feed.trace('a')!.last!)).toBe(true);
+    expect(feed.trace('b')?.reason).toBe('target unavailable');
+    expect(feed.trace('b')?.last?.error).toBe('waiting for target');
+    expect(notConfirmed(feed.trace('b')!.last!)).toBe(false);
+    c.subs[0].push({ full: false, rules: { a: { ...ok, last: { ...last, error: 'not confirmed' } } } });
+    expect(feed.trace('a')?.last?.error).toBe('not confirmed by the device');
+    expect(feed.trace('a')?.reason).toBeUndefined();
+    expect(t('rules.error.notConfirmed')).toBe('not confirmed by the device');
   });
 
   it('the same plan is a no-op; another plan ends the old subscription and forgets its traces', async () => {

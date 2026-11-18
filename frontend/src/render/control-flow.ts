@@ -1,6 +1,6 @@
 import { html, nothing, svg, type TemplateResult } from 'lit';
 import { isButtonSource, type ControlAction, type ControlSource, type Id, type Rule } from '../model/types';
-import { keptOn, type RuleLast, type RuleTrace } from '../live/rules-feed';
+import { keptOn, notConfirmed, type RuleLast, type RuleTrace } from '../live/rules-feed';
 import { clock, lastFlowLine, lastText } from '../panel/rules-panel';
 import { CX, IN_W, MW, ACT_GAP, HEAD_H, WIDTH, FLOW_MAX_SCALE, gateLines, inputGrid, liveDetail, tone } from './rule-trace';
 import { FLOW_PAD as PAD, FLOW_VGAP as VGAP, blockH, flowBlock } from './flow-block';
@@ -37,7 +37,8 @@ const HEADS = { on: 'control.whenOn', off: 'control.whenOff', toggle: 'control.w
 
 /** The last action written on a device block: "last: turned on 21:43", or in words when nothing was sent. */
 const lastLine = (l: RuleLast): string =>
-  l.error ? t('control.flow.notSent').replace('{at}', clock(l.at)) : keptOn(l) || l.sent !== false ? lastFlowLine(l) : lastText(l);
+  l.error && !notConfirmed(l) ? t('control.flow.notSent').replace('{at}', clock(l.at))
+    : keptOn(l) || l.sent !== false ? lastFlowLine(l) : lastText(l);
 
 /**
  * The flowchart of a load control rule, top to bottom: the sources in rows (name, live value, what they give), the

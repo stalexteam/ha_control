@@ -538,6 +538,7 @@ const en: Dict = {
   'rules.status.disabled': 'Disabled',
   'rules.status.waiting': 'Waiting for data',
   'rules.status.error': 'Error',
+  'rules.error.notConfirmed': 'not confirmed by the device',
   'rules.unsaved': 'Not saved yet',
   'rules.unsavedChanges': 'Unsaved changes',
   'rules.noTrace': 'Waiting for live state',

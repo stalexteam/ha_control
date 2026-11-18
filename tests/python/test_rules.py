@@ -29,9 +29,10 @@ class World:
     def lookup(self, eid):
         return self.states.get(eid)
 
-    def call(self, domain, service, eid, on_error=None, current=None):
+    def call(self, domain, service, eid, on_error=None, current=None, by=None):
         self.on_error = on_error
         self.current = current
+        self.by = by  # the rule a command belongs to (live.py records it with the expected state)
         self.calls.append((domain, service, eid))
         if eid in self.fail:
             raise RuntimeError("boom")
@@ -1626,3 +1627,62 @@ def test_vent_trace_missing_device_leaves_the_other_sensor_readable():
     v = trace(w)["inputs"][0]["vent"]
     assert v["b"]["why"] == "missing" and v["b"]["t"] is None
     assert v["a"]["why"] is None and v["a"]["t"] == 24.0 and v["a"]["ah"] is not None and v["pct"] is None
+
+
+# --- a command the device never confirmed ------------------------------------------------
+
+SOCK = dev("k", "socket", "Socket", control="switch.sock")
+LEAK = dev("s", "leak_sensor", "Leak", leak="binary_sensor.s")
+
+
+def unconfirmed_world(pair=False, **states):
+    w = World(**{"binary_sensor__s": "off", "switch__sock": "off", **states})
+    on_false = (("k", "off"),) if pair else ()
+    w.engine.load_plans([plan([LEAK, SOCK], [rule("r", ["s"], on_true=(("k", "on"),), on_false=on_false),
+                                             rule("q", ["s"])])])
+    return w
+
+
+@pytest.mark.parametrize("pair", [False, True])
+def test_not_confirmed_marks_the_entry_of_the_rule_that_sent_it_until_the_state_arrives(pair):
+    w = unconfirmed_world(pair)
+    w.set("binary_sensor.s", "on")
+    assert w.calls[-1] == ("switch", "turn_on", "switch.sock") and w.by == ("p", "r")  # an arbitrated one too
+    w.engine.command_unconfirmed("switch.sock", ("p", "r"))
+    tr = trace(w)
+    assert tr["status"] == "error" and tr["reason"] == "not confirmed" and tr["last"]["error"] == "not confirmed"
+    w.set("switch.sock", "on")
+    tr = trace(w)
+    assert tr["status"] == "ok" and "error" not in tr["last"]
+
+
+def test_not_confirmed_from_another_sender_or_an_unknown_entity_marks_nothing():
+    w = unconfirmed_world()
+    w.set("binary_sensor.s", "on")
+    w.engine.command_unconfirmed("switch.sock", ("p", "q"))
+    w.engine.command_unconfirmed("switch.other", ("p", "r"))
+    w.engine.command_unconfirmed("switch.sock", None)
+    assert trace(w)["status"] == "ok" and "error" not in trace(w)["last"]
+
+
+def test_not_confirmed_keeps_a_waiting_entry_and_skips_an_entity_already_there():
+    w = unconfirmed_world(switch__sock="unavailable")
+    w.set("binary_sensor.s", "on")
+    w.engine.command_unconfirmed("switch.sock", ("p", "r"))
+    tr = trace(w)
+    assert tr["reason"] == "target unavailable" and tr["last"]["error"] == "waiting for target"
+    w2 = unconfirmed_world()
+    w2.set("binary_sensor.s", "on")
+    w2.states["switch.sock"] = ("on", {})  # reached without a state change seen
+    w2.engine.command_unconfirmed("switch.sock", ("p", "r"))
+    assert trace(w2)["status"] == "ok"
+
+
+def test_a_newer_command_to_the_entity_clears_not_confirmed():
+    w = unconfirmed_world()
+    w.set("binary_sensor.s", "on")
+    w.engine.command_unconfirmed("switch.sock", ("p", "r"))
+    w.set("binary_sensor.s", "off")
+    w.set("binary_sensor.s", "on")  # fires again: a new on
+    tr = trace(w)
+    assert len(w.calls) == 2 and tr["status"] == "ok" and "error" not in tr["last"]

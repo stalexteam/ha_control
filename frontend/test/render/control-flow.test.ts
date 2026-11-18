@@ -76,6 +76,16 @@ describe('load control flowchart', () => {
     expect(host.querySelector('[data-block="toggle:1"] .fc-err')!.textContent).toBe('target unavailable');
   });
 
+  it('live: a command the device never confirmed was sent: the block says what was done, then the error', () => {
+    const r = rule([dev('sw')], { on: [act('a', 'on')] });
+    const t = live({ event: { source: 'Switch hall', what: 'on', at: NOW }, devices: [{ id: 'a', name: 'Light', state: 'off' }] }, {
+      last: { action: 'on', target: 'Light', at: NOW, reason: 'Switch hall: on', error: 'not confirmed by the device' },
+    });
+    const { host } = draw(r, t);
+    expect(text(host, 'on:0')).toMatch(/^Light \| on \| now off \| last: turned on .+ \| not confirmed by the device$/);
+    expect(text(host, 'on:0')).not.toContain('not sent');
+  });
+
   it('live: a dropped event warns and writes no last action; the last goes in the column of the event', () => {
     const r = rule([dev('sw')], { on: [act('a', 'on')], off: [act('a', 'off')] });
     const last = { action: 'off' as const, target: 'Light', at: NOW, reason: 'Switch hall: off' };

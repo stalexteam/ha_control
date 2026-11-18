@@ -1419,3 +1419,217 @@ def test_readings_get_command(env):
             schema({"type": "plan_studio/readings/get", "entity_ids": ["x"] * 201})
 
     asyncio.run(go())
+
+
+# --- expected state of commanded entities ("our optimistic") ---------------------------
+
+
+def _ws_plan():
+    """A wet sensor switches a socket on; a wall switch container reads the same relay (its presses are intents)."""
+    def dev(i, kind, bindings):
+        return {"id": i, "name": i, "props": {"kind": kind}, "bindings": bindings}
+
+    return {
+        "id": "p1",
+        "levels": [{"devices": [
+            dev("leak", "leak_sensor", {"leak": "binary_sensor.leak"}),
+            dev("sw", "socket", {"control": "switch.sock"}),
+            dev("ws", "wall_switch", {"state": "switch.sock"}),
+        ]}],
+        "rules": [{
+            "id": "r1", "name": "R", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+            "inputs": [{"source": {"device": "leak"}}], "onTrue": [{"device": "sw", "do": "on"}], "onFalse": [],
+        }],
+    }
+
+
+async def _xstart(env, hass, plan, clock, **states):
+    """Start with a manual monotonic clock for the expected states."""
+    hass.services.known |= {("switch", "turn_on"), ("switch", "turn_off")}
+    hass.states.d.update(states)
+    live = env.live.LiveRuntime(hass, FakePlans([plan]))
+    live._now = lambda: clock[0]
+    await live.async_start()
+    return live
+
+
+def _tick(env, clock, to):
+    """Move the clock and fire the timers that are armed (a fired timer is gone)."""
+    clock[0] = to
+    for t in [t for t in env.later if t["on"]]:
+        t["on"] = False
+        t["action"](datetime.datetime.now())
+
+
+def _press(live, did="ws"):
+    return live.runtime.snapshot("p1")[did].get("last")
+
+
+WS_OFF = {"binary_sensor.leak": "off", "switch.sock": "off"}
+
+
+def test_a_confirmation_7_s_late_with_a_foreign_context_is_ours_not_a_press(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_on"]
+        clock[0] = 7.0
+        _boiler_event(env, hass, "switch.sock", "on", old="off")  # outside HA's context window: a foreign context
+        assert _press(live) is None
+        _tick(env, clock, 10.0)
+        _tick(env, clock, 60.0)
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1  # confirmed: never sent again
+        trace = live.engine.snapshot("p1")["r1"]
+        assert trace["status"] == "ok" and "error" not in trace["last"]
+        _boiler_event(env, hass, "switch.sock", "off", old="on")  # the record is used up: a person's flip is a press
+        assert _press(live)["value"] == "off"
+
+    asyncio.run(go())
+
+
+def test_a_late_boiler_confirmation_is_no_wall_switch_press_and_no_take_over(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        FakeStore.contents[BOILER_KEY] = {"p1": {"r1": "auto"}}
+        live = await _xstart(env, hass, _boiler_plan("wall_switch"), clock, **{
+            "switch.relay": "off", "sensor.grid": "500", "sensor.bp": "0", "sensor.act": ""})
+        await asyncio.gather(*hass.tasks)  # auto sent on
+        assert [c[1] for c in hass.services.calls] == ["turn_on"]
+        clock[0] = 7.0
+        _boiler_event(env, hass, "switch.relay", "on", old="off")  # the slow relay confirms without the context
+        assert _press(live, "btn") is None
+        assert live.engine.snapshot("p1")["r1"]["boiler"]["mode"] == "auto"
+
+    asyncio.run(go())
+
+
+def test_a_lost_on_is_sent_once_more_at_10_s_and_not_confirmed_at_60_s(env, caplog):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        _tick(env, clock, 9.0)
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1
+        _tick(env, clock, 10.0)
+        await asyncio.gather(*hass.tasks)
+        assert [c[:3] for c in hass.services.calls] == [("switch", "turn_on", {"entity_id": "switch.sock"})] * 2
+        first, again = hass.services.calls[0][4], hass.services.calls[1][4]
+        assert again is not first and live.runtime.is_own((again.id, None))  # Plan Studio's own context
+        _tick(env, clock, 30.0)
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 2  # once only
+        assert live.engine.snapshot("p1")["r1"]["status"] == "ok"
+        with caplog.at_level("WARNING"):
+            _tick(env, clock, 60.0)
+        assert "switch.sock did not confirm turn_on within 60 s" in caplog.text
+        trace = live.engine.snapshot("p1")["r1"]
+        assert trace["status"] == "error" and trace["reason"] == "not confirmed"
+        assert trace["last"]["error"] == "not confirmed"
+        assert not [t for t in env.later if t["on"]]  # nothing left to wake for
+        _boiler_event(env, hass, "switch.sock", "on", old="off")  # the device reaches the state at last
+        trace = live.engine.snapshot("p1")["r1"]
+        assert trace["status"] == "ok" and "error" not in trace["last"]
+
+    asyncio.run(go())
+
+
+def test_a_person_flipping_to_another_state_is_a_press_and_drops_the_record(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **{**WS_OFF, "switch.sock": "on"})
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")  # an on while the relay reads on already
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_on"]
+        clock[0] = 2.0
+        _boiler_event(env, hass, "switch.sock", "off", old="on")  # a person
+        assert _press(live)["value"] == "off"
+        clock[0] = 3.0
+        _boiler_event(env, hass, "switch.sock", "on", old="off")  # the record is gone: not swallowed as ours
+        assert _press(live)["value"] == "on"
+        _tick(env, clock, 10.0)
+        _tick(env, clock, 60.0)
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1  # no retry
+        assert live.engine.snapshot("p1")["r1"]["status"] == "ok"
+
+    asyncio.run(go())
+
+
+def test_a_command_its_rule_no_longer_wants_is_not_sent_again(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        clock[0] = 3.0
+        _boiler_event(env, hass, "binary_sensor.leak", "off", old="on")  # a newer firing (no action): the on is stale
+        _tick(env, clock, 10.0)
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1
+
+    asyncio.run(go())
+
+
+def test_an_unavailable_entity_is_not_sent_again_at_10_s(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        clock[0] = 5.0
+        _boiler_event(env, hass, "switch.sock", "unavailable", old="off")
+        _tick(env, clock, 10.0)
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1
+        _tick(env, clock, 60.0)
+        trace = live.engine.snapshot("p1")["r1"]
+        assert trace["status"] == "error" and trace["last"]["error"] == "not confirmed"
+
+    asyncio.run(go())
+
+
+def test_a_command_to_an_entity_already_there_is_never_retried_nor_an_error(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **{**WS_OFF, "switch.sock": "on"})
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")  # no state change will come
+        await asyncio.gather(*hass.tasks)
+        _tick(env, clock, 10.0)
+        _tick(env, clock, 60.0)
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1
+        assert live.engine.snapshot("p1")["r1"]["status"] == "ok"
+
+    asyncio.run(go())
+
+
+def test_a_burst_keeps_one_record_for_the_last_command(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        for do in ("turn_on", "turn_off", "turn_on"):
+            live._call("switch", do, "switch.sock", on_error=lambda *a: None, by=("p1", "r1"))
+        await asyncio.gather(*hass.tasks)
+        _tick(env, clock, 10.0)
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_on", "turn_off", "turn_on", "turn_on"]  # the last, once
+
+    asyncio.run(go())
+
+
+def test_stop_leaves_no_expected_state_timer(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        assert [t for t in env.later if t["on"]]
+        await live.async_stop()
+        assert not [t for t in env.later if t["on"]]
+
+    asyncio.run(go())

@@ -70,10 +70,13 @@ class Runtime:
             self._notify(pid, True, self.snapshot(pid))
 
     def handle_state(
-        self, entity_id: str, old, new, context: "tuple[str | None, str | None]" = (None, None)
+        self, entity_id: str, old, new, context: "tuple[str | None, str | None]" = (None, None),
+        own: "bool | None" = None,
     ) -> None:
-        """One state change; context is (context.id, context.parent_id) of the change."""
-        own = self.is_own(context)
+        """One state change; context is (context.id, context.parent_id) of the change. own: whether Plan Studio made
+        it, when the caller knows more than the context (a late confirmation of its command); None asks the context."""
+        if own is None:
+            own = self.is_own(context)
         now = self._now()
         stamp: str | None = None
         events: list[tuple[Key, dict]] = []

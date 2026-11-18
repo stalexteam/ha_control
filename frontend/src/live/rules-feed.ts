@@ -46,6 +46,25 @@ export interface RuleGateTrace { value: boolean | null; detail: string; until?: 
  */
 export interface RuleLast { action: 'on' | 'off' | 'open' | 'close'; target: string; at: number; reason: string; error?: string; sent?: false }
 
+/**
+ * The server's entry errors the panel words itself (status reason and `RuleLast.error`); any other error ("target
+ * unavailable", "service failed", "waiting for target", ...) is shown as the server sends it.
+ */
+const ERROR_WORDS = new Map([['not confirmed', 'rules.error.notConfirmed']]);
+
+/** The trace with the server's error codes worded for the panel. */
+export function wordErrors(tr: RuleTrace): RuleTrace {
+  const reason = tr.reason !== undefined ? ERROR_WORDS.get(tr.reason) : undefined;
+  const error = tr.last?.error !== undefined ? ERROR_WORDS.get(tr.last.error) : undefined;
+  if (!reason && !error) return tr;
+  return { ...tr, ...(reason ? { reason: t(reason) } : {}), ...(error && tr.last ? { last: { ...tr.last, error: t(error) } } : {}) };
+}
+
+/** A command the device never confirmed (it was sent): its entry's error. */
+export function notConfirmed(l: RuleLast): boolean {
+  return l.error === t('rules.error.notConfirmed');
+}
+
 /** The `RuleLast.reason` of a timed switch run that ended because someone else switched its device. */
 export const SWITCHED_ELSEWHERE = 'ended: switched elsewhere';
 
@@ -144,7 +163,10 @@ export interface TimedTrace { running: boolean; until?: number; device: 'on' | '
 /** Live state of one saved rule, from `plan_studio/rules/subscribe`. */
 export interface RuleTrace {
   status: 'ok' | 'disabled' | 'waiting' | 'error';
-  /** Why the status is `error` (device missing, target missing, target unavailable, service failed, cycle, rule missing). */
+  /**
+   * Why the status is `error` (device missing, target missing, target unavailable, service failed, cycle, rule missing,
+   * or not confirmed: worded by the feed).
+   */
   reason?: string;
   verdict: boolean | null;
   /** A debounce is running: the verdict is about to become `to` at epoch ms `at`. */
@@ -336,7 +358,7 @@ export class RulesFeed {
   }
 
   private apply(ev: RulesEvent): void {
-    const changed = Object.entries(ev.rules ?? {});
+    const changed = Object.entries(ev.rules ?? {}).map(([id, s]): [string, RuleTrace] => [id, wordErrors(s)]);
     if (ev.full) {
       this.map = new Map(changed);
       this.gotFull = true;

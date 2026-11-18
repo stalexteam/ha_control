@@ -30,6 +30,7 @@ from .const import (
     RUNTIME_STORAGE_KEY,
     TIMED_STORAGE_KEY,
 )
+from .expected import EXPIRE, Expected, expect, service as service_for
 from .power import PowerHub, device_bindings, entity_ids as power_entity_ids
 from .readings import Readings
 from .rules import RuleEngine
@@ -78,8 +79,12 @@ class LiveRuntime:
         self._motion_modes: dict | None = None  # stored light motion control modes, handed to the first engine load only
         self._engine_start: CALLBACK_TYPE | None = None  # waits for HA to start after a boot load
         # rule actions fired before HA has started (a sensor known at boot), sent in order once it has
-        self._deferred: list[tuple[str, str, str, Callable[..., None], Callable[[], bool]]] = []
+        self._deferred: list[tuple[str, str, str, Callable[..., None], Callable[[], bool], object]] = []
         self._unstarted: CALLBACK_TYPE | None = None
+        # the state every command should bring: a late confirmation is still ours, a lost command is sent again once
+        self._expected = Expected()
+        self._expected_timer: tuple[float, CALLBACK_TYPE] | None = None  # (when, cancel) of its next wake
+        self._now: Callable[[], float] = time.monotonic  # the clock of the expected states
 
     async def async_start(self) -> None:
         # The v0.4 runtime store held persisted outputs; it is no longer used.
@@ -208,6 +213,7 @@ class LiveRuntime:
         self._stopped = True
         self._untrack_all()
         self._deferred.clear()
+        self._disarm()
         if self._engine_start is not None:
             self._engine_start()
             self._engine_start = None
@@ -268,10 +274,17 @@ class LiveRuntime:
             else:
                 self._returned.pop(data["entity_id"], None)
         context = (event.context.id, event.context.parent_id)
+        # Plan Studio's own change: its context, or the first change to the state one of its commands expects (however
+        # late; asked once per change of the state value, an attribute update is no change). Both consumers get it.
+        own = self.runtime.is_own(context)
+        was, now = (None if old is None else old.state), (None if new is None else new.state)
+        if was != now:
+            own = self._expected.arrived(data["entity_id"], now, self._now()) or own
+            self._arm()
         # intents first (runtime listeners are synchronous): the engine must know them before the state change
-        self.runtime.handle_state(data["entity_id"], _pair(data["old_state"]), _pair(data["new_state"]), context)
+        self.runtime.handle_state(data["entity_id"], _pair(data["old_state"]), _pair(data["new_state"]), context, own=own)
         self.power.handle_state(data["entity_id"])
-        self.engine.handle_state(data["entity_id"], own=self.runtime.is_own(context))
+        self.engine.handle_state(data["entity_id"], own=own)
 
     def _call(
         self,
@@ -280,21 +293,23 @@ class LiveRuntime:
         entity_id: str,
         on_error: Callable[..., None],
         current: Callable[[], bool] = lambda: True,
+        by: object = None,
     ) -> bool:
         """Send a rule action as a task; a missing service fails now, a failing call is reported later.
 
         Before HA has started (platforms may not have registered their services yet) the call waits for the start
         and True is returned (held: the engine leaves the target check to the send). It is then sent only while its
         firing is still the rule's latest one (current()); a missing service is reported through on_error, and so is
-        a target that is unavailable at that moment (with the reason "target unavailable"; the call is still sent)."""
+        a target that is unavailable at that moment (with the reason "target unavailable"; the call is still sent).
+        by: the rule the command belongs to, told when the device never confirms it (engine.command_unconfirmed)."""
         if self._hass.state is not CoreState.running:
-            self._deferred.append((domain, service, entity_id, on_error, current))
+            self._deferred.append((domain, service, entity_id, on_error, current, by))
             if self._unstarted is None:
                 self._unstarted = async_at_started(self._hass, self._started)
             return True
         if not self._hass.services.has_service(domain, service):
             raise RuntimeError(f"service {domain}.{service} not found")
-        self._dispatch(domain, service, entity_id, on_error)
+        self._dispatch(domain, service, entity_id, on_error, by, current)
         return False
 
     @callback
@@ -302,7 +317,7 @@ class LiveRuntime:
         """Send the calls deferred during the start, in the order they were fired, each once."""
         self._unstarted = None
         deferred, self._deferred = self._deferred, []
-        for domain, service, entity_id, on_error, current in deferred:
+        for domain, service, entity_id, on_error, current, by in deferred:
             if self._stopped or not current():
                 continue  # the rule fired again, changed or went away: this call is stale
             if not self._hass.services.has_service(domain, service):
@@ -313,11 +328,19 @@ class LiveRuntime:
             if st is None or st.state in ("unavailable", "unknown"):
                 # still sent (HA may accept it); the rule re-sends it when the target becomes available
                 on_error("target unavailable", "target unavailable")
-            self._dispatch(domain, service, entity_id, on_error)
+            self._dispatch(domain, service, entity_id, on_error, by, current)
 
-    def _dispatch(self, domain: str, service: str, entity_id: str, on_error: Callable[..., None]) -> None:
+    def _dispatch(
+        self, domain: str, service: str, entity_id: str, on_error: Callable[..., None], by: object = None,
+        current: Callable[[], bool] = lambda: True, retry: bool = False,
+    ) -> None:
+        """Send one call with its own context. The state it should bring is recorded as the entity's latest command
+        with its sender (the rule `by` and whether it still wants it, current()); a retry keeps the first one's record."""
         ctx = Context()
         self.runtime.ignore_context(ctx.id)  # its state change is not a press for a wall switch
+        state = expect(domain, service)
+        if state is not None and not retry:
+            self._expected.sent(entity_id, state, self._now(), (by, current))
         # A background task that starts on the next loop turn: the call cannot re-enter the engine from inside a firing.
         task = self._hass.async_create_background_task(
             self._send(domain, service, entity_id, ctx), f"plan_studio rule {domain}.{service}", eager_start=False
@@ -332,10 +355,57 @@ class LiveRuntime:
         task.add_done_callback(done)
 
     async def _send(self, domain: str, service: str, entity_id: str, ctx: Context) -> None:
+        self._arm()  # the wake for the retry / expiry of the expected state, once the call goes out
         await asyncio.wait_for(  # a hung blocking call ends as a recorded failure
             self._hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=True, context=ctx),
             CALL_TIMEOUT,
         )
+
+    # --- expected states ("our optimistic") ------------------------------------
+
+    def _arm(self) -> None:
+        """Keep one timer at the next retry / expiry of the expected states (none without records or once stopped)."""
+        at = None if self._stopped else self._expected.next_at()
+        if self._expected_timer is not None and self._expected_timer[0] == at:
+            return
+        self._disarm()
+        if at is not None:
+            self._expected_timer = (at, self._schedule(max(0.0, at - self._now()), self._expected_due))
+
+    def _disarm(self) -> None:
+        if self._expected_timer is not None:
+            self._expected_timer[1]()
+            self._expected_timer = None
+
+    def _expected_due(self) -> None:
+        """A command without its confirmation: sent once more after RETRY s with Plan Studio's context (not while the
+        entity has no data: the engine's "waiting for target" re-send covers its return; not when its sender no longer
+        wants it: its firing is no longer the latest one); given up after EXPIRE s with a warning and "not confirmed"
+        on the entry of the rule that sent it. An entity already reading the expected state (its change was not seen,
+        or the command found it there) is confirmed silently."""
+        self._expected_timer = None
+        if self._stopped:
+            return
+        now = self._now()
+        for entity_id, state, sender, what in self._expected.due(now):
+            by, current = sender
+            st = self._hass.states.get(entity_id)
+            domain = entity_id.split(".", 1)[0]
+            if st is not None and st.state == state:
+                if what == "retry":
+                    self._expected.arrived(entity_id, state, now)  # uses the record up
+                continue
+            if what == "retry":
+                svc = service_for(domain, state)
+                if svc is not None and st is not None and st.state not in ("unavailable", "unknown") and current():
+                    self._dispatch(domain, svc, entity_id, lambda *_: None, retry=True)  # a failure is logged
+                continue
+            _LOGGER.warning("%s did not confirm %s within %s s", entity_id, service_for(domain, state), EXPIRE)
+            try:
+                self.engine.command_unconfirmed(entity_id, by)
+            except Exception:  # noqa: BLE001 - a failing report must not stop the other records
+                _LOGGER.exception("reporting an unconfirmed command failed")
+        self._arm()
 
     def _schedule(self, delay: float, cb: Callable[[], None]) -> CALLBACK_TYPE:
         @callback
