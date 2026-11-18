@@ -15,7 +15,7 @@ EXPIRE = 60  # s after the command without a confirmation: given up, a command t
 # neither the confirmation nor another state: no data, or a valve on its way
 _PASSING = (None, "unavailable", "unknown", "opening", "closing")
 _NO_DATA = (None, "unavailable", "unknown")
-_SWITCHED = ("light", "switch", "fan", "input_boolean")
+_SWITCHED = ("light", "switch", "fan", "input_boolean", "virtual")  # virtual: the integration's own switches (virtual.py)
 _VALVE = {"open_valve": "open", "close_valve": "closed"}
 
 

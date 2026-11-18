@@ -1,7 +1,8 @@
 """Runs the container runtime and the power hub inside Home Assistant: state lookup, state tracking and clock.
 
-The transfer positions, the boiler modes, the running timed switches, the outside light pauses and the light motion
-control modes are persisted."""
+The transfer positions, the boiler modes, the running timed switches, the outside light pauses, the light motion
+control modes and the virtual switch states are persisted. A virtual switch (virtual.py) is answered and switched here:
+never a Home Assistant entity, call or tracked state."""
 
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ from .const import (
     POWER_STORAGE_KEY,
     RUNTIME_STORAGE_KEY,
     TIMED_STORAGE_KEY,
+    VIRTUAL_STORAGE_KEY,
 )
 from .expected import EXPIRE, Expected, expect, passing, service as service_for
 from .power import PowerHub, device_bindings, entity_ids as power_entity_ids
@@ -36,6 +38,7 @@ from .readings import Readings
 from .rules import RuleEngine
 from .runtime import Runtime
 from .store import PlanStore
+from .virtual import Virtual, device_id as virtual_device, devices as virtual_devices
 
 if TYPE_CHECKING:
     from homeassistant.core import Event, EventStateChangedData, State
@@ -77,6 +80,8 @@ class LiveRuntime:
         self._pauses: dict | None = None  # stored outside light pauses, handed to the first engine load only
         self._motion_store: Store = Store(hass, 1, MOTION_LIGHT_STORAGE_KEY)
         self._motion_modes: dict | None = None  # stored light motion control modes, handed to the first engine load only
+        self.virtual = Virtual()  # the virtual switch states, answered for virtual.<device id>
+        self._virtual_store: Store = Store(hass, 1, VIRTUAL_STORAGE_KEY)
         self._engine_start: CALLBACK_TYPE | None = None  # waits for HA to start after a boot load
         # rule actions fired before HA has started (a sensor known at boot), sent in order once it has
         self._deferred: list[tuple[str, str, str, Callable[..., None], Callable[[], bool], object]] = []
@@ -108,6 +113,7 @@ class LiveRuntime:
         self._pauses = pauses if isinstance(pauses, dict) else {}
         motion_modes = await self._motion_store.async_load()
         self._motion_modes = motion_modes if isinstance(motion_modes, dict) else {}
+        self.virtual.load(await self._virtual_store.async_load())  # before the first load reads them
         self.engine = RuleEngine(
             self._lookup, time.time, self._call, self._schedule,
             local=lambda ts: dt_util.as_local(dt_util.utc_from_timestamp(ts)),  # the real zone: DST-safe
@@ -123,6 +129,7 @@ class LiveRuntime:
     @callback
     def reload(self) -> None:
         plans = self._plans.plans()
+        self._keep_virtual(plans)  # before the loads read them
         self.runtime.load_plans(plans)
         # only the first load while HA is still starting is the HA start; an entry reload is not
         boot = not self._loaded and self._hass.state is not CoreState.running
@@ -176,16 +183,37 @@ class LiveRuntime:
         self._motion_store.async_delay_save(lambda: modes, 1)
 
     @callback
+    def _save_virtual(self) -> None:
+        self._virtual_store.async_delay_save(self.virtual.dump, 1)  # the states at the time of the write
+
+    def _keep_virtual(self, plans: list[dict]) -> None:
+        """The saved plans' virtual switches: a new one starts off; one removed from its plan, or of a deleted plan,
+        drops its state."""
+        before = self.virtual.dump()
+        saved: set[str] = set()
+        for plan in plans:
+            pid = plan.get("id") if isinstance(plan, dict) else None
+            if isinstance(pid, str):
+                saved.add(pid)
+                self.virtual.keep(pid, virtual_devices(plan))
+        for pid in set(before) - saved:
+            self.virtual.keep(pid, [])
+        if self.virtual.dump() != before:
+            self._save_virtual()
+
+    @callback
     def retrack(self) -> None:
-        """Track the entities the containers, the rules and the power subscriptions read; a stopped runtime tracks nothing."""
+        """Track the entities the containers, the rules and the power subscriptions read; a stopped runtime tracks nothing.
+        The virtual switches are the integration's own (no Home Assistant state events)."""
         self._untrack_all()
         if self._stopped:
             return
         ids = self.runtime.entity_ids() | self.power.entity_ids() | self.engine.entity_ids() | self._saved_power_entities()
         self.readings.keep(ids)
-        self._untrack = async_track_state_change_event(self._hass, sorted(ids), self._on_state)
+        tracked = sorted(e for e in ids if virtual_device(e) is None)
+        self._untrack = async_track_state_change_event(self._hass, tracked, self._on_state)
         if async_track_state_report_event is not None:  # a repeated report of the same value feeds the statistics only
-            self._untrack_reports = async_track_state_report_event(self._hass, sorted(ids), self._on_report)
+            self._untrack_reports = async_track_state_report_event(self._hass, tracked, self._on_report)
 
     def _saved_power_entities(self) -> set[str]:
         """The entities of the saved plans' power schematics: their statistics do not wait for an open panel."""
@@ -239,6 +267,10 @@ class LiveRuntime:
             await self._motion_store.async_save(self.engine.motion_modes())
         except Exception:  # noqa: BLE001 - stopping must go on
             _LOGGER.warning("could not save the light motion control modes", exc_info=True)
+        try:  # likewise the virtual switch states
+            await self._virtual_store.async_save(self.virtual.dump())
+        except Exception:  # noqa: BLE001 - stopping must go on
+            _LOGGER.warning("could not save the virtual switch states", exc_info=True)
         self.engine.load_plans([], unload=True)  # cancels every rule timer; switches no boiler relay or timed device
 
     @callback
@@ -262,6 +294,9 @@ class LiveRuntime:
         return st.last_changed.timestamp()
 
     def _lookup(self, entity_id: str) -> tuple[str, dict] | None:
+        if virtual_device(entity_id) is not None:  # the integration's own switch; None once it left the saved plans
+            state = self.virtual.state(entity_id)
+            return None if state is None else (state, {})
         return _pair(self._hass.states.get(entity_id))
 
     @callback
@@ -276,21 +311,28 @@ class LiveRuntime:
                 self._returned[data["entity_id"]] = new.last_changed
             else:
                 self._returned.pop(data["entity_id"], None)
-        context = (event.context.id, event.context.parent_id)
+        self._deliver(data["entity_id"], _pair(old), _pair(new), (event.context.id, event.context.parent_id))
+
+    def _deliver(
+        self, entity_id: str, old: tuple[str, dict] | None, new: tuple[str, dict] | None,
+        context: tuple[str | None, str | None],
+    ) -> None:
+        """One state change (a Home Assistant one, or a virtual switch's) to the containers runtime, the power hub and
+        the rules; context is (context.id, context.parent_id) of the change."""
         # Plan Studio's own change: its context, or the first change to the state one of its commands expects (however
         # late; asked once per change of the state value, an attribute update is no change; a return from no data is
         # a fresh reading). Both consumers get it.
         own = self.runtime.is_own(context)
-        was, now = (None if old is None else old.state), (None if new is None else new.state)
+        was, now = (None if old is None else old[0]), (None if new is None else new[0])
         if was != now:
-            own = self._expected.arrived(data["entity_id"], now, self._now(), back=passing(was)) or own
+            own = self._expected.arrived(entity_id, now, self._now(), back=passing(was)) or own
             self._arm()
             if not passing(now):
-                self._warned.pop(data["entity_id"], None)  # it reached a state: a new episode
+                self._warned.pop(entity_id, None)  # it reached a state: a new episode
         # intents first (runtime listeners are synchronous): the engine must know them before the state change
-        self.runtime.handle_state(data["entity_id"], _pair(data["old_state"]), _pair(data["new_state"]), context, own=own)
-        self.power.handle_state(data["entity_id"])
-        self.engine.handle_state(data["entity_id"], own=own)
+        self.runtime.handle_state(entity_id, old, new, context, own=own)
+        self.power.handle_state(entity_id)
+        self.engine.handle_state(entity_id, own=own)
 
     def _call(
         self,
@@ -307,7 +349,13 @@ class LiveRuntime:
         and True is returned (held: the engine leaves the target check to the send). It is then sent only while its
         firing is still the rule's latest one (current()); a missing service is reported through on_error, and so is
         a target that is unavailable at that moment (with the reason "target unavailable"; the call is still sent).
-        by: the rule the command belongs to, told when the device never confirms it (engine.command_unconfirmed)."""
+        by: the rule the command belongs to, told when the device never confirms it (engine.command_unconfirmed).
+        A virtual switch is never called nor held: turn_on / turn_off / toggle set it on the next loop turn (_send)."""
+        if virtual_device(entity_id) is not None:
+            if service not in ("turn_on", "turn_off", "toggle"):
+                raise RuntimeError(f"service {domain}.{service} not found")
+            self._dispatch(domain, service, entity_id, on_error, by)
+            return False
         if self._hass.state is not CoreState.running:
             self._deferred.append((domain, service, entity_id, on_error, current, by))
             if self._unstarted is None:
@@ -363,11 +411,37 @@ class LiveRuntime:
         task.add_done_callback(done)
 
     async def _send(self, domain: str, service: str, entity_id: str, ctx: Context) -> None:
+        if virtual_device(entity_id) is not None:  # the integration's own switch: no Home Assistant call
+            self._virtual_set(entity_id, service, ctx)
+            return
         self._arm()  # the wake for the retry / expiry of the expected state, once the call goes out
         await asyncio.wait_for(  # a hung blocking call ends as a recorded failure
             self._hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=True, context=ctx),
             CALL_TIMEOUT,
         )
+
+    def _virtual_set(self, entity_id: str, service: str, ctx: Context) -> None:
+        """A command to a virtual switch: the state is set now and its change goes the way of a Home Assistant state
+        change with the command's (Plan Studio's) context, so its expected state is confirmed at once. Already in that
+        state, or the device left the saved plans since the send: nothing changes and the expected state is used up
+        (no retry, no "not confirmed"). A failure past the set is logged; the command itself succeeded."""
+        if self._stopped:
+            return
+        was = self.virtual.state(entity_id)
+        state = ("off" if was == "on" else "on") if service == "toggle" else service[len("turn_"):]
+        if was is None or not self.virtual.set(entity_id, state):
+            self._expected.arrived(entity_id, state, self._now())
+            self._arm()
+            return
+        self._save_virtual()
+        try:
+            self.readings.report(entity_id, state, time.time())
+        except Exception:  # noqa: BLE001 - the statistics must never disturb the automations
+            _LOGGER.debug("could not record a report of %s", entity_id, exc_info=True)
+        try:
+            self._deliver(entity_id, (was, {}), (state, {}), (ctx.id, ctx.parent_id))
+        except Exception:  # noqa: BLE001 - the state is set: a failing consumer is a bug to log, not a failed command
+            _LOGGER.exception("virtual switch %s: delivering its change to %s failed", entity_id, state)
 
     # --- expected states ("our optimistic") ------------------------------------
 

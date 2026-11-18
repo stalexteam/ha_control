@@ -46,10 +46,12 @@ INPUT_ROLE = {
     "equipment": "control",
     "wall_switch": "state",
     "valve": "state",
+    "virtual_switch": "control",
 }
 ON_OFF_DETAIL = {"leak_sensor": ("wet", "dry"), "motion_sensor": ("motion", "clear")}
-ON_OFF_TARGETS = {"ceiling_light", "wall_light", "socket", "exhaust_fan"}
-CONTROL_DOMAINS = {"light", "switch", "fan"}
+ON_OFF_TARGETS = {"ceiling_light", "wall_light", "socket", "exhaust_fan", "virtual_switch"}
+# virtual: the synthetic virtual.<device id> of a virtual switch, switched by the live runtime itself (virtual.py)
+CONTROL_DOMAINS = {"light", "switch", "fan", "virtual"}
 VALVE_SERVICES = {
     ("valve", "open"): "open_valve",
     ("valve", "close"): "close_valve",

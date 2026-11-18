@@ -2013,3 +2013,288 @@ def test_stop_leaves_no_expected_state_timer(env):
         assert not [t for t in env.later if t["on"]]
 
     asyncio.run(go())
+
+
+# --- virtual switches (kept by the integration, never Home Assistant entities) -----------------------------------------
+
+VIRTUAL_KEY = "plan_studio.virtual"
+
+
+def _vplan(sleep=True):
+    """A smart button toggles the virtual switch Sleep (Load control); a wet leak sensor switches a socket on only while
+    Sleep is on (the gate)."""
+    def dev(i, kind, bindings):
+        return {"id": i, "name": i, "props": {"kind": kind}, "bindings": bindings}
+
+    devices = [dev("btn", "smart_button", {"action": "sensor.act"}),
+               dev("leak", "leak_sensor", {"leak": "binary_sensor.leak"}),
+               dev("sw", "socket", {"control": "switch.sock"})]
+    if sleep:
+        devices.append(dev("sleep", "virtual_switch", {"control": "virtual.sleep"}))
+    return {
+        "id": "p1",
+        "levels": [{"devices": devices}],
+        "rules": [
+            {"id": "lc", "name": "Sleep button", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+             "inputs": [], "onTrue": [], "onFalse": [],
+             "control": {"sources": [{"button": "btn"}], "on": [], "off": [],
+                         "toggle": [{"device": "sleep", "do": "toggle"}]}},
+            {"id": "r1", "name": "R", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+             "inputs": [{"source": {"device": "leak"}}], "gate": {"source": {"device": "sleep"}},
+             "onTrue": [{"device": "sw", "do": "on"}], "onFalse": []},
+        ],
+    }
+
+
+async def _vstart(env, hass, stored=None, clock=None, plan=None):
+    if stored is not None:
+        FakeStore.contents[VIRTUAL_KEY] = stored
+    hass.services.known |= {("switch", "turn_on"), ("switch", "turn_off")}
+    hass.states.d.update({"binary_sensor.leak": "on", "switch.sock": "off", "sensor.act": ""})
+    live = env.live.LiveRuntime(hass, FakePlans([plan or _vplan()]))
+    if clock is not None:
+        live._now = lambda: clock[0]
+    await live.async_start()
+    return live
+
+
+def _vsaves():
+    return [s for s in FakeStore.saved if s[0] == VIRTUAL_KEY]
+
+
+def _spy_engine(live):
+    seen = []
+    orig = live.engine.handle_state
+    live.engine.handle_state = lambda eid, own=False: (seen.append((eid, own)), orig(eid, own=own))[1]
+    return seen
+
+
+def test_a_virtual_switch_is_answered_by_the_runtime_and_never_tracked_through_ha(env):
+    async def go():
+        hass = FakeHass()
+        live = await _vstart(env, hass)
+        assert live._lookup("virtual.sleep") == ("off", {})  # default off
+        assert live._lookup("virtual.nope") is None
+        assert "virtual.sleep" in live.engine.entity_ids()  # the gate reads it, the load control rule switches it
+        for entry in (env.tracked[-1], env.reported[-1]):
+            assert entry["ids"] and not [e for e in entry["ids"] if e.startswith("virtual.")]
+        await asyncio.gather(*hass.tasks)
+        assert hass.services.calls == []  # wet, but Sleep is off: the gate is closed
+
+    asyncio.run(go())
+
+
+def test_a_load_control_toggle_switches_the_virtual_switch_at_once_as_an_own_change_without_ha(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _vstart(env, hass, clock=clock)
+        seen = _spy_engine(live)
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})
+        assert hass.services.calls == [] and seen == []  # a task: the change cannot re-enter the firing
+        await asyncio.gather(*hass.tasks)
+        assert live._lookup("virtual.sleep") == ("on", {}) and live.virtual.state("virtual.sleep") == "on"
+        assert ("virtual.sleep", True) in seen  # the engine got the change as Plan Studio's own
+        assert "virtual.sleep" not in live._expected._records  # confirmed at once: no retry, no expiry
+        assert live.readings.stats("virtual.sleep")["count"] == 1  # fed like a report
+        assert _vsaves()[-1] == (VIRTUAL_KEY, {"p1": {"sleep": "on"}})
+        lc = live.engine.snapshot("p1")["lc"]
+        assert lc["status"] == "ok" and lc["last"]["action"] == "on" and "error" not in lc["last"]
+        # the gate opened: the condition rule applies its verdict (the socket is a real HA entity)
+        await asyncio.gather(*hass.tasks)
+        assert [c[:3] for c in hass.services.calls] == [("switch", "turn_on", {"entity_id": "switch.sock"})]
+        assert not [c for c in hass.services.calls if c[0] == "virtual"]
+        _tick(env, clock, 10.0)
+        _tick(env, clock, 60.0)
+        await asyncio.gather(*hass.tasks)
+        assert live.engine.snapshot("p1")["lc"]["status"] == "ok"  # never "not confirmed"
+        live.reload()  # a plan save keeps the state of a virtual switch still in the plan
+        assert live.virtual.state("virtual.sleep") == "on"
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})  # toggles back off
+        await asyncio.gather(*hass.tasks)
+        assert live.virtual.state("virtual.sleep") == "off" and _vsaves()[-1] == (VIRTUAL_KEY, {"p1": {"sleep": "off"}})
+        assert ("virtual.sleep", True) in seen[1:]
+
+    asyncio.run(go())
+
+
+def test_a_gate_on_the_virtual_switch_opens_and_closes_a_holder_slot_of_a_light(env):
+    async def go():
+        hass = FakeHass()
+        plan = _vplan()
+        plan["levels"][0]["devices"].append(
+            {"id": "lamp", "name": "lamp", "props": {"kind": "ceiling_light"}, "bindings": {"control": "light.k"}})
+        plan["rules"][1].update({"onTrue": [{"device": "lamp", "do": "on"}], "onFalse": [{"device": "lamp", "do": "off"}]})
+        hass.services.known |= {("light", "turn_on"), ("light", "turn_off")}
+        hass.states.d["light.k"] = "off"
+        live = await _vstart(env, hass, plan=plan)
+        await asyncio.gather(*hass.tasks)
+        assert hass.services.calls == [] and "holders" not in live.engine.snapshot("p1")["r1"]
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})  # Sleep on: the gate opens, the wet rule holds the lamp
+        await asyncio.gather(*hass.tasks)
+        await asyncio.gather(*hass.tasks)
+        assert [c[:3] for c in hass.services.calls] == [("light", "turn_on", {"entity_id": "light.k"})]
+        assert live.engine.snapshot("p1")["r1"]["holders"] == ["R"]
+        _boiler_event(env, hass, "light.k", "on", old="off")
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})  # Sleep off: the gate closes, the hold is released
+        await asyncio.gather(*hass.tasks)
+        await asyncio.gather(*hass.tasks)
+        assert live.virtual.state("virtual.sleep") == "off" and "holders" not in live.engine.snapshot("p1")["r1"]
+        assert len(hass.services.calls) == 1  # a closed gate sends nothing
+
+    asyncio.run(go())
+
+
+def test_a_turn_on_to_a_virtual_switch_already_on_changes_nothing_and_leaves_no_record(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _vstart(env, hass, stored={"p1": {"sleep": "on"}}, clock=clock)
+        await asyncio.gather(*hass.tasks)
+        seen, n = _spy_engine(live), len(_vsaves())
+        errors = []
+        assert live._call("virtual", "turn_on", "virtual.sleep", errors.append) is False
+        await asyncio.gather(*hass.tasks)
+        assert seen == [] and errors == [] and len(_vsaves()) == n and "virtual.sleep" not in live._expected._records
+        live._call("virtual", "toggle", "virtual.sleep", errors.append)  # a toggle service is resolved here
+        await asyncio.gather(*hass.tasks)
+        assert live.virtual.state("virtual.sleep") == "off" and ("virtual.sleep", True) in seen
+        with pytest.raises(RuntimeError):
+            live._call("virtual", "open_valve", "virtual.sleep", errors.append)
+        assert not [c for c in hass.services.calls if c[0] == "virtual"]
+
+    asyncio.run(go())
+
+
+def test_a_virtual_command_to_a_device_removed_before_it_applies_leaves_no_record(env):
+    async def go():
+        hass = FakeHass()
+        plans = FakePlans([_vplan()])
+        live = env.live.LiveRuntime(hass, plans)
+        await live.async_start()
+        live._call("virtual", "turn_on", "virtual.sleep", lambda *_: None)
+        assert "virtual.sleep" in live._expected._records
+        plans._plans = [_vplan(sleep=False)]
+        live.reload()  # saved without the device before the command's task ran
+        await asyncio.gather(*hass.tasks)
+        assert live._lookup("virtual.sleep") is None and "virtual.sleep" not in live._expected._records
+
+    asyncio.run(go())
+
+
+def test_a_virtual_command_before_ha_has_started_is_not_held_for_the_start(env):
+    async def go():
+        hass = FakeHass()
+        live = await _vstart(env, hass)
+        hass.state = CoreState.starting
+        assert live._call("virtual", "turn_on", "virtual.sleep", lambda *_: None) is False
+        await asyncio.gather(*hass.tasks)
+        assert live.virtual.state("virtual.sleep") == "on"
+        # the gate opened: the socket's call waits for the start; nothing of the virtual switch does
+        assert [d[:3] for d in live._deferred] == [("switch", "turn_on", "switch.sock")]
+
+    asyncio.run(go())
+
+
+def test_the_virtual_state_is_restored_at_start_and_flushed_at_stop(env):
+    async def go():
+        hass = FakeHass()
+        live = await _vstart(env, hass, stored={"p1": {"sleep": "on"}})
+        assert live._lookup("virtual.sleep") == ("on", {})
+        await asyncio.gather(*hass.tasks)
+        # the gate reads the restored state: the condition rule's start verdict is sent
+        assert [c[:3] for c in hass.services.calls] == [("switch", "turn_on", {"entity_id": "switch.sock"})]
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})
+        await asyncio.gather(*hass.tasks)
+        await live.async_stop()
+        assert (VIRTUAL_KEY, {"p1": {"sleep": "off"}}) in FakeStore.flushed
+        live2 = env.live.LiveRuntime(hass, FakePlans([_vplan()]))
+        await live2.async_start()
+        assert live2._lookup("virtual.sleep") == ("off", {})
+        live2.engine.on_intent("p1", "btn", {"action": "toggle"})
+        await asyncio.gather(*hass.tasks)
+        assert live2.virtual.state("virtual.sleep") == "on"
+        live3 = env.live.LiveRuntime(hass, FakePlans([_vplan()]))
+        await live2.async_stop()
+        await live3.async_start()
+        assert live3._lookup("virtual.sleep") == ("on", {})
+
+    asyncio.run(go())
+
+
+def test_a_virtual_switch_removed_from_the_saved_plan_drops_its_state_at_reload(env):
+    async def go():
+        hass = FakeHass()
+        plans = FakePlans([_vplan()])
+        FakeStore.contents[VIRTUAL_KEY] = {"p1": {"sleep": "on", "gone": "on"}, "deleted": {"x": "on"}}
+        live = env.live.LiveRuntime(hass, plans)
+        await live.async_start()
+        assert live.virtual.dump() == {"p1": {"sleep": "on"}} and _vsaves()[-1] == (VIRTUAL_KEY, {"p1": {"sleep": "on"}})
+        plans._plans = [_vplan(sleep=False)]
+        live.reload()
+        assert live._lookup("virtual.sleep") is None and live.virtual.dump() == {}
+        assert _vsaves()[-1] == (VIRTUAL_KEY, {})
+        n = len(_vsaves())
+        live.reload()  # nothing changed: nothing saved
+        assert len(_vsaves()) == n
+
+    asyncio.run(go())
+
+
+def test_a_failure_inside_the_virtual_path_does_not_block_the_ha_state_path(env, caplog):
+    async def go():
+        hass = FakeHass()
+        live = await _vstart(env, hass)
+        orig = live.power.handle_state
+
+        def boom(eid):
+            if eid.startswith("virtual."):
+                raise RuntimeError("bug")
+            orig(eid)
+
+        live.power.handle_state = boom
+        errors = []
+        with caplog.at_level("ERROR"):
+            live._call("virtual", "turn_on", "virtual.sleep", errors.append)
+            await asyncio.gather(*hass.tasks)
+        assert live.virtual.state("virtual.sleep") == "on" and errors == [] and "bug" in caplog.text
+        seen = _spy_engine(live)
+        _boiler_event(env, hass, "binary_sensor.leak", "off", old="on")  # an HA state change still gets through
+        assert seen == [("binary_sensor.leak", False)]
+
+    asyncio.run(go())
+
+
+def test_virtual_subscribe_sends_result_then_the_states_then_every_change(env):
+    async def go():
+        hass = FakeHass()
+        plans = FakePlans([_vplan()])
+        live = env.live.LiveRuntime(hass, plans)
+        hass.states.d.update({"binary_sensor.leak": "off", "switch.sock": "off", "sensor.act": ""})
+        await live.async_start()
+        hass.data["plan_studio"]["live"] = live
+        sent, subs = [], {}
+        conn = types.SimpleNamespace(
+            subscriptions=subs,
+            send_result=lambda i, r=None: sent.append(("result", i)),
+            send_message=lambda m: sent.append(("msg", m)),
+            send_error=lambda i, code, text: sent.append(("error", code)),
+        )
+        env.ws.ws_virtual_subscribe(hass, conn, {"id": 5, "plan_id": "p1"})
+        assert sent[0] == ("result", 5)
+        assert sent[1] == ("msg", {"id": 5, "type": "event", "event": {"states": {"sleep": "off"}}})
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})
+        await asyncio.gather(*hass.tasks)
+        assert sent[-1] == ("msg", {"id": 5, "type": "event", "event": {"states": {"sleep": "on"}}})
+        plans._plans = [_vplan(sleep=False)]
+        live.reload()
+        assert sent[-1] == ("msg", {"id": 5, "type": "event", "event": {"states": {}}})
+        subs[5]()
+        n = len(sent)
+        plans._plans = [_vplan()]
+        live.reload()
+        assert len(sent) == n
+        hass.data["plan_studio"].pop("live")
+        env.ws.ws_virtual_subscribe(hass, conn, {"id": 6, "plan_id": "p1"})
+        assert sent[-1] == ("error", "not_loaded")
+        assert "plan_studio/virtual/subscribe" in env.cmds
+
+    asyncio.run(go())

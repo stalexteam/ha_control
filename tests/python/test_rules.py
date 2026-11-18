@@ -1698,3 +1698,25 @@ def test_an_identical_repeat_of_a_command_not_confirmed_keeps_saying_so_until_th
     assert len(w.calls) == 2 and tr["status"] == "error" and tr["last"]["error"] == "not confirmed"
     w.set("switch.sock", "on")
     assert trace(w)["status"] == "ok" and "error" not in trace(w)["last"]
+
+
+# --- virtual switches (kept by the integration; the engine sees the virtual.<id> entity) -------------------------------
+
+VSW = dev("vs", "virtual_switch", "Sleep", control="virtual.vs")
+
+
+def test_a_virtual_switch_is_an_input_and_an_on_off_target():
+    w = World(binary_sensor__s="off", virtual__vs="off")
+    w.engine.load_plans([plan([dev("s", "leak_sensor", leak="binary_sensor.s"), VSW],
+                              [rule("r", ["s"], on_true=[("vs", "on")], on_false=[("vs", "off")]),
+                               rule("g", ["vs"])])])
+    assert {"virtual.vs"} <= w.engine.entity_ids()
+    assert w.calls == [("virtual", "turn_off", "virtual.vs")]  # the start verdict false, both ways
+    w.calls.clear()
+    w.set("binary_sensor.s", "on")
+    assert w.calls == [("virtual", "turn_on", "virtual.vs")]
+    w.set("virtual.vs", "on")
+    assert w.engine.snapshot("p")["g"]["verdict"] is True
+    assert w.engine.snapshot("p")["r"]["holders"] == ["r"]  # the on / off pair holds it (holder slots)
+    w.set("binary_sensor.s", "off")
+    assert w.calls[-1] == ("virtual", "turn_off", "virtual.vs")

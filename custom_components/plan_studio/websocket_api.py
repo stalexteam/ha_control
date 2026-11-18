@@ -36,6 +36,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_delete)
     websocket_api.async_register_command(hass, ws_containers_subscribe)
     websocket_api.async_register_command(hass, ws_rules_subscribe)
+    websocket_api.async_register_command(hass, ws_virtual_subscribe)
     websocket_api.async_register_command(hass, ws_power_subscribe)
     websocket_api.async_register_command(hass, ws_power_set_position)
     websocket_api.async_register_command(hass, ws_readings_get)
@@ -167,6 +168,33 @@ def ws_rules_subscribe(hass, connection, msg):
     connection.subscriptions[msg["id"]] = engine.subscribe(plan_id, forward)
     connection.send_result(msg["id"])
     forward(True, engine.snapshot(plan_id))
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "plan_studio/virtual/subscribe", vol.Required("plan_id"): str}
+)
+@websocket_api.require_admin
+@callback
+def ws_virtual_subscribe(hass, connection, msg):
+    """Stream the states of one plan's virtual switches: every event is the whole map {"states": {device id: "on" |
+    "off"}}, first at once, then on every change (a state, or a virtual switch added to / removed from the saved plan).
+
+    Ends with HA's standard `unsubscribe_events` or when the connection closes.
+    """
+    live = _live(hass)
+    if live is None:
+        connection.send_error(msg["id"], "not_loaded", "Plan Studio is not loaded")
+        return
+    virtual = live.virtual
+    plan_id = msg["plan_id"]
+
+    @callback
+    def forward(frame: dict) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], frame))
+
+    connection.subscriptions[msg["id"]] = virtual.subscribe(plan_id, forward)
+    connection.send_result(msg["id"])
+    forward({"states": virtual.states(plan_id)})
 
 
 @websocket_api.websocket_command(

@@ -495,3 +495,25 @@ def test_validate_plan_control_rule_source_refs():
     with pytest.raises(vol.Invalid, match="cycle"):
         validate_plan({**plan("p"), "rules": [control_rule(control=ctl(sources=[{"source": {"rule": "r2"}}])), other]})
     validate_plan({**plan("p"), "rules": [control_rule(control=ctl(sources=[{"source": {"rule": "r2"}}])), rule("r2")]})
+
+
+def with_devices(*devices):
+    return {**plan("p"), "levels": [{**LEVEL, "devices": list(devices)}]}
+
+
+def vswitch(did="s1", bindings=None, **extra):
+    return {"id": did, "name": "Sleep", "placement": {"mode": "none"}, "props": {"kind": "virtual_switch"},
+            "bindings": {"control": f"virtual.{did}"} if bindings is None else bindings, **extra}
+
+
+def test_validate_plan_virtual_switch_binds_only_its_synthetic_entity():
+    validate_plan(with_devices(vswitch()))
+    validate_plan(with_devices(vswitch("a"), vswitch("b"), {"id": "x", "props": {"kind": "socket"}, "bindings": {}}))
+    for bad in (
+        {}, {"control": "virtual.other"}, {"control": "switch.s1"}, {"control": "virtual.s1", "power": "sensor.p"},
+        {"state": "virtual.s1"}, None, "virtual.s1",
+    ):
+        with pytest.raises(vol.Invalid, match="virtual switch"):
+            validate_plan(with_devices(vswitch(bindings=bad) if bad is not None else {**vswitch(), "bindings": None}))
+    with pytest.raises(vol.Invalid, match="virtual switch"):
+        validate_plan(with_devices({**vswitch(), "id": ""}))

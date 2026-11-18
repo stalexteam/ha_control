@@ -18,3 +18,5 @@ TIMED_STORAGE_KEY = "plan_studio.timed"
 OUTSIDE_STORAGE_KEY = "plan_studio.outside"
 # Light motion control rules in manual: {plan_id: {rule_id: {"mode": "manual", "since": epoch seconds}}}, version 1.
 MOTION_LIGHT_STORAGE_KEY = "plan_studio.motion_light"
+# Virtual switch states: {plan_id: {device_id: "on" | "off"}}, version 1.
+VIRTUAL_STORAGE_KEY = "plan_studio.virtual"
