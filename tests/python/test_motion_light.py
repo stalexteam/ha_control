@@ -572,14 +572,14 @@ def test_second_auto_before_the_echo():
     w.press("btn", "auto")
     assert w.calls == [OFF]
     w.advance(T0 + 1)
-    w.press("btn", "auto")  # again, before the lamp confirms the off
-    assert w.calls == [OFF, OFF]
+    w.press("btn", "auto")  # again, before the lamp confirms the off: the off on its way counts as off (0.26.0)
+    assert w.calls == [OFF]
     w.light("off", own=True)
     t = w.tr()
     assert t["verdict"] is False and t["motionLight"]["mode"] == "auto" and "waiting" not in t["motionLight"]
     assert t["motionLight"]["light"] == "off"
     w.advance(T0 + 3600)
-    assert w.calls == [OFF, OFF]
+    assert w.calls == [OFF]
 
 
 def test_auto_with_motion_while_dark_and_the_light_off_switches_on():
@@ -1823,3 +1823,109 @@ def test_no_flapping_between_blocked_and_daylight():
     w.set("sensor.lux", *DAY)
     w.sleep("off")  # the daylight change was taken while blocked: no "daylight" off later
     assert w.calls == [OFF, OFF, ON, OFF] and w.tr()["last"]["reason"] == "blocked"
+
+
+# --- fix round 1: no daylight re-hold after a daylight off; an off on its way counts as off ----------------------------
+
+def test_raw_after_a_daylight_off_and_its_reset():
+    m = make(daylight={"sensor": "ls", "is": "night"})
+    m.day_off = True  # a daylight off: the light being on no longer keeps it
+    assert m.raw([True, False, False], True) is False
+    assert m.raw([True, False, True], True) is True and m.raw([True, False, None], False) is True  # dark / no data
+    assert not m.day_came([True, False, False]) and m.day_off
+    assert not m.day_came([True, False, None]) and m.day_off  # no data is not "met"
+    assert not m.day_came([True, False, True]) and not m.day_off  # the daylight condition is met again
+    assert m.raw([True, False, False], True) is True  # a light found on in daylight is kept again
+
+
+def test_a_daylight_off_kept_back_by_another_holder_is_not_undone_by_motion():
+    """Probe P3: a Timer keeps the light on, so the daylight off is kept back; the motion goes on in daylight: the rule
+    does not hold the light again; the Timer's end switches it off; dusk with motion switches it on."""
+    w = lit([ml_rule(daylight=("ls", "dark")), timed_rule(minutes=10)])
+    w.press("tb", "set", "on")  # already on: the timer holds it without a command
+    w.set("sensor.lux", *DAY)
+    t = w.tr()
+    assert w.calls == [] and t["verdict"] is False and t["last"]["reason"] == "kept on by Timer"
+    w.advance(T0 + 30)
+    w.pir("on")  # the motion goes on in daylight, the light reads on
+    t = w.tr()
+    assert w.calls == [] and t["verdict"] is False and t["holders"] == ["Timer"]
+    w.advance(T0 + 600)  # the timed run ends while the motion lasts: nobody keeps the light on
+    assert w.calls == [OFF] and w.tr()["verdict"] is False
+    w.light("off", own=True)
+    w.pir("on")
+    assert w.calls == [OFF]
+    w.set("sensor.lux", *NIGHT)  # dark again with motion: on
+    assert w.calls == [OFF, ON] and w.tr()["verdict"] is True
+
+
+def test_a_lost_daylight_off_is_not_undone_by_motion():
+    """Probe P3b: the daylight off is lost (the lamp keeps reading on): motion after the off's window sends no on
+    while it is still day; dusk with motion switches it on."""
+    w = lit([ml_rule(daylight=("ls", "dark"))])
+    w.set("sensor.lux", *DAY)
+    assert w.calls == [OFF]
+    w.advance(T0 + 11)
+    w.pir("on")
+    t = w.tr()
+    assert w.calls == [OFF] and t["verdict"] is False and "holders" not in t
+    w.advance(T0 + 600)
+    w.pir("on")
+    assert w.calls == [OFF]
+    w.set("sensor.lux", *DUSK)  # twilight is dark: motion switches it on
+    assert w.calls == [OFF, ON] and w.tr()["verdict"] is True
+
+
+def test_a_hand_on_after_a_daylight_off_is_held_as_before():
+    w = lit([ml_rule(daylight=("ls", "dark"))])
+    w.set("sensor.lux", *DAY)
+    w.light("off", own=True)
+    w.advance(T0 + 30)
+    w.light("on")  # by hand in daylight while the motion lasts: found on, held while the motion lasts
+    t = w.tr()
+    assert t["verdict"] is True and t["last"]["reason"] == "found on" and not w.pending()
+    w.advance(T0 + 600)
+    w.pir("on")
+    assert w.calls == [OFF] and w.tr()["verdict"] is True
+    w.pir("off")
+    w.advance(T0 + 779)
+    assert w.calls == [OFF]
+    w.advance(T0 + 780)
+    assert w.calls == [OFF, OFF]
+
+
+def test_the_daylight_off_mark_ends_on_manual_and_on_a_changed_save():
+    w = lit([ml_rule(buttons=("btn",), daylight=("ls", "dark"))])
+    w.set("sensor.lux", *DAY)  # lost: the lamp keeps reading on
+    w.press("btn", "set", "on")  # manual (already on: nothing sent)
+    w.press("btn", "auto")  # a fresh decision in daylight: off
+    assert w.calls == [OFF, OFF] and w.tr()["last"]["reason"] == "back to auto: not dark"
+    w.advance(T0 + 12)
+    w.pir("on")  # this off lost too: entering auto heals as before (test_lost_off_on_entering_auto_heals)
+    assert w.calls == [OFF, OFF, ON] and w.tr()["verdict"] is True
+    w = lit([ml_rule(daylight=("ls", "dark"))])
+    w.set("sensor.lux", *DAY)  # lost: the lamp keeps reading on
+    w.advance(T0 + 11)
+    w.load([ml_rule(daylight=("ls", "dark"), off=60)])  # changed: the light found on is held
+    t = w.tr()
+    assert w.calls == [OFF] and t["verdict"] is True and t["last"]["reason"] == "found on"
+    w.pir("on")
+    assert w.tr()["verdict"] is True and not w.pending()
+
+
+def test_an_off_on_its_way_counts_as_off_when_sleep_ends():
+    """Probe P1b: Sleep off within the dimmer's confirm latency after Sleep on, motion in the dark: the blocked off is
+    still on its way, so the light counts as off and the rule switches it on (it does not hold a light going dark)."""
+    w = lit([ml_rule(blocker=("vs", "on"))])
+    w.sleep("on")
+    assert w.calls == [OFF]
+    w.advance(T0 + 2)
+    w.sleep("off")  # the lamp still reads on
+    t = w.tr()
+    assert w.calls == [OFF, ON] and t["verdict"] is True and t["last"]["reason"] == "unblocked: motion"
+    w.light("off", own=True)  # the blocked off lands: its own echo
+    t = w.tr()
+    assert t["verdict"] is True and "waiting" not in t["motionLight"]
+    w.light("on", own=True)  # then the on
+    t = w.tr()
+    assert w.calls == [OFF, ON] and t["verdict"] is True and t["motionLight"]["light"] == "on"

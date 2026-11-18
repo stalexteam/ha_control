@@ -958,6 +958,7 @@ class RuleEngine:
             if prev.sig != rule.sig:
                 m.waiting = False  # the rule starts anew: it takes the light as it is
                 m.blocked = m.met = None
+                m.day_off = False
             return
         m.seen = m.state(self._lookup)
         stored = self._motion_modes.get(rule.key[0], {}).get(rule.key[1]) if prev is None and motion_modes is not None else None
@@ -1886,24 +1887,27 @@ class RuleEngine:
             self._motion_enter(rule, "unblocked")
         elif day and rule.verdict is True:  # the daylight came: a held light goes off at once
             self._motion_decide(rule, False, "daylight")
+            m.day_off = True  # motion no longer keeps a light reading on (an off kept back or lost) while not dark
         m.entered = False
         if self._step(rule, due):
             # the rule decided to switch the light on: the minimum on time counts from here
             m.on_at = now if rule.verdict is True else None
             m.decide("on" if rule.verdict else "off", now, ON_WAY)  # its late echo is not a manual switch
             m.dropped = None
+        if rule.verdict is True:
+            m.day_off = False  # the rule holds a light again
         return rule.verdict != was
 
     def _motion_hold(self, rule: _Rule, on: bool, note: bool = True) -> None:
         """Take the light's state as the verdict without a command: a light found on is held (its off comes after the
         off delay; the minimum on time does not apply; recorded as "found on" unless `note` is False; it ends a wait for
-        new motion), one found off is not."""
+        new motion and a daylight off's mark), one found off is not."""
         m = rule.motion_light
         assert m is not None and m.eid is not None
         rule.cancel()
         rule.verdict, m.on_at, m.dropped = on, None, None
         if on:
-            m.waiting = False
+            m.waiting = m.day_off = False
         self._new_firing(rule)
         self._give_up(m.eid, rule.key)  # a command of the rule still waiting for the light is stale
         if on and note:
@@ -1924,11 +1928,16 @@ class RuleEngine:
         m = rule.motion_light
         assert m is not None
         values = self._motion_values(rule)
-        motion, on = m.motion(values), m.state(self._lookup) == "on"
+        # an own off still on its way (entering auto, blocked, daylight): the light counts as off, so a wanted light
+        # is switched on (not held while it goes dark) and an unwanted one gets no second off
+        dropping = m.dropped is not None and self._now() < m.dropped
+        motion, on = m.motion(values), m.state(self._lookup) == "on" and not dropping
         want = motion and m.dark(values)
         rule.raw = want  # the step after this one sees the decision, not the light's reading (dark matters here)
+        dropped = m.dropped if dropping else None
         self._motion_hold(rule, on, note=False)
         if want == on:
+            m.dropped = dropped  # that off is still on its way
             return
         self._motion_decide(rule, want, f"{prefix}: {'motion' if want else 'not dark' if motion else 'no motion'}")
 
@@ -1967,7 +1976,7 @@ class RuleEngine:
         m = rule.motion_light
         assert m is not None and m.eid is not None
         m.mode, m.since, m.moving, m.on_at, m.entered, m.own, m.waiting = "manual", self._now(), False, None, False, [], False
-        m.dropped = None
+        m.dropped, m.day_off = None, False
         m.presses += 1  # an older press's command is no longer wanted
         rule.cancel()
         rule.open, rule.verdict = False, None
@@ -2001,11 +2010,10 @@ class RuleEngine:
 
     def _motion_auto(self, rule: _Rule, why: str) -> None:
         """Enter auto: the auto rules apply from now on (the evaluation takes a fresh decision at once; a wait for new
-        motion ends)."""
+        motion ends; an own off still on its way, `dropped`, is kept for that decision)."""
         m = rule.motion_light
         assert m is not None
         m.mode, m.since, m.moving, m.on_at, m.entered, m.own, m.waiting = "auto", None, False, None, True, [], False
-        m.dropped = None
         m.presses += 1  # a press's command is no longer wanted
         m.stop()
         rule.cancel()

@@ -95,6 +95,9 @@ class MotionLight:
         # the blocker's last known reading: True while it reads `is` (None until the rule's first evaluation)
         self.blocked: bool | None = None
         self.met: bool | None = None  # the daylight condition at the previous evaluation (None: no data)
+        # a daylight off was decided: the light reading on no longer keeps it (an off kept back by another holder or
+        # lost must not be undone by motion) until the condition is met again or the rule holds a light again
+        self.day_off = False
 
     def inputs(self) -> "list[dict]":
         """The rule's inputs, in this order: the motion sensors, then the daylight (when set), then the blocker (when
@@ -110,6 +113,7 @@ class MotionLight:
         self.mode, self.since, self.moving, self.on_at = old.mode, old.since, old.moving, old.on_at
         self.seen, self.entered, self.own, self.waiting = old.seen, old.entered, list(old.own), old.waiting
         self.dropped, self.presses, self.blocked, self.met = old.dropped, old.presses, old.blocked, old.met
+        self.day_off = old.day_off
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -155,25 +159,27 @@ class MotionLight:
 
     def day_came(self, values: "list[bool | None]") -> bool:
         """The daylight condition went from met to not met since the previous evaluation (between known readings: to
-        or from no data is no change, as no data counts as dark)."""
+        or from no data is no change, as no data counts as dark). Met again ends a daylight off's mark."""
         if self.daylight is None:
             return False
         n = len(self.sensors)
         was, self.met = self.met, values[n] if len(values) > n else None
+        if self.met is True:
+            self.day_off = False
         return was is True and self.met is False
 
     def raw(self, values: "list[bool | None]", light_on: bool) -> "bool | None":
         """Want the light on: motion, and dark unless the light is on already (a light found on in daylight stays while
-        the motion lasts; the daylight coming switches a held light off: see day_came). None without motion sensors
-        (auto does nothing). While waiting for new motion: not while the motion lasts; the wait ends once every sensor
-        is clear."""
+        the motion lasts; the daylight coming switches a held light off: see day_came, and after that off the light
+        reading on no longer counts: day_off). None without motion sensors (auto does nothing). While waiting for new
+        motion: not while the motion lasts; the wait ends once every sensor is clear."""
         if not self.sensors:
             return None
         motion = self.motion(values)
         if self.waiting:
             self.waiting = motion
             return False
-        return motion and (self.dark(values) or light_on)
+        return motion and (self.dark(values) or (light_on and not self.day_off))
 
     def off_delay(self, now: float, off_delay: int) -> float:
         """The delay of an off: the off delay, but not before the minimum on time since the rule's on decision."""
