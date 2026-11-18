@@ -2268,14 +2268,16 @@ class RuleEngine:
 
     def _boiler_drop_on(self, rule: _Rule, relay: str | None) -> None:
         """Auto no longer wants the relay on (blackout, limit, undecided): a switch-on of this rule still waiting to be
-        sent again is given up, so the relay coming back is not switched on into an overload; never an off. The
-        outstanding on is forgotten too, so a later legitimate on is sent."""
+        sent again is given up, so the relay coming back is not switched on into an overload; never an off. A given-up
+        on is forgotten too, so a later legitimate on is sent; an on on its way (delivered, not confirmed yet) keeps its
+        command: its late confirmation stays the rule's own and the next evaluation switches it off."""
         b = rule.boiler
         assert b is not None and b.relay is not None
         hold = self._holds.get(b.relay)
+        waiting = hold is not None and hold.cmd == "on" and bool(hold.waiting) and hold.by == rule.key
         if hold is not None and hold.cmd == "on":
             self._give_up(b.relay, rule.key)  # an arbitrated on of this rule waiting for the relay
-        if b.cmd == "on" and relay != "on":
+        if b.cmd == "on" and relay != "on" and (waiting or rule.failed is not None):
             b.cmd = None
             if rule.failed is not None:  # a button's on waiting for the relay (_boiler_relay would send it again)
                 if rule.last is not None:

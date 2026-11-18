@@ -1281,3 +1281,36 @@ def test_a_waiting_on_is_not_resent_after_a_blackout():
     assert w.calls == [ON] and w.b()["phase"] == "blackout"
     w.set("switch.relay", "off")  # the relay reports again
     assert w.calls == [ON]
+
+
+# --- 0.24.0 final review W1c: an ON on its way keeps its command (its late confirmation is the rule's own) --------
+
+def test_an_on_on_its_way_confirmed_late_after_a_limit_stays_auto_and_is_switched_off():
+    """Probe A: the ON was delivered, the relay confirms 7 s after the call (no context any more)."""
+    w = loaded()
+    w.press("auto")
+    assert w.calls == [ON]
+    w.advance(1001)
+    w.set("sensor.grid", "2000", W)  # relay still reads off: no draw, 2000 + 1400 > 3000; no OFF to send
+    assert w.calls == [ON] and w.b()["phase"] == "limit"
+    w.advance(1007)
+    w.set("switch.relay", "on")  # the late confirmation: not a take-over
+    assert w.b()["mode"] == "auto" and w.calls == [ON]
+    w.advance(1016.9)  # the readings settle after the relay change (no statistics: 10 s)
+    assert w.calls == [ON]
+    w.advance(1017)
+    assert w.calls == [ON, OFF] and w.b()["mode"] == "auto" and w.b()["phase"] == "limit"
+    assert w.engine.snapshot("p")["r"]["last"]["reason"] == "power limit"
+
+
+def test_an_on_on_its_way_confirmed_late_during_a_blackout_is_switched_off_at_once():
+    """Probe B: the grid meter goes unavailable while the ON is on its way."""
+    w = loaded()
+    w.press("auto")
+    w.advance(1001)
+    w.set("sensor.grid", "unavailable")
+    assert w.calls == [ON] and w.b()["phase"] == "blackout"
+    w.advance(1007)
+    w.set("switch.relay", "on")
+    assert w.b()["mode"] == "auto" and w.calls == [ON, OFF] and w.b()["phase"] == "blackout"
+    assert w.engine.snapshot("p")["r"]["last"]["reason"] == "blackout"
