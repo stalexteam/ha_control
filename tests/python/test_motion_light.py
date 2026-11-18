@@ -371,28 +371,54 @@ def test_no_button_is_always_auto():
     assert w.calls == [OFF]
 
 
-def test_auto_intent_returns_auto_and_holds_a_light_left_on():
-    """Review focus 2."""
-    w = loaded([ml_rule(buttons=("btn",))])
+def test_auto_with_no_motion_switches_off_at_once():
+    """Review focus 1 (spec §11): entering auto is a fresh decision; its off is the rule's own (its echo is neither found
+    nor released)."""
+    for rules, states in (([ml_rule(buttons=("btn",), daylight=("ls", "night"))], {"sensor__lux": DAY}),
+                          ([ml_rule(buttons=("btn",))], {})):
+        w = loaded(rules, **states)
+        w.press("btn", "toggle")  # manual: the lamp on
+        w.light("on", own=True)
+        w.calls.clear()
+        w.advance(T0 + 10)
+        w.press("btn", "auto")
+        t = w.tr()
+        assert w.calls == [OFF] and t["verdict"] is False and t["motionLight"]["mode"] == "auto", rules
+        assert t["last"]["action"] == "off" and t["last"]["reason"] == "back to auto: no motion" and "sent" not in t["last"]
+        assert not w.pending() and "holders" not in t
+        w.light("off", own=True)  # the off arrives
+        t = w.tr()
+        assert w.calls == [OFF] and t["verdict"] is False and t["motionLight"]["mode"] == "auto"
+        assert "waiting" not in t["motionLight"] and t["last"]["reason"] == "back to auto: no motion"
+        w.advance(T0 + 3600)
+        assert w.calls == [OFF]
+        w.set("sensor.lux", *NIGHT)
+        w.pir("on")  # motion while dark
+        assert w.calls == [OFF, ON] and w.tr()["verdict"] is True
+
+
+def test_auto_with_no_motion_switches_off_and_consumers_follow():
+    w = loaded([ml_rule(buttons=("btn",)), consumer_rule()])
     w.press("btn", "toggle")
     w.light("on", own=True)
+    assert w.tr("c")["inputs"][0]["value"] is None
     w.calls.clear()
-    w.advance(T0 + 10)
     w.press("btn", "auto")
-    t = w.tr()
-    assert w.calls == [] and t["motionLight"]["mode"] == "auto" and t["verdict"] is True
-    assert t["last"]["reason"] == "button: auto"
-    w.advance(T0 + 189)
-    assert w.calls == []
-    w.advance(T0 + 190)
-    assert w.calls == [OFF]
+    assert w.calls == [OFF] and w.tr()["verdict"] is False and w.tr("c")["inputs"][0]["value"] is False
 
-    w = loaded([ml_rule(buttons=("btn",))])
+
+def test_auto_with_motion_while_dark_keeps_the_light():
+    """Review focus 2: held; its off comes after the off delay once the motion ends (the minimum on time does not
+    apply)."""
+    w = loaded([ml_rule(buttons=("btn",), daylight=("ls", "night"), min_on=3600)])
     w.press("btn", "toggle")
     w.light("on", own=True)
     w.pir("on")
     w.calls.clear()
     w.press("btn", "auto")
+    t = w.tr()
+    assert w.calls == [] and t["verdict"] is True and t["motionLight"]["mode"] == "auto"
+    assert t["last"]["reason"] == "button: auto" and "minUntil" not in t["motionLight"]
     w.advance(T0 + 600)
     assert w.calls == []
     w.pir("off")
@@ -400,6 +426,86 @@ def test_auto_intent_returns_auto_and_holds_a_light_left_on():
     assert w.calls == []
     w.advance(T0 + 780)
     assert w.calls == [OFF]
+
+
+def test_auto_with_motion_in_daylight_switches_off():
+    """Review focus 3: not dark: off at once; the stale on reading before its echo does not switch it on again."""
+    w = loaded([ml_rule(buttons=("btn",), daylight=("ls", "night"))], sensor__lux=DAY)
+    w.press("btn", "toggle")
+    w.light("on", own=True)
+    w.pir("on")
+    w.calls.clear()
+    w.press("btn", "auto")
+    t = w.tr()
+    assert w.calls == [OFF] and t["verdict"] is False and t["motionLight"]["mode"] == "auto"
+    assert t["last"]["action"] == "off" and t["last"]["reason"] == "back to auto: not dark"
+    w.pir("on")  # a motion report before the off arrives
+    w.set("sensor.lux", *DAY)
+    assert w.calls == [OFF] and w.tr()["verdict"] is False
+    w.light("off", own=True)
+    t = w.tr()
+    assert w.calls == [OFF] and t["verdict"] is False and "waiting" not in t["motionLight"]
+    w.advance(T0 + 600)
+    assert w.calls == [OFF]
+    w.set("sensor.lux", *NIGHT)  # it gets dark while the motion lasts: on at that moment
+    assert w.calls == [OFF, ON]
+
+
+def test_auto_with_motion_while_dark_and_the_light_off_switches_on():
+    w = loaded([ml_rule(buttons=("btn",), min_on=60, off=0)])
+    w.press("btn", "toggle")
+    w.light("on", own=True)
+    w.press("btn", "toggle")
+    w.light("off", own=True)
+    w.pir("on")
+    w.calls.clear()
+    w.press("btn", "auto")
+    t = w.tr()
+    assert w.calls == [ON] and t["verdict"] is True and t["motionLight"]["mode"] == "auto"
+    assert t["last"]["action"] == "on" and t["last"]["reason"] == "back to auto: motion"
+    w.light("on", own=True)  # its echo
+    assert w.tr()["last"]["reason"] == "back to auto: motion"
+    w.advance(T0 + 5)
+    w.pir("off")
+    w.advance(T0 + 59)
+    assert w.calls == [ON]
+    w.advance(T0 + 60)
+    assert w.calls == [ON, OFF]
+
+
+def test_auto_again_timeout_decides_at_once():
+    w = loaded([ml_rule(buttons=("btn",), auto_after=10)])
+    w.press("btn", "toggle")  # manual at T0
+    w.light("on", own=True)
+    w.calls.clear()
+    w.advance(T0 + 599)
+    assert w.calls == [] and w.ml()["mode"] == "manual"
+    w.advance(T0 + 600)
+    t = w.tr()
+    assert w.calls == [OFF] and t["verdict"] is False and t["motionLight"]["mode"] == "auto"
+    assert t["last"]["action"] == "off" and t["last"]["reason"] == "back to auto: no motion"
+    w.light("off", own=True)
+    w.advance(T0 + 3600)
+    assert w.calls == [OFF] and w.tr()["verdict"] is False and "waiting" not in w.ml()
+
+
+def test_auto_without_sensors_sends_nothing():
+    """Review focus 5."""
+    for auto_after in (0, 10):
+        w = loaded([ml_rule(sensors=(), buttons=("btn",), auto_after=auto_after)])
+        w.press("btn", "toggle")
+        w.light("on", own=True)
+        w.calls.clear()
+        if auto_after:
+            w.advance(T0 + 600)
+            assert w.ml()["mode"] == "auto"
+        else:
+            w.press("btn", "auto")
+        t = w.tr()
+        assert w.calls == [] and t["verdict"] is None and t["motionLight"]["mode"] == "auto"
+        assert t["last"]["reason"] == ("auto again" if auto_after else "button: auto")
+        w.advance(T0 + 7200)
+        assert w.calls == []
 
 
 def test_auto_with_the_light_off_and_motion_switches_on():
@@ -451,10 +557,8 @@ def test_auto_again_after_minutes_without_motion():
     assert w.ml()["mode"] == "manual"
     w.advance(T0 + 900)
     t = w.tr()
-    assert t["motionLight"]["mode"] == "auto" and t["last"]["reason"] == "auto again" and "autoAt" not in t["motionLight"]
-    assert w.calls == [ON] and t["verdict"] is True  # the light left on is held
-    w.advance(T0 + 1080)
-    assert w.calls == [ON, OFF]
+    assert t["motionLight"]["mode"] == "auto" and t["last"]["reason"] == "back to auto: no motion" and "autoAt" not in t["motionLight"]
+    assert w.calls == [ON, OFF] and t["verdict"] is False  # a fresh decision: no motion, the light left on goes off
 
     w = loaded([ml_rule(buttons=("btn",))])
     w.press("btn", "toggle")
@@ -804,8 +908,9 @@ def test_found_on_is_recorded():
     last = w.tr()["last"]
     assert last == {"action": "on", "target": "Lamp", "at": T0 * 1000, "reason": "found on", "sent": False}
     w.press("btn", "set", "on")  # manual, already on
-    w.press("btn", "auto")
-    assert w.tr()["last"]["reason"] == "button: auto" and w.tr()["verdict"] is True
+    w.pir("on")
+    w.press("btn", "auto")  # motion while dark, the light on: held, the mode entry stays the last one
+    assert w.tr()["last"]["reason"] == "button: auto" and w.tr()["verdict"] is True and w.calls == []
 
 
 def test_switched_on_by_another_slot_participant_is_held():

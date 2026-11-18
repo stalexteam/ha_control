@@ -184,6 +184,7 @@ describe('light motion control diagram', () => {
     expect(motionModeLast(e('off', 'switched elsewhere: manual', { sent: false })!)).toBeUndefined(); // no longer written, no table row
     expect(lastOf(e('on', 'found on', { sent: false }))).toBe(`last: found on ${c}`);
     expect(lastOf(e('on', 'became true: Motion kitchen motion'))).toBe(`last: turned on ${c} (became true)`);
+    expect(lastOf(e('off', 'back to auto: no motion'))).toBe(`last: turned off ${c} (back to auto)`); // the shared wording keeps the reason's head
     const err = text(draw({ trace: live({}, { last: e('on', 'button: manual', { error: 'target unavailable' }) }) }).host, 'motionlight-light');
     expect(err).toContain(`last: manual ${c} (button)`);
     expect(err).toContain('target unavailable');

@@ -56,7 +56,8 @@ class MotionLight:
         self.moving = False  # manual: motion at the previous evaluation (its end is the last motion)
         self.on_at: float | None = None  # when the rule decided to switch the light on (None for a light found on)
         self.seen: str | None = None  # the light's last on / off reading (None after no data)
-        self.entered = False  # auto was just entered: its entry stays the last one (no "found on" over it)
+        self.entered = False  # auto was just entered: the evaluation takes a fresh decision (no "found on")
+        self.dropped = False  # auto was entered with an off: until the light reads off, its reading on is that off on its way
         # the rule's own recent decisions (state, until epoch s): a late echo of one is never a foreign change
         self.own: list[tuple[str, float]] = []
         self.waiting = False  # switched off elsewhere while held: no switch-on until every motion sensor was clear
@@ -72,6 +73,7 @@ class MotionLight:
     def take(self, old: "MotionLight") -> None:
         self.mode, self.since, self.moving, self.on_at = old.mode, old.since, old.moving, old.on_at
         self.seen, self.entered, self.own, self.waiting = old.seen, old.entered, list(old.own), old.waiting
+        self.dropped = old.dropped
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -144,6 +146,8 @@ class MotionLight:
         the slots' last command (switched off elsewhere: the rule lets go). "back" and "released" drop the recorded
         decisions (a later change is foreign). Else None (manual, no motion sensors)."""
         was, self.seen = self.seen, state
+        if state != "on":
+            self.dropped = False
         self.own = [o for o in self.own if o[1] > now]
         if not active or self.mode != "auto" or not self.sensors or state is None or state == was:
             return None
