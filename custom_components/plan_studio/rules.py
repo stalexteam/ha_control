@@ -590,6 +590,11 @@ class _Rule:
         self.acted: dict | None = None  # load control: the event whose actions `entries` are
         self.sent: list[_Sent] = []  # its actions with a target, while that firing is the latest one
         self.open = self.timed is not None  # the gate (always open without one) as of the last evaluation
+        # announcements: per input its last known value (after NOT; kept through no data) and those values as of the
+        # latest verdict change; real: that change came from an input moving between two known values (RuleEngine._real)
+        self.known: list[bool | None] = [None] * len(self.inputs)
+        self.basis: list[bool | None] = [None] * len(self.inputs)
+        self.real = False
         # derived on every evaluation
         self.raw: bool | None = None
         self.trace_inputs: list[dict] = []
@@ -599,6 +604,7 @@ class _Rule:
         self.verdict, self.pending, self.last, self.failed = old.verdict, old.pending, old.last, old.failed
         self.seq, self.entries, self.sent, self.open = old.seq, old.entries, old.sent, old.open
         self.seen, self.acted = dict(old.seen), old.acted
+        self.known, self.basis, self.real = list(old.known), list(old.basis), old.real
         if self.outside is not None and old.outside is not None:
             old.outside.stop()
             self.outside.take(old.outside)
@@ -1108,6 +1114,7 @@ class RuleEngine:
             t = self._input(rule, i)
             trace.append(t)
             values.append(t["value"] if t["value"] is None or not i.negate else not t["value"])
+        rule.known = [k if v is None else v for v, k in zip(values, rule.known)]
         if rule.outside is not None:
             rule.raw = rule.outside.want(values)
         elif rule.motion_light is not None:
@@ -1373,13 +1380,31 @@ class RuleEngine:
         self._flush()
 
     def _commit(self, rule: _Rule, verdict: bool, why: str) -> None:
-        """A new verdict (also at rule start, both ways); its actions wait while the gate is closed."""
+        """A new verdict (also at rule start, both ways); its actions wait while the gate is closed. Its announcements
+        run only for a real change (_real) when it became true / false: never at the start or a gate opening."""
         rule.verdict = verdict
+        rule.real = self._real(rule)
+        rule.basis = list(rule.known)
         # A new verdict ends the previous firing, also without actions: its held calls are stale and its waiting
         # actions are given up (their error shows why they did not get through).
         self._new_firing(rule)
         if rule.open:
-            self._fire(rule, rule.actions(), why)
+            self._fire(rule, rule.actions(), why, announce=rule.real and why in ("became true", "became false"))
+
+    def _real(self, rule: _Rule) -> bool:
+        """Whether some input moved between two known values since the previous verdict change (its last known value
+        then and now differ); an input that only came back from no data (a slow sensor after HA start, a blip of
+        unavailable with the same value) is no change. A rule input counts only when that rule's own latest verdict
+        change was real."""
+        for i, was, now in zip(rule.inputs, rule.basis, rule.known):
+            if was is None or now is None or was == now:
+                continue
+            if i.type == "rule":
+                ref = self._rules.get((rule.key[0], i.rule or ""))
+                if ref is None or not ref.real:
+                    continue
+            return True
+        return False
 
     def _new_firing(self, rule: _Rule) -> None:
         rule.seq += 1
@@ -1388,10 +1413,11 @@ class RuleEngine:
                 s.entry["error"] = s.waiting
         rule.sent = []
 
-    def _fire(self, rule: _Rule, actions: "list[_Action]", why: str) -> None:
-        if why == "start" or self._loading or self._booting:
-            # an announcement tells of a change: never at the rule's start (its first known verdict), inside a load (a
-            # Save, an entry reload) or while HA starts (it would be held and spoken late); it leaves no entry then
+    def _fire(self, rule: _Rule, actions: "list[_Action]", why: str, announce: bool = False) -> None:
+        if not announce or self._loading or self._booting:
+            # an announcement tells of a real verdict change (announce, from _commit): never at the rule's start, a
+            # gate opening or a purpose-built rule's step, inside a load (a Save, an entry reload) or while HA starts
+            # (it would be held and spoken late); it leaves no entry then
             actions = [a for a in actions if a.do not in ANNOUNCE]
         if not actions:
             return
@@ -2313,13 +2339,16 @@ class RuleEngine:
                     self._echo = st is not None and self._echo_take(i.eid, st[0])
                 if self._echo and virtual_device(i.eid) is None:
                     continue  # a real device's change made by a load control rule: chains do not propagate
-            self._control_event(rule, i.label, what)
+            # a rule's verdict changed only by inputs back from no data: the event switches but announces nothing
+            ref = self._rules.get((rule.key[0], i.rule or "")) if i.type == "rule" else None
+            self._control_event(rule, i.label, what, announce=ref is None or ref.real)
 
-    def _control_event(self, rule: _Rule, source: str, what: str) -> None:
+    def _control_event(self, rule: _Rule, source: str, what: str, announce: bool = True) -> None:
         """An event ("on", "off" or "toggle") of a source: recorded; dropped while the gate is not open (an "off" event ignores the gate); else the list
         of its kind runs by direct calls (own context). Its toggle actions act as one group (any of their devices
-        effectively on: all off, else all on); on / off / close are literal; an announcement runs on its own (_announce).
-        A device in the wanted state already or without data gets nothing (never re-sent later)."""
+        effectively on: all off, else all on); on / off / close are literal; an announcement runs on its own (_announce),
+        unless the event is no real change (announce False: it is left out, no entry). A device in the wanted state
+        already or without data gets nothing (never re-sent later)."""
         c = rule.control
         assert c is not None
         at = int(self._now() * 1000)
@@ -2327,7 +2356,7 @@ class RuleEngine:
         if what != "off" and rule.gate is not None and (rule.gate_trace is None or rule.gate_trace["value"] is not True):
             c.event["dropped"] = "gate closed"
             return
-        actions = rule.control_actions.get(what, [])
+        actions = [a for a in rule.control_actions.get(what, []) if announce or a.do not in ANNOUNCE]
         if not actions:
             return
         effective = [self._control_state(a.call[2]) if a.call is not None else None for a in actions]
@@ -2771,7 +2800,9 @@ class RuleEngine:
         c = rule.control
         if c is None or c.event is None or rule.acted is not c.event:
             return None
-        for a, e in zip(rule.control_actions.get(c.event["what"], []), rule.entries):
+        # the device actions and their entries (an event may leave its announcements out: they have no device state)
+        acts = [a for a in rule.control_actions.get(c.event["what"], []) if a.do not in ANNOUNCE]
+        for a, e in zip(acts, [e for e in rule.entries if e["action"] not in ANNOUNCE]):
             if a.call is not None and a.call[2] == eid:
                 if e["action"] == "close":  # the valve services; a switch-backed valve reads off when closed
                     return e, "closed" if a.call[0] == "valve" else "off"

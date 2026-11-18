@@ -283,14 +283,15 @@ def _validate_control(r: dict, c: object, devices: dict) -> list[str]:
         actions = c[key]
         if not isinstance(actions, list):
             raise vol.Invalid(f"rule control {key} must be a list")
-        ids = []
+        ids: list[object] = []  # a device once; an announcement once per (device, do): a sound and a text on one speaker
         for a in actions:
             if isinstance(a, dict) and a.get("do") in ANNOUNCE:
                 _validate_announce(a, devices)  # switches nothing: not a target its sources must not read
-            elif not isinstance(a, dict) or set(a) != {"device", "do"} or not _is_id(a["device"]) or a["do"] not in _CONTROL_DOS:
+                ids.append((a["device"], a["do"]))
+                continue
+            if not isinstance(a, dict) or set(a) != {"device", "do"} or not _is_id(a["device"]) or a["do"] not in _CONTROL_DOS:
                 raise vol.Invalid("rule control action needs a device and do on/off/toggle/close/say/play/notify")
-            else:
-                targets.add(a["device"])
+            targets.add(a["device"])
             ids.append(a["device"])
         if len(set(ids)) != len(ids):
             raise vol.Invalid(f"rule control needs a device once in {key}")

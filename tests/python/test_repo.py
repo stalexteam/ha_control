@@ -648,11 +648,15 @@ def test_validate_plan_announcement_actions_of_a_load_control_rule():
     validate_plan({**base, "rules": [control_rule(control=ctl(
         on=[say(), notify(title="Boiler")], off=[play("mute")], toggle=[{"device": "l", "do": "toggle"}, play()]))]})
     validate_plan({**base, "rules": [control_rule(control=ctl(toggle=[], on=[play()]))]})  # announcements alone
+    # an announcement is once per (device, do) in a list: a sound then a text on the same speaker
+    validate_plan({**base, "rules": [control_rule(control=ctl(toggle=[], on=[play(), say()]))]})
     bad = [
         ctl(on=[say(text="")]), ctl(on=[play(media="")]), ctl(toggle=[notify(title="")]),
         ctl(on=[say("mute")]), ctl(off=[play("ph")]), ctl(toggle=[notify("sp")]),
         ctl(on=[{"device": "sp", "do": "say"}]),
-        ctl(on=[say(), play()]),  # a device once in a list
+        ctl(on=[say(), say(text="Again")]),  # the same announcement twice in a list
+        ctl(on=[notify(), notify(title="t")]),
+        ctl(on=[{"device": "l", "do": "on"}, {"device": "l", "do": "off"}]),  # a device once for on / off
     ]
     for c in bad:
         with pytest.raises(vol.Invalid, match="rule "):

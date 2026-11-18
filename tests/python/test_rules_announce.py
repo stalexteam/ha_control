@@ -189,17 +189,103 @@ def test_a_say_beside_an_on_off_pair_keeps_the_slot_and_is_no_holder_target_or_c
     assert w.calls[-1] == ("light", "turn_off", "light.l") and "holders" not in trace(w)
 
 
-def test_each_gate_opening_runs_the_held_announcement_once():
+GATE = {"source": {"device": "g"}}
+GATED = DEVICES + [dev("g", "motion_sensor", "Gate", motion="binary_sensor.g")]
+LIGHT_ON, LIGHT_OFF = {"device": "l", "do": "on"}, {"device": "l", "do": "off"}
+TURN_ON, TURN_OFF = ("light", "turn_on", "light.l"), ("light", "turn_off", "light.l")
+
+
+def test_a_gate_opening_never_runs_an_announcement():
+    """The gate re-applies the current verdict's on / off actions; an announcement only follows a real verdict change."""
     w = world(binary_sensor__g="off")
-    gate = {"source": {"device": "g"}}
-    load(w, [cond([SAY], gate=gate)], devices=DEVICES + [dev("g", "motion_sensor", "Gate", motion="binary_sensor.g")])
+    load(w, [cond([SAY, LIGHT_ON], gate=GATE)], devices=GATED)
     w.set("binary_sensor.m", "on")
     assert w.calls == [] and trace(w)["held"] is True
     w.set("binary_sensor.g", "on")
-    assert w.calls == [SPEAK]
+    assert w.calls == [TURN_ON]
+    w.set("binary_sensor.g", "off")
+    w.set("binary_sensor.g", "unavailable")  # the gate sensor drops out and returns
+    w.set("binary_sensor.g", "on")
+    assert said(w) == []
+    w.set("binary_sensor.m", "off")
+    w.set("binary_sensor.m", "on")  # a real change with the gate open
+    assert said(w) == [SPEAK]
+
+
+def test_no_announcement_when_the_gate_opens_after_a_restart():
+    w = world(binary_sensor__m="on", binary_sensor__g="unknown")
+    load(w, [cond([SAY], gate=GATE)], devices=GATED, boot=True)  # true at the start, the gate not known yet
+    w.engine.started()
+    w.set("binary_sensor.g", "on")
+    assert said(w) == []
+
+
+def test_no_announcement_when_the_gate_opens_after_a_changed_save():
+    w = world(binary_sensor__g="off")
+    r = cond([SAY], gate=GATE)
+    load(w, [r], devices=GATED)
+    w.set("binary_sensor.m", "on")  # true while the gate is closed: held
+    load(w, [{**r, "onTrue": [{**SAY, "text": "Changed"}]}], devices=GATED)  # starts anew, true, gate closed
+    w.set("binary_sensor.g", "on")
     w.set("binary_sensor.g", "off")
     w.set("binary_sensor.g", "on")
-    assert w.calls == [SPEAK, SPEAK]  # the condition rule's gate re-applies the current verdict on every opening
+    assert said(w) == []
+
+
+# --- a verdict change caused only by inputs returning from no data ------------------------------------
+
+M2 = dev("m2", "motion_sensor", "Motion 2", motion="binary_sensor.m2")
+SAY_LIGHT = dict(on_true=[SAY, LIGHT_ON], on_false=[PLAY, LIGHT_OFF], inputs=("m", "m2"))
+
+
+def test_an_any_rule_whose_slow_input_reports_after_the_start_does_not_announce():
+    w = world(binary_sensor__m2="unavailable")
+    load(w, [cond(**SAY_LIGHT)], devices=DEVICES + [M2])
+    w.calls.clear()
+    w.set("binary_sensor.m2", "on")  # became true only because m2 has data now
+    assert trace(w)["verdict"] is True
+    assert w.calls == [TURN_ON]  # the on / off actions are unaffected
+
+
+def test_an_input_blipping_unavailable_does_not_announce_a_real_change_does():
+    w = world(binary_sensor__m="on", binary_sensor__m2="off")
+    load(w, [cond(**SAY_LIGHT)], devices=DEVICES + [M2])
+    w.calls.clear()
+    w.set("binary_sensor.m", "unavailable")  # ANY ignores it: false by m2 alone
+    assert trace(w)["verdict"] is False and w.calls == [TURN_OFF]
+    w.set("binary_sensor.m", "on")  # back with the same value
+    assert trace(w)["verdict"] is True and w.calls == [TURN_OFF, TURN_ON]
+    w.set("binary_sensor.m", "off")  # a real change
+    assert w.calls[-2:] == [SOUND, TURN_OFF]
+    w.set("binary_sensor.m", "on")
+    assert w.calls[-2:] == [SPEAK, TURN_ON] and said(w) == [SOUND, SPEAK]
+
+
+def test_a_real_change_still_announces_after_a_blip_during_the_off_delay():
+    w = world(binary_sensor__m="on", binary_sensor__m2="on")
+    load(w, [cond([], [PLAY], inputs=("m", "m2"), combine="all", off_delay=60)], devices=DEVICES + [M2])
+    w.set("binary_sensor.m", "off")  # really off: the off delay starts
+    w.advance(1030)
+    w.set("binary_sensor.m", "unavailable")  # unknown: the pending change is cancelled
+    w.set("binary_sensor.m", "off")  # back, still off: the off delay starts again
+    w.advance(1100)
+    assert trace(w)["verdict"] is False and said(w) == [SOUND]
+
+
+def test_a_rule_verdict_changed_only_by_a_return_from_no_data_announces_nowhere_downstream():
+    x = cond(inputs=("m", "m2"), rid="x")
+    y = rule("y", [ref("x")], onTrue=[SAY])
+    lc = control([{"source": {"rule": "x"}}], on=[NOTE, LIGHT_ON], rid="lc")
+    w = world(binary_sensor__m2="unavailable")
+    load(w, [x, y, lc], devices=DEVICES + [M2])
+    w.set("binary_sensor.m2", "on")  # x becomes true only because m2 has data now
+    assert trace(w, "x")["verdict"] is True and trace(w, "y")["verdict"] is True
+    assert said(w) == [] and w.calls[-1] == TURN_ON  # the load control rule still switches the light
+    assert w.engine._rules[("p", "lc")].entries == [
+        {"action": "on", "target": "Light", "at": 1000000, "reason": "x: on"}]
+    w.set("binary_sensor.m2", "off")
+    w.set("binary_sensor.m2", "on")  # a real change: both announce
+    assert said(w) == [SPEAK, PUSH]
 
 
 # --- load control -----------------------------------------------------------------
