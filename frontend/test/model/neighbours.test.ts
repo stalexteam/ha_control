@@ -66,6 +66,58 @@ describe('neighbourZones', () => {
   });
 });
 
+describe('zones touching without a wall', () => {
+  const poly = (id: Id, pts: [number, number][]): Zone => ({
+    id, name: id.toUpperCase(), invalid: false,
+    shape: { kind: 'polygon', vertices: pts.map(([x, y]) => ({ kind: 'free' as const, x, y })) },
+  });
+  /** Zones p and q in the empty north strip (no walls near y < -500); one sensor in each. */
+  const open = (q: [number, number][]): Level => ({
+    ...twoRoomsLevel(), zones: [poly('p', [[0, -3000], [1000, -3000], [1000, -2000], [0, -2000]]), poly('q', q)],
+    devices: [pir('sp', 500, -2500), pir('sq', 1500, -2500)],
+  });
+  const ids = (l: Level, z: Id) => neighbourZones(l, z, []).map(n => n.zone.id);
+
+  it('a shared edge with no wall makes neighbours both ways', () => {
+    const l = open([[1000, -3000], [2000, -3000], [2000, -2000], [1000, -2000]]);
+    expect(ids(l, 'p')).toEqual(['q']);
+    expect(ids(l, 'q')).toEqual(['p']);
+  });
+
+  it('a shared diagonal edge counts too', () => {
+    const l = open([[1000, -3000], [2000, -3000], [2000, -2000], [0, -2000]]);
+    expect(ids(l, 'q')).toEqual(['p']);
+  });
+
+  it('a shared edge along a wall (centreline of mid, x 3000) is not a passage', () => {
+    const l: Level = {
+      ...twoRoomsLevel(), zones: [poly('p', [[2000, 500], [3000, 500], [3000, 1000], [2000, 1000]]), poly('q', [[3000, 500], [4000, 500], [4000, 1000], [3000, 1000]])],
+      devices: [pir('sp', 2500, 700), pir('sq', 3500, 700)],
+    };
+    expect(ids(l, 'p')).toEqual([]);
+  });
+
+  it('overlapping polygons are neighbours', () => {
+    const l = open([[500, -2500], [1500, -2500], [1500, -1500], [500, -1500]]);
+    expect(ids(l, 'p')).toEqual(['q']);
+  });
+
+  it('a nested zone is a neighbour of its container', () => {
+    const l = open([[200, -2800], [800, -2800], [800, -2200], [200, -2200]]);
+    expect(ids(l, 'p')).toEqual(['q']);
+  });
+
+  it('touching at one corner only is not a passage', () => {
+    const l = open([[1000, -2000], [2000, -2000], [2000, -1000], [1000, -1000]]);
+    expect(ids(l, 'p')).toEqual([]);
+  });
+
+  it('separate zones stay apart', () => {
+    const l = open([[1200, -3000], [2000, -3000], [2000, -2000], [1200, -2000]]);
+    expect(ids(l, 'p')).toEqual([]);
+  });
+});
+
 describe('neighbourIds', () => {
   it('sorted and unique across zones', () => {
     const level = scene(midGap('door'));

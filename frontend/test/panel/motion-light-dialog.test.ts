@@ -475,7 +475,7 @@ describe('Light motion control blocker', () => {
       await press(el, 'button[data-action="rule-ok"]');
       expect(el.rules[0].motionLight).not.toHaveProperty('neighbours'); // derived at Save, never edited
       expect(el.session.currentPlan().rules![0].motionLight).toMatchObject({ presence: true, neighbours: ['d-motion-east'] });
-      el.commit({ ...el.level!, devices: el.level!.devices.map(d => (d.id === 'd-motion-east' ? { ...d, placement: { mode: 'free' as const, x: 2000, y: 1500, rotation: 0 } } : d)) });
+      el.commit({ ...el.level!, devices: el.level!.devices.map(d => (d.id === 'd-motion-east' ? { ...d, placement: { mode: 'free' as const, x: 9000, y: 9000, rotation: 0 } } : d)) });
       expect(el.session.currentPlan().rules![0].motionLight!.neighbours).toEqual([]);
     });
 
