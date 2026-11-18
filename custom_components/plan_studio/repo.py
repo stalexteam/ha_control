@@ -230,8 +230,9 @@ def _validate_motion_light(r: dict, m: object) -> None:
 
 def _validate_announce(a: dict, devices: dict) -> None:
     """A say / play / notify action: a non-empty text (media for play; notify takes an optional non-empty title). A
-    device of the plan must take it (say: a speaker with a voice, play: a speaker, notify: a phone with a notify
-    service); a device missing from the plan is the engine's "target missing", as for any action."""
+    device of the plan must be of the right kind (say / play: a speaker, notify: a phone). Its binding state never
+    rejects the plan: a speaker without a voice (say) or a player, a phone without a notify service, and a device
+    missing from the plan are the engine's "target missing" at run time, as for any action."""
     do = a["do"]
     field = "media" if do == "play" else "text"
     keys = {"device", "do", field}
@@ -245,14 +246,8 @@ def _validate_announce(a: dict, devices: dict) -> None:
     if device is None:
         return
     props = device.get("props") if isinstance(device.get("props"), dict) else {}
-    bindings = device.get("bindings") if isinstance(device.get("bindings"), dict) else {}
-    kind = props.get("kind")
-    if do == "say" and (kind != SPEAKER or "voice" not in bindings):
-        raise vol.Invalid("rule say action needs a speaker with a voice")
-    if do == "play" and kind != SPEAKER:
-        raise vol.Invalid("rule play action needs a speaker")
-    if do == "notify" and (kind != PHONE or "notify" not in props):
-        raise vol.Invalid("rule notify action needs a phone with a notify service")
+    if props.get("kind") != (PHONE if do == "notify" else SPEAKER):
+        raise vol.Invalid(f"rule {do} action needs a {'phone' if do == 'notify' else 'speaker'}")
 
 
 _CONTROL_DOS = ("on", "off", "toggle", "close")

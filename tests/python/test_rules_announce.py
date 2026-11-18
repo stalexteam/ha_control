@@ -499,3 +499,37 @@ def test_a_motion_light_verdict_moved_by_hand_or_by_a_button_is_real_downstream(
     assert w.tr()["verdict"] is True and said(w) == [SPEAK]
     w.press("btn", "auto")  # auto again: a fresh decision at once, no motion: off now
     assert w.tr()["verdict"] is False and said(w) == [SPEAK, SOUND]
+
+
+# --- fix round 5 (D1): no voice / no notify service is a run-time error, not a rejected plan ----------------------
+
+PHONE0 = {"id": "ph0", "name": "Phone 0", "props": {"kind": "phone"}, "bindings": {}}  # no notify service yet
+MUTE_SAY = {"device": "mute", "do": "say", "text": "Go bathe"}
+NO_PUSH = {"device": "ph0", "do": "notify", "text": "Go bathe"}
+
+
+def test_a_say_without_a_voice_or_a_notify_without_a_service_is_target_missing_and_never_sent():
+    from repo import validate_plan
+    rules = [cond([MUTE_SAY, NO_PUSH, PLAY])]
+    validate_plan({**plan(DEVICES + [PHONE0], rules), "name": "P", "schemaVersion": 2})  # the plan saves
+    w = world()
+    load(w, rules, devices=DEVICES + [PHONE0])
+    t = trace(w)
+    assert t["status"] == "error" and t["reason"] == "target missing"
+    w.set("binary_sensor.m", "on")
+    assert w.calls == [SOUND]  # the speaker still plays
+    assert [e.get("error") for e in w.engine._rules[("p", "r")].entries] == ["target missing", "target missing", None]
+    assert trace(w)["last"]["error"] == "target missing"
+    w.set("media_player.vlc", "playing")
+    w.set("media_player.vlc", "idle")
+    assert w.calls == [SOUND]  # nothing re-sent later
+
+
+def test_load_control_say_without_a_voice_or_notify_without_a_service_is_target_missing():
+    w = CWorld(media_player__vlc="idle")
+    w.load([control([btn("btn")], on=[MUTE_SAY, NO_PUSH, ("l1", "on")])], [BTN, L1, CPIR, SPK, MUTE, PHONE, PHONE0])
+    w.press("btn", SET_ON)
+    assert w.calls == [on("switch.l1")]
+    t = w.tr()
+    assert t["status"] == "error" and t["reason"] == "target missing"
+    assert [e.get("error") for e in w.engine._rules[("p", "r")].entries] == ["target missing", "target missing", None]

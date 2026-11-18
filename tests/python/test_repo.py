@@ -640,11 +640,15 @@ def test_validate_plan_speaker_and_phone_devices():
 
 
 def test_validate_plan_announcement_actions_of_a_condition_rule():
-    base = with_devices(SPEAKER, MUTE, PHONE, {"id": "x", "props": {"kind": "socket"}, "bindings": {"control": "switch.x"}})
+    base = with_devices(SPEAKER, MUTE, PHONE, {"id": "x", "props": {"kind": "socket"}, "bindings": {"control": "switch.x"}},
+                        {**PHONE, "id": "ph0", "props": {"kind": "phone"}})
     for actions in (
         [say(), play(), notify()],
         [notify(title="Boiler"), play("mute"), {"device": "x", "do": "on"}],
         [say("gone"), notify("gone")],  # a deleted device: the engine says "target missing"
+        # a speaker without a voice, a phone without a notify service: a run-time "target missing", never a rejected
+        # plan (the owner unbinds in Binding while a rule still uses the device)
+        [say("mute"), notify("ph0")],
     ):
         validate_plan({**base, "rules": [rule(onTrue=actions, onFalse=actions)]})
     bad = [
@@ -661,32 +665,32 @@ def test_validate_plan_announcement_actions_of_a_condition_rule():
         ("rule notify action needs a non-empty text", notify(text="")),
         ("rule notify action needs a non-empty title", notify(title="")),
         ("rule notify action needs a non-empty title", notify(title=" ")),
-        ("rule say action needs a speaker with a voice", say("mute")),
-        ("rule say action needs a speaker with a voice", say("ph")),
-        ("rule say action needs a speaker with a voice", say("x")),
-        ("rule play action needs a speaker", play("ph")),
-        ("rule play action needs a speaker", play("x")),
-        ("rule notify action needs a phone with a notify service", notify("sp")),
+        ("rule say action needs a speaker$", say("ph")),
+        ("rule say action needs a speaker$", say("x")),
+        ("rule play action needs a speaker$", play("ph")),
+        ("rule play action needs a speaker$", play("x")),
+        ("rule notify action needs a phone$", notify("sp")),
+        ("rule notify action needs a phone$", notify("x")),
         ("rule action needs a device and do", {"device": "sp", "do": "speak", "text": "x"}),
     ]
     for match, action in bad:
         for key in ("onTrue", "onFalse"):
             with pytest.raises(vol.Invalid, match=match):
                 validate_plan({**base, "rules": [rule(**{key: [action]})]})
-    with pytest.raises(vol.Invalid, match="rule notify action needs a phone with a notify service"):
-        validate_plan({**with_devices({**PHONE, "props": {"kind": "phone"}}), "rules": [rule(onTrue=[notify()])]})
 
 
 def test_validate_plan_announcement_actions_of_a_load_control_rule():
-    base = with_devices(SPEAKER, MUTE, PHONE)
+    base = with_devices(SPEAKER, MUTE, PHONE, {**PHONE, "id": "ph0", "props": {"kind": "phone"}})
     validate_plan({**base, "rules": [control_rule(control=ctl(
         on=[say(), notify(title="Boiler")], off=[play("mute")], toggle=[{"device": "l", "do": "toggle"}, play()]))]})
+    # no voice / no notify service yet: a run-time "target missing", the plan saves
+    validate_plan({**base, "rules": [control_rule(control=ctl(toggle=[], on=[say("mute"), notify("ph0")]))]})
     validate_plan({**base, "rules": [control_rule(control=ctl(toggle=[], on=[play()]))]})  # announcements alone
     # an announcement is once per (device, do) in a list: a sound then a text on the same speaker
     validate_plan({**base, "rules": [control_rule(control=ctl(toggle=[], on=[play(), say()]))]})
     bad = [
         ctl(on=[say(text="")]), ctl(on=[play(media="")]), ctl(toggle=[notify(title="")]),
-        ctl(on=[say("mute")]), ctl(off=[play("ph")]), ctl(toggle=[notify("sp")]),
+        ctl(on=[say("ph")]), ctl(off=[play("ph")]), ctl(toggle=[notify("sp")]),
         ctl(on=[{"device": "sp", "do": "say"}]),
         ctl(on=[say(), say(text="Again")]),  # the same announcement twice in a list
         ctl(on=[notify(), notify(title="t")]),
