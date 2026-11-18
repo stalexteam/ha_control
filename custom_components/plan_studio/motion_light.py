@@ -141,12 +141,14 @@ class MotionLight:
         its window is its own late echo (every such change uses up the earliest matching decision): None; otherwise
         "found" for a change to on while the rule does not hold the light (switched on elsewhere, also by another slot
         participant: held from now) and "released" for a change to off while it holds the light that does not confirm
-        the slots' last command (switched off elsewhere: the rule lets go). Else None (manual, no motion sensors)."""
+        the slots' last command (switched off elsewhere: the rule lets go). "back" and "released" drop the recorded
+        decisions (a later change is foreign). Else None (manual, no motion sensors)."""
         was, self.seen = self.seen, state
         self.own = [o for o in self.own if o[1] > now]
         if not active or self.mode != "auto" or not self.sensors or state is None or state == was:
             return None
         if was is None:
+            self.own = []  # the light is taken as it is: older decisions are stale
             return "back"
         mine = next((o for o in self.own if o[0] == state), None)  # in decision order: the earliest
         if mine is not None:
@@ -154,7 +156,10 @@ class MotionLight:
             return None
         if state == "on":
             return None if held else "found"
-        return "released" if held and not confirms else None
+        if held and not confirms:
+            self.own = []  # switched off elsewhere: older decisions are stale
+            return "released"
+        return None
 
     def auto_due(self, now: float, motion: bool) -> "float | None":
         """While manual with auto_after > 0: the epoch auto returns at (None while motion lasts); `since` moves only to

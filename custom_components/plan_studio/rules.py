@@ -630,11 +630,13 @@ def _stamps(stored: object) -> "dict[str, dict[str, float]]":
 
 
 def _manual_modes(stored: object) -> "dict[str, dict[str, dict]]":
-    """The stored {plan id: {rule id: {mode, since}}} of motion light rules in manual, without malformed entries."""
+    """The stored {plan id: {rule id: {mode, since, by}}} of motion light rules in manual, without malformed entries.
+    "by" is None for a record without "by": "button" (0.22.0 entered manual on a switch elsewhere): never restored."""
     out: dict[str, dict[str, dict]] = {}
     for pid, rs in stored.items() if isinstance(stored, dict) else ():
         kept = {
-            rid: {"mode": "manual", "since": float(v["since"]) if _epoch(v.get("since")) else None}
+            rid: {"mode": "manual", "since": float(v["since"]) if _epoch(v.get("since")) else None,
+                  "by": "button" if v.get("by") == "button" else None}
             for rid, v in rs.items() if isinstance(v, dict) and v.get("mode") == "manual"
         } if isinstance(rs, dict) else {}
         if kept:
@@ -677,7 +679,7 @@ class RuleEngine:
         self._runs: dict[str, dict[str, float]] = {}  # the runs last reported (or loaded)
         self._on_pauses = on_pauses  # the outside light pauses {plan id: {rule id: end epoch s}} after any changed
         self._pauses: dict[str, dict[str, float]] = {}  # the pauses last reported (or loaded)
-        self._on_motion_modes = on_motion_modes  # the motion light rules in manual {plan id: {rule id: {mode, since}}}
+        self._on_motion_modes = on_motion_modes  # the motion light rules in manual {plan id: {rule id: {mode, since, by}}}
         self._motion_modes: dict[str, dict[str, dict]] = {}  # the manual modes last reported (or loaded)
         self._booting = False  # a boot load happened and started() has not come yet: boiler auto waits
         self._holds: dict[str, _Hold] = {}  # shared device entity -> its arbitrated command
@@ -702,7 +704,8 @@ class RuleEngine:
         modes: the stored boiler modes {plan id: {rule id: 'auto' | 'manual'}}, used for boiler rules not loaded yet.
         runs: the stored timed runs {plan id: {rule id: until epoch s}}, restored for timed rules not loaded yet.
         pauses: the stored outside light pauses {plan id: {rule id: end epoch s}}, restored likewise.
-        motion_modes: the stored motion light rules in manual {plan id: {rule id: {mode, since}}}, restored likewise.
+        motion_modes: the stored motion light rules in manual {plan id: {rule id: {mode, since, by}}}, restored likewise
+            (only a record with "by": "button").
         unload: the integration stops: no device is switched (boiler relays and running timed devices stay as they are;
         the modes and runs are restored on the next start)."""
         old = self._rules
@@ -921,7 +924,7 @@ class RuleEngine:
             return
         m.seen = m.state(self._lookup)
         stored = self._motion_modes.get(rule.key[0], {}).get(rule.key[1]) if prev is None and motion_modes is not None else None
-        if stored is not None and m.buttons:
+        if stored is not None and stored["by"] == "button" and m.buttons:
             m.restore(stored["mode"], stored["since"])  # evaluated once the boot phase is over (started())
 
     def _released_runs(self, old: "dict[Key, _Rule]", rules: "dict[Key, _Rule]") -> "list[Timed]":
@@ -1929,13 +1932,13 @@ class RuleEngine:
         return True
 
     def motion_modes(self) -> "dict[str, dict[str, dict]]":
-        """The motion light rules in manual {plan id: {rule id: {"mode": "manual", "since": epoch s}}} of every loaded
-        rule (auto is the default and is not stored)."""
+        """The motion light rules in manual {plan id: {rule id: {"mode": "manual", "since": epoch s, "by": "button"}}} of
+        every loaded rule (auto is the default and is not stored; a button is the only way into manual)."""
         out: dict[str, dict[str, dict]] = {}
         for (pid, rid), rule in self._rules.items():
             m = rule.motion_light
             if m is not None and m.mode == "manual":
-                out.setdefault(pid, {})[rid] = {"mode": "manual", "since": m.since}
+                out.setdefault(pid, {})[rid] = {"mode": "manual", "since": m.since, "by": "button"}
         return out
 
     def _report_motion_modes(self) -> None:
@@ -2322,8 +2325,11 @@ class RuleEngine:
                 if key[0] != plan_id or container_id not in m.buttons or not rule.enabled or m.missing or m.eid is None \
                         or self._booting:
                     continue
+                was = rule.verdict
                 if self._motion_press(rule, intent):
                     dirty.add(key)
+                    if rule.verdict != was:  # moved before the settle: its consumers follow it there
+                        dirty.update(self._consumers.get(key, ()))
                 continue
             c = rule.control
             if c is not None:  # a button source; any other source is read through its input (handle_state)
@@ -2396,6 +2402,7 @@ class RuleEngine:
             self._day_read(dk)  # before the rules reading it are evaluated
         for key in self._targets.get(entity_id, ()):
             self._reclose(self._rules[key], entity_id)
+        moved: set[Key] = set()  # consumers of motion light rules whose verdict the light's change moved before the settle
         for key in keys or ():
             rule = self._rules[key]
             if rule.boiler is not None and rule.boiler.relay == entity_id:
@@ -2405,7 +2412,10 @@ class RuleEngine:
             if rule.outside is not None and rule.outside.eid == entity_id:
                 self._outside_light(rule, own or confirms)
             if rule.motion_light is not None and rule.motion_light.eid == entity_id:
+                was = rule.verdict
                 self._motion_light_changed(rule, confirms)
+                if rule.verdict != was:
+                    moved.update(self._consumers.get(key, ()))
             if rule.beurer is not None and rule.beurer.eid == entity_id:
                 self._beurer_heater(rule, own or confirms)
         # A load control rule finding a source change of this entity asks once whether it is its command arriving;
@@ -2413,7 +2423,7 @@ class RuleEngine:
         self._trigger, self._echo = entity_id, None
         try:
             if keys:
-                self._settle(set(keys))
+                self._settle(set(keys) | moved)
         finally:
             self._trigger = None
         if self._echo is None:

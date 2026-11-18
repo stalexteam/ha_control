@@ -19,6 +19,7 @@ WS["props"]["autoByDoubleToggle"] = True
 TB = dev("tb", "smart_button", "Timer button", action="sensor.tact")
 DEVICES = [LAMP, LAMP2, PIR1, PIR2, LS, BTN, WS, TB]
 ON, OFF = ("light", "turn_on", "light.k"), ("light", "turn_off", "light.k")
+ON2, OFF2 = ("light", "turn_on", "light.k2"), ("light", "turn_off", "light.k2")
 DAY, NIGHT, DUSK = lux(100), lux(5), lux(30)
 T0 = 1000.0
 
@@ -33,6 +34,11 @@ def ml_rule(rid="m", sensors=("pir1",), daylight=None, min_on=0, off=180, button
 
 def pair_rule(rid="cr", name="Pair"):
     return rule(rid, ["pir2"], name=name, on_true=[("lamp", "on")], on_false=[("lamp", "off")])
+
+
+def consumer_rule(rid="c", name="Consumer"):
+    """A condition rule whose single input is the motion light rule "m", switching the second lamp both ways."""
+    return rule(rid, [{"source": {"rule": "m"}}], name=name, on_true=[("lamp2", "on")], on_false=[("lamp2", "off")])
 
 
 def timed_rule(rid="t", minutes=1, name="Timer"):
@@ -479,7 +485,7 @@ def test_since_changes_only_when_motion_ends():
     assert len(w.saved) == n and w.engine.motion_modes()["p"]["m"]["since"] == T0
     w.advance(T0 + 120)
     w.pir("off")
-    assert len(w.saved) == n + 1 and w.saved[-1] == {"p": {"m": {"mode": "manual", "since": T0 + 120}}}
+    assert len(w.saved) == n + 1 and w.saved[-1] == {"p": {"m": {"mode": "manual", "since": T0 + 120, "by": "button"}}}
     w.advance(T0 + 719)
     assert w.ml()["mode"] == "manual"
     w.advance(T0 + 720)
@@ -512,9 +518,12 @@ def test_own_off_overtaken_by_motion_is_not_manual():
     w.pir("on")  # motion returns before the light reports off
     assert w.calls == [OFF, ON]
     w.light("off", own=True)  # the off arrives late
+    t = w.tr()
+    assert t["verdict"] is True and "waiting" not in t["motionLight"] and t["last"]["reason"] == "became true: Motion 1 motion"
     w.light("on", own=True)  # then the on
     t = w.tr()
     assert t["motionLight"]["mode"] == "auto" and t["verdict"] is True and t["motionLight"]["light"] == "on"
+    assert t["last"]["reason"] not in ("found on", "switched off elsewhere: waits for new motion")
     assert w.calls == [OFF, ON]
 
 
@@ -524,6 +533,8 @@ def test_own_on_overtaken_by_off_is_not_manual():
     w.pir("off")  # before the light reports on
     assert w.calls == [ON, OFF]
     w.light("on", own=True)
+    t = w.tr()
+    assert t["verdict"] is False and t["last"]["reason"] != "found on"
     w.light("off", own=True)
     t = w.tr()
     assert t["motionLight"]["mode"] == "auto" and t["verdict"] is False and w.calls == [ON, OFF]
@@ -585,6 +596,28 @@ def test_own_window_expires():
     w.light("on")  # by hand, not confirming, after the window: found on
     t = w.tr()
     assert t["motionLight"]["mode"] == "auto" and t["verdict"] is True and t["last"]["reason"] == "found on"
+
+
+def test_stale_own_record_does_not_swallow_a_hand_on():
+    w = loaded(light__k="unavailable")
+    w.pir("on")  # the rule decides on while the light has no data: a record "on"
+    assert w.tr()["verdict"] is True
+    w.pir("off")
+    w.advance(T0 + 1)
+    w.light("on")  # back reading on: the auto start applies again
+    assert w.tr()["verdict"] is True
+    w.advance(T0 + 2)
+    w.light("off")  # the person: released
+    assert w.tr()["verdict"] is False and w.tr()["last"]["reason"] == "switched off elsewhere: waits for new motion"
+    w.advance(T0 + 3)
+    n = len(w.calls)
+    w.light("on")  # the person again, within 10 s of the decision
+    t = w.tr()
+    assert t["verdict"] is True and t["last"]["reason"] == "found on" and t["holders"] == ["Light motion control"]
+    w.advance(T0 + 182)
+    assert len(w.calls) == n
+    w.advance(T0 + 183)
+    assert w.calls[n:] == [OFF]
 
 
 def test_hand_on_in_auto_is_held():
@@ -719,6 +752,39 @@ def test_released_drops_owed_offs():
     assert w.calls == []
 
 
+def test_consumer_follows_released_and_found():
+    w = loaded([ml_rule(), consumer_rule()])
+    w.calls.clear()  # the consumer's start off
+    w.pir("on")
+    assert w.tr()["verdict"] is True and w.tr("c")["verdict"] is True and w.calls == [ON, ON2]
+    w.light("on", own=True)
+    w.set("light.k2", "on", own=True)
+    w.calls.clear()
+    w.light("off")  # switched off elsewhere: released
+    assert w.tr()["verdict"] is False and w.tr("c")["verdict"] is False and w.calls == [OFF2]
+    w.set("light.k2", "off", own=True)
+    w.pir("off")
+    w.advance(T0 + 30)
+    w.light("on")  # switched on elsewhere with no motion: found
+    assert w.tr()["verdict"] is True and w.tr()["last"]["reason"] == "found on"
+    assert w.tr("c")["verdict"] is True and w.calls == [OFF2, ON2]
+
+
+def test_consumer_follows_manual_and_auto():
+    w = loaded([ml_rule(buttons=("btn",)), consumer_rule()])
+    w.pir("on")
+    w.light("on", own=True)
+    w.set("light.k2", "on", own=True)
+    assert w.tr("c")["verdict"] is True and w.tr("c")["inputs"][0]["value"] is True
+    w.calls.clear()
+    w.press("btn", "set", "on")  # manual (the lamp is on already: nothing sent)
+    assert w.tr()["verdict"] is None and w.ml()["mode"] == "manual"
+    assert w.tr("c")["inputs"][0]["value"] is None  # re-evaluated: its input is unknown
+    w.press("btn", "auto")  # auto with the light on: held
+    assert w.tr()["verdict"] is True and w.tr("c")["verdict"] is True and w.tr("c")["inputs"][0]["value"] is True
+    assert OFF2 not in w.calls
+
+
 def test_light_found_on_is_held():
     """Review focus 4."""
     w = loaded(light__k="on")
@@ -771,7 +837,7 @@ def test_no_sensors_auto_is_inert():
     t = w.tr()
     assert w.calls == [] and t["verdict"] is None and "last" not in t and t["motionLight"]["mode"] == "auto"
     w.press("btn", "toggle")
-    assert w.calls == [OFF] and w.ml()["mode"] == "manual" and w.saved[-1] == {"p": {"m": {"mode": "manual", "since": T0 + 3600}}}
+    assert w.calls == [OFF] and w.ml()["mode"] == "manual" and w.saved[-1] == {"p": {"m": {"mode": "manual", "since": T0 + 3600, "by": "button"}}}
     w.light("off", own=True)
     w.press("btn", "auto")
     t = w.tr()
@@ -809,13 +875,14 @@ def test_mode_is_persisted_and_restored():
     """Review focus 5."""
     w = loaded([ml_rule(buttons=("btn",))])
     w.press("btn", "toggle")
-    assert w.saved[-1] == {"p": {"m": {"mode": "manual", "since": T0}}}
+    assert w.saved[-1] == {"p": {"m": {"mode": "manual", "since": T0, "by": "button"}}}
     assert w.engine.motion_modes() == w.saved[-1]
     w.press("btn", "auto")
     assert w.saved[-1] == {}
 
     w = MWorld(binary_sensor__pir1="on")
-    w.load([ml_rule(buttons=("btn",))], boot=True, motion_modes={"p": {"m": {"mode": "manual", "since": T0}}})
+    w.load([ml_rule(buttons=("btn",))], boot=True,
+           motion_modes={"p": {"m": {"mode": "manual", "since": T0, "by": "button"}}})
     assert w.calls == [] and w.ml()["mode"] == "manual" and w.saved == []
     w.engine.started()
     assert w.calls == [] and w.ml()["mode"] == "manual" and w.tr()["verdict"] is None
@@ -825,6 +892,20 @@ def test_mode_is_persisted_and_restored():
     assert w.ml()["mode"] == "manual" and w.calls == []
     w.load([ml_rule(buttons=("btn",), light="lamp2")])
     assert w.ml()["mode"] == "auto" and w.calls == [("light", "turn_on", "light.k2")] and w.saved[-1] == {}
+
+
+def test_stored_manual_of_0_22_0_is_ignored():
+    """0.22.0 stored a manual entered by a switch elsewhere, without "by": the rule starts in auto."""
+    w = MWorld(light__k="on")
+    w.load([ml_rule(buttons=("btn",))], boot=True, motion_modes={"p": {"m": {"mode": "manual", "since": 1000.0}}})
+    w.engine.started()
+    t = w.tr()
+    assert t["motionLight"]["mode"] == "auto" and t["verdict"] is True and t["last"]["reason"] == "found on"
+    assert w.engine.motion_modes() == {} and w.saved[-1] == {}
+    w.advance(T0 + 179)
+    assert w.calls == []
+    w.advance(T0 + 180)
+    assert w.calls == [OFF]
 
 
 def test_a_stored_record_of_an_unknown_rule_or_auto_is_dropped():

@@ -1212,7 +1212,7 @@ def _msaves():
 def test_motion_mode_loads_before_the_first_load_and_saves_on_change(env):
     async def go():
         hass = FakeHass()
-        stored = {"p1": {"r1": {"mode": "manual", "since": time.time()}}}
+        stored = {"p1": {"r1": {"mode": "manual", "since": time.time(), "by": "button"}}}
         live = await _mstart(env, hass, stored=stored, pir="on")
         assert live.engine.motion_modes() == stored and _msaves() == []
         assert live.engine.snapshot("p1")["r1"]["motionLight"]["mode"] == "manual" and hass.services.calls == []
