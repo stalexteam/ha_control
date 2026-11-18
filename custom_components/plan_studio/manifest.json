@@ -1,7 +1,7 @@
 {
   "domain": "plan_studio",
   "name": "Plan Studio",
-  "version": "0.22.2",
+  "version": "0.23.0",
   "config_flow": true,
   "dependencies": [
     "http",
