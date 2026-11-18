@@ -411,3 +411,59 @@ def test_the_first_real_change_of_an_input_unknown_at_the_last_verdict_announces
     assert trace(w)["verdict"] is False and said(w) == []
     w.set("binary_sensor.m", "on")
     assert trace(w)["verdict"] is True and said(w) == [SPEAK]
+
+
+# --- fix round 3: nothing at HA start; a motion light's sensor-return flip is not real ------------------------
+
+def test_no_announcement_from_a_restored_timed_run_ending_at_ha_start():
+    """S1: a timed run restored from the Store ended while HA was down: at started() the fan goes off, the consumers
+    switch but announce nothing; a later press announces."""
+    from test_timed import BUTTON as TIMED_BUTTON, VENT, timed_rule
+    w = world(fan__vent="on")
+    rules = [timed_rule("t"), rule("y", [ref("t")], onTrue=[SAY], onFalse=[PLAY]),
+             control([{"source": {"rule": "t"}}], on=[NOTE], off=[{**NOTE, "text": "Off"}, LIGHT_OFF], rid="lc")]
+    w.engine.load_plans([plan(DEVICES + [TIMED_BUTTON, VENT], rules)], boot=True, runs={"p": {"t": 900.0}})
+    assert trace(w, "t")["verdict"] is True and trace(w, "y")["verdict"] is True
+    w.states["light.l"] = ("on", {})  # so lc's off really switches it
+    w.calls.clear()
+    w.engine.started()
+    assert ("fan", "turn_off", "fan.vent") in w.calls and TURN_OFF in w.calls  # the run ended, lc still switches
+    assert trace(w, "y")["verdict"] is False and said(w) == []
+    w.engine.on_intent("p", "btn", {"action": "set", "value": "on"})
+    assert said(w) == [SPEAK, PUSH]
+
+
+def ml_world(rules):
+    from test_motion_light import DEVICES as ML_DEVICES, MWorld
+    w = MWorld(media_player__vlc="idle")
+    w.engine.load_plans([plan(ML_DEVICES + [SPK, PHONE], rules)], boot=False)
+    return w
+
+
+def test_a_motion_light_flip_by_its_sensor_returning_is_not_real_downstream():
+    """M1: the motion sensor without data counts as no motion (off after the off delay); back with the same value it
+    switches the light on again: no announcement downstream. Real motion changes announce."""
+    from test_motion_light import ml_rule
+    w = ml_world([ml_rule(), rule("y", [ref("m")], onTrue=[SAY], onFalse=[PLAY]),
+                  control([{"source": {"rule": "m"}}], on=[NOTE], rid="lc")])
+    w.pir("on")  # real motion
+    assert w.tr()["verdict"] is True and said(w) == [SPEAK, PUSH]
+    w.pir("unavailable")
+    w.advance(w.t + 181)
+    assert w.tr()["verdict"] is False and said(w) == [SPEAK, PUSH]
+    w.pir("on")  # back with the same value
+    assert w.tr()["verdict"] is True and said(w) == [SPEAK, PUSH]
+    w.pir("off")
+    w.advance(w.t + 181)
+    assert w.tr()["verdict"] is False and said(w)[-1] == SOUND
+    w.pir("on")
+    assert said(w)[-2:] == [SPEAK, PUSH]
+
+
+def test_a_motion_light_verdict_moved_by_hand_or_by_a_button_is_real_downstream():
+    from test_motion_light import ml_rule
+    w = ml_world([ml_rule(buttons=("btn",)), rule("y", [ref("m")], onTrue=[SAY], onFalse=[PLAY])])
+    w.light("on")  # switched on by hand without motion: found on, held
+    assert w.tr()["verdict"] is True and said(w) == [SPEAK]
+    w.press("btn", "auto")  # auto again: a fresh decision at once, no motion: off now
+    assert w.tr()["verdict"] is False and said(w) == [SPEAK, SOUND]
