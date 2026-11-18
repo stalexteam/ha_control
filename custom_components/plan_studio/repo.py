@@ -190,7 +190,8 @@ def _validate_beurer(r: dict, b: object) -> None:
 
 
 def _validate_motion_light(r: dict, m: object) -> None:
-    """A light motion control rule: motion sensors (optional) switch one light, smart buttons (optional) set the mode,
+    """A light motion control rule: motion sensors (optional) switch one light, buttons (optional; the engine accepts smart buttons and wall switches with
+    a state entity, this check only ids) set the mode,
     offDelay = off after; no inputs, gate, other kinds or actions."""
     keys = {"light", "sensors", "minOn", "buttons", "autoAfter"}
     if not isinstance(m, dict) or not keys <= set(m) <= keys | {"daylight"}:

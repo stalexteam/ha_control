@@ -520,7 +520,7 @@ const en: Dict = {
   'rules.problem.boiler-auto': "This button has no Auto action: enable it in the button's properties",
   'rules.problem.boiler': 'Boiler: a boiler and a button; Limit and Boiler power above 0 W.',
   'rules.problem.outside': 'Outside light: pick a light that can be switched on and a different daylight sensor, a time window with different From and To, and a pause of 0 to 1440 minutes.',
-  'rules.problem.motionLight': 'Light motion control: pick a light that can be switched on and off, smart buttons and motion sensors each only once, and whole numbers in range.',
+  'rules.problem.motionLight': 'Light motion control: pick a light that can be switched on and off, buttons and motion sensors each only once, and whole numbers in range.',
   'rules.problem.beurer': 'Beurer heater: pick a heater that can be switched on and a different device with a Power binding, a threshold above 0 W, and whole minutes 0 to 1440.',
   'rules.problem.control': 'Load control: every source once; a device once per list; a device the rule switches cannot also be its source; toggle, on and off for devices that can be switched, close for valves.',
   'rules.problem.timed': 'Timed switch: pick a button and a different device that can be switched on, and a duration of 1 to 1440 minutes.',

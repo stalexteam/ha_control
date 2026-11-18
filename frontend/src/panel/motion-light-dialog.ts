@@ -12,7 +12,7 @@ import { t } from '../i18n';
 
 export interface MotionLightDialogOpts {
   draft: RuleDraft;
-  /** Devices that can be switched on and off; motion sensors; illuminance sensors; smart buttons; every device (for names). */
+  /** Devices that can be switched on and off; motion sensors; illuminance sensors; smart buttons and wall switches; every device (for names). */
   lights: Device[];
   sensors: Device[];
   daylightSensors: Device[];

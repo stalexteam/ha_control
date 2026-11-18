@@ -216,7 +216,7 @@ describe('Light motion control form', () => {
     expect(okBtn(el).disabled).toBe(false);
     await set(el, '[data-field="motionlight-autoafter"]', '1441');
     expect(okBtn(el).disabled).toBe(true);
-    expect(problems(el)).toEqual(['Light motion control: pick a light that can be switched on and off, smart buttons and motion sensors each only once, and whole numbers in range.']);
+    expect(problems(el)).toEqual(['Light motion control: pick a light that can be switched on and off, buttons and motion sensors each only once, and whole numbers in range.']);
     await set(el, '[data-field="motionlight-autoafter"]', '0');
     await set(el, '[data-field="motionlight-minon"]', '1.5');
     expect(okBtn(el).disabled).toBe(true);

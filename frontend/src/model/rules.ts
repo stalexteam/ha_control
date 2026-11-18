@@ -111,7 +111,7 @@ const delayOk = (n: unknown): boolean => Number.isInteger(n) && (n as number) >=
  * (beurer rules); default = any existing device. `controlSourceExists` / `controlLoadExists` (optional) tell whether an id is a button /
  * wall switch / motion sensor and a device taking 'on' and 'off' (control rules); default = any existing device.
  * `motionLightExists` / `motionSensorExists` / `motionButtonExists` (optional) tell whether an id is a device taking 'on' and 'off' / a motion sensor /
- * a smart button (motion light rules; the daylight sensor is checked with `lightSensorExists`); default = any existing device.
+ * a smart button or a wall switch with a state entity (motion light rules; the daylight sensor is checked with `lightSensorExists`); default = any existing device.
  */
 export function ruleProblems(
   rules: Rule[], r: Rule, deviceExists: (id: Id) => boolean, actionsOf?: (id: Id) => RuleDo[] | undefined,
