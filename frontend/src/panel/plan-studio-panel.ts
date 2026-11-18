@@ -67,7 +67,9 @@ import { EntityFeed } from '../live/entity-feed';
 import { UpdateCheck } from '../live/update-check';
 
 /** The integration version this bundle was built from (Vite `define`, from manifest.json). */
-declare const __PLAN_STUDIO_VERSION__: string;
+declare const __PLAN_STUDIO_VERSION__: string | undefined;
+/** Not defined where the bundle is not built by Vite with the config (dev harness): then empty = no update check. */
+const BUNDLE_VERSION = typeof __PLAN_STUDIO_VERSION__ === 'string' ? __PLAN_STUDIO_VERSION__ : '';
 
 export class PlanStudioPanel extends LitElement {
   static styles = panelStyles;
@@ -155,7 +157,7 @@ export class PlanStudioPanel extends LitElement {
   /** Reloads the page (the "updated on the server" notice); replaceable in tests. */
   reloadPage: () => void = () => location.reload();
   /** Asks the server for its version at start and after every reconnect; `serverVersion` is set while it differs. */
-  private readonly updateCheck = new UpdateCheck(() => this.hass?.connection, __PLAN_STUDIO_VERSION__, () => this.requestUpdate());
+  private readonly updateCheck = new UpdateCheck(() => this.hass?.connection, BUNDLE_VERSION, () => this.requestUpdate());
   private trackedLevel: Level | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
   /** True while the 1 s ticker runs (Binding step with a timer, event or fading bubble). */

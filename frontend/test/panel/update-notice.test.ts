@@ -94,4 +94,15 @@ describe('UpdateCheck', () => {
     expect(check.serverVersion).toBe('2.0.0');
     expect(changes).toHaveBeenCalledTimes(1);
   });
+
+  it('says nothing when its own version is unknown', async () => {
+    const h = infoHass({ version: '2.0.0' });
+    const changes = vi.fn();
+    const check = new UpdateCheck(() => h.hass.connection, '', changes);
+    check.watch();
+    h.reconnect();
+    await new Promise(r => setTimeout(r, 20));
+    expect(check.serverVersion).toBeNull();
+    expect(changes).not.toHaveBeenCalled();
+  });
 });

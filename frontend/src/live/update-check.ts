@@ -6,7 +6,7 @@ type Connection = HassLike['connection'];
 /**
  * Tells whether the server runs another Plan Studio version than this bundle (a deploy under an open tab).
  * Asks at `watch` and after every `ready` of the connection; once a different version is seen `serverVersion`
- * keeps it until the page is reloaded. An old server (unknown command) or any failure leaves it null, silently.
+ * keeps it until the page is reloaded. An empty `bundleVersion` (not baked in) means no check at all. An old server (unknown command) or any failure leaves it null, silently.
  */
 export class UpdateCheck {
   /** The server's version while it differs from the bundle's; null otherwise. */
@@ -22,6 +22,7 @@ export class UpdateCheck {
 
   /** Starts listening to the current connection (a no-op for the same one) and asks once. */
   watch(): void {
+    if (!this.bundleVersion) return; // an unknown own version cannot be compared
     const conn = this.connection();
     if (!conn || conn === this.conn) return;
     this.stop();

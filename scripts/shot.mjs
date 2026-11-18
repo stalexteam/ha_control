@@ -1,7 +1,7 @@
 // Headless Chrome screenshots of the dev harness.
 // Usage: node scripts/shot.mjs [--out <dir>] [--size 1500x950] <name>=<query> ...
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -43,7 +43,8 @@ async function main() {
   const { createServer } = await import('vite');
   const chrome = findChrome();
   mkdirSync(out, { recursive: true });
-  const server = await createServer({ root: 'frontend/dev', configFile: false, logLevel: 'error', server: { port: 0 } });
+  const manifest = JSON.parse(readFileSync('custom_components/plan_studio/manifest.json', 'utf-8'));
+  const server = await createServer({ root: 'frontend/dev', configFile: false, define: { __PLAN_STUDIO_VERSION__: JSON.stringify(manifest.version) }, logLevel: 'error', server: { port: 0 } });
   let failed = false;
   try {
     await server.listen();
