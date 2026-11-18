@@ -52,6 +52,8 @@ describe('virtual switch device', () => {
     expect(setBinding(l, 'v1', 'control', null)).toBe(l);
     expect(activeRoleSpecs(l.devices[0]).map(s => s.role)).toEqual(['control']);
     expect(bindingStatus(l.devices[0], e => (e === 'virtual.v1' ? 'present' : 'missing'))).toBe('bound');
+    // never missing: the entity has no state until the integration knows the device (unsaved, or after a disconnect)
+    for (const p of ['missing', 'unavailable', 'unknown'] as const) expect(bindingStatus(l.devices[0], () => p)).toBe('bound');
   });
 
   it('is switchable (on, off, toggle), an input and a blocker, never listed in the Power step', () => {

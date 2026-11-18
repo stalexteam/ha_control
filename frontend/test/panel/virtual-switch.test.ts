@@ -121,4 +121,18 @@ describe('virtual switch in the panel', () => {
     expect(items).toEqual(['a rule must not switch a virtual switch it reads as an input']);
     expect($<HTMLButtonElement>(el, '.rule-backdrop button[data-action="rule-ok"]').disabled).toBe(true);
   });
+
+  it('a freshly added virtual switch (no frame yet) is bound with the registry loaded, and Next unbound skips it', async () => {
+    seed([]);
+    const el = await mount(createMockHass({ demo: true }));
+    el.setMode('binding');
+    await vi.waitFor(() => expect(el.haMeta.get().registryLoaded).toBe(true));
+    el.commit({ ...el.level!, devices: [sleep({ placement: { mode: 'none' } })] });
+    await el.updateComplete;
+    expect((el.liveStates as Record<string, unknown>)['virtual.v1']).toBeUndefined();
+    expect(el.bindStatus(device(el, 'v1'))).toBe('bound');
+    el.selection = null;
+    el.nextUnboundDevice();
+    expect(el.selection).toBeNull();
+  });
 });

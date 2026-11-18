@@ -104,6 +104,8 @@ export function setBinding(level: Level, deviceId: Id, role: BindingRole, entity
 
 /** A device whose roles are all optional (equipment) is bound with nothing bound: a dummy needs nothing. */
 export function bindingStatus(d: Device, presence: (eid: string) => Presence): BindStatus {
+  // A virtual switch is always bound: its entity has no state until the integration knows the device (unsaved, or after a disconnect).
+  if (d.props.kind === 'virtual_switch') return 'bound';
   const b = d.bindings ?? {};
   const ids = Object.values(b).filter((e): e is string => !!e);
   const primaries = activeRoleSpecs(d).filter(s => s.primary);
