@@ -2006,15 +2006,15 @@ class RuleEngine:
         if rule.verdict is True:
             m.day_off = False  # the rule holds a light again
         else:
-            m.unhold()  # nothing held: a later hold starts anew
+            m.hold_from = None  # nothing held (a departure seen meanwhile still counts)
         self._motion_arm(rule, m.hold_until(now))  # the hold's end (auto has no other timer)
         return rule.verdict != was
 
     def _motion_hold(self, rule: _Rule, on: bool, note: bool = True) -> None:
         """Take the light's state as the verdict without a command: a light found on is held (its off comes after the
-        off delay, with presence once someone left or after the maximum hold; the minimum on time does not apply;
-        recorded as "found on" unless `note` is False; it ends a wait for new motion and a daylight off's mark), one
-        found off is not."""
+        off delay once the zone shows no motion, also with presence: only a later end of the zone's motion starts a
+        presence hold; the minimum on time does not apply; recorded as "found on" unless `note` is False; it ends a
+        wait for new motion and a daylight off's mark), one found off is not."""
         m = rule.motion_light
         assert m is not None and m.eid is not None
         rule.cancel()
@@ -2171,6 +2171,7 @@ class RuleEngine:
         if change == "back":
             rule.cancel()
             rule.verdict = None  # the auto start applies again
+            m.unhold()  # also for the presence hold: a light back after a blackout is held only by a new motion end
         elif change == "found" and rule.verdict is False:
             self._motion_hold(rule, True)  # switched on elsewhere: held from now
         elif change == "released":

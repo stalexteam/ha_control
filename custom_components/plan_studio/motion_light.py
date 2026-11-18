@@ -4,7 +4,8 @@ relay (without a button the rule is always in auto). A change of the light made 
 auto the rule adapts to it. In auto the daylight coming switches a held light off at once, and an optional blocker (any
 on / off device, normally a virtual switch "Sleep") switches it off and keeps the rule from acting while it reads the
 chosen state. With presence the light is kept on after the zone's motion ends while no motion sensor of a neighbouring
-zone has seen motion since (someone sits still), up to HOLD_MAX. Must not import homeassistant.
+zone has seen motion since the zone's motion started (someone sits still), up to HOLD_MAX. Must not import
+homeassistant.
 
 The rule engine owns the I/O (the sensor and daylight inputs, the holder slots, timers and trace frames); this module
 holds the rule's configuration, its runtime state and the decisions."""
@@ -111,10 +112,11 @@ class MotionLight:
         # a daylight off was decided: the light reading on no longer keeps it (an off kept back by another holder or
         # lost must not be undone by motion) until the condition is met again or the rule holds a light again
         self.day_off = False
-        # the presence hold: when it started (epoch s; None: no hold), the neighbour sensor that saw motion since (the
-        # off delay runs) and the neighbour sensors' values at the previous evaluation
+        # the presence hold: when it started (epoch s; None: no hold), the neighbour sensor that saw motion since the
+        # zone's last motion start (a departure), and the own and neighbour sensors' values at the previous evaluation
         self.hold_from: float | None = None
         self.left: str | None = None
+        self.zone_was: "list[bool | None]" = []
         self.next_to: "list[bool | None]" = []
 
     def inputs(self) -> "list[dict]":
@@ -134,7 +136,8 @@ class MotionLight:
         self.seen, self.entered, self.own, self.waiting = old.seen, old.entered, list(old.own), old.waiting
         self.dropped, self.presses, self.blocked, self.met = old.dropped, old.presses, old.blocked, old.met
         self.day_off = old.day_off
-        self.hold_from, self.left, self.next_to = old.hold_from, old.left, list(old.next_to)
+        self.hold_from, self.left = old.hold_from, old.left
+        self.zone_was, self.next_to = list(old.zone_was), list(old.next_to)
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -209,26 +212,36 @@ class MotionLight:
         return max(off_delay, self.on_at + self.min_on - now)
 
     def hold(self, values: "list[bool | None]", now: float, holding: bool) -> bool:
-        """The presence hold (spec presence hold §3), at every evaluation in auto while not blocked, after the rule's own
-        decisions; holding: the rule holds the light (verdict true). True while the light is kept on for someone still
-        in the zone: the hold starts when the rule holds the light and the zone sees no motion (its last sensor went
-        clear, or a light was taken as found on); it lasts while no neighbour sensor has gone from off to on since then
-        (one reading motion at the start counts only after an off; to or from no data tells nothing) and HOLD_MAX has
-        not passed. Then the off delay runs: a departure (`left`) or the maximum hold. Motion in the zone or the rule no
-        longer holding the light ends it all: a later motion end starts a new hold. Never without neighbour sensors."""
-        k = self.neighbour_at
+        """The presence hold (spec presence hold §3 with its Task 1 review amendments), at every evaluation in auto while
+        not blocked, after the rule's own decisions; holding: the rule holds the light (verdict true). True while the
+        light is kept on for someone still in the zone.
+        Departure (`left`): a neighbour sensor's known off -> on after the zone's last motion start (a known off -> on of
+        any own sensor), recorded also while the zone still reads motion (a sensor reads motion for its timeout after
+        the last movement); a neighbour already on when the zone's motion started counts only after an off; a new
+        motion start of the zone clears it; to or from no data tells nothing.
+        Hold: starts at the zone's motion END while the rule holds the light (the zone read motion at the previous
+        evaluation and every own sensor that did now reads a known off) unless a departure is recorded (then the off
+        delay starts at once); it lasts while no departure comes and HOLD_MAX has not passed. A light taken as found
+        on without a motion end is not held. Motion in the zone or the rule no longer holding the light ends it. Never
+        without neighbour sensors."""
+        n, k = len(self.sensors), self.neighbour_at
+        own = [values[i] if len(values) > i else None for i in range(n)]
         seen = [values[k + j] if len(values) > k + j else None for j in range(len(self.neighbours))]
+        was, self.zone_was = self.zone_was, own
         prev, self.next_to = self.next_to, seen
-        if not self.neighbours or not holding or self.motion(values):
-            self.hold_from = self.left = None
+        if not self.neighbours:
             return False
-        if self.hold_from is None:
+        if any(p is False and s is True for p, s in zip(was, own)):
+            self.left = None  # the zone's motion (re)started: an earlier departure no longer counts
+        j = next((j for j, (p, s) in enumerate(zip(prev, seen)) if p is False and s is True), None)
+        if j is not None:
+            self.left = self.neighbour_names[j]
+        if True in own or not holding:
+            self.hold_from = None
+            return False
+        ended = True in was and all(s is False for p, s in zip(was, own) if p is True)
+        if ended and self.left is None:
             self.hold_from = now
-            return True
-        if self.present(now):
-            j = next((j for j, (p, s) in enumerate(zip(prev, seen)) if p is False and s is True), None)
-            if j is not None:
-                self.left = self.neighbour_names[j]
         return self.present(now)
 
     def present(self, now: float) -> bool:
@@ -240,9 +253,10 @@ class MotionLight:
         return self.hold_from + HOLD_MAX if self.present(now) and self.hold_from is not None else None
 
     def unhold(self) -> None:
-        """No presence hold (manual, blocked, inactive, a changed Save)."""
+        """No presence hold and no departure; the sensors are read anew (manual, blocked, inactive, entering auto, a
+        changed Save, the light back from no data)."""
         self.hold_from = self.left = None
-        self.next_to = []
+        self.zone_was, self.next_to = [], []
 
     def press(self, intent: dict, light: "str | None") -> "tuple[str | None, str | None]":
         """A button intent: (mode change "manual" | "auto" | None, the state to command | None). A wall switch's flip
@@ -329,8 +343,8 @@ class MotionLight:
         if until is not None:
             out["present"] = True
             out["holdUntil"] = int(until * 1000)
-        if self.left is not None:
-            out["left"] = self.left  # the neighbour sensor whose motion started the off delay
+        if self.left is not None and off_at is not None:
+            out["left"] = self.left  # while the off delay runs: the neighbour sensor that saw the departure
         if self.presence:
             out["neighbours"] = [{"id": n, "name": name} for n, name in zip(self.neighbours, self.neighbour_names)]
         return out
