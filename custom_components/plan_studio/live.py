@@ -14,6 +14,10 @@ from typing import TYPE_CHECKING
 
 from homeassistant.core import CALLBACK_TYPE, Context, CoreState, HomeAssistant, callback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+try:  # HA 2024.4+; an older core tracks state changes only
+    from homeassistant.helpers.event import async_track_state_report_event
+except ImportError:  # pragma: no cover
+    async_track_state_report_event = None
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -26,7 +30,8 @@ from .const import (
     RUNTIME_STORAGE_KEY,
     TIMED_STORAGE_KEY,
 )
-from .power import PowerHub
+from .power import PowerHub, device_bindings, entity_ids as power_entity_ids
+from .readings import Readings
 from .rules import RuleEngine
 from .runtime import Runtime
 from .store import PlanStore
@@ -56,6 +61,8 @@ class LiveRuntime:
         self._hass = hass
         self._plans = plans
         self._untrack: CALLBACK_TYPE | None = None
+        self._untrack_reports: CALLBACK_TYPE | None = None
+        self.readings = Readings()  # report statistics of every tracked entity (memory only)
         self._stopped = False
         self._loaded = False
         # entity id -> last_changed of the state it returned to from no data (unavailable, unknown, none)
@@ -165,9 +172,31 @@ class LiveRuntime:
         self._untrack_all()
         if self._stopped:
             return
-        self._untrack = async_track_state_change_event(
-            self._hass, sorted(self.runtime.entity_ids() | self.power.entity_ids() | self.engine.entity_ids()), self._on_state
-        )
+        ids = self.runtime.entity_ids() | self.power.entity_ids() | self.engine.entity_ids() | self._saved_power_entities()
+        self.readings.keep(ids)
+        self._untrack = async_track_state_change_event(self._hass, sorted(ids), self._on_state)
+        if async_track_state_report_event is not None:  # a repeated report of the same value feeds the statistics only
+            self._untrack_reports = async_track_state_report_event(self._hass, sorted(ids), self._on_report)
+
+    def _saved_power_entities(self) -> set[str]:
+        """The entities of the saved plans' power schematics: their statistics do not wait for an open panel."""
+        out: set[str] = set()
+        for plan in self._plans.plans():
+            try:
+                power = plan.get("power")
+                if isinstance(power, dict):
+                    out |= power_entity_ids(power, device_bindings(plan))
+            except Exception:  # noqa: BLE001 - a malformed saved schematic must not stop the runtime
+                _LOGGER.warning("could not read the power schematic of plan %s", plan.get("id"), exc_info=True)
+        return out
+
+    def _report(self, entity_id: str, new: State | None) -> None:
+        at = None if new is None else (getattr(new, "last_reported", None) or getattr(new, "last_updated", None))
+        self.readings.report(entity_id, None if new is None else new.state, at.timestamp() if at else time.time())
+
+    @callback
+    def _on_report(self, event: Event) -> None:
+        self._report(event.data["entity_id"], event.data["new_state"])
 
     async def async_stop(self) -> None:
         # A power subscription that ends later (its connection closes) retracks; it must not track again.
@@ -206,6 +235,9 @@ class LiveRuntime:
         if self._untrack is not None:
             self._untrack()
             self._untrack = None
+        if self._untrack_reports is not None:
+            self._untrack_reports()
+            self._untrack_reports = None
 
     def _changed_at(self, entity_id: str) -> float | None:
         st = self._hass.states.get(entity_id)
@@ -222,6 +254,7 @@ class LiveRuntime:
     def _on_state(self, event: Event[EventStateChangedData]) -> None:
         data = event.data
         old, new = data["old_state"], data["new_state"]
+        self._report(data["entity_id"], new)
         if new is None:
             self._returned.pop(data["entity_id"], None)
         elif new.state not in ("unavailable", "unknown"):

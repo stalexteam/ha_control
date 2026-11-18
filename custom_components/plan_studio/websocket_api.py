@@ -38,6 +38,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_rules_subscribe)
     websocket_api.async_register_command(hass, ws_power_subscribe)
     websocket_api.async_register_command(hass, ws_power_set_position)
+    websocket_api.async_register_command(hass, ws_readings_get)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "plan_studio/info"})
@@ -45,6 +46,19 @@ def async_register(hass: HomeAssistant) -> None:
 def ws_info(hass, connection, msg):
     """The integration version (manifest), so an open panel can tell it was updated under it."""
     connection.send_result(msg["id"], {"version": hass.data[DOMAIN]["manifest_version"]})
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "plan_studio/readings/get", vol.Required("entity_ids"): vol.All([str], vol.Length(max=200))}
+)
+@callback
+def ws_readings_get(hass, connection, msg):
+    """Report statistics (last, period in epoch / duration ms, count) of tracked entities; unknown ones have count 0."""
+    live = _live(hass)
+    if live is None:
+        connection.send_error(msg["id"], "not_loaded", "Plan Studio is not loaded")
+        return
+    connection.send_result(msg["id"], {"readings": {e: live.readings.stats(e) for e in msg["entity_ids"]}})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "plan_studio/plans/list"})

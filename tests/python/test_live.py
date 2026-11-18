@@ -124,12 +124,17 @@ class FakeStore:
 
 @pytest.fixture
 def env(monkeypatch):
-    tracked, later, cmds, started = [], [], {}, []
+    tracked, later, cmds, started, reported, schemas = [], [], {}, [], [], {}
     FakeStore.contents, FakeStore.saved, FakeStore.flushed = {}, [], []
 
     def track(hass, ids, cb):
         entry = {"ids": list(ids), "cb": cb, "on": True}
         tracked.append(entry)
+        return lambda: entry.__setitem__("on", False)
+
+    def track_report(hass, ids, cb):
+        entry = {"ids": list(ids), "cb": cb, "on": True}
+        reported.append(entry)
         return lambda: entry.__setitem__("on", False)
 
     def call_later(hass, delay, action):
@@ -146,7 +151,9 @@ def env(monkeypatch):
 
     def command(schema):
         def deco(fn):
-            cmds[next(v for k, v in schema.items() if str(k) == "type")] = fn
+            t = next(v for k, v in schema.items() if str(k) == "type")
+            cmds[t] = fn
+            schemas[t] = schema
             return fn
 
         return deco
@@ -169,7 +176,8 @@ def env(monkeypatch):
         ),
         "homeassistant.helpers": _module("homeassistant.helpers"),
         "homeassistant.helpers.event": _module(
-            "homeassistant.helpers.event", async_track_state_change_event=track, async_call_later=call_later
+            "homeassistant.helpers.event", async_track_state_change_event=track, async_track_state_report_event=track_report,
+            async_call_later=call_later,
         ),
         "homeassistant.helpers.start": _module("homeassistant.helpers.start", async_at_started=at_started),
         "homeassistant.helpers.storage": _module("homeassistant.helpers.storage", Store=FakeStore),
@@ -190,7 +198,7 @@ def env(monkeypatch):
     live_mod = importlib.import_module(f"{NAME}.live")
     ws_mod = importlib.import_module(f"{NAME}.websocket_api")
     yield types.SimpleNamespace(
-        live=live_mod, ws=ws_mod, tracked=tracked, later=later, cmds=cmds, started=started
+        live=live_mod, ws=ws_mod, tracked=tracked, later=later, cmds=cmds, started=started, reported=reported, schemas=schemas
     )
     for name in [m for m in sys.modules if m.startswith(f"{NAME}.")]:
         sys.modules.pop(name, None)
@@ -1277,3 +1285,97 @@ def test_info_answers_the_manifest_version(env):
     env.ws.ws_info(hass, conn, {"id": 3})
     assert sent == [(3, {"version": "9.8.7"})]
     assert "plan_studio/info" in env.cmds
+
+
+def _ev(eid, new, old=None):
+    return types.SimpleNamespace(data={"entity_id": eid, "old_state": old, "new_state": new}, context=Context())
+
+
+def _st(state, at):
+    d = datetime.datetime.fromtimestamp(at, datetime.timezone.utc)
+    return types.SimpleNamespace(state=state, attributes={}, last_changed=d, last_updated=d, last_reported=d)
+
+
+def test_readings_fed_by_state_change_and_state_report(env):
+    async def go():
+        hass = FakeHass()
+        live = await _start(env, hass)
+        eid = "binary_sensor.leak"
+        assert env.reported[-1]["ids"] == env.tracked[-1]["ids"]
+        env.tracked[-1]["cb"](_ev(eid, _st("on", 100)))
+        env.reported[-1]["cb"](_ev(eid, _st("on", 105)))
+        assert live.readings.stats(eid) == {"last": 105000, "period": None, "count": 2}
+        env.reported[-1]["cb"](_ev(eid, _st("unavailable", 106)))
+        assert live.readings.stats(eid)["count"] == 2
+
+    asyncio.run(go())
+
+
+def test_state_report_does_not_reach_engine_or_power(env):
+    async def go():
+        hass = FakeHass()
+        live = await _start(env, hass)
+        seen = []
+        live.engine.handle_state = lambda *a, **k: seen.append(a)
+        live.power.handle_state = lambda *a, **k: seen.append(a)
+        live.runtime.handle_state = lambda *a, **k: seen.append(a)
+        env.reported[-1]["cb"](_ev("binary_sensor.leak", _st("off", 100)))
+        assert seen == []
+        env.tracked[-1]["cb"](_ev("binary_sensor.leak", _st("off", 101)))
+        assert len(seen) == 3
+
+    asyncio.run(go())
+
+
+def test_saved_plan_power_schematic_entities_are_tracked_without_subscription(env):
+    async def go():
+        hass = FakeHass()
+        plan = _plan()
+        plan["power"] = {"blocks": [{"id": "g", "kind": "grid", "power": "sensor.grid_w", "voltage": "sensor.grid_v"},
+                                    {"id": "d", "kind": "device", "deviceId": "pc"}]}
+        plan["levels"][0]["devices"].append(
+            {"id": "pc", "name": "pc", "props": {"kind": "socket"}, "bindings": {"power": "sensor.pc_w", "control": "switch.pc"}}
+        )
+        live = await _start(env, hass, plan)
+        ids = env.tracked[-1]["ids"]
+        for e in ("sensor.grid_w", "sensor.grid_v", "sensor.pc_w"):
+            assert e in ids and e in env.reported[-1]["ids"]
+        live.readings.report("sensor.stale", "1", 1.0)
+        live.retrack()
+        assert live.readings.last("sensor.stale") is None
+
+    asyncio.run(go())
+
+
+def test_retrack_and_stop_untrack_both_trackers(env):
+    async def go():
+        hass = FakeHass()
+        live = await _start(env, hass)
+        live.retrack()
+        assert [e["on"] for e in env.tracked] == [False, True] and [e["on"] for e in env.reported] == [False, True]
+        await live.async_stop()
+        assert not env.tracked[-1]["on"] and not env.reported[-1]["on"]
+
+    asyncio.run(go())
+
+
+def test_readings_get_command(env):
+    async def go():
+        hass = FakeHass()
+        live = await _start(env, hass)
+        hass.data["plan_studio"]["live"] = live
+        live.readings.report("sensor.a", "1", 10.0)
+        sent = []
+        conn = types.SimpleNamespace(send_result=lambda i, r=None: sent.append((i, r)), send_error=lambda *a: sent.append(a))
+        env.cmds["plan_studio/readings/get"](hass, conn, {"id": 7, "entity_ids": ["sensor.a", "sensor.b"]})
+        assert sent == [(7, {"readings": {
+            "sensor.a": {"last": 10000, "period": None, "count": 1},
+            "sensor.b": {"last": None, "period": None, "count": 0},
+        }})]
+        import voluptuous as vol
+        schema = vol.Schema(env.schemas["plan_studio/readings/get"])
+        schema({"type": "plan_studio/readings/get", "entity_ids": ["x"] * 200})
+        with pytest.raises(vol.Invalid):
+            schema({"type": "plan_studio/readings/get", "entity_ids": ["x"] * 201})
+
+    asyncio.run(go())
