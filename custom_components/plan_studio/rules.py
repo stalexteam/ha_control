@@ -1131,6 +1131,9 @@ class RuleEngine:
             trace.append(t)
             values.append(t["value"] if t["value"] is None or not i.negate else not t["value"])
         rule.known = [k if v is None else v for v, k in zip(values, rule.known)]
+        # an input unknown at the previous verdict change takes its first known value as its basis: arriving is no
+        # change, its next move is
+        rule.basis = [k if b is None else b for b, k in zip(rule.basis, rule.known)]
         if rule.outside is not None:
             rule.raw = rule.outside.want(values)
         elif rule.motion_light is not None:
@@ -1415,12 +1418,19 @@ class RuleEngine:
         for i, was, now in zip(rule.inputs, rule.basis, rule.known):
             if was is None or now is None or was == now:
                 continue
-            if i.type == "rule":
-                ref = self._rules.get((rule.key[0], i.rule or ""))
-                if ref is None or not ref.real:
-                    continue
+            if i.type == "rule" and not self._ref_real(rule.key[0], i.rule):
+                continue
             return True
         return False
+
+    def _ref_real(self, pid: str, rid: "str | None") -> bool:
+        """Whether the referenced rule's latest verdict change was real. A timed, boiler or light motion control rule
+        moves its verdict by presses, timers and the device's state (often outside _commit): always real. Any other
+        kind (condition, vent, leak, outside light, beurer) moves it through _commit by its inputs: rule.real."""
+        ref = self._rules.get((pid, rid or ""))
+        if ref is None:
+            return False
+        return ref.timed is not None or ref.boiler is not None or ref.motion_light is not None or ref.real
 
     def _new_firing(self, rule: _Rule) -> None:
         rule.seq += 1
@@ -2364,8 +2374,8 @@ class RuleEngine:
                 if self._echo and virtual_device(i.eid) is None:
                     continue  # a real device's change made by a load control rule: chains do not propagate
             # a rule's verdict changed only by inputs back from no data: the event switches but announces nothing
-            ref = self._rules.get((rule.key[0], i.rule or "")) if i.type == "rule" else None
-            self._control_event(rule, i.label, what, announce=ref is None or ref.real)
+            real = i.type != "rule" or self._ref_real(rule.key[0], i.rule)
+            self._control_event(rule, i.label, what, announce=real)
 
     def _rule_event(self, rule: _Rule, *whats: str) -> None:
         """A purpose-built rule's mode changed ("auto", "manual"; heating done gives "done" then "manual"): every

@@ -368,3 +368,46 @@ def test_load_control_no_announcement_at_a_load_or_while_ha_starts():
     assert w.calls == []
     w.set("binary_sensor.pir", "on")
     assert w.calls == [("tts", "speak", "tts.piper", {"media_player_entity_id": "media_player.vlc", "message": "Changed"})]
+
+
+# --- fix round 2: purpose-built verdicts are real; a never-known input's first value is its basis ------------
+
+def test_a_timed_rule_started_by_a_button_is_a_real_change_downstream():
+    """P8: a timed rule's verdict moves by a press, never through a commit: a consumer and a Load control rule-verdict
+    source announce."""
+    from test_timed import BUTTON as TIMED_BUTTON, VENT, timed_rule
+    w = world(fan__vent="off")
+    rules = [timed_rule("t"), rule("y", [ref("t")], onTrue=[SAY]), control([{"source": {"rule": "t"}}], on=[NOTE], rid="lc")]
+    load(w, rules, devices=DEVICES + [TIMED_BUTTON, VENT])
+    w.engine.on_intent("p", "btn", {"action": "set", "value": "on"})
+    assert trace(w, "t")["verdict"] is True and trace(w, "y")["verdict"] is True
+    assert said(w) == [SPEAK, PUSH]
+
+
+def test_a_boiler_rule_entering_auto_is_a_real_change_downstream():
+    from test_boiler import BWorld, boiler_plan, boiler_rule, BOILER, BUTTON as BOILER_BUTTON, WALL
+    w = BWorld(media_player__vlc="idle")
+    rules = [boiler_rule(), rule("y", [ref("r")], onTrue=[SAY]), control([{"source": {"rule": "r"}}], on=[NOTE], rid="lc")]
+    w.engine.load_plans([boiler_plan(rules, [BOILER, BOILER_BUTTON, WALL, SPK, PHONE])], boot=False)
+    w.press("auto")
+    assert w.engine.snapshot("p")["r"]["verdict"] is True
+    assert said(w) == [SPEAK, PUSH]
+
+
+@pytest.mark.parametrize("how", ["restart", "changed save"])
+def test_the_first_real_change_of_an_input_unknown_at_the_last_verdict_announces(how):
+    """P9 / P9b: ANY [m, x]; m unknown at the start, then known off (no verdict change), then on: said."""
+    w = world(binary_sensor__m="unavailable", binary_sensor__m2="off")
+    r = cond([SAY], inputs=("m", "m2"))
+    if how == "restart":
+        load(w, [r], devices=DEVICES + [M2], boot=True)
+        w.engine.started()
+    else:
+        w.states["binary_sensor.m"] = ("off", {})
+        load(w, [{**r, "onTrue": [{**SAY, "text": "Old"}]}], devices=DEVICES + [M2])
+        w.states["binary_sensor.m"] = ("unavailable", {})
+        load(w, [r], devices=DEVICES + [M2])  # starts anew with m unknown
+    w.set("binary_sensor.m", "off")  # m known now: no verdict change
+    assert trace(w)["verdict"] is False and said(w) == []
+    w.set("binary_sensor.m", "on")
+    assert trace(w)["verdict"] is True and said(w) == [SPEAK]
