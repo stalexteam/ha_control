@@ -850,7 +850,7 @@ export class PlanStudioPanel extends LitElement {
                 const live = deviceLive(d, states);
                 const ev = this.events.event(d.id, now);
                 return {
-                  shown: [...ruleModeBubbles(this.session.savedRules, id => this.rulesFeed.trace(id), d.id), ...liveBubbles(live, d, now), ...(ev ? [{ text: ev.text, tone: 'event' as const, key: ev.at }] : [])],
+                  shown: [...ruleModeBubbles(this.session.savedRules, id => this.rulesFeed.trace(id), d.id), ...liveBubbles(live, d, now), ...(ev ? [{ text: ev.text, tone: ev.tone, key: ev.at }] : [])],
                   leaving: this.events.leaving(d.id, now),
                 };
               },

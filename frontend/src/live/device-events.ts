@@ -1,6 +1,7 @@
 import type { Device, Id, Level } from '../model/types';
 import { activeRoleSpecs } from '../model/bindings';
-import { deviceLive, liveBubbles, type DeviceLive, type HassStates, type LiveBubble } from './device-live';
+import { deviceLive, liveBubbles, type BubbleTone, type DeviceLive, type HassStates, type LiveBubble } from './device-live';
+import { t } from '../i18n';
 
 /** How long an action bubble shows, and how long an ended bubble fades. */
 export const EVENT_MS = 10_000;
@@ -11,6 +12,8 @@ export const EVENT_FADE_WINDOW_MS = 1000;
 interface St { state: string; last_changed?: string; attributes?: { event_type?: unknown } }
 interface Watch { entity: string; settled: boolean; valve: boolean }
 interface Seen { last: string }
+/** An action bubble: the text shown, when it came and its tone (`unmatched` = a button press that matches no trigger). */
+export interface ActionEvent { text: string; at: number; tone: Extract<BubbleTone, 'event' | 'unmatched'> }
 interface Leave { bubble: LiveBubble; at: number }
 type Slot = 'timer' | 'power';
 
@@ -21,6 +24,24 @@ const stateOf = (states: HassStates, id: string): St | undefined => {
   const s = states?.[id];
   return s && typeof s === 'object' && typeof (s as St).state === 'string' ? (s as St) : undefined;
 };
+
+/** The action value a trigger waits for: the event alone for slot 0, else `<slot>_<event>` (as the server's `expected_value`). */
+export function expectedAction(slot: number, event: string): string {
+  return slot === 0 ? event : `${slot}_${event}`;
+}
+
+/** The active triggers of a smart button (on; off with separateOff; auto with autoEnabled) that have an entity and an event. */
+export function buttonTriggers(d: Device): { entity: string; value: string }[] {
+  if (d.props.kind !== 'smart_button') return [];
+  const out: { entity: string; value: string }[] = [];
+  for (const { role } of activeRoleSpecs(d)) {
+    if (role !== 'on' && role !== 'off' && role !== 'auto') continue;
+    const entity = d.bindings?.[role];
+    const tr = d.props[role];
+    if (entity && tr && typeof tr.event === 'string' && tr.event) out.push({ entity, value: expectedAction(tr.slot, tr.event) });
+  }
+  return out;
+}
 
 /** Event sources of a device: one entry per distinct entity. */
 function watches(d: Device): Watch[] {
@@ -79,7 +100,7 @@ export function eventSources(level: Level): string[] {
 /** Tracks action events (10 s bubble) and ended bubbles (fading) per device, from hass.states only. */
 export class DeviceEventTracker {
   private seen = new Map<string, Seen>();
-  private events = new Map<Id, { text: string; at: number }>();
+  private events = new Map<Id, ActionEvent>();
   /** The live state behind the device's timer and power bubbles at the last update. */
   private bubbles = new Map<Id, DeviceLive>();
   private leave = new Map<Id, Leave[]>();
@@ -87,13 +108,13 @@ export class DeviceEventTracker {
   /** Compare states with the last seen ones for every event source of the level's devices; record new events and bubble exits. */
   update(level: Level, states: HassStates, now: number): void {
     for (const d of level.devices) {
-      this.updateEvents(d, states, now);
+      this.updateEvents(level, d, states, now);
       this.updateBubbles(d, states, now);
     }
   }
 
   /** The device's event bubble text while under EVENT_MS old, else null. */
-  event(deviceId: Id, now: number): { text: string; at: number } | null {
+  event(deviceId: Id, now: number): ActionEvent | null {
     const e = this.events.get(deviceId);
     return e && now - e.at < EVENT_MS ? e : null;
   }
@@ -106,11 +127,11 @@ export class DeviceEventTracker {
     const out = (this.leave.get(deviceId) ?? []).filter((l) => now - l.at < FADE_MS).map((l) => l.bubble);
     const e = this.events.get(deviceId);
     const age = e ? now - e.at : -1;
-    if (e && age >= EVENT_MS && age < EVENT_MS + EVENT_FADE_WINDOW_MS) out.push({ text: e.text, tone: 'event', key: e.at });
+    if (e && age >= EVENT_MS && age < EVENT_MS + EVENT_FADE_WINDOW_MS) out.push({ text: e.text, tone: e.tone, key: e.at });
     return out;
   }
 
-  private updateEvents(d: Device, states: HassStates, now: number): void {
+  private updateEvents(level: Level, d: Device, states: HassStates, now: number): void {
     const ws = watches(d);
     const prefix = `${d.id}|`;
     const keep = new Set(ws.map((w) => prefix + w.entity));
@@ -122,7 +143,13 @@ export class DeviceEventTracker {
       const key = prefix + w.entity;
       const { value, text } = read(w, s, this.seen.get(key));
       if (value !== undefined) this.seen.set(key, { last: value });
-      if (text) this.events.set(d.id, { text, at: now });
+      if (!text) continue;
+      if (d.props.kind !== 'smart_button') { this.events.set(d.id, { text, at: now, tone: 'event' }); continue; }
+      // A press: shown here when this device's trigger takes it, nowhere else when another button's does, else as "no trigger".
+      if (buttonTriggers(d).some(x => x.entity === w.entity && x.value === text)) this.events.set(d.id, { text, at: now, tone: 'event' });
+      else if (!level.devices.some(o => o !== d && buttonTriggers(o).some(x => x.entity === w.entity && x.value === text))) {
+        this.events.set(d.id, { text: t('live.noTrigger').replace('{action}', text), at: now, tone: 'unmatched' });
+      }
     }
   }
 

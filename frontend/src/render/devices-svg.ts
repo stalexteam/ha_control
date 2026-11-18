@@ -272,7 +272,7 @@ function badge(live: ContainerState, R: number, o: DeviceRenderOpts): SVGTemplat
 
 /** Bubble ring and text colour by tone. */
 function toneColor(tone: BubbleTone, p: PlanPalette): string {
-  return tone === 'motion' ? p.motionCone : tone === 'leak' ? ALERT : tone === 'event' ? p.selection : tone === 'mode' ? p.modeBubble : p.device;
+  return tone === 'motion' ? p.motionCone : tone === 'leak' || tone === 'unmatched' ? ALERT : tone === 'event' ? p.selection : tone === 'mode' ? p.modeBubble : p.device;
 }
 
 /**

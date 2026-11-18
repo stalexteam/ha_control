@@ -78,7 +78,7 @@ describe('EntityFeed', () => {
     const c = fakeConnection();
     const t = new DeviceEventTracker();
     const level = { devices: [{ id: 'b1', name: 'B', invalid: false, placement: { mode: 'free', x: 0, y: 0 },
-      props: { kind: 'smart_button', separateOff: false, autoEnabled: false } as DeviceProps,
+      props: { kind: 'smart_button', separateOff: false, autoEnabled: false, on: { slot: 0, event: 'single' } } as DeviceProps,
       bindings: { on: 'sensor.act' } } as Device] } as unknown as Level;
     // The panel's hass only ever shows the coalesced last value ('').
     const hass = { 'sensor.act': { state: '', last_changed: iso(LC) } };
