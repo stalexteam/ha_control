@@ -198,18 +198,26 @@ def _validate_beurer(r: dict, b: object) -> None:
 def _validate_motion_light(r: dict, m: object) -> None:
     """A light motion control rule: motion sensors (optional) switch one light, buttons (optional; the engine accepts smart buttons and wall switches with
     a state entity, this check only ids) set the mode, an optional blocker (any on / off device, the engine checks it reads as one) keeps auto from acting,
-    offDelay = off after; no inputs, gate, other kinds or actions."""
+    offDelay = off after; optional presence with the neighbour motion sensors (computed by the panel; ids only, the engine
+    ignores one that is not a motion sensor of the plan); no inputs, gate, other kinds or actions."""
     keys = {"light", "sensors", "minOn", "buttons", "autoAfter"}
-    if not isinstance(m, dict) or not keys <= set(m) <= keys | {"daylight", "blocker"}:
-        raise vol.Invalid("rule motionLight needs light, sensors, minOn, buttons, autoAfter and optional daylight, blocker")
+    if not isinstance(m, dict) or not keys <= set(m) <= keys | {"daylight", "blocker", "presence", "neighbours"}:
+        raise vol.Invalid("rule motionLight needs light, sensors, minOn, buttons, autoAfter and optional daylight, blocker, presence, neighbours")
     if not _is_id(m["light"]):
         raise vol.Invalid("rule motionLight needs a light device id")
-    for key in ("sensors", "buttons"):
-        ids = m[key]
+    if "presence" in m and type(m["presence"]) is not bool:
+        raise vol.Invalid("rule motionLight presence must be true or false")
+    for key in ("sensors", "buttons", "neighbours"):
+        ids = m.get(key, [])
         if not isinstance(ids, list) or not all(_is_id(i) for i in ids) or len(set(ids)) != len(ids):
             raise vol.Invalid(f"rule motionLight {key} needs distinct device ids")
         if m["light"] in ids:
             raise vol.Invalid(f"rule motionLight light must not be one of its {key}")
+    if "neighbours" in m:
+        if m.get("presence") is not True:
+            raise vol.Invalid("rule motionLight neighbours need presence")
+        if set(m["neighbours"]) & set(m["sensors"]):
+            raise vol.Invalid("rule motionLight neighbours must not be its sensors")
     if "daylight" in m:
         d = m["daylight"]
         if not isinstance(d, dict) or set(d) != {"sensor", "is"} or not _is_id(d["sensor"]) or d["is"] not in ("night", "dark"):

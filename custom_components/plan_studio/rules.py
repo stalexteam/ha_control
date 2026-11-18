@@ -985,6 +985,7 @@ class RuleEngine:
                 m.waiting = False  # the rule starts anew: it takes the light as it is
                 m.blocked = m.met = None
                 m.day_off = False
+                m.unhold()
             return
         m.seen = m.state(self._lookup)
         stored = self._motion_modes.get(rule.key[0], {}).get(rule.key[1]) if prev is None and motion_modes is not None else None
@@ -1450,9 +1451,11 @@ class RuleEngine:
             actions = [a for a in actions if a.do not in ANNOUNCE]
         if not actions:
             return
+        # a motion light rule's neighbour sensors only end its presence hold: never a reason of its decision
+        shown = rule.motion_light.neighbour_at if rule.motion_light is not None else len(rule.inputs)
         because = [
             f"{t['label']} {t['detail']}"
-            for i, t in zip(rule.inputs, rule.trace_inputs)
+            for i, t in zip(rule.inputs[:shown], rule.trace_inputs)
             if t["value"] is not None and (t["value"] != i.negate) == rule.verdict
         ]
         reason = f"{why}: {', '.join(because)}" if because else why
@@ -1944,11 +1947,12 @@ class RuleEngine:
 
     def _motion(self, rule: _Rule, due: "_Pending | None") -> bool:
         """Evaluate a motion light rule. In auto with motion sensors it is the condition machinery over its inputs (the
-        light held through the slots; a light found on is held; the off waits for the minimum on time; the daylight
-        coming switches a held light off at once). While its blocker reads the chosen state (auto) it holds nothing and
-        sends nothing: blocking starting (or auto entered while blocked) switches the light off, ending it takes a fresh
-        decision. In manual, in auto without motion sensors (inert), while HA starts, disabled or with a static problem
-        it is out of the slots (verdict None, nothing sent); manual arms the auto-return. True when the verdict changed."""
+        light held through the slots; a light found on is held; the off waits for the minimum on time and, with presence,
+        for a neighbour's motion or the maximum hold; the daylight coming switches a held light off at once). While its
+        blocker reads the chosen state (auto) it holds nothing and sends nothing: blocking starting (or auto entered
+        while blocked) switches the light off, ending it takes a fresh decision. In manual, in auto without motion
+        sensors (inert), while HA starts, disabled or with a static problem it is out of the slots (verdict None,
+        nothing sent); manual arms the auto-return. True when the verdict changed."""
         m = rule.motion_light
         assert m is not None
         self._compute(rule)
@@ -1966,12 +1970,14 @@ class RuleEngine:
         if not active or m.mode == "manual" or not m.sensors:
             if not active or m.mode == "auto":
                 m.stop()
+            m.unhold()
             rule.cancel()
             rule.open, rule.verdict, m.entered = False, None, False
             return rule.verdict != was
-        m.stop()
         rule.open = True
         if m.blocked:
+            m.stop()
+            m.unhold()
             m.waiting = False
             if change == "start" or m.entered:
                 self._motion_block(rule)
@@ -1990,6 +1996,8 @@ class RuleEngine:
             self._motion_decide(rule, False, "daylight")
             m.day_off = True  # motion no longer keeps a light reading on (an off kept back or lost) while not dark
         m.entered = False
+        if m.hold(values, now, rule.verdict is True):
+            rule.raw = True  # someone is still in the zone (spec presence hold §3): the off delay waits
         if self._step(rule, due):
             # the rule decided to switch the light on: the minimum on time counts from here
             m.on_at = now if rule.verdict is True else None
@@ -1997,12 +2005,16 @@ class RuleEngine:
             m.dropped = None
         if rule.verdict is True:
             m.day_off = False  # the rule holds a light again
+        else:
+            m.unhold()  # nothing held: a later hold starts anew
+        self._motion_arm(rule, m.hold_until(now))  # the hold's end (auto has no other timer)
         return rule.verdict != was
 
     def _motion_hold(self, rule: _Rule, on: bool, note: bool = True) -> None:
         """Take the light's state as the verdict without a command: a light found on is held (its off comes after the
-        off delay; the minimum on time does not apply; recorded as "found on" unless `note` is False; it ends a wait for
-        new motion and a daylight off's mark), one found off is not."""
+        off delay, with presence once someone left or after the maximum hold; the minimum on time does not apply;
+        recorded as "found on" unless `note` is False; it ends a wait for new motion and a daylight off's mark), one
+        found off is not."""
         m = rule.motion_light
         assert m is not None and m.eid is not None
         rule.cancel()
@@ -2079,6 +2091,7 @@ class RuleEngine:
         was = m.mode
         m.mode, m.since, m.moving, m.on_at, m.entered, m.own, m.waiting = "manual", self._now(), False, None, False, [], False
         m.dropped, m.day_off = None, False
+        m.unhold()
         m.presses += 1  # an older press's command is no longer wanted
         rule.cancel()
         rule.open, rule.verdict = False, None
@@ -2121,6 +2134,7 @@ class RuleEngine:
         m.mode, m.since, m.moving, m.on_at, m.entered, m.own, m.waiting = "auto", None, False, None, True, [], False
         m.presses += 1  # a press's command is no longer wanted
         m.stop()
+        m.unhold()
         rule.cancel()
         rule.verdict = None
         rule.last, rule.failed = {"action": "auto", "target": m.label, "at": int(self._now() * 1000), "reason": why,

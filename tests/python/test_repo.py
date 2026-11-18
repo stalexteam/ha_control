@@ -451,6 +451,31 @@ def test_validate_plan_motion_light_blocker():
             validate_plan({**plan("p"), "rules": [motion_rule(ml={**good, "blocker": b})]})
 
 
+def test_validate_plan_motion_light_presence():
+    """0.28.0: an optional presence flag and the neighbour motion sensors (ids only; only with presence; none of the
+    light or the rule's own sensors)."""
+    good = motion_rule()["motionLight"]
+    for ml in ({**good, "presence": True}, {**good, "presence": False}, {**good, "presence": True, "neighbours": []},
+               {**good, "presence": True, "neighbours": ["n1", "n2"]}):
+        validate_plan({**plan("p"), "rules": [motion_rule(ml=ml)]})
+    cases = [
+        ({**good, "presence": "yes"}, "rule motionLight presence must be true or false"),
+        ({**good, "presence": 1}, "rule motionLight presence must be true or false"),
+        ({**good, "presence": None}, "rule motionLight presence must be true or false"),
+        ({**good, "neighbours": ["n1"]}, "rule motionLight neighbours need presence"),
+        ({**good, "presence": False, "neighbours": ["n1"]}, "rule motionLight neighbours need presence"),
+        ({**good, "presence": True, "neighbours": "n1"}, "rule motionLight neighbours needs distinct device ids"),
+        ({**good, "presence": True, "neighbours": ["n1", "n1"]}, "rule motionLight neighbours needs distinct device ids"),
+        ({**good, "presence": True, "neighbours": [""]}, "rule motionLight neighbours needs distinct device ids"),
+        ({**good, "presence": True, "neighbours": [3]}, "rule motionLight neighbours needs distinct device ids"),
+        ({**good, "presence": True, "neighbours": ["l"]}, "rule motionLight light must not be one of its neighbours"),
+        ({**good, "presence": True, "neighbours": ["n1", "s2"]}, "rule motionLight neighbours must not be its sensors"),
+    ]
+    for ml, msg in cases:
+        with pytest.raises(vol.Invalid, match=msg):
+            validate_plan({**plan("p"), "rules": [motion_rule(ml=ml)]})
+
+
 def ctl(**kw):
     c = {"sources": [{"button": "b"}], "on": [], "off": [], "toggle": [{"device": "l", "do": "toggle"}]}
     c.update(kw)
