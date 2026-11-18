@@ -503,7 +503,7 @@ const en: Dict = {
   'motionLight.flow.noSensors': 'no motion sensors: auto does nothing',
   'motionLight.flow.autoNoButton': 'auto (no button)',
   'motionLight.flow.waiting': 'waiting for new motion',
-  'motionLight.flow.held': 'held: nobody left (until {until})',
+  'motionLight.flow.held': 'held: nobody left (ends in {until})',
   'motionLight.flow.left': 'left: {name}',
   'motionLight.flow.byButton': 'back to auto: a button\'s Auto action',
   'leak.title': 'Leak protection',

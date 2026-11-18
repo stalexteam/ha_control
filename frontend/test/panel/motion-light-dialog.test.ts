@@ -483,7 +483,7 @@ describe('Light motion control blocker', () => {
       const base = SCENES.motionlight.rulesFrame!['rule-ml'];
       const frame = (m: Partial<MotionLightTrace>) => ({ ...SCENES.motionlight.rulesFrame, 'rule-ml': { ...base, motionLight: { ...base.motionLight!, present: true, ...m } } }) as never;
       for (const [m, text] of [
-        [{ holdUntil: Date.now() + 1_620_500 }, 'held: nobody left (until 27:'],
+        [{ holdUntil: Date.now() + 1_620_500 }, 'held: nobody left (ends in 27:'],
         [{ left: 'Motion Transit', offAt: Date.now() + 160_000 }, 'left: Motion Transit'],
       ] as const) {
         document.body.innerHTML = ''; localStorage.clear();

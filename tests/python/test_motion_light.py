@@ -1968,7 +1968,8 @@ def test_presence_table():
     assert m.hold([False, True], 5, True) is False and m.left == "Motion Entrance"  # off -> on: recorded
     assert m.hold([True, True], 10, True) is False and m.left is None  # the zone's motion starts: forgotten
     # the neighbour already read motion when the zone's motion started (someone came in from there): no departure
-    assert m.hold([False, True], 70, True) is True and m.hold_from == 70  # the zone's motion ends: held
+    assert m.hold([True, False], 25, True) is False and m.left is None
+    assert m.hold([False, False], 70, True) is True and m.hold_from == 70  # the zone's motion ends: held
     assert m.hold_until(70) == 70 + HOLD
     assert m.hold([False, None], 80, True) is True  # no data tells nothing
     assert m.hold([False, True], 90, True) is True  # nor does a return from no data
@@ -1981,9 +1982,17 @@ def test_presence_table():
     assert m.hold([True, True], 130, True) is False and m.left == "Motion Entrance"
     assert m.hold([False, True], 190, True) is False and m.hold_from is None  # the zone clears: no hold, off delay
     assert m.hold([True, True], 200, True) is False and m.left is None  # back: the departure no longer counts
-    assert m.hold([False, True], 260, True) is True and m.hold_from == 260
-    assert m.hold([False, True], 260 + HOLD - 1, True) is True
-    assert m.hold([False, True], 260 + HOLD, True) is False and m.left is None  # the maximum hold has passed
+    # final review: a neighbour reading motion at the zone's motion end is a departure (a short visit re-triggers it
+    # on the way out without a new off -> on); one without data tells nothing
+    assert m.hold([False, True], 218, True) is False and m.hold_from is None and m.left == "Motion Entrance"
+    assert m.hold([True, True], 230, True) is False and m.left is None
+    assert m.hold([True, None], 235, True) is False
+    assert m.hold([False, None], 250, True) is True and m.hold_from == 250
+    assert m.hold([True, None], 255, True) is False and m.hold_from is None
+    assert m.hold([True, False], 258, True) is False
+    assert m.hold([False, False], 260, True) is True and m.hold_from == 260
+    assert m.hold([False, False], 260 + HOLD - 1, True) is True
+    assert m.hold([False, False], 260 + HOLD, True) is False and m.left is None  # the maximum hold has passed
     assert m.hold([False, False], 260 + HOLD + 1, False) is False and m.hold_from is None  # the light let go
     # a motion end while the light is not held, then the light held: no hold (no motion end while held)
     assert m.hold([True, False], 3000, False) is False
@@ -2078,23 +2087,25 @@ def test_a_trip_longer_than_the_off_delay_switches_off_and_the_return_switches_o
 
 
 def test_a_neighbour_already_on_when_the_zone_motion_started_does_not_count():
-    """Someone comes in from the neighbouring zone: its sensor still reads motion when the zone's motion starts; only
-    its next off -> on is a departure."""
+    """Someone comes in from the neighbouring zone: its sensor still reads motion when the zone's motion starts and
+    clears 18 s later; only its next off -> on is a departure."""
     w = loaded([ml_rule(sensors=("pir1", "pir2"), **PRESENT)])
     w.pir("on", 3)  # in the neighbouring zone
     w.pir("on", 1)  # comes in: the zone's motion starts while the neighbour still reads motion
     assert w.calls == [ON]
     w.light("on", own=True)
     w.pir("on", 2)
+    w.advance(T0 + 18)
+    w.pir("off", 3)
+    w.advance(T0 + 30)
     w.pir("off", 1)  # another sensor of the zone still sees motion: no hold yet, nothing pending
     t = w.tr()
     assert "present" not in t["motionLight"] and "pending" not in t and t["verdict"] is True
-    w.pir("off", 2)  # the zone's last sensor clears while the neighbour still reads motion: held
+    w.advance(T0 + 40)
+    w.pir("off", 2)  # the zone's last sensor clears: held
     t = w.tr()
     assert t["motionLight"]["present"] is True and "left" not in t["motionLight"] and "pending" not in t
     w.advance(T0 + 300)
-    w.pir("off", 3)
-    assert w.ml()["present"] is True
     w.pir("on", 3)  # its next off -> on: a departure
     t = w.tr()
     assert t["motionLight"]["left"] == "Motion Entrance" and t["pending"]["at"] == (T0 + 480) * 1000
@@ -2141,27 +2152,29 @@ def test_a_person_moving_on_in_the_neighbouring_zone_is_not_held():
 
 
 def test_a_walk_out_and_back_with_sensor_timeouts():
-    """The owner's "a walk to the kitchen and back" with real sensor timeouts: the departure is seen while the zone
-    still reads motion; the zone clears: the off delay; the return's motion cancels it and the departure; the next
-    clear holds again (the neighbour read motion before the zone's motion started: no departure)."""
+    """The owner's "a walk to the kitchen and back" with sensor timeouts (live ~18 s after the last movement): the
+    departure is seen while the zone still reads motion; the zone clears: the off delay; the return's motion cancels it
+    and the departure; the next clear holds again (the neighbour read motion before the zone's motion started and has
+    cleared since: no departure)."""
     w = lit([ml_rule(**PRESENT)])
     w.advance(T0 + 5)
-    w.pir("on", 3)
-    w.advance(T0 + 65)
+    w.pir("on", 3)  # leaves: the neighbour sees them, the zone still reads motion
+    w.advance(T0 + 23)
     w.pir("off")
-    assert w.tr()["pending"]["at"] == (T0 + 245) * 1000
-    w.advance(T0 + 70)
     w.pir("off", 3)
+    assert w.tr()["pending"]["at"] == (T0 + 203) * 1000
     w.advance(T0 + 120)
     w.pir("on", 3)  # back through the neighbouring zone
     w.advance(T0 + 125)
     w.pir("on")  # back in the zone: the off delay and the departure are gone
     t = w.tr()
     assert w.calls == [] and "pending" not in t and t["verdict"] is True and "left" not in t["motionLight"]
-    w.advance(T0 + 185)
-    w.pir("off")  # sits still
+    w.advance(T0 + 138)
+    w.pir("off", 3)
+    w.advance(T0 + 148)
+    w.pir("off")  # sat down at +130
     t = w.tr()
-    assert t["motionLight"]["present"] is True and t["motionLight"]["holdUntil"] == (T0 + 185 + HOLD) * 1000
+    assert t["motionLight"]["present"] is True and t["motionLight"]["holdUntil"] == (T0 + 148 + HOLD) * 1000
     assert "pending" not in t
     w.advance(T0 + 1000)
     assert w.calls == [] and w.ml()["present"] is True
@@ -2169,12 +2182,14 @@ def test_a_walk_out_and_back_with_sensor_timeouts():
 
 def test_two_people_zone_motion_while_a_departure_off_delay_runs_keeps_the_light():
     """One person leaves through the neighbouring zone while another moves in the zone: the light stays; the one left
-    sitting still keeps it again although the neighbour still reads motion."""
+    sitting still keeps it again."""
     w = lit([ml_rule(**PRESENT)])
     w.pir("off")
     w.advance(T0 + 100)
     w.pir("on", 3)  # one leaves
     assert w.tr()["pending"]["at"] == (T0 + 280) * 1000
+    w.advance(T0 + 118)
+    w.pir("off", 3)
     w.advance(T0 + 200)
     w.pir("on")  # the other moves in the zone: the off is cancelled
     w.advance(T0 + 3600)
@@ -2197,6 +2212,7 @@ def test_sleep_or_daylight_switch_a_held_light_off_at_once():
     assert "present" not in t["motionLight"] and "holdUntil" not in t["motionLight"]
     w.light("off", own=True)
     w.pir("on", 3)
+    w.pir("off", 3)
     w.sleep("off")  # no motion, the light off: nothing to decide
     t = w.tr()
     assert w.calls == [OFF] and t["verdict"] is False and "present" not in t["motionLight"] and not w.pending()
@@ -2368,6 +2384,77 @@ def test_a_disabled_or_deleted_rule_drops_the_hold():
     assert w.calls == [] and not w.pending()
 
 
+def entered_from_the_neighbour(rules, neighbour=3):
+    """The neighbour sees the person at -3 s, the zone at 0 (its motion starts while the neighbour reads motion); the
+    light on and confirmed; the calls cleared."""
+    w = MWorld()
+    w.load(rules)
+    w.t = T0 - 3
+    w.pir("on", neighbour)
+    w.t = T0
+    w.pir("on")
+    assert w.calls == [ON]
+    w.light("on", own=True)
+    w.calls.clear()
+    return w
+
+
+def test_a_short_visit_entered_from_a_neighbour_is_not_held():
+    """Final review (live on-periods ~18 s): in through the neighbour (on at -3), out at +10 re-triggering the still-on
+    neighbour (it reads motion until +30, no new off -> on), the zone clears at +28: the neighbour reads motion at the
+    zone's motion end: a departure, the off delay at once (as without presence)."""
+    w = entered_from_the_neighbour([ml_rule(off=60, **PRESENT)])
+    w.advance(T0 + 28)
+    w.pir("off")
+    t = w.tr()
+    assert "present" not in t["motionLight"] and t["motionLight"]["left"] == "Motion Entrance"
+    assert t["pending"] == {"to": False, "at": (T0 + 88) * 1000} and len(w.pending()) == 1
+    w.advance(T0 + 30)
+    w.pir("off", 3)
+    w.advance(T0 + 87)
+    assert w.calls == []
+    w.advance(T0 + 88)
+    assert w.calls == [OFF] and w.tr()["verdict"] is False
+
+
+def test_a_quick_sit_after_entering_from_a_neighbour_is_held():
+    """In through the neighbour (on at -3, clears at +15), sits down at +20: the zone clears at +38 while the
+    neighbour reads no motion: held."""
+    w = entered_from_the_neighbour([ml_rule(**PRESENT)])
+    w.advance(T0 + 15)
+    w.pir("off", 3)
+    w.advance(T0 + 38)
+    w.pir("off")
+    t = w.tr()
+    assert t["motionLight"]["present"] is True and t["motionLight"]["holdUntil"] == (T0 + 38 + HOLD) * 1000
+    assert "left" not in t["motionLight"] and "pending" not in t
+    w.advance(T0 + 1200)
+    assert w.calls == []
+
+
+def test_staying_in_the_zone_after_entering_from_a_neighbour_is_held():
+    """In through the neighbour, moves in the zone for 5 min, then sits still: held."""
+    w = entered_from_the_neighbour([ml_rule(**PRESENT)])
+    w.advance(T0 + 15)
+    w.pir("off", 3)
+    w.advance(T0 + 300)
+    w.pir("off")
+    t = w.tr()
+    assert t["motionLight"]["present"] is True and "left" not in t["motionLight"] and "pending" not in t
+
+
+def test_a_neighbour_without_data_at_the_zone_motion_end_tells_nothing():
+    """The neighbour read motion, then lost its data before the zone's motion end: no departure."""
+    for lost in ("unavailable", "unknown"):
+        w = entered_from_the_neighbour([ml_rule(**PRESENT)])
+        w.advance(T0 + 10)
+        w.pir(lost, 3)
+        w.advance(T0 + 28)
+        w.pir("off")
+        t = w.tr()
+        assert t["motionLight"]["present"] is True and "left" not in t["motionLight"] and "pending" not in t, lost
+
+
 def test_presence_trace_and_reasons():
     w = loaded([ml_rule(presence=True, neighbours=("pir3", "pir4"))])
     t = w.tr()
@@ -2381,11 +2468,12 @@ def test_presence_trace_and_reasons():
     assert w.calls == [ON] and t["last"]["reason"] == "became true: Motion 1 motion"
     assert [s["id"] for s in t["motionLight"]["sensors"]] == ["pir1"] and t["motionLight"]["motion"] is True
     w.light("on", own=True)
-    w.pir("off")
     w.pir("off", 3)
+    w.pir("off")
+    assert w.ml()["present"] is True
     w.pir("on", 4)
     t = w.tr()
-    assert t["motionLight"]["left"] == "Motion Transit"
+    assert t["motionLight"]["left"] == "Motion Transit" and "present" not in t["motionLight"]
     w.advance(T0 + 180)
     t = w.tr()
     assert w.calls == [ON, OFF] and t["last"]["reason"] == "became false: Motion 1 clear"

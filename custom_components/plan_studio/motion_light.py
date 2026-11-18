@@ -220,10 +220,12 @@ class MotionLight:
         the last movement); a neighbour already on when the zone's motion started counts only after an off; a new
         motion start of the zone clears it; to or from no data tells nothing.
         Hold: starts at the zone's motion END while the rule holds the light (the zone read motion at the previous
-        evaluation and every own sensor that did now reads a known off) unless a departure is recorded (then the off
-        delay starts at once); it lasts while no departure comes and HOLD_MAX has not passed. A light taken as found
-        on without a motion end is not held. Motion in the zone or the rule no longer holding the light ends it. Never
-        without neighbour sensors."""
+        evaluation and every own sensor that did now reads a known off) unless a departure is recorded or a neighbour
+        reads motion at that moment (final review: a visit shorter than the neighbour's on-period re-triggers it on the
+        way out without a new off -> on; someone who sits down lets it clear first) — then the off delay starts at
+        once; it lasts while no departure comes and HOLD_MAX has not passed. A light taken as found on without a motion
+        end is not held. Motion in the zone or the rule no longer holding the light ends it. Never without neighbour
+        sensors."""
         n, k = len(self.sensors), self.neighbour_at
         own = [values[i] if len(values) > i else None for i in range(n)]
         seen = [values[k + j] if len(values) > k + j else None for j in range(len(self.neighbours))]
@@ -241,7 +243,11 @@ class MotionLight:
             return False
         ended = True in was and all(s is False for p, s in zip(was, own) if p is True)
         if ended and self.left is None:
-            self.hold_from = now
+            j = next((j for j, s in enumerate(seen) if s is True), None)  # without data tells nothing
+            if j is not None:
+                self.left = self.neighbour_names[j]  # it still reads the person passing it on the way out
+            else:
+                self.hold_from = now
         return self.present(now)
 
     def present(self, now: float) -> bool:
