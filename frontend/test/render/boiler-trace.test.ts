@@ -135,6 +135,23 @@ describe('boiler diagram', () => {
     expect(text(draw({ trace: live({}) }).host, 'boiler-grid')).toBe('AC-IN | 546 W');
   });
 
+  it('the headroom is "not judged", neutral, while the meters settle or an unknown draw leaves it undecided', () => {
+    const settling = draw({ trace: live({ grid: 2054, headroom: 3454, settling: NOW + 5_000 }) }).host;
+    expect(text(settling, 'boiler-limit')).toBe('Headroom: not judged | grid + 1400 - boiler = 3454 / 3000 W');
+    expect(cls(settling, 'boiler-limit')).not.toContain('off');
+    expect(cls(settling, 'boiler-limit')).not.toContain('on');
+    const undecided = draw({ trace: live({ grid: 2023, boilerW: null, headroom: 3423, relay: null }) }).host;
+    expect(text(undecided, 'boiler-limit')).toMatch(/^Headroom: not judged \|/);
+    expect(cls(undecided, 'boiler-limit')).not.toContain('off');
+    // judged: the relay known off (no draw), a grid over the limit, a settle time already over
+    for (const b of [{ grid: 2023, boilerW: null, headroom: 3423, relay: 'off' as const },
+      { grid: 3200, boilerW: null, headroom: 4600, relay: null }, { grid: 2054, headroom: 3454, settling: NOW - 1 }]) {
+      const h = draw({ trace: live(b) }).host;
+      expect(text(h, 'boiler-limit')).toMatch(/^Headroom: over the limit \|/);
+      expect(cls(h, 'boiler-limit')).toContain('off');
+    }
+  });
+
   it('a failed last call adds the error line; an error status shows under the diagram', () => {
     const { host } = draw({
       trace: live({ relay: 'off' }, {

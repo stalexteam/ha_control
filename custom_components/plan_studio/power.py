@@ -78,8 +78,8 @@ def block_ports(block: dict, devices: dict | None = None) -> dict[str, str]:
 def device_bindings(plan: dict) -> dict[str, dict[str, str]]:
     """The power roles (`_ROLES`) bound on every plan device, by device id.
 
-    Not used by the live feed (the panel sends the bindings with the draft); kept for the automation stage. Only
-    tests call it today.
+    The live power subscription does not use it (the panel sends the bindings with the draft); the runtime (`live.py`)
+    uses it to track the entities of the saved plans' power schematics for the reading statistics.
     """
     out: dict[str, dict[str, str]] = {}
     for level in _list(plan.get("levels")):

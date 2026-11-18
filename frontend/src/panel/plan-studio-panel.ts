@@ -293,7 +293,7 @@ export class PlanStudioPanel extends LitElement {
       || this.events.leaving(d.id, now).length > 0);
     const tr = this.modal && this.ruleDraft ? this.shownRuleTrace(this.ruleDraft.rule) : undefined;
     const countdown = !!tr && (!!tr.pending || tr.inputs.some(i => i.until !== undefined && i.until > now) || (tr.gate?.until ?? 0) > now
-      || (tr.boiler?.until ?? 0) > now || (tr.timed?.running === true && (tr.timed.until ?? 0) > now)
+      || (tr.boiler?.until ?? 0) > now || (tr.boiler?.settling ?? 0) > now || (tr.timed?.running === true && (tr.timed.until ?? 0) > now)
       || [tr.outside?.pausedUntil, tr.outside?.until, tr.outside?.windowUntil, tr.beurer?.pausedUntil, tr.beurer?.cycleAt, tr.beurer?.keptUntil, tr.motionLight?.offAt, tr.motionLight?.minUntil, tr.motionLight?.autoAt].some(u => (u ?? 0) > now));
     if ((need || countdown) && !this.ticker) this.ticker = setInterval(() => this.requestUpdate(), 1000);
     else if (!need && !countdown) this.stopTicker();

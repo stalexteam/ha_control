@@ -94,3 +94,9 @@ def test_stats_ms():
     feed(r, [100, 105.5, 111, 116.5])
     assert r.stats(E) == {"last": 116500, "period": 5500, "count": 4}
     assert r.stats("sensor.none") == {"last": None, "period": None, "count": 0}
+
+
+def test_a_report_not_after_the_latest_is_skipped():
+    r = Readings()
+    feed(r, [100, 105, 105, 103, 110, 115])  # the same ms twice, a backward clock step: no 0 s or negative interval
+    assert r.stats(E) == {"last": 115000, "period": 5000, "count": 4}

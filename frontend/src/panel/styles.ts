@@ -211,6 +211,7 @@ export const panelStyles = css`
   .power-hint { position: absolute; z-index: 5; pointer-events: none; white-space: nowrap; box-sizing: border-box;
     padding: 6px 10px; border: 1px solid var(--ch-divider); border-radius: 6px; background: var(--ch-card); color: var(--ch-text);
     font-size: 12px; line-height: 17px; box-shadow: 0 2px 8px rgba(0, 0, 0, .25); }
+  .power-hint .line { white-space: pre; } /* keeps the two spaces between label and value; lines never wrap */
   .canvas svg { width: 100%; height: 100%; display: block; user-select: none; }
   .draft-banner { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 5;
     display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--ch-radius);

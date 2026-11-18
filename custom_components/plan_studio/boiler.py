@@ -223,11 +223,13 @@ class Boiler:
     def _auto(self, now: float, grid: float | None, power: float | None, relay: str | None,
               settle: float | None) -> "tuple[str | None, str]":
         self.until = None
+        undecided = False  # the limit cannot be told from the bounds of an unknown boiler draw (spec reading-stats §4.1)
         if self.limited:
             if grid is None:
                 return self._off(now, relay, "blackout", "blackout")  # never delayed
             self.settling = settle  # the limit is not judged until the meters settle
             over = self._over(grid, power, relay) if settle is None else None
+            undecided = settle is None and over is None
             if over is None:
                 if self.holding:
                     return None, ""  # the off reason in force stays: same phase, the 15 s wait not started yet
@@ -240,7 +242,8 @@ class Boiler:
             self.phase, self.until = "waiting", self.last_off + OFF_WAIT
             return None, ""
         self.phase = "heating"
-        do = self._want("on", relay, now)
+        # never switched on into a possible overload while undecided; a relay that is on stays on
+        do = None if undecided else self._want("on", relay, now)
         if self.last_on is not None and now - self.last_on < ON_WAIT:
             self.until = self.last_on + ON_WAIT
             return do, "auto"

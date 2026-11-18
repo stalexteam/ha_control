@@ -192,8 +192,12 @@ class LiveRuntime:
         return out
 
     def _report(self, entity_id: str, new: State | None) -> None:
-        at = None if new is None else (getattr(new, "last_reported", None) or getattr(new, "last_updated", None))
-        self.readings.report(entity_id, None if new is None else new.state, at.timestamp() if at else time.time())
+        """Feed the statistics; a failure here never blocks the containers, the power feed or the rules."""
+        try:
+            at = None if new is None else (getattr(new, "last_reported", None) or getattr(new, "last_updated", None))
+            self.readings.report(entity_id, None if new is None else new.state, at.timestamp() if at else time.time())
+        except Exception:  # noqa: BLE001 - the statistics must never disturb the automations
+            _LOGGER.debug("could not record a report of %s", entity_id, exc_info=True)
 
     @callback
     def _on_report(self, event: Event) -> None:

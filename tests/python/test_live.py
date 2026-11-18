@@ -1359,6 +1359,34 @@ def test_saved_plan_power_schematic_entities_are_tracked_without_subscription(en
     asyncio.run(go())
 
 
+def test_a_tracked_entity_keeps_its_history_across_retrack(env):
+    async def go():
+        hass = FakeHass()
+        live = await _start(env, hass)
+        eid = "binary_sensor.leak"
+        for at in (100, 105, 110):
+            env.reported[-1]["cb"](_ev(eid, _st("off", at)))
+        live.retrack()
+        assert live.readings.stats(eid)["count"] == 3
+
+    asyncio.run(go())
+
+
+def test_a_failing_report_does_not_block_the_event(env):
+    async def go():
+        hass = FakeHass()
+        live = await _start(env, hass)
+        seen = []
+        live.engine.handle_state = lambda *a, **k: seen.append("engine")
+        live.power.handle_state = lambda *a, **k: seen.append("power")
+        live.runtime.handle_state = lambda *a, **k: seen.append("runtime")
+        junk = types.SimpleNamespace(state="on", attributes={}, last_changed=None, last_updated="x", last_reported="x")
+        env.tracked[-1]["cb"](_ev("binary_sensor.leak", junk))  # "x".timestamp() raises
+        assert seen == ["runtime", "power", "engine"]
+
+    asyncio.run(go())
+
+
 def test_retrack_and_stop_untrack_both_trackers(env):
     async def go():
         hass = FakeHass()

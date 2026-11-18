@@ -190,6 +190,17 @@ describe('Boiler form', () => {
     expect(el.tickerOn).toBe(false);
   });
 
+  it('the settling countdown alone runs the 1 s ticker', async () => {
+    const frame = structuredClone(SCENES['boiler-settling'].rulesFrame!);
+    const b = frame['rule-boiler'].boiler!;
+    delete b.until;
+    b.settling = Date.now() + 9_000;
+    const el = await open(undefined, undefined, frame);
+    await edit(el, 'rule-boiler');
+    expect(q<HTMLElement>(el, '[data-block="boiler-grid"]').textContent).toMatch(/limit not judged until the meters report \(0:\d\d\)/);
+    expect(el.tickerOn).toBe(true);
+  });
+
   it('a new rule shows no live values', async () => {
     const el = await open();
     await selectZone(el, 'z-util');

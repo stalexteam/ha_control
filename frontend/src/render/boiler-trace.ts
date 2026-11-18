@@ -81,8 +81,11 @@ export function renderBoilerTrace(o: BoilerTraceOpts): TemplateResult {
     add('boiler-grid', b ? (b.grid === null ? tone(null) : '') : '', [o.gridName(g.block), b ? watts(b.grid) : t('boiler.flow.gridPower'), ...settling]);
     const formula = t('boiler.flow.formula').replace('{nominal}', shown(g.nominal));
     const over = b && b.headroom !== null ? b.headroom > g.limit : null;
-    add('boiler-limit', b ? tone(over === null ? null : !over) : '', [
-      b ? `${t('boiler.flow.headroom')}: ${over === null ? word(null) : over ? t('boiler.flow.over') : t('boiler.flow.ok')}` : t('boiler.flow.headroom'),
+    // not judged (spec reading-stats §4.1): the meters settle after a switch, or an unknown draw leaves it undecided
+    const unjudged = !!b && (settling.length > 0 || (b.boilerW === null && b.relay !== 'off' && b.grid !== null
+      && b.grid <= g.limit && b.grid + g.nominal > g.limit));
+    add('boiler-limit', b ? (unjudged ? '' : tone(over === null ? null : !over)) : '', [
+      b ? `${t('boiler.flow.headroom')}: ${unjudged ? t('boiler.flow.notJudged') : over === null ? word(null) : over ? t('boiler.flow.over') : t('boiler.flow.ok')}` : t('boiler.flow.headroom'),
       b && b.headroom !== null ? `${formula} = ${Math.round(b.headroom)} / ${shown(g.limit)} W` : `${formula} ≤ ${shown(g.limit)} W`,
     ]);
   }

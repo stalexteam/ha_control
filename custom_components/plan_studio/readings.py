@@ -25,6 +25,8 @@ class Readings:
                 self._gap.add(entity_id)
             return
         reports = self._reports.setdefault(entity_id, [])
+        if reports and now <= reports[-1][0]:
+            return  # not after the latest (the same ms, a clock step back): no 0 s or negative interval
         reports.append((now, state, entity_id in self._gap))
         self._gap.discard(entity_id)
         if len(reports) > KEEP:

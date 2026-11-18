@@ -509,6 +509,7 @@ const en: Dict = {
   'boiler.flow.formula': 'grid + {nominal} - boiler',
   'boiler.flow.ok': 'ok',
   'boiler.flow.over': 'over the limit',
+  'boiler.flow.notJudged': 'not judged',
   'boiler.flow.mode': 'Mode',
   'boiler.flow.button': 'button: {name}',
   'boiler.flow.relay': 'Relay',

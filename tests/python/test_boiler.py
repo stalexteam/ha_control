@@ -1055,6 +1055,7 @@ def test_stats_a_silent_boiler_meter_is_settled_after_two_of_its_periods():
     w.advance(1012)  # T + 2 + 2 * 5 s
     assert w.calls == [ON, OFF] and w.b()["phase"] == "limit" and "settling" not in w.b()
     assert w.engine.snapshot("p")["r"]["last"]["reason"] == "power limit"
+    assert w.pending() == []  # the tick stopped: a holding limit waits for a reading
 
 
 def test_stats_a_same_value_report_is_caught_by_the_next_tick():
@@ -1221,3 +1222,26 @@ def test_ha_restart_with_the_grid_over_the_limit_and_no_boiler_data_switches_off
     w.engine.started()
     assert w.calls == [OFF] and w.b()["phase"] == "limit"
     assert w.engine.snapshot("p")["r"]["last"]["reason"] == "power limit"
+
+
+# --- 0.24.0 final review: never switch on while the limit is undecided by bounds (reading-stats §4.1 amended) ---
+
+def test_restored_auto_undecided_by_bounds_sends_nothing_and_never_switches_on():
+    """Relay and boiler meter unknown, grid 2500 W: 2500 <= 3000 < 2500 + 1400, the boiler draw decides."""
+    w = BWorld(switch__relay="unknown", sensor__bp="unknown", sensor__grid=("2500", W))
+    w.engine.load_plans([boiler_plan()], boot=True, modes={"p": {"r": "auto"}})
+    w.engine.started()
+    assert w.calls == [] and w.b()["mode"] == "auto" and "settling" not in w.b()
+    w.set("switch.relay", "off")  # known off: no draw, 2500 + 1400 > 3000
+    assert w.calls == [] and w.b()["phase"] == "limit" and w.b()["mode"] == "auto"
+    w.set("sensor.grid", "3900", W)
+    w.advance(w.t + 120)
+    assert ON not in w.calls and w.b()["phase"] == "limit"
+
+
+def test_auto_pressed_undecided_by_bounds_does_not_switch_on():
+    w = loaded(switch__relay="unknown", sensor__bp="unknown", sensor__grid=("2500", W))
+    w.press("auto")
+    assert w.calls == [] and w.b()["mode"] == "auto"
+    w.set("sensor.bp", "0", W)  # decided: 2500 + 1400 - 0 > 3000
+    assert w.calls == [OFF] and w.b()["phase"] == "limit"
