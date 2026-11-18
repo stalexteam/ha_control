@@ -49,15 +49,22 @@ class _Record:
 class Expected:
     def __init__(self) -> None:
         self._records: dict[str, _Record] = {}
+        # (entity, state, by, expired at) of records an identical repeat replaced at or after their expiry: due() still
+        # reports them, so the lost command shows "not confirmed"
+        self._expired: list[tuple[str, str, object, float]] = []
 
     def sent(self, entity_id: str, state: str, now: float, by: object) -> None:
         """A command to the entity was sent by `by` (opaque here); it replaces the entity's record. An identical repeat
         of the record (same state, same sender) keeps its first send time and its retried mark, so a command repeated
         every few seconds still fails after EXPIRE s; not after the entity had no data (the re-send when the device is
-        back is a fresh send)."""
+        back is a fresh send), and not at or after the record's expiry: the repeat is a fresh record (its late
+        confirmation is ours) and the old one's expiry is still reported by due()."""
         r = self._records.get(entity_id)
-        if r is not None and r.state == state and r.by == by and not r.lapsed:
-            return
+        if r is not None and r.state == state and r.by == by:
+            if now >= r.at + EXPIRE:
+                self._expired.append((entity_id, r.state, r.by, r.at + EXPIRE))
+            elif not r.lapsed:
+                return
         self._records[entity_id] = _Record(state, now, by)
 
     def arrived(self, entity_id: str, state: str | None, now: float, back: bool = False) -> bool:
@@ -80,7 +87,8 @@ class Expected:
     def due(self, now: float) -> "list[tuple[str, str, object, str]]":
         """The records needing action, (entity id, state, by, "retry" | "expire"): a retry is reported once (the record
         stays), an expiry removes the record."""
-        out: list[tuple[str, str, object, str]] = []
+        out: list[tuple[str, str, object, str]] = [(eid, state, by, "expire") for eid, state, by, _ in self._expired]
+        self._expired = []
         for eid, r in list(self._records.items()):
             if now >= r.at + EXPIRE:
                 del self._records[eid]
@@ -92,4 +100,5 @@ class Expected:
 
     def next_at(self) -> float | None:
         """When due() has something to report next; None without records."""
-        return min((r.at + (EXPIRE if r.retried else RETRY) for r in self._records.values()), default=None)
+        times = [r.at + (EXPIRE if r.retried else RETRY) for r in self._records.values()]
+        return min(times + [at for _, _, _, at in self._expired], default=None)

@@ -43,6 +43,16 @@ def test_an_identical_repeat_keeps_the_first_send_time_and_the_retried_mark():
     assert x.next_at() == 80.0
 
 
+def test_an_identical_repeat_at_the_expiry_starts_a_fresh_record_and_the_old_one_still_expires():
+    x = Expected()
+    x.sent(E, "off", 0.0, "b")
+    x.sent(E, "off", 60.0, "b")  # the repeat lands exactly at the expiry, before due() has run
+    assert x.next_at() == 60.0  # the old record's expiry is still to report
+    assert x.due(60.0) == [(E, "off", "b", "expire")]
+    assert x.next_at() == 70.0  # the repeat is a fresh record
+    assert x.arrived(E, "off", 67.0) is True  # its late confirmation is ours
+
+
 @pytest.mark.parametrize("state,by", [("on", "b"), ("off", "c")])
 def test_another_state_or_sender_restarts_the_record(state, by):
     x = Expected()

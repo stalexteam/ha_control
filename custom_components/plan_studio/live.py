@@ -85,6 +85,9 @@ class LiveRuntime:
         self._expected = Expected()
         self._expected_timer: tuple[float, CALLBACK_TYPE] | None = None  # (when, cancel) of its next wake
         self._now: Callable[[], float] = time.monotonic  # the clock of the expected states
+        # entity -> (state, by) of the command whose expiry was warned: its identical repeats expire at debug level
+        # until the entity reaches a state or another command replaces it (one warning per episode)
+        self._warned: dict[str, tuple[str, object]] = {}
 
     async def async_start(self) -> None:
         # The v0.4 runtime store held persisted outputs; it is no longer used.
@@ -282,6 +285,8 @@ class LiveRuntime:
         if was != now:
             own = self._expected.arrived(data["entity_id"], now, self._now(), back=passing(was)) or own
             self._arm()
+            if not passing(now):
+                self._warned.pop(data["entity_id"], None)  # it reached a state: a new episode
         # intents first (runtime listeners are synchronous): the engine must know them before the state change
         self.runtime.handle_state(data["entity_id"], _pair(data["old_state"]), _pair(data["new_state"]), context, own=own)
         self.power.handle_state(data["entity_id"])
@@ -342,6 +347,8 @@ class LiveRuntime:
         state = expect(domain, service)
         if state is not None and not retry:
             self._expected.sent(entity_id, state, self._now(), by)
+            if self._warned.get(entity_id) != (state, by):
+                self._warned.pop(entity_id, None)  # another command: a new episode
         # A background task that starts on the next loop turn: the call cannot re-enter the engine from inside a firing.
         task = self._hass.async_create_background_task(
             self._send(domain, service, entity_id, ctx), f"plan_studio rule {domain}.{service}", eager_start=False
@@ -408,7 +415,11 @@ class LiveRuntime:
                 if wanted:
                     self._dispatch(domain, svc, entity_id, lambda *_: None, retry=True)  # a failure is logged
                 continue
-            _LOGGER.warning("%s did not confirm %s within %s s", entity_id, service_for(domain, state), EXPIRE)
+            if self._warned.get(entity_id) == (state, by):  # the same episode: warned at its first expiry
+                _LOGGER.debug("%s did not confirm %s within %s s again", entity_id, service_for(domain, state), EXPIRE)
+            else:
+                _LOGGER.warning("%s did not confirm %s within %s s", entity_id, service_for(domain, state), EXPIRE)
+                self._warned[entity_id] = (state, by)
             try:
                 self.engine.command_unconfirmed(entity_id, by)
             except Exception:  # noqa: BLE001 - a failing report must not stop the other records

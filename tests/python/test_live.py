@@ -1908,6 +1908,75 @@ def test_a_safety_off_the_relay_ignores_is_repeated_and_not_confirmed_60_s_after
     asyncio.run(go())
 
 
+def test_a_repeat_at_the_expiry_is_still_ours_when_confirmed_late_and_the_episode_shows_not_confirmed(env):
+    """Round 5 J1 (the reviewer's probe): the boiler's +60 s repeat and the expiry come together."""
+    async def go():
+        hass, clock = FakeHass(), [5000.0]
+        FakeStore.contents[BOILER_KEY] = {"p1": {"r1": "auto"}}
+        live = await _xstart(env, hass, _boiler_plan("wall_switch"), clock, **BOILER_HEATING)
+        live.engine._now = lambda: clock[0]
+        await asyncio.gather(*hass.tasks)
+        _boiler_event(env, hass, "sensor.grid", "3200", old="500")  # the safety off, ignored by the relay
+        await asyncio.gather(*hass.tasks)
+        for k in range(1, 7):
+            _tick(env, clock, 5000.0 + 10 * k)
+            await asyncio.gather(*hass.tasks)
+        _tick(env, clock, 5060.0)  # whatever is still due at +60 s
+        await asyncio.gather(*hass.tasks)
+        assert "switch.relay" in live._expected._records  # the +60 s off has a record
+        trace = live.engine.snapshot("p1")["r1"]
+        assert trace["status"] == "error" and trace["last"]["error"] == "not confirmed"
+        clock[0] = 5067.0
+        _boiler_event(env, hass, "switch.relay", "off", old="on")  # confirmed 7 s late, without the context
+        assert _press(live, "btn") is None
+        assert live.engine.snapshot("p1")["r1"]["boiler"]["mode"] == "auto"
+        assert live.engine.snapshot("p1")["r1"]["status"] == "ok"
+
+    asyncio.run(go())
+
+
+def test_the_expiry_warning_comes_once_per_episode(env, caplog):
+    """Round 5 J2: identical repeats of a lost command warn at their first expiry only; another command or the
+    entity reaching a state starts a new episode."""
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        live.engine.still_wants = lambda *a: False
+        async def send(do, at, by=("p1", "x")):
+            clock[0] = at
+            live._call("switch", do, "switch.sock", on_error=lambda *a: None, by=by)
+            await asyncio.gather(*hass.tasks)
+
+        def warned():
+            return [r for r in caplog.records if "did not confirm" in r.getMessage() and r.levelname == "WARNING"]
+
+        def noted():
+            return [r for r in caplog.records if "did not confirm" in r.getMessage() and r.levelname == "DEBUG"]
+
+        with caplog.at_level("DEBUG"):
+            await send("turn_on", 0.0)
+            _tick(env, clock, 10.0)
+            _tick(env, clock, 60.0)
+            assert len(warned()) == 1
+            await send("turn_on", 70.0)  # the same command again, still lost: the same episode
+            _tick(env, clock, 80.0)
+            _tick(env, clock, 130.0)
+            assert len(warned()) == 1 and len(noted()) == 1
+            await send("turn_on", 140.0, by=("p1", "y"))  # another command (another sender): a new episode
+            _tick(env, clock, 150.0)
+            _tick(env, clock, 200.0)
+            assert len(warned()) == 2
+            clock[0] = 205.0
+            _boiler_event(env, hass, "switch.sock", "unavailable", old="off")
+            _boiler_event(env, hass, "switch.sock", "off", old="unavailable")  # it reached a state: a new episode
+            await send("turn_on", 210.0, by=("p1", "y"))  # the same command again
+            _tick(env, clock, 220.0)
+            _tick(env, clock, 270.0)
+            assert len(warned()) == 3 and len(noted()) == 1
+
+    asyncio.run(go())
+
+
 def test_a_failing_still_wants_is_logged_and_the_other_records_go_on(env, caplog):
     async def go():
         hass, clock = FakeHass(), [0.0]
