@@ -1,6 +1,6 @@
 """Virtual switches kept by the integration: the synthetic entity ids and the state map (pure)."""
 
-from virtual import KIND, PREFIX, Virtual, device_id, devices, entity_id
+from virtual import KIND, LOOP_CHANGES, LOOP_REFUSE, LOOP_WINDOW, PREFIX, Breaker, Virtual, device_id, devices, entity_id
 
 
 def test_synthetic_entity_ids():
@@ -88,3 +88,20 @@ def test_a_failing_subscriber_is_dropped_and_the_others_still_get_frames():
     assert v.set("virtual.s", "on") is True
     v.set("virtual.s", "off")
     assert frames == [{"states": {"s": "on"}}, {"states": {"s": "off"}}]
+
+
+def test_the_breaker_refuses_a_switch_changing_more_than_5_times_in_1_s_for_10_s():
+    assert (LOOP_CHANGES, LOOP_WINDOW, LOOP_REFUSE) == (5, 1.0, 10.0)
+    b = Breaker()
+    assert [b.change("virtual.s", 0.1 * n) for n in range(5)] == ["ok"] * 5
+    assert b.change("virtual.t", 0.5) == "ok"  # per switch
+    assert b.change("virtual.s", 0.5) == "trip"  # the 6th within 1 s: a loop
+    assert b.change("virtual.s", 9.9) == "refused" and b.change("virtual.s", 10.4) == "refused"
+    assert b.change("virtual.s", 10.5) == "ok"  # 10 s after the trip: accepted, counted afresh
+    assert [b.change("virtual.s", 10.5) for _ in range(4)] == ["ok"] * 4
+    assert b.change("virtual.s", 10.6) == "trip"  # still looping: a new episode
+
+
+def test_the_breaker_counts_only_the_changes_of_the_last_second():
+    b = Breaker()
+    assert all(b.change("virtual.s", 0.3 * n) == "ok" for n in range(40))  # about 3 per second, for 12 s

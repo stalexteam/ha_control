@@ -38,7 +38,7 @@ from .readings import Readings
 from .rules import RuleEngine
 from .runtime import Runtime
 from .store import PlanStore
-from .virtual import Virtual, device_id as virtual_device, devices as virtual_devices
+from .virtual import LOOP_REFUSE, Breaker, Virtual, device_id as virtual_device, devices as virtual_devices
 
 if TYPE_CHECKING:
     from homeassistant.core import Event, EventStateChangedData, State
@@ -81,6 +81,7 @@ class LiveRuntime:
         self._motion_store: Store = Store(hass, 1, MOTION_LIGHT_STORAGE_KEY)
         self._motion_modes: dict | None = None  # stored light motion control modes, handed to the first engine load only
         self.virtual = Virtual()  # the virtual switch states, answered for virtual.<device id>
+        self._breaker = Breaker()  # refuses the changes of a virtual switch in a rule loop
         self._virtual_store: Store = Store(hass, 1, VIRTUAL_STORAGE_KEY)
         self._engine_start: CALLBACK_TYPE | None = None  # waits for HA to start after a boot load
         # rule actions fired before HA has started (a sensor known at boot), sent in order once it has
@@ -399,7 +400,7 @@ class LiveRuntime:
                 self._warned.pop(entity_id, None)  # another command: a new episode
         # A background task that starts on the next loop turn: the call cannot re-enter the engine from inside a firing.
         task = self._hass.async_create_background_task(
-            self._send(domain, service, entity_id, ctx), f"plan_studio rule {domain}.{service}", eager_start=False
+            self._send(domain, service, entity_id, ctx, by), f"plan_studio rule {domain}.{service}", eager_start=False
         )
 
         def done(t: asyncio.Future) -> None:
@@ -410,9 +411,9 @@ class LiveRuntime:
 
         task.add_done_callback(done)
 
-    async def _send(self, domain: str, service: str, entity_id: str, ctx: Context) -> None:
+    async def _send(self, domain: str, service: str, entity_id: str, ctx: Context, by: object = None) -> None:
         if virtual_device(entity_id) is not None:  # the integration's own switch: no Home Assistant call
-            self._virtual_set(entity_id, service, ctx)
+            self._virtual_set(entity_id, service, ctx, by)
             return
         self._arm()  # the wake for the retry / expiry of the expected state, once the call goes out
         await asyncio.wait_for(  # a hung blocking call ends as a recorded failure
@@ -420,18 +421,29 @@ class LiveRuntime:
             CALL_TIMEOUT,
         )
 
-    def _virtual_set(self, entity_id: str, service: str, ctx: Context) -> None:
+    def _virtual_set(self, entity_id: str, service: str, ctx: Context, by: object = None) -> None:
         """A command to a virtual switch: the state is set now and its change goes the way of a Home Assistant state
         change with the command's (Plan Studio's) context, so its expected state is confirmed at once. Already in that
         state, or the device left the saved plans since the send: nothing changes and the expected state is used up
-        (no retry, no "not confirmed"). A failure past the set is logged; the command itself succeeded."""
+        (no retry, no "not confirmed"). A change the loop breaker refuses (virtual.Breaker) changes nothing either: its
+        expected state is used up and the rule `by` that sent it shows "virtual switch loop"; the first refusal of an
+        episode is logged. A failure past the set is logged; the command itself succeeded."""
         if self._stopped:
             return
         was = self.virtual.state(entity_id)
         state = ("off" if was == "on" else "on") if service == "toggle" else service[len("turn_"):]
-        if was is None or not self.virtual.set(entity_id, state):
+        allowed = "ok" if was is None or was == state else self._breaker.change(entity_id, self._now())
+        if allowed == "trip":
+            _LOGGER.error("virtual switch %s changes too fast: a rule loop; changes refused for %d s", entity_id,
+                          LOOP_REFUSE)
+        if allowed != "ok" or was is None or not self.virtual.set(entity_id, state):
             self._expected.arrived(entity_id, state, self._now())
             self._arm()
+            if allowed != "ok":
+                try:
+                    self.engine.command_refused(entity_id, by)
+                except Exception:  # noqa: BLE001 - a failing report must not stop the runtime
+                    _LOGGER.exception("reporting a refused virtual switch command failed")
             return
         self._save_virtual()
         try:

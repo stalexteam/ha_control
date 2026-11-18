@@ -64,6 +64,7 @@ VALVE_SERVICES = {
 STATIC_REASONS = ("cycle", "device missing", "rule missing", "target missing")
 WAITING = "waiting for target"
 NOT_CONFIRMED = "not confirmed"  # the device never reached the state of a command (live.py gives it up)
+LOOP = "virtual switch loop"  # a virtual switch refused the command: it changed too fast (live.py, virtual.Breaker)
 ON_WAY = 10  # s an unconfirmed on of a shared device counts as on its way
 SUN = "sun.sun"
 SUN_STATES = {"below_horizon": (True, "below horizon"), "above_horizon": (False, "above horizon")}
@@ -1418,9 +1419,10 @@ class RuleEngine:
         return self._call(domain, service, eid, on_error=on_error, current=current, by=by)
 
     def _unmark(self, eid: str) -> bool:
-        """Forget the entity's latest command; True when its entry said "not confirmed" (that error is removed)."""
+        """Forget the entity's latest command; True when its entry said "not confirmed" or "virtual switch loop" (that
+        error is removed)."""
         cmd = self._commands.pop(eid, None)
-        if cmd is None or cmd.entry is None or cmd.entry.get("error") != NOT_CONFIRMED:
+        if cmd is None or cmd.entry is None or cmd.entry.get("error") not in (NOT_CONFIRMED, LOOP):
             return False
         del cmd.entry["error"]
         return True
@@ -2613,10 +2615,17 @@ class RuleEngine:
         self._resend(entity_id)  # after the inputs: a newer firing has already dropped stale waiting actions
         self._flush()
 
-    def command_unconfirmed(self, entity_id: str, by: object) -> None:
+    def command_refused(self, entity_id: str, by: object) -> None:
+        """A virtual switch refused the latest command to it (a rule loop: it changed too fast, live.py): an echo of it
+        never arrives, and the entry of the rule `by` that sent it says "virtual switch loop" as command_unconfirmed."""
+        self._echoes.pop(entity_id, None)
+        self.command_unconfirmed(entity_id, by, LOOP)
+
+    def command_unconfirmed(self, entity_id: str, by: object, error: str = NOT_CONFIRMED) -> None:
         """The device never confirmed the latest command to the entity (live.py gives it up 60 s after the send): the
         entry of the rule `by` that sent it says "not confirmed" (status error) until the entity reaches the commanded
-        state or another command is sent to it. An entry that already says why it did not get through keeps that."""
+        state or another command is sent to it. An entry that already says why it did not get through keeps that.
+        error: LOOP for a command a virtual switch refused (command_refused)."""
         cmd = self._commands.get(entity_id)
         if by is None or cmd is None or cmd.by != by or cmd.entry is None:
             return  # another sender's or a newer command, or one without a rule (a released relay)
@@ -2628,7 +2637,7 @@ class RuleEngine:
         entry = cmd.entry
         if rule is None or "error" in entry or (st is not None and st[0] == cmd.state):
             return
-        entry["error"] = NOT_CONFIRMED
+        entry["error"] = error
         if any(e is entry for e in rule.entries):
             rule.last = next(e for e in rule.entries if "error" in e)  # the first entry with an error, as _refresh picks
         self._flush()
@@ -2734,7 +2743,7 @@ class RuleEngine:
             status, reason = "disabled", None
         else:
             reason = rule.static_reason() or rule.failed or self._hold_reason(rule.key) or (
-                NOT_CONFIRMED if rule.last is not None and rule.last.get("error") == NOT_CONFIRMED else None)
+                rule.last["error"] if rule.last is not None and rule.last.get("error") in (NOT_CONFIRMED, LOOP) else None)
             # a motion light rule without motion sensors has no want by design (inert in auto), not for lack of data
             inert = rule.motion_light is not None and not rule.motion_light.sensors
             status = "error" if reason else "waiting" if rule.raw is None and rule.control is None and not inert else "ok"

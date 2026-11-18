@@ -16,6 +16,11 @@ KIND = "virtual_switch"
 PREFIX = "virtual."
 STATES = ("on", "off")
 DEFAULT = "off"
+# A virtual switch changes at once, so rules switching each other's switches would flip them at event-loop speed:
+# more than LOOP_CHANGES changes of one switch within LOOP_WINDOW s refuse its changes for LOOP_REFUSE s.
+LOOP_CHANGES = 5
+LOOP_WINDOW = 1.0  # s
+LOOP_REFUSE = 10.0  # s
 
 Callback = Callable[[dict], None]  # a frame {"states": {device id: "on" | "off"}}: every virtual switch of the plan
 
@@ -44,6 +49,31 @@ def devices(plan: dict) -> list[str]:
             if isinstance(props, dict) and props.get("kind") == KIND and isinstance(did, str) and did and did not in out:
                 out.append(did)
     return out
+
+
+class Breaker:
+    """Stops a rule loop over a virtual switch (see LOOP_CHANGES). The caller owns the clock (monotonic seconds)."""
+
+    def __init__(self) -> None:
+        self._changes: dict[str, list[float]] = {}  # entity -> times of its accepted changes within the window
+        self._refused: dict[str, float] = {}  # entity -> until when its changes are refused
+
+    def change(self, entity_id: str, now: float) -> str:
+        """Ask for one change of the switch: "ok" (accepted and counted), "trip" (one change too many within the
+        window: a loop; refused, and the switch refuses changes for LOOP_REFUSE s) or "refused" (within that time)."""
+        until = self._refused.get(entity_id)
+        if until is not None:
+            if now < until:
+                return "refused"
+            del self._refused[entity_id]
+        recent = [t for t in self._changes.get(entity_id, ()) if now - t < LOOP_WINDOW]
+        if len(recent) >= LOOP_CHANGES:
+            self._refused[entity_id] = now + LOOP_REFUSE
+            self._changes.pop(entity_id, None)
+            return "trip"
+        recent.append(now)
+        self._changes[entity_id] = recent
+        return "ok"
 
 
 class Virtual:

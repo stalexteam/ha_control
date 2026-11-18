@@ -2354,3 +2354,95 @@ def test_a_due_record_of_a_virtual_switch_reads_its_state_from_the_runtime(env):
         assert "virtual.sleep" not in live._expected._records  # confirmed silently: never "not confirmed"
 
     asyncio.run(go())
+
+
+LOOP_LOG = "changes too fast: a rule loop; changes refused for 10 s"
+
+
+def _loop_plan(rules):
+    """_vplan's button rule (toggle Sleep) plus the given rules, and a second virtual switch v2."""
+    p = _vplan()
+    p["levels"][0]["devices"].append(
+        {"id": "v2", "name": "v2", "props": {"kind": "virtual_switch"}, "bindings": {"control": "virtual.v2"}})
+    p["rules"] = [p["rules"][0]] + rules
+    return p
+
+
+def _lc(rid, source, target, dos):
+    """A load control rule: the source's on / off events switch the target to dos[0] / dos[1]."""
+    return {"id": rid, "name": rid, "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+            "inputs": [], "onTrue": [], "onFalse": [],
+            "control": {"sources": [{"source": {"device": source}}], "on": [{"device": target, "do": dos[0]}],
+                        "off": [{"device": target, "do": dos[1]}], "toggle": []}}
+
+
+def _cond(rid, source, target, dos):
+    """A condition rule: true / false switch the target to dos[0] / dos[1]."""
+    return {"id": rid, "name": rid, "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+            "inputs": [{"source": {"device": source}}], "onTrue": [{"device": target, "do": dos[0]}],
+            "onFalse": [{"device": target, "do": dos[1]}]}
+
+
+def test_a_load_control_loop_over_two_virtual_switches_stops_and_the_switch_works_again_after_10_s(env, caplog):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _vstart(env, hass, clock=clock, plan=_loop_plan(
+            [_lc("a", "sleep", "v2", ("on", "off")), _lc("b", "v2", "sleep", ("off", "on"))]))
+        assert await _drain(hass)
+        frames = []
+        live.virtual.subscribe("p1", lambda f: frames.append(f["states"]))
+        with caplog.at_level("ERROR"):
+            live.engine.on_intent("p1", "btn", {"action": "toggle"})
+            assert await _drain(hass)  # the loop stopped
+        assert len(frames) == 10  # five changes of each switch; Sleep's sixth within 1 s is refused
+        assert caplog.text.count(LOOP_LOG) == 1 and "virtual.sleep " + LOOP_LOG in caplog.text
+        b = live.engine.snapshot("p1")["b"]
+        assert b["status"] == "error" and b["reason"] == "virtual switch loop"
+        assert b["last"]["error"] == "virtual switch loop"
+        assert "virtual.sleep" not in live._expected._records  # nothing retries the refused change
+        state = live.virtual.state("virtual.sleep")
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})  # still refused within the 10 s
+        assert await _drain(hass)
+        assert live.virtual.state("virtual.sleep") == state and len(frames) == 10
+        assert live.engine.snapshot("p1")["lc"]["reason"] == "virtual switch loop"
+        clock[0] = 10.0
+        with caplog.at_level("ERROR"):
+            live.engine.on_intent("p1", "btn", {"action": "toggle"})  # accepted again; still a loop: trips again
+            assert await _drain(hass)
+        assert frames[10]["sleep"] != state  # the first change after the 10 s was applied
+        assert caplog.text.count(LOOP_LOG) == 2  # one log per episode
+
+    asyncio.run(go())
+
+
+def test_a_condition_rule_loop_over_two_virtual_switches_stops(env, caplog):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        with caplog.at_level("ERROR"):
+            live = await _vstart(env, hass, clock=clock, plan=_loop_plan(
+                [_cond("x", "sleep", "v2", ("on", "off")), _cond("y", "v2", "sleep", ("off", "on"))]))
+            assert await _drain(hass)
+        assert caplog.text.count(LOOP_LOG) == 1
+        reasons = {rid: live.engine.snapshot("p1")[rid].get("reason") for rid in ("x", "y")}
+        assert "virtual switch loop" in reasons.values()
+
+    asyncio.run(go())
+
+
+def test_normal_use_of_a_virtual_switch_never_trips_the_loop_breaker(env, caplog):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _vstart(env, hass, clock=clock)
+        assert await _drain(hass)
+        with caplog.at_level("ERROR"):
+            live.engine.on_intent("p1", "btn", {"action": "toggle"})
+            live.engine.on_intent("p1", "btn", {"action": "toggle"})  # a double press in one turn
+            assert await _drain(hass)
+            assert live.virtual.state("virtual.sleep") == "off"
+            for _ in range(3):  # five changes within the same second: still normal use
+                live.engine.on_intent("p1", "btn", {"action": "toggle"})
+                assert await _drain(hass)
+        assert live.virtual.state("virtual.sleep") == "on" and LOOP_LOG not in caplog.text
+        assert live.engine.snapshot("p1")["lc"]["status"] == "ok"
+
+    asyncio.run(go())
