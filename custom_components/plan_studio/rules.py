@@ -1608,6 +1608,8 @@ class RuleEngine:
             if do is not None:
                 # blackout / limit: a safety off (inverter protection), never kept back by other rules
                 self._boiler_auto(rule, do, why, safety=b.phase in ("blackout", "limit"))
+            if b.refuses_on():
+                self._boiler_drop_on(rule, relay)
         b.view = b.trace(grid, power, relay)
         wake = b.until if active else None
         if b.timer is not None and b.timer[0] != wake:
@@ -2263,6 +2265,22 @@ class RuleEngine:
         self._settle({key for key, rule in self._rules.items() if rule.boiler is not None or rule.timed is not None
                       or rule.outside is not None or rule.beurer is not None or rule.motion_light is not None})
         self._flush()
+
+    def _boiler_drop_on(self, rule: _Rule, relay: str | None) -> None:
+        """Auto no longer wants the relay on (blackout, limit, undecided): a switch-on of this rule still waiting to be
+        sent again is given up, so the relay coming back is not switched on into an overload; never an off. The
+        outstanding on is forgotten too, so a later legitimate on is sent."""
+        b = rule.boiler
+        assert b is not None and b.relay is not None
+        hold = self._holds.get(b.relay)
+        if hold is not None and hold.cmd == "on":
+            self._give_up(b.relay, rule.key)  # an arbitrated on of this rule waiting for the relay
+        if b.cmd == "on" and relay != "on":
+            b.cmd = None
+            if rule.failed is not None:  # a button's on waiting for the relay (_boiler_relay would send it again)
+                if rule.last is not None:
+                    rule.last["error"] = rule.failed
+                rule.failed = None
 
     def _boiler_wake(self, key: Key, b: Boiler) -> None:
         rule = self._rules.get(key)

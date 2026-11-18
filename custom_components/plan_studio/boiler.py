@@ -103,6 +103,7 @@ class Boiler:
         self.until: float | None = None  # the time to look again (the engine's timer)
         self.due: float | None = None  # the phase's own deadline (waiting / grace), shown in the trace
         self.settling: float | None = None  # the latest moment the limit is judged while the meters settle
+        self.undecided = False  # the last auto evaluation could not tell the limit from the bounds (spec reading-stats §4.1)
         self.timer: "tuple[float, Callable[[], None]] | None" = None
         self.view: dict = {}
 
@@ -223,13 +224,13 @@ class Boiler:
     def _auto(self, now: float, grid: float | None, power: float | None, relay: str | None,
               settle: float | None) -> "tuple[str | None, str]":
         self.until = None
-        undecided = False  # the limit cannot be told from the bounds of an unknown boiler draw (spec reading-stats §4.1)
+        undecided = self.undecided = False  # the limit cannot be told from the bounds of an unknown draw (§4.1)
         if self.limited:
             if grid is None:
                 return self._off(now, relay, "blackout", "blackout")  # never delayed
             self.settling = settle  # the limit is not judged until the meters settle
             over = self._over(grid, power, relay) if settle is None else None
-            undecided = settle is None and over is None
+            undecided = self.undecided = settle is None and over is None
             if over is None:
                 if self.holding:
                     return None, ""  # the off reason in force stays: same phase, the 15 s wait not started yet
@@ -251,6 +252,10 @@ class Boiler:
             return do, "auto"  # never conclude "done" without data
         self.mode, self.phase = "manual", "done"
         return self._want("off", relay, now), "heating done"
+
+    def refuses_on(self) -> bool:
+        """The last auto evaluation does not want the relay on: an off reason (blackout / limit) or undecided."""
+        return self.mode == "auto" and (self.phase in ("blackout", "limit") or self.undecided)
 
     def _off(self, now: float, relay: str | None, phase: str, why: str) -> "tuple[str | None, str]":
         self.phase, self.holding, self.last_off = phase, True, now

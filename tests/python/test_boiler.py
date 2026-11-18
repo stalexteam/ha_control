@@ -1245,3 +1245,39 @@ def test_auto_pressed_undecided_by_bounds_does_not_switch_on():
     assert w.calls == [] and w.b()["mode"] == "auto"
     w.set("sensor.bp", "0", W)  # decided: 2500 + 1400 - 0 > 3000
     assert w.calls == [OFF] and w.b()["phase"] == "limit"
+
+
+# --- 0.24.0 final review W1b: a waiting switch-on is given up once auto no longer wants it -------------------------
+
+def test_a_waiting_on_is_not_resent_after_the_limit_is_judged():
+    """The re-reviewer's probe: the ON waits for an unknown relay, the grid rises, the relay returns off -> limit."""
+    w = BWorld(switch__relay="unknown", sensor__bp="unknown", sensor__grid=("1500", W))
+    w.engine.load_plans([boiler_plan()], boot=True, modes={"p": {"r": "auto"}})
+    w.engine.started()
+    assert w.calls == [ON]  # 1500 + 1400 <= 3000: no overload whatever the boiler draws; the relay is unknown: it waits
+    assert w.engine.snapshot("p")["r"]["last"]["error"] == "waiting for target"
+    w.set("sensor.grid", "2500", W)  # undecided: nothing sent
+    assert w.calls == [ON]
+    w.set("switch.relay", "off")  # back: no draw, 2500 + 1400 > 3000
+    assert w.calls == [ON] and w.b()["phase"] == "limit" and w.states["switch.relay"][0] == "off"
+    w.set("switch.relay", "off")  # another report of the relay: still nothing re-sent
+    assert w.calls == [ON]
+    w.set("sensor.grid", "1000", W)  # 2400: cleared, the 15 s wait starts
+    t = w.t
+    assert w.b()["phase"] == "waiting"
+    w.advance(t + 14.9)
+    assert w.calls == [ON]
+    w.advance(t + 15)
+    assert w.calls == [ON, ON] and w.b()["phase"] == "heating"
+
+
+def test_a_waiting_on_is_not_resent_after_a_blackout():
+    w = loaded()
+    w.fail.add("switch.relay")
+    w.press("auto")
+    assert w.calls == [ON] and w.engine.snapshot("p")["r"]["status"] == "error"  # service failed: the ON waits
+    w.fail.discard("switch.relay")
+    w.set("sensor.grid", "unavailable")  # blackout; the relay is off already: no OFF to send
+    assert w.calls == [ON] and w.b()["phase"] == "blackout"
+    w.set("switch.relay", "off")  # the relay reports again
+    assert w.calls == [ON]
