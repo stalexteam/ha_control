@@ -527,7 +527,7 @@ export function ruleActionsFor(d: Device): RuleDo[] {
   if (p.kind === 'valve') return ['close'];
   // Announcements are fire and forget: a speaker plays a file, and says text only with a voice; a phone notifies.
   if (p.kind === 'speaker') return d.bindings?.voice ? ['say', 'play'] : ['play'];
-  if (p.kind === 'phone') return ['notify'];
+  if (p.kind === 'phone') return p.notify ? ['notify'] : [];
   if (p.kind === 'equipment') return p.controllable === true ? ['on', 'off'] : [];
   if (p.kind === 'ceiling_light' || p.kind === 'wall_light' || p.kind === 'socket' || p.kind === 'exhaust_fan' || p.kind === 'virtual_switch') return ['on', 'off'];
   return [];

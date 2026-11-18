@@ -295,6 +295,36 @@ describe('Load control dialog: events and announcements', () => {
   });
 });
 
+describe('a phone without a notify service', () => {
+  beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
+
+  async function openNoService(): Promise<PlanStudioPanel> {
+    const plan: Plan = structuredClone(SCENES.announce.plans[0]);
+    plan.levels[0].devices.find(d => d.id === 'd-phone')!.props = { kind: 'phone' };
+    plan.rules = plan.rules!.map(r => (r.id === 'rule-announce' ? { ...r, control: { ...r.control!, on: [{ device: 'd-phone', do: 'notify', text: 'x' }] } } : r));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ plans: { [plan.id]: plan } }));
+    const el = await mount(createMockHass({ rulesFrame: SCENES.announce.rulesFrame }));
+    el.setMode('automation');
+    await vi.waitFor(() => expect(el.rulesFeed.ready).toBe(true));
+    await el.updateComplete;
+    return el;
+  }
+
+  it('is not offered in either dialog, and an existing notify action on it is flagged', async () => {
+    const el = await openNoService();
+    await editRule(el, 'rule-announce');
+    expect(options(el, 'select[data-action="add-action-on"]')).not.toContain('d-phone');
+    expect(all(el, '.rproblems li').map(x => x.getAttribute('data-problem'))).toContain('action');
+    expect(q<HTMLButtonElement>(el, 'button[data-action="rule-ok"]').disabled).toBe(true);
+    await press(el, 'button[data-action="rule-cancel"]');
+    el.selection = null;
+    await el.updateComplete;
+    await press(el, 'button[data-template="condition"]');
+    expect(options(el, 'select[data-action="add-action-true"]')).not.toContain('d-phone');
+    expect(options(el, 'select[data-action="add-action-true"]')).toContain('d-speaker');
+  });
+});
+
 describe('Condition dialog: announcements', () => {
   beforeEach(() => { document.body.innerHTML = ''; localStorage.clear(); });
 

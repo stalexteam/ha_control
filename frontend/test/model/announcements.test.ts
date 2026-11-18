@@ -106,6 +106,12 @@ describe('announcement actions of a device', () => {
     expect(ruleActionsFor(speaker())).toEqual(['say', 'play']);
     expect(ruleActionsFor(speaker({ bindings: { player: 'media_player.vlc' } }))).toEqual(['play']);
     expect(ruleActionsFor(phone())).toEqual(['notify']);
+    // a phone without a notify service is not a target (a notify action on it is the action problem)
+    expect(ruleActionsFor(phone({ props: { kind: 'phone' } }))).toEqual([]);
+    expect(controlActionsFor(phone({ props: { kind: 'phone' } }))).toEqual([]);
+    const noService = [speaker(), phone({ props: { kind: 'phone' } }), lamp];
+    const r = rule({ inputs: [{ source: { device: 'l1' } }], onTrue: [{ device: 'ph', do: 'notify', text: 'x' }] });
+    expect(problems([r], r, noService)).toContain('action');
     expect(controlActionsFor(speaker())).toEqual(['say', 'play']);
     expect(controlActionsFor(phone())).toEqual(['notify']);
     expect(controlActionsFor(lamp)).toEqual(['on', 'off', 'toggle']);
