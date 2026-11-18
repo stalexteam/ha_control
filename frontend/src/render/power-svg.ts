@@ -70,7 +70,7 @@ export function formatWatts(w: number | null | undefined): string {
   return Math.abs(r) < 1000 ? `${minus}${Math.abs(r)} W` : `${minus}${(Math.abs(w) / 1000).toFixed(2)} kW`;
 }
 
-const unit = (v: number | null | undefined, u: string): string =>
+export const unit = (v: number | null | undefined, u: string): string =>
   v === null || v === undefined || !Number.isFinite(v) ? '—' : `${Math.round(v)} ${u}`;
 
 function wireStyle(l: WireLive | undefined): WireStyle {

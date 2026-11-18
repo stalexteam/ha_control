@@ -13,7 +13,9 @@ import { History } from '../editor/history';
 import {
   defaultPower, deleteBlock, deleteDeviceDoc, deleteWire, pruneLevelDevices, type PlanDoc, type Position, type PowerBlock, type PowerSchema,
 } from '../model/power';
-import { schemaBounds } from '../geometry/power';
+import { blockRect, hitPower, schemaBounds } from '../geometry/power';
+import { PowerHint, blockMeters } from './power-hint';
+import { hintSize, placeHint } from '../render/power-hint';
 import { SaveController } from '../editor/save';
 import type { Selection, Tool, ToolContext } from '../editor/tools/types';
 import type { HassLike, PlanSummary } from '../api';
@@ -150,6 +152,12 @@ export class PlanStudioPanel extends LitElement {
   /** Live values of the schematic draft (subscribed only in the Power step of an attached panel). */
   readonly powerFeed = new PowerFeed(this, () => this.hass?.connection);
 
+  /** The Power step's hover hint: the report statistics of the meters of the block the pointer rests on. */
+  readonly hint = new PowerHint(this, () => this.hass?.connection, id => {
+    const b = this.power.blocks.find(x => x.id === id);
+    return b && this.mode === 'power' ? blockMeters(b, this.ctx.geo(), this.powerFeed.frame?.blocks[id]) : [];
+  });
+
   /** Action events and ended bubbles of the open level's devices, from hass.states and the entity feed. */
   private readonly events = new DeviceEventTracker();
   /** Per-message states of the event sources (Binding step of an attached panel), so no press is coalesced away. */
@@ -225,6 +233,7 @@ export class PlanStudioPanel extends LitElement {
     this.resizeObs = null;
     this.feed.stop();
     this.powerFeed.stop();
+    this.hint.hide();
     this.rulesFeed.stop();
     this.entityFeed.stop();
     this.stopTicker();
@@ -248,6 +257,7 @@ export class PlanStudioPanel extends LitElement {
     this.feed.watch(this.isConnected ? this.plan?.id ?? null : null);
     this.watchPower();
     this.watchRules();
+    this.hint.sync(); // closes when the step changed or the block went; follows an edited binding
   }
 
   /** The rules feed watches the open plan in the Binding (mode bubbles) and Automation steps of an attached panel. */
@@ -751,6 +761,27 @@ export class PlanStudioPanel extends LitElement {
 
   toMm(e: { clientX: number; clientY: number }): Pt { return screenToMm(this.svgEl(), this.view, e); }
 
+  /** Power step pointer move without a button: the block under the pointer (not a bus, wire or empty space) rests for the hint. */
+  hintHover(e: { clientX: number; clientY: number }): void {
+    if (this.mode !== 'power') return;
+    const hit = hitPower(this.power, this.toMm(e), this.ctx.tolMm(), this.ctx.geo());
+    const id = hit?.kind === 'block' ? hit.id : hit?.kind === 'port' || hit?.kind === 'chip' ? hit.block : null;
+    this.hint.move(id !== null && this.hint.meterCount(id) > 0 ? id : null);
+  }
+
+  /** The open hover hint over the canvas: its lines beside the hovered block (screen pixels of the canvas). */
+  private renderHint(now: number): TemplateResult | typeof nothing {
+    const id = this.hint.openId;
+    const lines = this.hint.lines(now);
+    const b = id === null ? undefined : this.power.blocks.find(x => x.id === id);
+    if (!lines || !b) return nothing;
+    const { x, y, scale } = this.view;
+    const r = blockRect(b, this.ctx.geo(), this.power);
+    const at = placeHint({ x: (r.x - x) * scale, y: (r.y - y) * scale, w: r.w * scale, h: r.h * scale }, hintSize(lines), this.size);
+    return html`<div class="power-hint" role="tooltip" style=${`left:${at.left}px;top:${at.top}px`}>
+      ${lines.map(l => html`<div class="line">${l}</div>`)}</div>`;
+  }
+
   private fit(): void { this.planView = fitView(this.level?.nodes ?? [], this.size.w, this.size.h); }
 
   /** The whole schematic with a 40-unit margin, at most 150 %. */
@@ -838,7 +869,7 @@ export class PlanStudioPanel extends LitElement {
           <svg class="plan" xmlns="http://www.w3.org/2000/svg" viewBox=${`${x} ${y} ${w} ${h}`}
             preserveAspectRatio="xMinYMin meet" style=${`background:${pal.background}`}
             @pointerdown=${this.input.pointerDown} @pointermove=${this.input.pointerMove}
-            @pointerup=${this.input.pointerUp} @pointercancel=${this.input.pointerAbort}
+            @pointerup=${this.input.pointerUp} @pointercancel=${this.input.pointerAbort} @pointerleave=${() => this.hint.hide()}
             @lostpointercapture=${this.input.pointerAbort} @dblclick=${this.input.dblClick} @wheel=${this.input.wheel} @contextmenu=${(e: Event) => e.preventDefault()}>
             ${this.grid ? renderGrid(this.view, w, h, pal, power ? 0.1 : 1) : nothing}
             ${this.mode === 'power' ? renderPower(this.power, {
@@ -862,6 +893,7 @@ export class PlanStudioPanel extends LitElement {
               live: trackerLive(preview, this.toolId === 'box' ? 'box' : 'wall', this.boxMeasure, this.thickness),
             }) : nothing}
           </svg>
+          ${power ? this.renderHint(now) : nothing}
           ${this.pendingDraft && this.dialog?.kind !== 'restore' ? renderDraftBanner({
             savedAt: this.pendingDraft.savedAt,
             onRestore: () => this.session.restoreDraft(this.pendingDraft!), onDiscard: () => this.session.discardDraft(this.pendingDraft!),

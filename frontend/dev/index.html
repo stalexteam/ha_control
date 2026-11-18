@@ -67,6 +67,9 @@
     } else {
       panel.hass = createMockHass({
         darkMode: dark, demo: true, serverVersion: params.get('update') ?? undefined,
+        // report statistics for the hover hint: a sample period and last report per asked entity
+        readings: (ids, now) => Object.fromEntries(ids.map((id, i) => [id, i % 3 === 2 ? { last: null, period: null, count: 0 }
+          : { last: now - 1000 - 1500 * i, period: 5000 * (i + 1), count: 12 }])),
         ...(scene ? {
           storage: memoryStorage({ [STORAGE_KEY]: JSON.stringify({ plans }) }), powerFrame: scene.powerFrame, rulesFrame: scene.rulesFrame,
           states: scene.states,
@@ -96,6 +99,8 @@
         if (zoneMethod) panel.nextObj = { ...panel.nextObj, zone: { ...panel.nextObj.zone, method: zoneMethod } };
         if (tool) panel.pickTool(tool);
         if (selection) panel.selection = selection;
+        // hint=<block id> (with step=power): the Power step's hover hint, open on that block.
+        if (params.get('hint')) panel.hint.show(params.get('hint'));
         // menu=automations: the Automation rail's "Automations" menu, open.
         if (params.get('menu') === 'automations') {
           panel.updateComplete.then(() => panel.toggleAutomationsMenu(panel.shadowRoot.querySelector('button[data-action="automations"]')));

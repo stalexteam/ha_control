@@ -46,7 +46,7 @@ function notConfiguredStates(plan: Plan | undefined): Record<string, ContainerSt
  * `plan_studio/containers/subscribe` answers once with a full snapshot: every container of the stored plan as error,
  * not configured. `plan_studio/rules/subscribe` answers once with a full snapshot of `rulesFrame` (none by default).
  * `plan_studio/power/subscribe` answers once with `powerFrame` (an empty frame by default), and
- * `plan_studio/power/set_position` resolves `{}`; `plan_studio/info` answers `serverVersion` (unknown command without it). Other subscriptions are unknown.
+ * `plan_studio/power/set_position` resolves `{}`; `plan_studio/info` answers `serverVersion` and `plan_studio/readings/get` answers `readings` (unknown command without them). Other subscriptions are unknown.
  * With `demo` it also has live states and answers the entity, device and area registry commands with a small
  * sample (dev harness); without it those commands are unknown, so tests bring their own HA data.
  */
@@ -57,6 +57,8 @@ export function createMockHass(
     states?: Record<string, unknown>;
     /** Answer of `plan_studio/info` (the reload notice shows when it differs from the bundle's version); absent: unknown command. */
     serverVersion?: string;
+    /** Answer of `plan_studio/readings/get` for the asked entities at `now` (epoch ms); absent: unknown command. */
+    readings?: (ids: string[], now: number) => Record<string, { last: number | null; period: number | null; count: number }>;
   } = {},
 ): HassLike {
   const storage = opts.storage ?? localStorage;
@@ -101,6 +103,9 @@ export function createMockHass(
             return Promise.resolve({} as T);
           case 'plan_studio/info':
             return opts.serverVersion ? Promise.resolve({ version: opts.serverVersion } as T) : fail('unknown_command', 'Unknown command plan_studio/info');
+          case 'plan_studio/readings/get':
+            return opts.readings ? Promise.resolve({ readings: opts.readings(msg.entity_ids as string[], Date.now()) } as T)
+              : fail('unknown_command', 'Unknown command plan_studio/readings/get');
           case 'plan_studio/plans/delete': {
             const id = msg.plan_id as string;
             const existed = id in data.plans;

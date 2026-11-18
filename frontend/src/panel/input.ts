@@ -5,7 +5,7 @@ import { panBy, zoomAt } from './viewport';
 
 /** The panel members the pointer / keyboard handlers use. */
 export type InputHost = Pick<PlanStudioPanel,
-  'activeTool' | 'view' | 'history' | 'selection' | 'dialog' | 'automationsMenu' | 'closeAutomationsMenu' | 'toMm' | 'focus' | 'requestUpdate' | 'undo' | 'redo' | 'doSave' | 'deleteSelection' | 'mode' | 'toolId' | 'pickTool'>;
+  'activeTool' | 'view' | 'history' | 'selection' | 'dialog' | 'automationsMenu' | 'closeAutomationsMenu' | 'toMm' | 'focus' | 'requestUpdate' | 'undo' | 'redo' | 'doSave' | 'deleteSelection' | 'mode' | 'toolId' | 'pickTool' | 'hint' | 'hintHover'>;
 
 const MODIFIER_KEYS = ['Shift', 'Control', 'Alt', 'Meta'];
 
@@ -40,6 +40,7 @@ export class EditorInput {
 
   readonly pointerDown = (e: PointerEvent) => {
     if (this.h.dialog !== null) return; // a modal dialog covers the canvas
+    this.h.hint.hide(); // a click, a drag or a pan: no hint
     this.h.focus();
     const el = e.currentTarget as Element;
     if (e.button === 1 || (e.button === 0 && this.spaceDown)) {
@@ -63,6 +64,7 @@ export class EditorInput {
       this.panFrom = { x: e.clientX, y: e.clientY };
       return;
     }
+    if (!this.pointerActive) this.h.hintHover(e); // a drag shows no hint
     this.h.activeTool.move(this.toolEvent(e));
     this.h.requestUpdate();
   };
@@ -96,6 +98,7 @@ export class EditorInput {
   readonly wheel = (e: WheelEvent) => {
     if (this.h.dialog !== null) return; // a modal dialog covers the canvas
     e.preventDefault();
+    this.h.hint.hide();
     this.h.view = zoomAt(this.h.view, this.h.toMm(e), e.deltaY);
   };
 

@@ -40,6 +40,15 @@ export async function fetchInfo(hass: Pick<HassLike, 'connection'>): Promise<{ v
   return hass.connection.sendMessagePromise<{ version: string }>({ type: 'plan_studio/info' });
 }
 
+/** What the server knows of an entity's reports: epoch ms of the last one, the typical gap in ms (null while unknown) and how many were seen. */
+export interface ReadingStats { last: number | null; period: number | null; count: number }
+
+/** Report statistics of up to 200 entities; an entity without reports has `count: 0`. An old server answers `unknown_command`. */
+export async function fetchReadings(conn: HassLike['connection'], entityIds: string[]): Promise<Record<string, ReadingStats>> {
+  const res = await conn.sendMessagePromise<{ readings: Record<string, ReadingStats> }>({ type: 'plan_studio/readings/get', entity_ids: entityIds });
+  return res.readings;
+}
+
 export async function getPlan(hass: HassLike, id: Id): Promise<Plan> {
   const res = await hass.connection.sendMessagePromise<{ plan: Plan }>({
     type: 'plan_studio/plans/get',
