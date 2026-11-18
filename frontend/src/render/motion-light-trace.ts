@@ -37,7 +37,7 @@ const MW = MOTION_LIGHT_WIDTH - 2 * PAD, CX = MOTION_LIGHT_WIDTH / 2;
 const GAP = 12, PER_ROW = 3;
 
 /** The mode changes of this kind are worded as what they are; every other entry goes through the shared wording. */
-const MODE_LAST = { auto: 'lastAuto', autoAgain: 'lastAutoAgain', manualButton: 'lastManualButton', manualElsewhere: 'lastManualElsewhere', found: 'lastFound' };
+const MODE_LAST = { auto: 'lastAuto', autoAgain: 'lastAutoAgain', manualButton: 'lastManualButton', releasedOff: 'lastReleased', found: 'lastFound' };
 const motionLast = (l: RuleLast): string => {
   const mode = motionModeLast(l);
   return mode ? t(`motionLight.flow.${MODE_LAST[mode]}`).replace('{at}', clock(l.at)).replace('{s}', l.action) : lastLine(l);
@@ -61,7 +61,7 @@ export function renderMotionLightTrace(o: MotionLightTraceOpts): TemplateResult 
   const d = cfg.daylight;
 
   const items: Item[] = cfg.sensors.length === 0
-    ? [{ field: 'motionlight-sensors', cls: '', lines: [t('motionLight.problem.sensors')] }]
+    ? [{ field: 'motionlight-sensors', cls: ' muted', lines: [t('motionLight.flow.noSensors')] }]
     : cfg.sensors.map(id => {
       const s = ml?.sensors.find(x => x.id === id);
       return {
@@ -81,7 +81,8 @@ export function renderMotionLightTrace(o: MotionLightTraceOpts): TemplateResult 
     });
   }
 
-  const perRow = Math.min(PER_ROW, items.length);
+  // The "no motion sensors" note is long: it gets a row of its own (the Daylight block below it).
+  const perRow = cfg.sensors.length === 0 ? 1 : Math.min(PER_ROW, items.length);
   const bw = (MW - (perRow - 1) * GAP) / perRow;
   const rows = Math.ceil(items.length / perRow);
   const h = blockH(Math.max(...items.map(b => b.lines.length)));
@@ -110,22 +111,24 @@ export function renderMotionLightTrace(o: MotionLightTraceOpts): TemplateResult 
   const rule = t('motionLight.flow.rule').replace('{dark}', d ? t('motionLight.flow.ruleDark') : '').replace('{d}', countdown(o.rule.offDelay))
     + (cfg.minOn > 0 ? t('motionLight.flow.ruleMin').replace('{d}', countdown(cfg.minOn)) : '');
   const manual = ml?.mode === 'manual';
+  const quiet = manual || cfg.sensors.length === 0; // no verdict in manual, nor in an auto without motion sensors
   add({
-    field: 'motionlight-wants', cls: ml && !manual ? tone(tr!.verdict) : '',
+    field: 'motionlight-wants', cls: ml && !quiet ? tone(tr!.verdict) : '',
     lines: [
-      ml && !manual ? `${t('motionLight.flow.wants')}: ${tr!.verdict === null ? word(null) : tr!.verdict ? 'on' : 'off'}` : t('motionLight.flow.wants'),
+      ml && !quiet ? `${t('motionLight.flow.wants')}: ${tr!.verdict === null ? word(null) : tr!.verdict ? 'on' : 'off'}` : t('motionLight.flow.wants'),
       rule,
-      ...(ml?.offAt !== undefined && !manual ? [t('motionLight.flow.offIn').replace('{t}', left(ml.offAt, o.now))] : []),
-      ...(ml?.minUntil !== undefined && !manual ? [t('motionLight.flow.minOn').replace('{t}', left(ml.minUntil, o.now))] : []),
+      ...(ml?.offAt !== undefined && !quiet ? [t('motionLight.flow.offIn').replace('{t}', left(ml.offAt, o.now))] : []),
+      ...(ml?.minUntil !== undefined && !quiet ? [t('motionLight.flow.minOn').replace('{t}', left(ml.minUntil, o.now))] : []),
+      ...(ml?.waiting && !quiet ? [t('motionLight.flow.waiting')] : []),
     ],
   });
 
   add({
     field: 'motionlight-mode', cls: ml ? tone(!manual) : '',
     lines: ml
-      ? [`${t('motionLight.flow.mode')}: ${t(manual ? 'motionLight.flow.manual' : 'motionLight.flow.auto')}`,
+      ? [`${t('motionLight.flow.mode')}: ${t(manual ? 'motionLight.flow.manual' : cfg.buttons.length === 0 ? 'motionLight.flow.autoNoButton' : 'motionLight.flow.auto')}`,
         ...(manual ? [ml.autoAt !== undefined ? t('motionLight.flow.autoIn').replace('{t}', left(ml.autoAt, o.now)) : t('motionLight.flow.byButton')] : [])]
-      : [t('motionLight.flow.mode'), t('motionLight.flow.byButton')],
+      : [t('motionLight.flow.mode'), t(cfg.buttons.length === 0 ? 'motionLight.flow.autoNoButton' : 'motionLight.flow.byButton')],
   });
 
   const last = tr?.last;

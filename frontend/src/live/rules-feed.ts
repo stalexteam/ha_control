@@ -53,13 +53,13 @@ export function keptOn(l: RuleLast): boolean {
 }
 
 /** The mode changes of a light motion control rule by their exact `RuleLast.reason`; the row and the diagram word them from this one list. */
-export const MOTION_MODE_REASONS: Record<string, 'auto' | 'autoAgain' | 'manualButton' | 'manualElsewhere' | 'found'> = {
+export const MOTION_MODE_REASONS: Record<string, 'auto' | 'autoAgain' | 'manualButton' | 'releasedOff' | 'found'> = {
   'button: auto': 'auto', 'auto again': 'autoAgain', 'button: manual': 'manualButton',
-  'switched elsewhere: manual': 'manualElsewhere', 'found on': 'found',
+  'switched off elsewhere: waits for new motion': 'releasedOff', 'found on': 'found',
 };
 
 /** Which mode change an entry of a light motion control rule is (undefined = a plain command or other entry). */
-export function motionModeLast(l: RuleLast): 'auto' | 'autoAgain' | 'manualButton' | 'manualElsewhere' | 'found' | undefined {
+export function motionModeLast(l: RuleLast): 'auto' | 'autoAgain' | 'manualButton' | 'releasedOff' | 'found' | undefined {
   return MOTION_MODE_REASONS[l.reason];
 }
 
@@ -129,6 +129,8 @@ export interface MotionLightTrace {
   offAt?: number;
   minUntil?: number;
   autoAt?: number;
+  /** The rule let a light go that was switched off elsewhere and waits for new motion. */
+  waiting?: true;
 }
 
 /** A timed switch rule's run: `until` = epoch ms of its end (only while running); `device` null = no data. */

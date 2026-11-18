@@ -468,7 +468,7 @@ export class PlanStudioPanel extends LitElement {
       id => devices.some(x => x.id === id && controlActionsFor(x).length > 0),
       id => devices.some(x => x.id === id && ruleActionsFor(x).includes('on') && ruleActionsFor(x).includes('off')),
       id => devices.some(x => x.id === id && x.props.kind === 'motion_sensor'),
-      id => devices.some(x => x.id === id && (x.props.kind === 'smart_button' || x.props.kind === 'wall_switch')));
+      id => devices.some(x => x.id === id && x.props.kind === 'smart_button'));
     if (isBoilerRule(rule)) {
       return renderBoilerDialog({
         draft: d,
@@ -528,7 +528,7 @@ export class PlanStudioPanel extends LitElement {
         lights: devices.filter(x => { const a = ruleActionsFor(x); return a.includes('on') && a.includes('off'); }),
         sensors: devices.filter(x => x.props.kind === 'motion_sensor'),
         daylightSensors: devices.filter(x => x.props.kind === 'illuminance_sensor'),
-        buttons: devices.filter(x => x.props.kind === 'smart_button' || x.props.kind === 'wall_switch'),
+        buttons: devices.filter(x => x.props.kind === 'smart_button'),
         deviceById: id => devices.find(x => x.id === id),
         zones, problems, trace, note, now: Date.now(),
         onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },

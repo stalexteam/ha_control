@@ -564,9 +564,9 @@ function beurerPlan(): Plan {
 }
 
 /**
- * Scene `motionlight`: the room with a second motion sensor "Motion hall", the wall switch "Switch hall", the smart button "Button hall" and the rule
+ * Scene `motionlight`: the room with a second motion sensor "Motion hall", the wall switch "Switch hall" (not a button of the rule), the smart button "Button hall" and the rule
  * `rule-ml` "Light motion control Main": Ceiling light, both motion sensors, Light sensor is dark, off after 180 s,
- * minimum on 60 s, the wall switch and the button, auto again after 30 min. Live: auto, no motion for a while, the off in 2:41 and the
+ * minimum on 60 s, the button, auto again after 30 min. Live: auto, no motion for a while, the off in 2:41 and the
  * minimum on time 0:38 still to run. Scene `motionlight-manual`: a button press made it manual, auto again in 12:34.
  */
 function motionLightPlan(): Plan {
@@ -593,7 +593,7 @@ function motionLightPlan(): Plan {
   );
   p.rules!.push({
     id: 'rule-ml', name: 'Light motion control Main', zoneId: 'r0', combine: 'any', inputs: [], onDelay: 0, offDelay: 180, onTrue: [], onFalse: [],
-    motionLight: { light: 'd-light', sensors: ['d-motion', 'd-motion-hall'], daylight: { sensor: 'd-lux', is: 'dark' }, minOn: 60, buttons: ['d-switch-ml', 'd-button-ml'], autoAfter: 30 },
+    motionLight: { light: 'd-light', sensors: ['d-motion', 'd-motion-hall'], daylight: { sensor: 'd-lux', is: 'dark' }, minOn: 60, buttons: ['d-button-ml'], autoAfter: 30 },
   });
   return p;
 }
@@ -615,6 +615,21 @@ const MOTION_LIGHT_AUTO = motionLightTrace(
 const MOTION_LIGHT_MANUAL = motionLightTrace(
   { mode: 'manual', autoAt: Date.now() + 754_000, sensors: [{ id: 'd-motion', name: 'Motion sensor', state: 'on' }, { id: 'd-motion-hall', name: 'Motion hall', state: null }], motion: true },
   { verdict: null, last: { action: 'on', target: 'Ceiling light', at: at(21, 41), reason: 'button: manual' } },
+);
+
+/** Scene `motionlight-nobutton`: no button, auto only. `-nosensors`: no motion sensors, auto does nothing. `-waiting`: a held light switched off elsewhere under motion. */
+function motionLightVariant(edit: (m: NonNullable<Rule['motionLight']>) => void): Plan {
+  const p = motionLightPlan();
+  edit(p.rules!.find(r => r.id === 'rule-ml')!.motionLight!);
+  return p;
+}
+const MOTION_LIGHT_NOSENSORS = motionLightTrace(
+  { sensors: [], motion: false, dark: null, light: 'off' },
+  { verdict: null, inputs: [], last: undefined },
+);
+const MOTION_LIGHT_WAITING = motionLightTrace(
+  { waiting: true, motion: true, light: 'off', sensors: [{ id: 'd-motion', name: 'Motion sensor', state: 'on' }, { id: 'd-motion-hall', name: 'Motion hall', state: 'off' }] },
+  { verdict: false, last: { action: 'off', target: 'Ceiling light', at: at(21, 44), reason: 'switched off elsewhere: waits for new motion', sent: false } },
 );
 
 /**
@@ -847,6 +862,9 @@ export const SCENES: Record<string, Scene> = {
   control: { plans: [controlPlan()], rulesFrame: { ...ROOM_RULES, 'rule-control': CONTROL_TRACE } },
   motionlight: { plans: [motionLightPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_AUTO } },
   'motionlight-manual': { plans: [motionLightPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_MANUAL } },
+  'motionlight-nobutton': { plans: [motionLightVariant(m => { m.buttons = []; m.autoAfter = 0; })], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_AUTO } },
+  'motionlight-nosensors': { plans: [motionLightVariant(m => { m.sensors = []; })], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_NOSENSORS } },
+  'motionlight-waiting': { plans: [motionLightPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_WAITING } },
   beurer: { plans: [beurerPlan()], rulesFrame: BEURER_RULES },
   'beurer-cycle': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ cycleAt: undefined, pausedUntil: Date.now() + 3_000, heater: 'off' }) } },
   'beurer-kept': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ watts: null, detail: 'no data, kept', keptUntil: Date.now() + 252_000 }, { pending: { to: false, at: Date.now() + 45_000 } }) } },

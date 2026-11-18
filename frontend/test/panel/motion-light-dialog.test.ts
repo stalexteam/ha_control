@@ -79,13 +79,13 @@ describe('Light motion control form', () => {
     });
   });
 
-  it('without a zone the light and sensors start empty: two hints and OK blocked; the lists are filtered by kind', async () => {
+  it('without a zone the light starts empty: one hint and OK blocked; the lists are filtered by kind; the light alone makes it valid', async () => {
     const el = await open([]);
     await selectZone(el, null);
     await pickAutomation(el, 'motionLight');
     expect(q<HTMLInputElement>(el, '[data-field="name"]').value).toBe('Light motion control');
     expect(okBtn(el).disabled).toBe(true);
-    expect(problems(el)).toEqual(['Choose the light', 'Add a motion sensor']);
+    expect(problems(el)).toEqual(['Choose the light']);
     // The light: devices taking on and off; no sensors, no buttons.
     const lights = options(el, 'motionlight-light');
     expect(lights).toContain('d-light');
@@ -95,20 +95,52 @@ describe('Light motion control form', () => {
     expect(options(el, 'motionlight-sensors')).toEqual(['', 'd-motion', 'd-motion-hall']);
     expect(options(el, 'motionlight-daylight')).toEqual(['', 'd-lux']);
     await set(el, '[data-field="motionlight-light"]', 'd-light', 'change');
-    await set(el, '[data-field="motionlight-sensors"]', 'd-motion', 'change');
     expect(problems(el)).toEqual([]);
     expect(okBtn(el).disabled).toBe(false);
-    expect(motion(el)).toMatchObject({ light: 'd-light', sensors: ['d-motion'] });
+    expect(motion(el)).toMatchObject({ light: 'd-light', sensors: [], buttons: [] });
+    await set(el, '[data-field="motionlight-sensors"]', 'd-motion', 'change');
+    expect(motion(el).sensors).toEqual(['d-motion']);
+    expect(okBtn(el).disabled).toBe(false);
   });
 
-  it('the Buttons add select lists smart buttons and wall switches only', async () => {
+  it('the Buttons add select lists smart buttons only (no wall switch)', async () => {
     const el = await open([]);
     await selectZone(el, null);
     await pickAutomation(el, 'motionLight');
-    expect(options(el, 'motionlight-buttons')).toEqual(['', 'd-switch-ml', 'd-button-ml']);
+    expect(options(el, 'motionlight-buttons')).toEqual(['', 'd-button-ml']);
     await set(el, '[data-field="motionlight-buttons"]', 'd-button-ml', 'change');
     expect(motion(el).buttons).toEqual(['d-button-ml']);
-    expect(options(el, 'motionlight-buttons')).toEqual(['', 'd-switch-ml']);
+    expect(options(el, 'motionlight-buttons')).toEqual(['']);
+  });
+
+  it('the form order: Buttons before Motion sensors, then Only when dark, Off after, Minimum on time, Auto again after', async () => {
+    const el = await open([]);
+    await selectZone(el, 'r0');
+    await pickAutomation(el, 'motionLight');
+    const fields = [...el.shadowRoot!.querySelectorAll('.rule-backdrop .rsettings [data-field]')].map(f => f.getAttribute('data-field'));
+    const wanted = ['name', 'motionlight-light', 'motionlight-buttons', 'motionlight-sensors', 'motionlight-daylight', 'motionlight-is', 'motionlight-off', 'motionlight-minon', 'motionlight-autoafter'];
+    expect(fields.filter(f => wanted.includes(f!))).toEqual(wanted);
+  });
+
+  it('the two hints say what an empty list means', async () => {
+    const el = await open([]);
+    await selectZone(el, null);
+    await pickAutomation(el, 'motionLight');
+    const text = q(el, '.rsettings').textContent!;
+    expect(text).toContain('none = always auto');
+    expect(text).toContain('none = auto does nothing');
+  });
+
+  it('Auto again after shows only when the rule has a button', async () => {
+    const el = await open([]);
+    await selectZone(el, 'r0');
+    await pickAutomation(el, 'motionLight');
+    expect(q(el, '[data-field="motionlight-autoafter"]')).toBeTruthy(); // the template pre-fills the smart button
+    await press(el, '.rule-backdrop [data-group="motionlight-buttons"] .rchip[data-id="d-button-ml"] button[data-action="remove"]');
+    expect(motion(el).buttons).toEqual([]);
+    expect(el.shadowRoot!.querySelector('.rule-backdrop [data-field="motionlight-autoafter"]')).toBeNull();
+    await set(el, '[data-field="motionlight-buttons"]', 'd-button-ml', 'change');
+    expect(q(el, '[data-field="motionlight-autoafter"]')).toBeTruthy();
   });
 
   it('the "is" select shows only with a light sensor and patches daylight.is; clearing the sensor removes daylight', async () => {
@@ -144,7 +176,7 @@ describe('Light motion control form', () => {
     expect(okBtn(el).disabled).toBe(false);
     await set(el, '[data-field="motionlight-autoafter"]', '1441');
     expect(okBtn(el).disabled).toBe(true);
-    expect(problems(el)).toEqual(['Light motion control: pick a light that can be switched on and off, motion sensors and buttons each only once (not the light itself), and whole numbers in range.']);
+    expect(problems(el)).toEqual(['Light motion control: pick a light that can be switched on and off, smart buttons and motion sensors each only once, and whole numbers in range.']);
     await set(el, '[data-field="motionlight-autoafter"]', '0');
     await set(el, '[data-field="motionlight-minon"]', '1.5');
     expect(okBtn(el).disabled).toBe(true);
@@ -209,23 +241,20 @@ describe('Light motion control form', () => {
     expect(el.shadowRoot!.querySelector('.rule-backdrop .rchip[data-id="d-motion"]')!.classList).toContain('hl');
     (el.shadowRoot!.activeElement as HTMLElement).blur(); // happy-dom keeps a stale focus across tests
   });
-  it('a note says when nothing returns the rule to auto: no Auto button and "Auto again after" 0; OK stays enabled', async () => {
+  it('a note says when no button has an Auto action and "Auto again after" is 0; absent without buttons; OK stays enabled', async () => {
     const note = (el: PlanStudioPanel) => el.shadowRoot!.querySelector('.rule-backdrop [data-note="motionlight-noauto"]');
-    const text = 'Nothing returns this rule to auto: no button with an Auto action (or a wall switch with double toggle) and "Auto again after" is 0. After a manual switch it stays silent until the rule is changed.';
+    const text = 'No button here has an Auto action and "Auto again after" is 0: after a press the rule stays manual until it is changed.';
     const el = await open([]);
     await selectZone(el, null);
     await pickAutomation(el, 'motionLight');
-    expect(note(el)!.textContent).toBe(text); // no buttons, 0
+    expect(note(el)).toBeNull(); // no buttons: the rule is always auto
     await set(el, '[data-field="motionlight-light"]', 'd-light', 'change');
-    await set(el, '[data-field="motionlight-sensors"]', 'd-motion', 'change');
     await set(el, '[data-field="motionlight-buttons"]', 'd-button-ml', 'change'); // smart button without Auto
     expect(note(el)!.textContent).toBe(text);
     expect(okBtn(el).disabled).toBe(false);
     await set(el, '[data-field="motionlight-autoafter"]', '10');
     expect(note(el)).toBeNull();
     await set(el, '[data-field="motionlight-autoafter"]', '0');
-    expect(note(el)).not.toBeNull();
-    await set(el, '[data-field="motionlight-buttons"]', 'd-switch-ml', 'change'); // still no Auto
     expect(note(el)).not.toBeNull();
   });
 
@@ -248,7 +277,7 @@ describe('Light motion control form', () => {
       [{ action: 'auto', reason: 'auto again', sent: false }, /^Ceiling light back to auto .*21.46.* \(no motion\)$/],
       [{ action: 'on', reason: 'button: manual' }, /^Ceiling light manual .*21.46.* \(button\)$/],
       [{ action: 'off', reason: 'button: manual', sent: false }, /^Ceiling light manual .*21.46.* \(button\)$/],
-      [{ action: 'off', reason: 'switched elsewhere: manual', sent: false }, /^Ceiling light manual .*21.46.* \(switched off elsewhere\)$/],
+      [{ action: 'off', reason: 'switched off elsewhere: waits for new motion', sent: false }, /^Ceiling light switched off elsewhere .*21.46.*: waits for new motion$/],
       [{ action: 'on', reason: 'found on', sent: false }, /^Ceiling light found on .*21.46/],
       [{ action: 'on', reason: 'motion', sent: false }, /^Ceiling light already on .*21.46/],
     ];

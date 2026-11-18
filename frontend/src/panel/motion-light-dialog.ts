@@ -12,7 +12,7 @@ import { t } from '../i18n';
 
 export interface MotionLightDialogOpts {
   draft: RuleDraft;
-  /** Devices that can be switched on and off; motion sensors; illuminance sensors; smart buttons and wall switches; every device (for names). */
+  /** Devices that can be switched on and off; motion sensors; illuminance sensors; smart buttons; every device (for names). */
   lights: Device[];
   sensors: Device[];
   daylightSensors: Device[];
@@ -38,7 +38,6 @@ function problemTexts(o: MotionLightDialogOpts): { key: string; text: string }[]
   const r = o.draft.rule, c = r.motionLight!;
   const hints: { key: string; text: string }[] = [];
   if (!c.light) hints.push({ key: 'pick-light', text: t('motionLight.problem.light') });
-  if (c.sensors.length === 0) hints.push({ key: 'pick-sensors', text: t('motionLight.problem.sensors') });
   const out = [...hints];
   const missing = (c.light && !o.lights.some(d => d.id === c.light)) || c.sensors.some(id => !o.sensors.some(d => d.id === id))
     || c.buttons.some(id => !o.buttons.some(d => d.id === id)) || (c.daylight && !o.daylightSensors.some(d => d.id === c.daylight!.sensor));
@@ -69,8 +68,8 @@ export function renderMotionLightDialog(o: MotionLightDialogOpts): TemplateResul
           @input=${(e: Event) => onInput(num((e.target as HTMLInputElement).value))} /></label>
       ${note ? html`<span class="muted">${note}</span>` : nothing}
     </div>`;
-  // No way back to auto: no button with an Auto action and no "Auto again after".
-  const noAuto = c.autoAfter === 0 && !c.buttons.some(id => { const b = o.buttons.find(x => x.id === id); return !!b && buttonHasAuto(b); });
+  // Buttons, none with an Auto action, and no "Auto again after": after a press nothing returns the rule to auto.
+  const noAuto = c.buttons.length > 0 && c.autoAfter === 0 && !c.buttons.some(id => { const b = o.buttons.find(x => x.id === id); return !!b && buttonHasAuto(b); });
   const d = c.daylight;
   const known = !d || o.daylightSensors.some(x => x.id === d.sensor);
   return renderPurposeDialog({
@@ -80,8 +79,13 @@ export function renderMotionLightDialog(o: MotionLightDialogOpts): TemplateResul
       <label class="rlabel">${t('motionLight.light')}</label>
       ${pick('motionlight-light', c.light, o.lights, id => set({ ...c, light: id }))}
 
+      <label class="rlabel">${t('motionLight.buttons')}</label>
+      ${chips(o, 'motionlight-buttons', 'motionlight-button', c.buttons, o.buttons.filter(x => x.id !== c.light), t('motionLight.addButton'), ids => set({ ...c, buttons: ids, ...(ids.length === 0 ? { autoAfter: 0 } : {}) }))}
+      <span class="muted">${t('motionLight.buttonsNote')}</span>
+
       <label class="rlabel">${t('motionLight.sensors')}</label>
       ${chips(o, 'motionlight-sensors', 'motionlight-sensor', c.sensors, o.sensors, t('motionLight.addSensor'), ids => set({ ...c, sensors: ids }))}
+      <span class="muted">${t('motionLight.sensorsNote')}</span>
 
       <label class="rlabel">${t('motionLight.daylight')}</label>
       <div class="vnums">
@@ -106,9 +110,7 @@ export function renderMotionLightDialog(o: MotionLightDialogOpts): TemplateResul
       ${field('off', t('motionLight.off'), r.offDelay, 0, RULE_DELAY_MAX, n => o.onChange({ ...r, offDelay: n }), t('motionLight.offNote'))}
       ${field('minon', t('motionLight.minOn'), c.minOn, 0, 3600, n => set({ ...c, minOn: n }))}
 
-      <label class="rlabel">${t('motionLight.buttons')}</label>
-      ${chips(o, 'motionlight-buttons', 'motionlight-button', c.buttons, o.buttons.filter(x => x.id !== c.light), t('motionLight.addButton'), ids => set({ ...c, buttons: ids }))}
-      ${field('autoafter', t('motionLight.autoAfter'), c.autoAfter, 0, 1440, n => set({ ...c, autoAfter: n }), t('motionLight.autoAfterNote'))}
+      ${c.buttons.length > 0 ? field('autoafter', t('motionLight.autoAfter'), c.autoAfter, 0, 1440, n => set({ ...c, autoAfter: n }), t('motionLight.autoAfterNote')) : nothing}
       ${noAuto ? html`<p class="muted" data-note="motionlight-noauto">${t('motionLight.noAutoNote')}</p>` : nothing}`,
     diagram: renderMotionLightTrace({
       rule: r, deviceName: name,

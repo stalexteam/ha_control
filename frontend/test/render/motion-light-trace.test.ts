@@ -5,7 +5,7 @@ import { renderMotionLightTrace, motionLightFocus, MOTION_LIGHT_WIDTH, type Moti
 import { PURPOSE_WIDTH } from '../../src/render/flow-block';
 import type { Rule } from '../../src/model/types';
 import { clock } from '../../src/panel/rules-panel';
-import type { MotionLightTrace, RuleTrace } from '../../src/live/rules-feed';
+import { motionModeLast, type MotionLightTrace, type RuleTrace } from '../../src/live/rules-feed';
 
 const NOW = new Date(2026, 10, 17, 20, 0).getTime();
 const at = (h: number, m: number) => new Date(2026, 10, 17, h, m).getTime();
@@ -87,10 +87,33 @@ describe('light motion control diagram', () => {
     expect(d).toContain(`V${pos(host, 'motionlight-wants').y}`);
   });
 
-  it('no sensors: one block asks for a sensor', () => {
-    const { host } = draw({ rule: { ...rule, motionLight: { ...rule.motionLight!, sensors: [] } } });
+  it('no sensors: one muted block says auto does nothing; the Daylight block is still shown', () => {
+    const r: Rule = { ...rule, motionLight: { ...rule.motionLight!, sensors: [] } };
+    const { host } = draw({ rule: r });
     expect(order(host).slice(0, 2)).toEqual(['motionlight-sensors', 'motionlight-daylight']);
-    expect(text(host, 'motionlight-sensors')).toBe('Add a motion sensor');
+    expect(text(host, 'motionlight-sensors')).toBe('no motion sensors: auto does nothing');
+    const k = cls(host, 'motionlight-sensors');
+    expect(k.contains('on') || k.contains('off') || k.contains('nodata')).toBe(false);
+    expect(text(draw({ rule: r, trace: live({ sensors: [] }) }).host, 'motionlight-sensors')).toBe('no motion sensors: auto does nothing');
+  });
+
+  it('no button: the Mode block says auto (no button), with and without live values', () => {
+    expect(text(draw({ rule: bare }).host, 'motionlight-mode')).toBe('Mode | auto (no button)');
+    expect(text(draw({ rule: bare, trace: live({}) }).host, 'motionlight-mode')).toBe('Mode: auto (no button)');
+    expect(text(draw({ trace: live({}) }).host, 'motionlight-mode')).toBe('Mode: auto');
+  });
+
+  it('auto without motion sensors (verdict null): Wants shows no on / off value', () => {
+    const r: Rule = { ...bare, motionLight: { ...bare.motionLight!, sensors: [] } };
+    const { host } = draw({ rule: r, trace: live({ sensors: [], dark: null }, { verdict: null }) });
+    expect(text(host, 'motionlight-wants')).toBe('Wants | on at motion, off 3:00 after it ends');
+    expect(cls(host, 'motionlight-wants')).not.toContain('nodata');
+  });
+
+  it('waiting for new motion shows in the Wants block only while the trace says so', () => {
+    const w = draw({ trace: live({ waiting: true }, { verdict: false }) });
+    expect(text(w.host, 'motionlight-wants')).toContain('waiting for new motion');
+    expect(text(draw({ trace: live({}, { verdict: false }) }).host, 'motionlight-wants')).not.toContain('waiting for new motion');
   });
 
   it('auto, off pending: sensors clear, Daylight night, off in and minimum on count down, the light on', () => {
@@ -136,9 +159,9 @@ describe('light motion control diagram', () => {
   });
 
   it('manual without a countdown: the way back is a button', () => {
-    const { host } = draw({ trace: live({ mode: 'manual' }, { verdict: null, last: { action: 'off', target: 'Kitchen light', at: at(19, 43), reason: 'switched elsewhere: manual', sent: false } }) });
+    const { host } = draw({ trace: live({ mode: 'manual' }, { verdict: null, last: { action: 'off', target: 'Kitchen light', at: at(19, 43), reason: 'button: manual', sent: false } }) });
     expect(text(host, 'motionlight-mode')).toBe('Mode: manual | back to auto: a button\'s Auto action');
-    expect(text(host, 'motionlight-light')).toBe(`Kitchen light | state: on | last: manual ${clock(at(19, 43))} (switched off elsewhere)`);
+    expect(text(host, 'motionlight-light')).toBe(`Kitchen light | state: on | last: manual ${clock(at(19, 43))} (button)`);
   });
 
   it('the light without data, a command error and a status note', () => {
@@ -157,7 +180,8 @@ describe('light motion control diagram', () => {
     expect(lastOf(e('auto', 'auto again', { sent: false }))).toBe(`last: back to auto ${c} (no motion)`);
     expect(lastOf(e('on', 'button: manual'))).toBe(`last: manual ${c} (button)`);
     expect(lastOf(e('off', 'button: manual', { sent: false }))).toBe(`last: manual ${c} (button)`);
-    expect(lastOf(e('off', 'switched elsewhere: manual', { sent: false }))).toBe(`last: manual ${c} (switched off elsewhere)`);
+    expect(lastOf(e('off', 'switched off elsewhere: waits for new motion', { sent: false }))).toBe(`last: switched off elsewhere ${c}, waits for new motion`);
+    expect(motionModeLast(e('off', 'switched elsewhere: manual', { sent: false })!)).toBeUndefined(); // no longer written, no table row
     expect(lastOf(e('on', 'found on', { sent: false }))).toBe(`last: found on ${c}`);
     expect(lastOf(e('on', 'became true: Motion kitchen motion'))).toBe(`last: turned on ${c} (became true)`);
     const err = text(draw({ trace: live({}, { last: e('on', 'button: manual', { error: 'target unavailable' }) }) }).host, 'motionlight-light');
