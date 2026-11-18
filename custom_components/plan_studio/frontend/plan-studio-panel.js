@@ -12325,7 +12325,7 @@ var Py = Object.defineProperty, G = (t, e, n, i) => {
     (r = t[s]) && (o = r(e, n, o) || o);
   return o && Py(e, n, o), o;
 };
-const Ty = "0.23.0", Er = class Er extends It {
+const Ty = "0.23.1", Er = class Er extends It {
   constructor() {
     super(), this.narrow = !1, this.plan = null, this.automationsMenu = null, this.loadError = null, this.selection = null, this.toolId = "select", this.wallType = "bearing", this.thickness = bh.bearing, this.boxMeasure = "inner", this.grid = !0, this.mode = "plan", this.bindFilter = "unbound", this.bindQuery = "", this.railCollapsed = !1, this.showAll = {}, this.zoneQuery = "", this.cones = !0, this.nextProps = Xb(), this.nextObj = Q1(), this.planView = { x: -1e3, y: -1e3, scale: 0.08 }, this.powerView = { x: -40, y: -40, scale: 1 }, this.placeDeviceId = null, this.size = { w: 0, h: 0 }, this.dialog = null, this.notice = null, this.fieldNotice = null, this.pendingDraft = null, this.ruleDraft = null, this.plans = [], this.deleting = !1, this.history = null, this.lazyPower = nu(), this.loading = !1, this.needFit = !1, this.needPowerFit = !1, this.drafts = new Yv(), this.resizeObs = null, this.session = new qb(this), this.haMeta = new Zb(this), this.feed = new Qv(this, () => {
       var i;
