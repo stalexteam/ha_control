@@ -29,6 +29,7 @@ def _reload_live(hass: HomeAssistant) -> None:
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
+    websocket_api.async_register_command(hass, ws_info)
     websocket_api.async_register_command(hass, ws_list)
     websocket_api.async_register_command(hass, ws_get)
     websocket_api.async_register_command(hass, ws_save)
@@ -37,6 +38,13 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_rules_subscribe)
     websocket_api.async_register_command(hass, ws_power_subscribe)
     websocket_api.async_register_command(hass, ws_power_set_position)
+
+
+@websocket_api.websocket_command({vol.Required("type"): "plan_studio/info"})
+@callback
+def ws_info(hass, connection, msg):
+    """The integration version (manifest), so an open panel can tell it was updated under it."""
+    connection.send_result(msg["id"], {"version": hass.data[DOMAIN]["manifest_version"]})
 
 
 @websocket_api.websocket_command({vol.Required("type"): "plan_studio/plans/list"})

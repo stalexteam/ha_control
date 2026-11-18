@@ -82,6 +82,8 @@ const same = (a, b, what) => {
   if (canon(a) !== canon(b)) fail(`${what}: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
 };
 async function run() {
+  const info = expectOk(await call({ type: "plan_studio/info" }), "info");
+  if (typeof info.version !== "string" || !info.version) fail("info: no version");
   const id = `smoke-${Date.now()}`;
   const level = { id: `${id}-l1`, name: "Level 1", kind: "floor", order: 0, nodes: [], walls: [], openings: [], zones: [] };
   const plan = { id, name: "Smoke", schemaVersion: 2, levels: [level] };

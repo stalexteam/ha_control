@@ -1267,3 +1267,13 @@ def test_motion_restored_auto_waits_for_ha_started(env):
         assert live.engine.snapshot("p1")["r1"]["verdict"] is True
 
     asyncio.run(go())
+
+
+def test_info_answers_the_manifest_version(env):
+    sent = []
+    hass = FakeHass()
+    hass.data["plan_studio"]["manifest_version"] = "9.8.7"
+    conn = types.SimpleNamespace(send_result=lambda i, r=None: sent.append((i, r)))
+    env.ws.ws_info(hass, conn, {"id": 3})
+    assert sent == [(3, {"version": "9.8.7"})]
+    assert "plan_studio/info" in env.cmds

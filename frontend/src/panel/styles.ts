@@ -38,6 +38,11 @@ export const panelStyles = css`
     background: var(--ch-bg); color: var(--ch-text);
     font-size: 14px; font-family: var(--ha-font-family-body, Roboto, "Noto Sans", system-ui, sans-serif);
   }
+  .ed[data-update] { grid-template-rows: auto auto 1fr 30px; }
+  .update-bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 6px 12px;
+    background: var(--ch-primary); color: var(--ch-on-primary); }
+  .update-bar button { border: 1px solid var(--ch-on-primary); border-radius: 6px; padding: 3px 12px;
+    background: transparent; color: inherit; }
   .ed.binding { grid-template-columns: 250px 300px 1fr; }
   .ed.binding.rail-off { grid-template-columns: 36px 300px 1fr; }
   .ed.power { grid-template-columns: 84px 300px 1fr; }

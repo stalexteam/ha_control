@@ -22,17 +22,17 @@ _LOGGER = logging.getLogger(__name__)
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 
 
-def _asset_version() -> str:
-    """Cache-busting token: manifest version plus a short hash of the bundle contents."""
+def _versions() -> tuple[str, str]:
+    """The manifest version and the cache-busting token (manifest version plus a short hash of the bundle contents)."""
     manifest = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))
     digest = hashlib.sha256((FRONTEND_DIR / PANEL_JS).read_bytes()).hexdigest()[:8]
-    return f"{manifest['version']}-{digest}"
+    return manifest["version"], f"{manifest['version']}-{digest}"
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data = hass.data.setdefault(DOMAIN, {})
     if "version" not in data:
-        data["version"] = await hass.async_add_executor_job(_asset_version)
+        data["manifest_version"], data["version"] = await hass.async_add_executor_job(_versions)
     if "store" not in data:
         store = PlanStore(hass)
         await store.async_load()

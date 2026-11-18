@@ -238,6 +238,8 @@ const en: Dict = {
   'action.delete': 'Delete',
   'action.cancel': 'Cancel',
   'action.retry': 'Retry',
+  'update.notice': 'Plan Studio was updated on the server ({version}). Reload the page to use it.',
+  'update.reload': 'Reload',
 
   'save.dirty': 'Unsaved changes',
   'save.clean': 'No changes',

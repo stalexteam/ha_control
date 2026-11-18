@@ -64,6 +64,10 @@ import { PowerFeed, powerPayload } from '../live/power-feed';
 import { deviceLive, liveBubbles } from '../live/device-live';
 import { DeviceEventTracker, eventSources } from '../live/device-events';
 import { EntityFeed } from '../live/entity-feed';
+import { UpdateCheck } from '../live/update-check';
+
+/** The integration version this bundle was built from (Vite `define`, from manifest.json). */
+declare const __PLAN_STUDIO_VERSION__: string;
 
 export class PlanStudioPanel extends LitElement {
   static styles = panelStyles;
@@ -148,6 +152,10 @@ export class PlanStudioPanel extends LitElement {
   private readonly events = new DeviceEventTracker();
   /** Per-message states of the event sources (Binding step of an attached panel), so no press is coalesced away. */
   readonly entityFeed = new EntityFeed(() => this.hass?.connection, () => this.onEntities());
+  /** Reloads the page (the "updated on the server" notice); replaceable in tests. */
+  reloadPage: () => void = () => location.reload();
+  /** Asks the server for its version at start and after every reconnect; `serverVersion` is set while it differs. */
+  private readonly updateCheck = new UpdateCheck(() => this.hass?.connection, __PLAN_STUDIO_VERSION__, () => this.requestUpdate());
   private trackedLevel: Level | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
   /** True while the 1 s ticker runs (Binding step with a timer, event or fading bubble). */
@@ -197,9 +205,11 @@ export class PlanStudioPanel extends LitElement {
     this.watchPower();
     this.watchRules();
     this.watchEntities();
+    this.updateCheck.watch();
   }
 
   disconnectedCallback(): void {
+    this.updateCheck.stop();
     super.disconnectedCallback();
     this.removeEventListener('keydown', this.input.keyDown);
     this.removeEventListener('keyup', this.input.keyUp);
@@ -224,6 +234,7 @@ export class PlanStudioPanel extends LitElement {
     // New states, or a new level whose devices have no baseline yet.
     const cur = this.history?.current.level ?? null;
     this.watchEntities();
+    if (changed.has('hass') && this.isConnected) this.updateCheck.watch(); // hass may arrive after the element is attached
     if (cur && this.hass && (changed.has('hass') || cur !== this.trackedLevel)) {
       this.events.update(cur, this.entityFeed.overlay(this.hass.states), Date.now());
     }
@@ -800,8 +811,11 @@ export class PlanStudioPanel extends LitElement {
     const states = this.hass?.states;
     return html`
       <div class="ed${this.mode === 'binding' ? ` binding${this.railCollapsed ? ' rail-off' : ''}` : power ? ' power' : this.mode === 'automation' ? ' automation' : ''}"
-        style=${paletteVars(pal)}
+        style=${paletteVars(pal)} ?data-update=${this.updateCheck.serverVersion !== null}
         @click=${this.refocus} @change=${this.refocusAfterChange}>
+        ${this.updateCheck.serverVersion === null ? nothing : html`<div class="update-bar" role="status">
+          <span>${t('update.notice').replace('{version}', this.updateCheck.serverVersion)}</span>
+          <button data-action="reload" @click=${() => this.reloadPage()}>${t('update.reload')}</button></div>`}
         ${renderTopBar({
           steps: renderSteps({
             mode: this.mode, level, status: this.bindStatus, power: this.power, rules: this.rules.length, planName: this.plan.name,

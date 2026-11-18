@@ -35,6 +35,11 @@ export async function listPlans(hass: HassLike): Promise<PlanSummary[]> {
   return res.plans;
 }
 
+/** The server's Plan Studio version (manifest); an old server answers `unknown_command`. */
+export async function fetchInfo(hass: Pick<HassLike, 'connection'>): Promise<{ version: string }> {
+  return hass.connection.sendMessagePromise<{ version: string }>({ type: 'plan_studio/info' });
+}
+
 export async function getPlan(hass: HassLike, id: Id): Promise<Plan> {
   const res = await hass.connection.sendMessagePromise<{ plan: Plan }>({
     type: 'plan_studio/plans/get',
