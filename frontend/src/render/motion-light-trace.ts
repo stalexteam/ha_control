@@ -37,7 +37,8 @@ const MW = MOTION_LIGHT_WIDTH - 2 * PAD, CX = MOTION_LIGHT_WIDTH / 2;
 const GAP = 12, PER_ROW = 3;
 
 /** The mode changes of this kind are worded as what they are; every other entry goes through the shared wording. */
-const MODE_LAST = { auto: 'lastAuto', autoAgain: 'lastAutoAgain', manualButton: 'lastManualButton', releasedOff: 'lastReleased', found: 'lastFound' };
+const MODE_LAST = { auto: 'lastAuto', autoAgain: 'lastAutoAgain', manualButton: 'lastManualButton', releasedOff: 'lastReleased', found: 'lastFound',
+  autoOff: 'lastAutoOff', autoOffLight: 'lastAutoOffLight', autoOn: 'lastAutoOn' };
 const motionLast = (l: RuleLast): string => {
   const mode = motionModeLast(l);
   return mode ? t(`motionLight.flow.${MODE_LAST[mode]}`).replace('{at}', clock(l.at)).replace('{s}', l.action) : lastLine(l);

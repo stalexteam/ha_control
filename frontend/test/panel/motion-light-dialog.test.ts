@@ -275,6 +275,9 @@ describe('Light motion control form', () => {
     const rows: [Record<string, unknown>, RegExp][] = [
       [{ action: 'auto', reason: 'button: auto', sent: false }, /^Ceiling light back to auto .*21.46.* \(button\)$/],
       [{ action: 'auto', reason: 'auto again', sent: false }, /^Ceiling light back to auto .*21.46.* \(no motion\)$/],
+      [{ action: 'off', reason: 'back to auto: no motion' }, /^Ceiling light turned off .*21.46.* \(back to auto: no motion\)$/],
+      [{ action: 'off', reason: 'back to auto: not dark' }, /^Ceiling light turned off .*21.46.* \(back to auto: it is light\)$/],
+      [{ action: 'on', reason: 'back to auto: motion' }, /^Ceiling light turned on .*21.46.* \(back to auto: motion\)$/],
       [{ action: 'on', reason: 'button: manual' }, /^Ceiling light manual .*21.46.* \(button\)$/],
       [{ action: 'off', reason: 'button: manual', sent: false }, /^Ceiling light manual .*21.46.* \(button\)$/],
       [{ action: 'off', reason: 'switched off elsewhere: waits for new motion', sent: false }, /^Ceiling light switched off elsewhere .*21.46.*: waits for new motion$/],

@@ -451,6 +451,68 @@ def test_auto_with_motion_in_daylight_switches_off():
     assert w.calls == [OFF, ON]
 
 
+def test_lost_off_on_entering_auto_heals():
+    """The off sent on entering auto counts as on its way only for ON_WAY s: a lost off does not leave the light on."""
+    w = loaded([ml_rule(buttons=("btn",), daylight=("ls", "night"))], sensor__lux=DAY)
+    w.press("btn", "toggle")
+    w.light("on", own=True)
+    w.calls.clear()
+    w.press("btn", "auto")
+    assert w.calls == [OFF]  # lost: the lamp keeps reading on
+    w.advance(T0 + 3)
+    w.pir("on")  # inside the window: the reading on is the off on its way
+    assert w.calls == [OFF] and w.tr()["verdict"] is False
+    w.advance(T0 + 12)
+    w.pir("on")  # after it: motion while the light reads on: held (the on goes through the slots again)
+    assert w.calls == [OFF, ON] and w.tr()["verdict"] is True
+    w.pir("off")
+    w.advance(T0 + 191)
+    assert w.calls == [OFF, ON]
+    w.advance(T0 + 192)
+    assert w.calls == [OFF, ON, OFF]
+
+
+def test_dropped_is_not_set_when_the_off_is_kept_back():
+    w = loaded([ml_rule(buttons=("btn",), daylight=("ls", "night")), timed_rule(minutes=10)], sensor__lux=DAY)
+    w.press("tb", "set", "on")
+    assert w.calls == [ON]
+    w.light("on", own=True)
+    w.press("btn", "set", "on")  # manual, already on
+    w.calls.clear()
+    w.press("btn", "auto")
+    t = w.tr()
+    assert w.calls == [] and t["verdict"] is False and t["motionLight"]["mode"] == "auto"
+    assert t["last"]["reason"] == "kept on by Timer" and t["last"]["sent"] is False
+    w.advance(T0 + 1)
+    w.pir("on")  # motion in daylight while the light is on: held as usual
+    assert w.tr()["verdict"] is True and w.calls == []
+    w.advance(T0 + 600)  # the timed run ends while the motion lasts: kept on by this rule
+    assert w.calls == []
+    w.pir("off")
+    w.advance(T0 + 779)
+    assert w.calls == []
+    w.advance(T0 + 780)
+    assert w.calls == [OFF]
+
+
+def test_second_auto_before_the_echo():
+    w = loaded([ml_rule(buttons=("btn",))])
+    w.press("btn", "toggle")
+    w.light("on", own=True)
+    w.calls.clear()
+    w.press("btn", "auto")
+    assert w.calls == [OFF]
+    w.advance(T0 + 1)
+    w.press("btn", "auto")  # again, before the lamp confirms the off
+    assert w.calls == [OFF, OFF]
+    w.light("off", own=True)
+    t = w.tr()
+    assert t["verdict"] is False and t["motionLight"]["mode"] == "auto" and "waiting" not in t["motionLight"]
+    assert t["motionLight"]["light"] == "off"
+    w.advance(T0 + 3600)
+    assert w.calls == [OFF, OFF]
+
+
 def test_auto_with_motion_while_dark_and_the_light_off_switches_on():
     w = loaded([ml_rule(buttons=("btn",), min_on=60, off=0)])
     w.press("btn", "toggle")

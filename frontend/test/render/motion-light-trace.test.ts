@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render } from 'lit';
 import { renderMotionLightTrace, motionLightFocus, MOTION_LIGHT_WIDTH, type MotionLightTraceOpts } from '../../src/render/motion-light-trace';
 import { PURPOSE_WIDTH } from '../../src/render/flow-block';
+import { lastLine } from '../../src/render/outside-trace';
 import type { Rule } from '../../src/model/types';
 import { clock } from '../../src/panel/rules-panel';
 import { motionModeLast, type MotionLightTrace, type RuleTrace } from '../../src/live/rules-feed';
@@ -184,7 +185,11 @@ describe('light motion control diagram', () => {
     expect(motionModeLast(e('off', 'switched elsewhere: manual', { sent: false })!)).toBeUndefined(); // no longer written, no table row
     expect(lastOf(e('on', 'found on', { sent: false }))).toBe(`last: found on ${c}`);
     expect(lastOf(e('on', 'became true: Motion kitchen motion'))).toBe(`last: turned on ${c} (became true)`);
-    expect(lastOf(e('off', 'back to auto: no motion'))).toBe(`last: turned off ${c} (back to auto)`); // the shared wording keeps the reason's head
+    expect(lastOf(e('off', 'back to auto: no motion'))).toBe(`last: turned off ${c} (back to auto: no motion)`);
+    expect(lastOf(e('off', 'back to auto: not dark'))).toBe(`last: turned off ${c} (back to auto: it is light)`);
+    expect(lastOf(e('on', 'back to auto: motion'))).toBe(`last: turned on ${c} (back to auto: motion)`);
+    const kept = e('off', 'kept on by Timer', { sent: false })!;
+    expect(lastOf(kept)).toBe(lastLine(kept)); // an off kept back on entering auto keeps the shared wording
     const err = text(draw({ trace: live({}, { last: e('on', 'button: manual', { error: 'target unavailable' }) }) }).host, 'motionlight-light');
     expect(err).toContain(`last: manual ${c} (button)`);
     expect(err).toContain('target unavailable');

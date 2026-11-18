@@ -53,13 +53,16 @@ export function keptOn(l: RuleLast): boolean {
 }
 
 /** The mode changes of a light motion control rule by their exact `RuleLast.reason`; the row and the diagram word them from this one list. */
-export const MOTION_MODE_REASONS: Record<string, 'auto' | 'autoAgain' | 'manualButton' | 'releasedOff' | 'found'> = {
+export type MotionModeLast = 'auto' | 'autoAgain' | 'manualButton' | 'releasedOff' | 'found' | 'autoOff' | 'autoOffLight' | 'autoOn';
+export const MOTION_MODE_REASONS: Record<string, MotionModeLast> = {
   'button: auto': 'auto', 'auto again': 'autoAgain', 'button: manual': 'manualButton',
   'switched off elsewhere: waits for new motion': 'releasedOff', 'found on': 'found',
+  // the command sent on entering auto (a fresh decision)
+  'back to auto: no motion': 'autoOff', 'back to auto: not dark': 'autoOffLight', 'back to auto: motion': 'autoOn',
 };
 
 /** Which mode change an entry of a light motion control rule is (undefined = a plain command or other entry). */
-export function motionModeLast(l: RuleLast): 'auto' | 'autoAgain' | 'manualButton' | 'releasedOff' | 'found' | undefined {
+export function motionModeLast(l: RuleLast): MotionModeLast | undefined {
   return MOTION_MODE_REASONS[l.reason];
 }
 
