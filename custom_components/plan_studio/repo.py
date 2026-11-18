@@ -11,10 +11,12 @@ import voluptuous as vol
 
 try:
     from .announce import KINDS as ANNOUNCE, PHONE, SPEAKER, in_domain, service_ok
+    from .control import EVENTS
     from .migrate import migrate_plan, CURRENT_SCHEMA
     from .virtual import KIND as VIRTUAL_KIND, PREFIX as VIRTUAL_PREFIX, entity_id as virtual_entity
 except ImportError:  # pytest: module dir on sys.path
     from announce import KINDS as ANNOUNCE, PHONE, SPEAKER, in_domain, service_ok
+    from control import EVENTS
     from migrate import migrate_plan, CURRENT_SCHEMA
     from virtual import KIND as VIRTUAL_KIND, PREFIX as VIRTUAL_PREFIX, entity_id as virtual_entity
 
@@ -256,8 +258,25 @@ def _validate_announce(a: dict, devices: dict) -> None:
 _CONTROL_DOS = ("on", "off", "toggle", "close")
 
 
-def _validate_control(r: dict, c: object, devices: dict) -> list[str]:
-    """A load control rule: sources (buttons or condition inputs) give events that run the on / off / toggle action lists; a gate is allowed. Returns the rule ids the sources reference."""
+def _validate_event(e: object, rules: dict) -> None:
+    """An event source {event: {rule, what}}: the event of a purpose-built rule of the plan its kind gives (a rule missing
+    from the plan is the engine's "rule missing", as for a rule input)."""
+    if not isinstance(e, dict) or set(e) != {"rule", "what"} or not _is_id(e["rule"]) or not _is_id(e["what"]):
+        raise vol.Invalid("rule control event source needs a rule id and what")
+    ref = rules.get(e["rule"])
+    if ref is None:
+        return
+    kind = next((k for k in EVENTS if k in ref), None)
+    if kind is None:
+        raise vol.Invalid("rule control event source needs a motionLight or boiler rule")
+    if e["what"] not in EVENTS[kind]:
+        whats = EVENTS[kind]
+        raise vol.Invalid(f"rule control event of a {kind} rule must be {', '.join(whats[:-1])} or {whats[-1]}")
+
+
+def _validate_control(r: dict, c: object, devices: dict, rules: dict) -> list[str]:
+    """A load control rule: sources (buttons, condition inputs or events of purpose-built rules) give events that run the on / off / toggle action lists; a
+    gate is allowed. Returns the rule ids the input sources reference (an event source reads no verdict)."""
     if not isinstance(c, dict) or set(c) != {"sources", "on", "off", "toggle"}:
         raise vol.Invalid("rule control needs sources, on, off and toggle")
     sources = c["sources"]
@@ -267,7 +286,11 @@ def _validate_control(r: dict, c: object, devices: dict) -> list[str]:
     seen: set[str] = set()
     read: set[str] = set()
     for s in sources:
-        if isinstance(s, dict) and "button" in s:
+        if isinstance(s, dict) and "event" in s:
+            if set(s) != {"event"}:
+                raise vol.Invalid("rule control event source needs a rule id and what")
+            _validate_event(s["event"], rules)  # switches nothing and reads no device
+        elif isinstance(s, dict) and "button" in s:
             if set(s) != {"button"} or not _is_id(s["button"]):
                 raise vol.Invalid("rule control button source needs a button id")
         else:
@@ -309,6 +332,10 @@ def _validate_rules(rules: object, devices: dict) -> None:
     if not isinstance(rules, list):
         raise vol.Invalid("rules must be a list")
     graph: dict[str, list[str]] = {}
+    by_id: dict[str, dict] = {}  # the rules an event source may name
+    for r in rules:
+        if isinstance(r, dict) and _is_id(r.get("id")):
+            by_id.setdefault(r["id"], r)
     for r in rules:
         if not isinstance(r, dict):
             raise vol.Invalid("a rule must be an object")
@@ -359,7 +386,7 @@ def _validate_rules(rules: object, devices: dict) -> None:
         if "motionLight" in r:
             _validate_motion_light(r, r["motionLight"])
         if "control" in r:
-            refs.extend(_validate_control(r, r["control"], devices))
+            refs.extend(_validate_control(r, r["control"], devices, by_id))
         graph[r["id"]] = refs
     state: dict[str, int] = {}
 

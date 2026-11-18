@@ -512,6 +512,40 @@ def test_validate_plan_control_rule_source_refs():
     validate_plan({**plan("p"), "rules": [control_rule(control=ctl(sources=[{"source": {"rule": "r2"}}])), rule("r2")]})
 
 
+def test_validate_plan_control_rule_event_sources():
+    def ev(rid, what):
+        return {"event": {"rule": rid, "what": what}}
+
+    others = [motion_rule("u1"), boiler_rule("b1"), rule("r1"), timed_rule("t1")]
+
+    def check(*sources, **lists):
+        validate_plan({**plan("p"), "rules": [control_rule(control=ctl(sources=list(sources), **lists)), *others]})
+
+    for what in ("auto", "manual"):
+        check(ev("u1", what))
+    for what in ("auto", "manual", "done"):
+        check(ev("b1", what))
+    check({"button": "b"}, ev("u1", "auto"), ev("u1", "manual"), ev("b1", "done"))  # several, beside a button
+    check(ev("u1", "auto"), toggle=[], on=[{"device": "l", "do": "on"}])  # no read: may switch the rule's own light
+    check(ev("gone", "auto"))  # a rule missing from the plan: the engine's "rule missing", as for a rule input
+    shape = "rule control event source needs a rule id and what"
+    kind = "rule control event source needs a motionLight or boiler rule"
+    bad = [
+        ({"event": {"rule": "u1"}}, shape), ({"event": {"rule": "u1", "what": "auto", "x": 1}}, shape),
+        ({"event": {"rule": "", "what": "auto"}}, shape), ({"event": {"rule": "u1", "what": 5}}, shape),
+        ({"event": {"rule": "u1", "what": ""}}, shape), ({"event": "u1"}, shape),
+        ({"event": {"rule": "u1", "what": "auto"}, "not": True}, shape),
+        (ev("r1", "auto"), kind), (ev("t1", "auto"), kind), (ev("c1", "auto"), kind),  # a condition, timed, itself
+        (ev("u1", "done"), "rule control event of a motionLight rule must be auto or manual"),
+        (ev("b1", "on"), "rule control event of a boiler rule must be auto, manual or done"),
+    ]
+    for s, msg in bad:
+        with pytest.raises(vol.Invalid, match=msg):
+            check(s)
+    with pytest.raises(vol.Invalid, match="rule control needs distinct sources"):
+        check(ev("u1", "auto"), ev("u1", "auto"))
+
+
 def with_devices(*devices):
     return {**plan("p"), "levels": [{**LEVEL, "devices": list(devices)}]}
 

@@ -14,7 +14,7 @@ try:
     from .announce import KINDS as ANNOUNCE, call as announcement
     from .beurer import Beurer
     from .boiler import MODES, Boiler, watts
-    from .control import ECHO, Control
+    from .control import ECHO, EVENTS, Control
     from .expected import expect
     from .motion_light import MotionLight
     from .outside import Outside
@@ -25,7 +25,7 @@ except ImportError:  # pytest: module dir on sys.path
     from announce import KINDS as ANNOUNCE, call as announcement
     from beurer import Beurer
     from boiler import MODES, Boiler, watts
-    from control import ECHO, Control
+    from control import ECHO, EVENTS, Control
     from expected import expect
     from motion_light import MotionLight
     from outside import Outside
@@ -656,7 +656,13 @@ class _Rule:
             found.add("target missing")
         if any(x is not None and x.missing for x in (self.boiler, self.timed, self.outside, self.beurer, self.control, self.motion_light)):
             found.add("device missing")
+        if self.control is not None and self.control.lost:
+            found.add("rule missing")
         return next((r for r in STATIC_REASONS if r in found), None)
+
+    def event_kind(self) -> str | None:
+        """The kind whose events this rule gives to Load control event sources (control.EVENTS), None for no events."""
+        return "boiler" if self.boiler is not None else "motionLight" if self.motion_light is not None else None
 
 
 def _delay(v: object) -> int:
@@ -720,6 +726,7 @@ class RuleEngine:
         self._rules: dict[Key, _Rule] = {}
         self._order: dict[Key, int] = {}  # referenced rules before their consumers
         self._consumers: dict[Key, list[Key]] = {}
+        self._listeners: dict[Key, list[Key]] = {}  # purpose-built rule -> the Load control rules with its events as sources
         self._readers: dict[str, list[Key]] = {}
         self._targets: dict[str, list[Key]] = {}  # action target entity -> enabled rules
         self._published: dict[Key, dict] = {}
@@ -733,6 +740,7 @@ class RuleEngine:
         self._on_motion_modes = on_motion_modes  # the motion light rules in manual {plan id: {rule id: {mode, since, by}}}
         self._motion_modes: dict[str, dict[str, dict]] = {}  # the manual modes last reported (or loaded)
         self._booting = False  # a boot load happened and started() has not come yet: boiler auto waits
+        self._starting = False  # inside started(): the restored state's first evaluation still gives no rule events
         self._holds: dict[str, _Hold] = {}  # shared device entity -> its arbitrated command
         self._loading = False  # inside load_plans: arbitrated calls wait for the end of the load
         self._deferred: list[str] = []  # the shared devices commanded in this load, called once at its end
@@ -1049,7 +1057,7 @@ class RuleEngine:
     def _link(self) -> None:
         """Order rules so references come first; a reference closing a cycle is marked and ignored."""
         self._order, self._consumers, self._readers, self._targets = {}, {}, {}, {}
-        self._day_reads, self._day_rules = {}, {}
+        self._day_reads, self._day_rules, self._listeners = {}, {}, {}
         for dk, d in self._days.items():
             for eid in d.eids:
                 self._day_reads.setdefault(eid, []).append(dk)
@@ -1095,6 +1103,14 @@ class RuleEngine:
             for a in actions if rule.enabled else []:
                 if a.call is not None and key not in self._targets.get(a.call[2], []):
                     self._targets.setdefault(a.call[2], []).append(key)
+            if rule.control is not None:  # its event sources: a rule of the plan that gives that event
+                rule.control.lost = False
+                for rid, what in rule.control.events:
+                    ref = self._rules.get((key[0], rid))
+                    if ref is None or what not in EVENTS.get(ref.event_kind() or "", ()):
+                        rule.control.lost = True
+                    elif key not in self._listeners.get(ref.key, []):
+                        self._listeners.setdefault(ref.key, []).append(key)
 
     # --- evaluation ----------------------------------------------------------
 
@@ -1746,6 +1762,8 @@ class RuleEngine:
                 self._boiler_auto(rule, do, why, safety=b.phase in ("blackout", "limit"))
             if b.refuses_on():
                 self._boiler_drop_on(rule, relay)
+            if b.mode == "manual":  # heating done: back to manual by itself
+                self._rule_event(rule, "done", "manual")
         b.view = b.trace(grid, power, relay)
         wake = b.until if active else None
         if b.timer is not None and b.timer[0] != wake:
@@ -2045,6 +2063,7 @@ class RuleEngine:
         any more."""
         m = rule.motion_light
         assert m is not None and m.eid is not None
+        was = m.mode
         m.mode, m.since, m.moving, m.on_at, m.entered, m.own, m.waiting = "manual", self._now(), False, None, False, [], False
         m.dropped, m.day_off = None, False
         m.presses += 1  # an older press's command is no longer wanted
@@ -2055,6 +2074,8 @@ class RuleEngine:
         if not sent:
             entry["sent"] = False
         rule.last, rule.failed = entry, None
+        if was != "manual":
+            self._rule_event(rule, "manual")
         return entry
 
     def _motion_release(self, rule: _Rule) -> None:
@@ -2083,6 +2104,7 @@ class RuleEngine:
         motion ends; an own off still on its way, `dropped`, is kept for that decision)."""
         m = rule.motion_light
         assert m is not None
+        was = m.mode
         m.mode, m.since, m.moving, m.on_at, m.entered, m.own, m.waiting = "auto", None, False, None, True, [], False
         m.presses += 1  # a press's command is no longer wanted
         m.stop()
@@ -2090,6 +2112,8 @@ class RuleEngine:
         rule.verdict = None
         rule.last, rule.failed = {"action": "auto", "target": m.label, "at": int(self._now() * 1000), "reason": why,
                                   "sent": False}, None
+        if was != "auto":  # auto while auto restarts the start: no event
+            self._rule_event(rule, "auto")
 
     def _motion_arm(self, rule: _Rule, wake: "float | None") -> None:
         m = rule.motion_light
@@ -2343,16 +2367,37 @@ class RuleEngine:
             ref = self._rules.get((rule.key[0], i.rule or "")) if i.type == "rule" else None
             self._control_event(rule, i.label, what, announce=ref is None or ref.real)
 
-    def _control_event(self, rule: _Rule, source: str, what: str, announce: bool = True) -> None:
+    def _rule_event(self, rule: _Rule, *whats: str) -> None:
+        """A purpose-built rule's mode changed ("auto", "manual"; heating done gives "done" then "manual"): every
+        enabled Load control rule with a matching event source gets an "on" event (its gate applies), once even when
+        several of its sources match (the first of `whats` it has). None while HA starts (also the restored state's first
+        evaluation in started()), inside a load (a Save, an entry reload) or from a disabled rule."""
+        if self._booting or self._starting or self._loading or not rule.enabled:
+            return
+        rid, fired = rule.key[1], set()
+        for what in whats:
+            for key in self._listeners.get(rule.key, ()):
+                lc = self._rules.get(key)
+                c = lc.control if lc is not None else None
+                if key in fired or c is None or not lc.enabled or c.missing or (rid, what) not in c.events:
+                    continue
+                fired.add(key)
+                self._control_event(lc, rule.name, "on", origin={"rule": rid, "what": what})
+
+    def _control_event(self, rule: _Rule, source: str, what: str, announce: bool = True,
+                       origin: "dict | None" = None) -> None:
         """An event ("on", "off" or "toggle") of a source: recorded; dropped while the gate is not open (an "off" event ignores the gate); else the list
         of its kind runs by direct calls (own context). Its toggle actions act as one group (any of their devices
         effectively on: all off, else all on); on / off / close are literal; an announcement runs on its own (_announce),
         unless the event is no real change (announce False: it is left out, no entry). A device in the wanted state
-        already or without data gets nothing (never re-sent later)."""
+        already or without data gets nothing (never re-sent later). origin: {rule, what} of an event source (the
+        purpose-built rule's event, kept in the record; the entries' reason names it)."""
         c = rule.control
         assert c is not None
         at = int(self._now() * 1000)
         c.event = {"source": source, "what": what, "at": at}
+        if origin is not None:
+            c.event["origin"] = dict(origin)
         if what != "off" and rule.gate is not None and (rule.gate_trace is None or rule.gate_trace["value"] is not True):
             c.event["dropped"] = "gate closed"
             return
@@ -2362,7 +2407,7 @@ class RuleEngine:
         effective = [self._control_state(a.call[2]) if a.call is not None else None for a in actions]
         group = c.want([s for a, s in zip(actions, effective) if a.do == "toggle"])
         rule.seq += 1  # a late failure of an older event must not mark this one
-        seq, reason = rule.seq, f"{source}: {what}"
+        seq, reason = rule.seq, f"{source}: {origin['what'] if origin is not None else what}"
         rule.entries, rule.acted = [], c.event
         for a, state in zip(actions, effective):
             do = group if a.do == "toggle" else a.do
@@ -2465,8 +2510,12 @@ class RuleEngine:
         if not self._booting:
             return
         self._booting = False
-        self._settle({key for key, rule in self._rules.items() if rule.boiler is not None or rule.timed is not None
-                      or rule.outside is not None or rule.beurer is not None or rule.motion_light is not None})
+        self._starting = True  # a light whose auto-return passed while HA was down, a restored boiler done: no events
+        try:
+            self._settle({key for key, rule in self._rules.items() if rule.boiler is not None or rule.timed is not None
+                          or rule.outside is not None or rule.beurer is not None or rule.motion_light is not None})
+        finally:
+            self._starting = False
         self._flush()
 
     def _boiler_drop_on(self, rule: _Rule, relay: str | None) -> None:
@@ -2557,6 +2606,7 @@ class RuleEngine:
             if rule.failed is not None and rule.last is not None:
                 rule.last["error"] = rule.failed  # given up: the human took over
             rule.failed = None
+            self._rule_event(rule, "manual")  # a take-over: auto -> manual
             return
         if b.cmd is None:
             return
@@ -2616,7 +2666,7 @@ class RuleEngine:
             b = rule.boiler
             if key[0] != plan_id or b is None or b.button != container_id or not rule.enabled or b.missing:
                 continue
-            relay = b.relay_state(self._lookup)
+            relay, was = b.relay_state(self._lookup), b.mode
             taken, do, why = b.press(intent, relay, self._now())
             if not taken:
                 continue
@@ -2624,6 +2674,8 @@ class RuleEngine:
             b.see(relay, self._now())  # a wall switch over the relay: the change behind this intent is no take-over
             if do is not None:
                 self._boiler_send(rule, do, why)
+            if b.mode != was:
+                self._rule_event(rule, b.mode)
             dirty.add(key)
         if dirty:
             self._settle(dirty)
@@ -2860,11 +2912,12 @@ class RuleEngine:
             out["motionLight"] = self._motion_trace(rule)
         if rule.beurer is not None:
             out["beurer"] = self._beurer_trace(rule)
-        if rule.control is not None:  # one entry per source in rule order; a button has no value
+        if rule.control is not None:  # one entry per source in rule order; a button and an event have no value
             c = rule.control
             out["inputs"] = [
                 {**rule.trace_inputs[k], "gives": gives} if kind == "input"
-                else {"label": c.buttons[k][1], "value": None, "detail": "", "gives": gives}
+                else {"label": c.buttons[k][1], "value": None, "detail": "", "gives": gives} if kind == "button"
+                else self._event_source(rule, k, gives)
                 for (kind, k), gives in zip(c.order, c.gives)
             ]
             out["control"] = self._control_trace(rule)
@@ -2874,6 +2927,16 @@ class RuleEngine:
                  {True: "open", False: "closed", None: None}[_valve_open(eid, self._lookup(eid))]}
                 for v, name, eid in rule.leak_valves]}
         return out
+
+    def _event_source(self, rule: _Rule, k: int, gives: str) -> dict:
+        """The trace entry of event source k of a Load control rule: the rule's name; detail "missing" when no rule of
+        the plan gives that event."""
+        assert rule.control is not None
+        rid, what = rule.control.events[k]
+        ref = self._rules.get((rule.key[0], rid))
+        ok = ref is not None and what in EVENTS.get(ref.event_kind() or "", ())
+        return {"label": ref.name if ref is not None else rid, "value": None, "detail": "" if ok else "missing",
+                "gives": gives}
 
     def snapshot(self, plan_id: str) -> "dict[str, dict]":
         return {rid: self._trace(r) for (pid, rid), r in self._rules.items() if pid == plan_id}

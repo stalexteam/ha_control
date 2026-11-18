@@ -1,5 +1,6 @@
-"""The Load control rule, the event twin of the condition rule: sources (smart buttons, or any condition rule input)
-give on / off / toggle events; each event kind runs its own action list by direct calls (announcements included).
+"""The Load control rule, the event twin of the condition rule: sources (smart buttons, any condition rule input, or an
+event of a purpose-built rule) give on / off / toggle events; each event kind runs its own action list by direct calls
+(announcements included).
 
 Must not import homeassistant.
 
@@ -16,6 +17,9 @@ except ImportError:  # pytest: module dir on sys.path
 ECHO = 10  # s a command counts as an expected change of its entity
 KINDS = ("on", "off", "toggle")
 DOS = ("on", "off", "toggle", "close") + ANNOUNCE  # the action `do` values a list keeps
+# the events a purpose-built rule gives to event sources {event: {rule, what}}, per its kind (the key of its config):
+# entered auto / entered manual by a button; a boiler also "done" (heating done: back to manual by itself)
+EVENTS = {"motionLight": ("auto", "manual"), "boiler": ("auto", "manual", "done")}
 
 
 def _str(v: object) -> str | None:
@@ -25,13 +29,20 @@ def _str(v: object) -> str | None:
 class Control:
     def __init__(self, raw: dict, devices: dict) -> None:
         sources = raw.get("sources") if isinstance(raw.get("sources"), list) else []
-        self.order: list[tuple[str, int]] = []  # ("button", k) | ("input", k) per source, in rule order
+        self.order: list[tuple[str, int]] = []  # ("button" | "input" | "event", k) per source, in rule order
         self.buttons: list[tuple[str, str]] = []  # (device id, label) of the button sources
         self.inputs: list[dict] = []  # the RuleInput sources (the engine builds and evaluates them)
-        self.gives: list[str] = []  # per source in rule order: "toggle" | "on / off"
+        self.events: list[tuple[str, str]] = []  # (rule id, what) of the event sources (the engine delivers them)
+        self.gives: list[str] = []  # per source in rule order: "toggle" | "on / off" | "on"
         self.missing = False  # a button source that is not a smart button
+        self.lost = False  # an event source whose rule is missing or gives no such event (set by the engine)
         for s in (x for x in sources if isinstance(x, dict)):
-            if "button" in s:
+            if "event" in s:
+                e = s["event"] if isinstance(s["event"], dict) else {}
+                self.order.append(("event", len(self.events)))
+                self.events.append((_str(e.get("rule")) or "", _str(e.get("what")) or ""))
+                self.gives.append("on")
+            elif "button" in s:
                 did = _str(s["button"]) or ""
                 dev = devices.get(did)
                 props = dev.get("props") if dev else None
