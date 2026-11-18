@@ -45,7 +45,7 @@ import { DraftStore, type Draft } from '../editor/draft';
 import { ContainerFeed } from '../live/container-feed';
 import { ruleModeBubbles } from '../live/rule-mode';
 import { RulesFeed, type RuleTrace } from '../live/rules-feed';
-import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakProtectionTemplate, ventTemplate, isVentRule, isLeakRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isTimedRule, timedTemplate, newRule, isOutsideRule, outsideTemplate, isMotionLightRule, motionLightTemplate, isBeurerRule, beurerTemplate, isControlRule, controlTemplate, controlActionsFor, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
+import { addRule, deleteRule, isRuleInputDevice, ruleUsers, leakProtectionTemplate, ventTemplate, isVentRule, isLeakRule, boilerTemplate, buttonHasAuto, isBoilerDevice, isBoilerRule, isTimedRule, timedTemplate, newRule, isOutsideRule, outsideTemplate, isMotionLightRule, isMotionButton, motionLightTemplate, isBeurerRule, beurerTemplate, isControlRule, controlTemplate, controlActionsFor, timerTemplate, ruleActionsFor, ruleEqual, ruleProblems, updateRule } from '../model/rules';
 import { renderAutomationsMenu, type RuleTemplate } from './rule-templates';
 import { renderRuleDialog, type RuleDialogOpts, type RuleDraft } from './rule-dialog';
 import { renderVentDialog } from './vent-dialog';
@@ -492,7 +492,7 @@ export class PlanStudioPanel extends LitElement {
       id => devices.some(x => x.id === id && controlActionsFor(x).length > 0),
       id => devices.some(x => x.id === id && ruleActionsFor(x).includes('on') && ruleActionsFor(x).includes('off')),
       id => devices.some(x => x.id === id && x.props.kind === 'motion_sensor'),
-      id => devices.some(x => x.id === id && x.props.kind === 'smart_button'));
+      id => devices.some(x => x.id === id && isMotionButton(x)));
     if (isBoilerRule(rule)) {
       return renderBoilerDialog({
         draft: d,
@@ -552,7 +552,7 @@ export class PlanStudioPanel extends LitElement {
         lights: devices.filter(x => { const a = ruleActionsFor(x); return a.includes('on') && a.includes('off'); }),
         sensors: devices.filter(x => x.props.kind === 'motion_sensor'),
         daylightSensors: devices.filter(x => x.props.kind === 'illuminance_sensor'),
-        buttons: devices.filter(x => x.props.kind === 'smart_button'),
+        buttons: devices.filter(isMotionButton),
         deviceById: id => devices.find(x => x.id === id),
         zones, problems, trace, note, now: Date.now(),
         onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },

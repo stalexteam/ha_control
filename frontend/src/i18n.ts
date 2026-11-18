@@ -431,6 +431,7 @@ const en: Dict = {
   'motionLight.buttons': 'Buttons',
   'motionLight.addButton': 'Add a button…',
   'motionLight.buttonsNote': 'none = always auto',
+  'motionLight.noDoubleToggle': 'This switch cannot return auto: turn on Auto by double toggle in Binding.',
   'motionLight.sensorsNote': 'none = auto does nothing',
   'motionLight.autoAfter': 'Auto again after, min',
   'motionLight.autoAfterNote': '0 = never',

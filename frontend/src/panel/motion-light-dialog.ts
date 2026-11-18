@@ -70,6 +70,8 @@ export function renderMotionLightDialog(o: MotionLightDialogOpts): TemplateResul
     </div>`;
   // Buttons, none with an Auto action, and no "Auto again after": after a press nothing returns the rule to auto.
   const noAuto = c.buttons.length > 0 && c.autoAfter === 0 && !c.buttons.some(id => { const b = o.buttons.find(x => x.id === id); return !!b && buttonHasAuto(b); });
+  // A chosen wall switch without Auto by double toggle cannot hand the light back to auto.
+  const noToggle = c.buttons.some(id => { const b = o.buttons.find(x => x.id === id); return b?.props.kind === 'wall_switch' && !b.props.autoByDoubleToggle; });
   const d = c.daylight;
   const known = !d || o.daylightSensors.some(x => x.id === d.sensor);
   return renderPurposeDialog({
@@ -82,6 +84,7 @@ export function renderMotionLightDialog(o: MotionLightDialogOpts): TemplateResul
       <label class="rlabel">${t('motionLight.buttons')}</label>
       ${chips(o, 'motionlight-buttons', 'motionlight-button', c.buttons, o.buttons.filter(x => x.id !== c.light), t('motionLight.addButton'), ids => set({ ...c, buttons: ids, ...(ids.length === 0 ? { autoAfter: 0 } : {}) }))}
       <span class="muted">${t('motionLight.buttonsNote')}</span>
+      ${noToggle ? html`<span class="muted" data-note="motionlight-nodoubletoggle">${t('motionLight.noDoubleToggle')}</span>` : nothing}
 
       <label class="rlabel">${t('motionLight.sensors')}</label>
       ${chips(o, 'motionlight-sensors', 'motionlight-sensor', c.sensors, o.sensors, t('motionLight.addSensor'), ids => set({ ...c, sensors: ids }))}

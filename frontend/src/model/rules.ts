@@ -350,7 +350,10 @@ function motionLightProblem(r: Rule, m: NonNullable<Rule['motionLight']>): boole
 
 export const isMotionLightRule = (r: Rule): boolean => r.motionLight !== undefined;
 
-/** The "Light motion control" template: the zone's single participating on/off ceiling / wall light, all its motion sensors and smart buttons, the plan's single illuminance sensor (daylight 'dark'); never invents a device. */
+/** A button of a light motion control rule: a smart button, or a wall switch with a bound state entity. */
+export const isMotionButton = (d: Device): boolean => d.props.kind === 'smart_button' || (d.props.kind === 'wall_switch' && !!d.bindings?.state);
+
+/** The "Light motion control" template: the zone's single participating on/off ceiling / wall light, all its motion sensors, smart buttons and the wall switches over the light's own entity, the plan's single illuminance sensor (daylight 'dark'); never invents a device. */
 export function motionLightTemplate(plan: { levels: Level[] }, zoneId: Id | null, zoneName: string | null): Rule {
   const rule = newRule(zoneId);
   rule.name = zoneId !== null && zoneName ? `Light motion control ${zoneName}` : 'Light motion control';
@@ -365,7 +368,7 @@ export function motionLightTemplate(plan: { levels: Level[] }, zoneId: Id | null
     sensors: members.filter(d => d.props.kind === 'motion_sensor').map(d => d.id),
     ...(lux.length === 1 ? { daylight: { sensor: lux[0].id, is: MOTION_LIGHT_DEFAULTS.is } } : {}),
     minOn: MOTION_LIGHT_DEFAULTS.minOn,
-    buttons: members.filter(d => d.props.kind === 'smart_button').map(d => d.id),
+    buttons: members.filter(d => d.props.kind === 'smart_button' || (!!light?.bindings?.control && d.props.kind === 'wall_switch' && d.bindings?.state === light.bindings.control)).map(d => d.id),
     autoAfter: MOTION_LIGHT_DEFAULTS.autoAfter,
   };
   return rule;

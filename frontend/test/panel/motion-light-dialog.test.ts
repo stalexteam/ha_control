@@ -68,14 +68,14 @@ describe('Light motion control form', () => {
     expect(q<HTMLSelectElement>(el, '[data-field="motionlight-is"]').value).toBe('dark');
     expect(q<HTMLInputElement>(el, '[data-field="motionlight-off"]').value).toBe('180');
     expect(q<HTMLInputElement>(el, '[data-field="motionlight-minon"]').value).toBe('0');
-    expect(chipIds(el, 'motionlight-buttons')).toEqual(['d-button-ml']); // smart buttons only (0.22.1)
+    expect(chipIds(el, 'motionlight-buttons')).toEqual(['d-switch-ml', 'd-button-ml']); // smart buttons and the wall switch over the light's entity (0.25.0)
     expect(q<HTMLInputElement>(el, '[data-field="motionlight-autoafter"]').value).toBe('0');
     expect(problems(el)).toEqual([]);
     expect(q(el, '.fc-note').textContent).toBe('Live state appears after Save');
     await press(el, 'button[data-action="rule-ok"]');
     expect(el.rules[0]).toMatchObject({
       name: 'Light motion control Main', zoneId: 'r0', combine: 'any', inputs: [], onDelay: 0, offDelay: 180, onTrue: [], onFalse: [],
-      motionLight: { light: 'd-light', sensors: ['d-motion', 'd-motion-hall'], daylight: { sensor: 'd-lux', is: 'dark' }, minOn: 0, buttons: ['d-button-ml'], autoAfter: 0 },
+      motionLight: { light: 'd-light', sensors: ['d-motion', 'd-motion-hall'], daylight: { sensor: 'd-lux', is: 'dark' }, minOn: 0, buttons: ['d-switch-ml', 'd-button-ml'], autoAfter: 0 },
     });
   });
 
@@ -103,14 +103,53 @@ describe('Light motion control form', () => {
     expect(okBtn(el).disabled).toBe(false);
   });
 
-  it('the Buttons add select lists smart buttons only (no wall switch)', async () => {
+  it('the Buttons add select lists smart buttons and wall switches with a state entity (not the light itself)', async () => {
+    const el = await open([], p => {
+      p.levels[0].devices.push({ id: 'd-switch-nostate', name: 'Switch no state', invalid: false, bindings: {}, placement: { mode: 'free', x: 500, y: 500, rotation: 0 }, props: { kind: 'wall_switch', autoByDoubleToggle: false, windowSec: 3 } });
+    });
+    await selectZone(el, null);
+    await pickAutomation(el, 'motionLight');
+    expect(options(el, 'motionlight-buttons')).toEqual(['', 'd-switch-ml', 'd-button-ml']);
+    await set(el, '[data-field="motionlight-buttons"]', 'd-switch-ml', 'change');
+    expect(motion(el).buttons).toEqual(['d-switch-ml']);
+    expect(options(el, 'motionlight-buttons')).toEqual(['', 'd-button-ml']);
+  });
+
+  it('a chosen wall switch without Auto by double toggle shows the note; with it, or a smart button, not', async () => {
+    const note = (el: PlanStudioPanel) => el.shadowRoot!.querySelectorAll('.rule-backdrop [data-note="motionlight-nodoubletoggle"]');
+    const text = 'This switch cannot return auto: turn on Auto by double toggle in Binding.';
     const el = await open([]);
     await selectZone(el, null);
     await pickAutomation(el, 'motionLight');
-    expect(options(el, 'motionlight-buttons')).toEqual(['', 'd-button-ml']);
     await set(el, '[data-field="motionlight-buttons"]', 'd-button-ml', 'change');
-    expect(motion(el).buttons).toEqual(['d-button-ml']);
-    expect(options(el, 'motionlight-buttons')).toEqual(['']);
+    expect(note(el).length).toBe(0);
+    await set(el, '[data-field="motionlight-buttons"]', 'd-switch-ml', 'change');
+    expect(note(el).length).toBe(1);
+    expect(note(el)[0].textContent).toBe(text);
+    await press(el, '.rule-backdrop [data-group="motionlight-buttons"] .rchip[data-id="d-switch-ml"] button[data-action="remove"]');
+    expect(note(el).length).toBe(0);
+    document.body.innerHTML = '';
+    const el2 = await open([], p => {
+      const w = p.levels[0].devices.find(d => d.id === 'd-switch-ml')!;
+      if (w.props.kind === 'wall_switch') w.props.autoByDoubleToggle = true;
+    });
+    await selectZone(el2, null);
+    await pickAutomation(el2, 'motionLight');
+    await set(el2, '[data-field="motionlight-buttons"]', 'd-switch-ml', 'change');
+    expect(note(el2).length).toBe(0);
+  });
+
+  it('a wall switch with double toggle counts as able to return auto (no "nothing can return auto" note)', async () => {
+    const el = await open([], p => {
+      const w = p.levels[0].devices.find(d => d.id === 'd-switch-ml')!;
+      if (w.props.kind === 'wall_switch') w.props.autoByDoubleToggle = true;
+    });
+    await selectZone(el, null);
+    await pickAutomation(el, 'motionLight');
+    await set(el, '[data-field="motionlight-light"]', 'd-light', 'change');
+    await set(el, '[data-field="motionlight-buttons"]', 'd-switch-ml', 'change');
+    expect(el.shadowRoot!.querySelector('.rule-backdrop [data-note="motionlight-noauto"]')).toBeNull();
+    expect(okBtn(el).disabled).toBe(false);
   });
 
   it('the form order: Buttons before Motion sensors, then Only when dark, Off after, Minimum on time, Auto again after', async () => {
@@ -137,6 +176,7 @@ describe('Light motion control form', () => {
     await pickAutomation(el, 'motionLight');
     expect(q(el, '[data-field="motionlight-autoafter"]')).toBeTruthy(); // the template pre-fills the smart button
     await press(el, '.rule-backdrop [data-group="motionlight-buttons"] .rchip[data-id="d-button-ml"] button[data-action="remove"]');
+    await press(el, '.rule-backdrop [data-group="motionlight-buttons"] .rchip[data-id="d-switch-ml"] button[data-action="remove"]');
     expect(motion(el).buttons).toEqual([]);
     expect(el.shadowRoot!.querySelector('.rule-backdrop [data-field="motionlight-autoafter"]')).toBeNull();
     await set(el, '[data-field="motionlight-buttons"]', 'd-button-ml', 'change');

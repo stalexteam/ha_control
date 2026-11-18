@@ -312,13 +312,18 @@ describe('rules model', () => {
       expect(r.motionLight).toEqual({ light: 'l', sensors: ['m1', 'm2'], buttons: ['b'], daylight: { sensor: 'ls', is: 'dark' }, minOn: 0, autoAfter: 0 });
       expect(ruleProblems([r], r, exists)).toEqual([]);
     });
-    it('template pre-fills only smart buttons, never a wall switch', () => {
+    it('template pre-fills the zone smart buttons and the wall switches over the own light entity', () => {
       const bind = (d: Device, b: Record<string, string>): Device => ({ ...d, bindings: b });
       const r = motionLightTemplate(lvl([bind(dev('l', 'ceiling_light', 100, 100), { control: 'light.a' }), dev('b', 'smart_button', 400, 400),
         bind(dev('w1', 'wall_switch', 500, 500), { state: 'light.a' }), bind(dev('w2', 'wall_switch', 600, 600), { state: 'switch.other' }), dev('w3', 'wall_switch', 700, 700)]), 'z1', 'Hall');
-      expect(r.motionLight!.buttons).toEqual(['b']);
+      expect(r.motionLight!.buttons).toEqual(['b', 'w1']);
+      expect(ruleProblems([r], r, exists)).toEqual([]);
+      const lone = motionLightTemplate(lvl([bind(dev('l', 'ceiling_light', 100, 100), { control: 'light.a' }), bind(dev('w1', 'wall_switch', 500, 500), { state: 'light.a' })]), 'z1', 'Hall');
+      expect(lone.motionLight!.buttons).toEqual(['w1']);
       const none = motionLightTemplate(lvl([dev('l', 'ceiling_light', 100, 100), bind(dev('w1', 'wall_switch', 500, 500), { state: 'light.a' })]), 'z1', 'Hall');
       expect(none.motionLight!.buttons).toEqual([]);
+      const noLight = motionLightTemplate(lvl([bind(dev('w1', 'wall_switch', 500, 500), { state: 'light.a' })]), 'z1', 'Hall');
+      expect(noLight.motionLight!.buttons).toEqual([]);
     });
     it('template never invents devices', () => {
       const two = motionLightTemplate(lvl([dev('l', 'ceiling_light', 100, 100), dev('w', 'wall_light', 200, 200), dev('ls', 'illuminance_sensor', 5000, 5000), dev('ls2', 'illuminance_sensor', 6000, 6000)]), 'z1', 'Hall');
