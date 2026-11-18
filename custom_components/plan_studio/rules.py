@@ -11,6 +11,7 @@ from typing import Callable
 
 try:
     from . import daylight
+    from .announce import KINDS as ANNOUNCE, call as announcement
     from .beurer import Beurer
     from .boiler import MODES, Boiler, watts
     from .control import ECHO, Control
@@ -21,6 +22,7 @@ try:
     from .virtual import device_id as virtual_device
 except ImportError:  # pytest: module dir on sys.path
     import daylight
+    from announce import KINDS as ANNOUNCE, call as announcement
     from beurer import Beurer
     from boiler import MODES, Boiler, watts
     from control import ECHO, Control
@@ -401,7 +403,13 @@ class _Action:
         device = devices.get(did)
         self.do = raw.get("do") if isinstance(raw.get("do"), str) else ""
         self.label = _label(device, did)
-        self.call = _target(device, self.do)
+        self.call = _target(device, self.do)  # None for an announcement: it switches nothing
+        # say / play / notify: its one-shot call (announce.py); None when its device cannot take it
+        self.announce = announcement(device, raw) if self.do in ANNOUNCE else None
+
+    def missing(self) -> bool:
+        """The target cannot take the action ("target missing")."""
+        return self.call is None and self.announce is None
 
 
 class _Sent:
@@ -501,13 +509,15 @@ class _Rule:
         self.control_devices: list[tuple[str, str, str | None, bool]] = []  # (id, label, entity, is a valve), once
         if isinstance(control, dict):
             self.control = Control(control, devices)
-            for kind, actions in self.control.lists.items():
+            for kind, actions in self.control.actions.items():
                 self.control_actions[kind] = []
-                for did, do in actions:
-                    a = _Action({"device": did, "do": "on" if do == "toggle" else do}, devices)
+                for raw_action in actions:
+                    did, do = raw_action["device"], raw_action["do"]
+                    a = _Action({"device": did, "do": "on"} if do == "toggle" else raw_action, devices)
                     a.do = do
                     self.control_actions[kind].append(a)
-                    if all(d[0] != did for d in self.control_devices):
+                    # an announcement switches nothing: no device state to follow
+                    if do not in ANNOUNCE and all(d[0] != did for d in self.control_devices):
                         valve = _valve_entity(devices.get(did))
                         eid = valve or (a.call[2] if a.call is not None else None)
                         self.control_devices.append((did, a.label, eid, valve is not None))
@@ -634,9 +644,9 @@ class _Rule:
                 found.add("cycle")
             elif i.missing:
                 found.add("rule missing" if i.rule is not None else "device missing")
-        if any(a.call is None for a in self.on_true + self.on_false):
+        if any(a.missing() for a in self.on_true + self.on_false):
             found.add("target missing")
-        if any(a.call is None for actions in self.control_actions.values() for a in actions):
+        if any(a.missing() for actions in self.control_actions.values() for a in actions):
             found.add("target missing")
         if any(x is not None and x.missing for x in (self.boiler, self.timed, self.outside, self.beurer, self.control, self.motion_light)):
             found.add("device missing")
@@ -680,7 +690,9 @@ class RuleEngine:
         self,
         lookup: Lookup,
         now: Callable[[], float],
-        call: Callable[..., None],  # call(domain, service, entity_id, on_error=cb(str), current=() -> bool, by=rule key)
+        # call(domain, service, entity_id, on_error=cb(str), current=() -> bool, by=rule key); an announcement adds
+        # data=its service data (entity_id None for a notify) and is never held until HA has started
+        call: Callable[..., None],
         schedule: Callable[[float, Callable[[], None]], Callable[[], None]],
         *,
         local: "Callable[[float], datetime]" = lambda t: datetime.fromtimestamp(t, timezone.utc),
@@ -1377,6 +1389,10 @@ class RuleEngine:
         rule.sent = []
 
     def _fire(self, rule: _Rule, actions: "list[_Action]", why: str) -> None:
+        if why == "start" or self._loading or self._booting:
+            # an announcement tells of a change: never at the rule's start (its first known verdict), inside a load (a
+            # Save, an entry reload) or while HA starts (it would be held and spoken late); it leaves no entry then
+            actions = [a for a in actions if a.do not in ANNOUNCE]
         if not actions:
             return
         because = [
@@ -1390,7 +1406,9 @@ class RuleEngine:
         for a in actions:
             entry = {"action": a.do, "target": a.label, "at": at, "reason": reason}
             rule.entries.append(entry)
-            if a.call is None:
+            if a.announce is not None:
+                self._announce(rule, a, entry, self._refresh)
+            elif a.call is None:
                 entry["error"] = "target missing"
             elif a.do in ("on", "off") and a.call[2] in rule.pairs:
                 self._arbitrated(rule, a.call[2], a.do, entry)
@@ -1450,12 +1468,38 @@ class RuleEngine:
         if held is not True and not _available(self._lookup(sent.action.call[2])):
             sent.waiting = "target unavailable"
 
+    def _announce(self, rule: _Rule, a: _Action, entry: dict, refresh: Callable[[_Rule], None]) -> None:
+        """Say / play / notify: one call with its service data, for this firing or event only. Never a holder slot, an
+        engine command (_command: no expected state, never sent again by live.py) or a re-send target (rule.sent): a
+        speaker whose player has no data gets nothing ("target unavailable"); a failed call says "service failed" on
+        its entry (a late one only while this firing / event is the rule's latest; refresh: the rule's own refresh)."""
+        assert a.announce is not None
+        domain, service, eid, data, player = a.announce
+        if player is not None and not _available(self._lookup(player)):
+            entry["error"] = "target unavailable"
+            return
+        seq = rule.seq
+
+        def on_error(err: str, why: str = "service failed") -> None:
+            now = self._current(rule, seq)
+            if now is None:
+                return  # a newer firing or event, a changed or a removed rule
+            entry["error"] = "service failed"
+            refresh(now)
+            self._flush()
+
+        try:
+            self._call(domain, service, eid, on_error=on_error, by=rule.key, data=dict(data))
+        except Exception as err:  # noqa: BLE001 - one failing announcement must not stop the other actions
+            _LOGGER.warning("rule %s: %s.%s %s failed: %s", rule.name, domain, service, eid or "", err)
+            entry["error"] = "service failed"
+
     def _refresh(self, rule: _Rule) -> None:
         """Last action and failure of the latest firing, from its entries and waiting marks."""
         for s in rule.sent:
             if s.waiting:
                 s.entry["error"] = WAITING
-        marks = {s.waiting for s in rule.sent}
+        marks = {s.waiting for s in rule.sent} | {e.get("error") for e in rule.entries if e.get("action") in ANNOUNCE}
         rule.failed = next((r for r in ("service failed", "target unavailable") if r in marks), None)
         if rule.entries:
             rule.last = next((e for e in rule.entries if "error" in e), rule.entries[-1])
@@ -2274,8 +2318,8 @@ class RuleEngine:
     def _control_event(self, rule: _Rule, source: str, what: str) -> None:
         """An event ("on", "off" or "toggle") of a source: recorded; dropped while the gate is not open (an "off" event ignores the gate); else the list
         of its kind runs by direct calls (own context). Its toggle actions act as one group (any of their devices
-        effectively on: all off, else all on); on / off / close are literal. A device in the wanted state already or
-        without data gets nothing (never re-sent later)."""
+        effectively on: all off, else all on); on / off / close are literal; an announcement runs on its own (_announce).
+        A device in the wanted state already or without data gets nothing (never re-sent later)."""
         c = rule.control
         assert c is not None
         at = int(self._now() * 1000)
@@ -2295,6 +2339,9 @@ class RuleEngine:
             do = group if a.do == "toggle" else a.do
             entry = {"action": do, "target": a.label, "at": at, "reason": reason}
             rule.entries.append(entry)
+            if a.announce is not None:  # on its own, also in the toggle list (never part of its group)
+                self._announce(rule, a, entry, self._control_refresh)
+                continue
             if a.call is None:
                 entry["error"] = "target missing"
                 continue

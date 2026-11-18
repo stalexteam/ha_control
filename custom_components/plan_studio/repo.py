@@ -10,9 +10,11 @@ import re
 import voluptuous as vol
 
 try:
+    from .announce import KINDS as ANNOUNCE, PHONE, SPEAKER, in_domain, service_ok
     from .migrate import migrate_plan, CURRENT_SCHEMA
     from .virtual import KIND as VIRTUAL_KIND, PREFIX as VIRTUAL_PREFIX, entity_id as virtual_entity
 except ImportError:  # pytest: module dir on sys.path
+    from announce import KINDS as ANNOUNCE, PHONE, SPEAKER, in_domain, service_ok
     from migrate import migrate_plan, CURRENT_SCHEMA
     from virtual import KIND as VIRTUAL_KIND, PREFIX as VIRTUAL_PREFIX, entity_id as virtual_entity
 
@@ -224,10 +226,37 @@ def _validate_motion_light(r: dict, m: object) -> None:
         raise vol.Invalid("rule motionLight needs no inputs, gate, other kinds or actions, combine any and onDelay 0")
 
 
+def _validate_announce(a: dict, devices: dict) -> None:
+    """A say / play / notify action: a non-empty text (media for play; notify takes an optional non-empty title). A
+    device of the plan must take it (say: a speaker with a voice, play: a speaker, notify: a phone with a notify
+    service); a device missing from the plan is the engine's "target missing", as for any action."""
+    do = a["do"]
+    field = "media" if do == "play" else "text"
+    keys = {"device", "do", field}
+    if not keys <= set(a) <= keys | ({"title"} if do == "notify" else set()) or not _is_id(a["device"]):
+        raise vol.Invalid(f"rule {do} action needs a device{',' if do == 'notify' else ' and'} a {field}"
+                          f"{' and optionally a title' if do == 'notify' else ''}")
+    for key in (field, "title"):
+        if key in a and not (isinstance(a[key], str) and a[key].strip()):
+            raise vol.Invalid(f"rule {do} action needs a non-empty {key}")
+    device = devices.get(a["device"])
+    if device is None:
+        return
+    props = device.get("props") if isinstance(device.get("props"), dict) else {}
+    bindings = device.get("bindings") if isinstance(device.get("bindings"), dict) else {}
+    kind = props.get("kind")
+    if do == "say" and (kind != SPEAKER or "voice" not in bindings):
+        raise vol.Invalid("rule say action needs a speaker with a voice")
+    if do == "play" and kind != SPEAKER:
+        raise vol.Invalid("rule play action needs a speaker")
+    if do == "notify" and (kind != PHONE or "notify" not in props):
+        raise vol.Invalid("rule notify action needs a phone with a notify service")
+
+
 _CONTROL_DOS = ("on", "off", "toggle", "close")
 
 
-def _validate_control(r: dict, c: object) -> list[str]:
+def _validate_control(r: dict, c: object, devices: dict) -> list[str]:
     """A load control rule: sources (buttons or condition inputs) give events that run the on / off / toggle action lists; a gate is allowed. Returns the rule ids the sources reference."""
     if not isinstance(c, dict) or set(c) != {"sources", "on", "off", "toggle"}:
         raise vol.Invalid("rule control needs sources, on, off and toggle")
@@ -256,12 +285,15 @@ def _validate_control(r: dict, c: object) -> list[str]:
             raise vol.Invalid(f"rule control {key} must be a list")
         ids = []
         for a in actions:
-            if not isinstance(a, dict) or set(a) != {"device", "do"} or not _is_id(a["device"]) or a["do"] not in _CONTROL_DOS:
-                raise vol.Invalid("rule control action needs a device and do on/off/toggle/close")
+            if isinstance(a, dict) and a.get("do") in ANNOUNCE:
+                _validate_announce(a, devices)  # switches nothing: not a target its sources must not read
+            elif not isinstance(a, dict) or set(a) != {"device", "do"} or not _is_id(a["device"]) or a["do"] not in _CONTROL_DOS:
+                raise vol.Invalid("rule control action needs a device and do on/off/toggle/close/say/play/notify")
+            else:
+                targets.add(a["device"])
             ids.append(a["device"])
         if len(set(ids)) != len(ids):
             raise vol.Invalid(f"rule control needs a device once in {key}")
-        targets.update(ids)
     if not (c["on"] or c["off"] or c["toggle"]):
         raise vol.Invalid("rule control needs at least one action")
     if targets & read:
@@ -272,7 +304,7 @@ def _validate_control(r: dict, c: object) -> list[str]:
     return refs
 
 
-def _validate_rules(rules: object) -> None:
+def _validate_rules(rules: object, devices: dict) -> None:
     if not isinstance(rules, list):
         raise vol.Invalid("rules must be a list")
     graph: dict[str, list[str]] = {}
@@ -307,8 +339,10 @@ def _validate_rules(rules: object) -> None:
             if not isinstance(actions, list):
                 raise vol.Invalid(f"rule {key} must be a list")
             for a in actions:
-                if not isinstance(a, dict) or not _is_id(a.get("device")) or a.get("do") not in ("on", "off", "open", "close"):
-                    raise vol.Invalid("rule action needs a device and do on/off/open/close")
+                if isinstance(a, dict) and a.get("do") in ANNOUNCE:
+                    _validate_announce(a, devices)
+                elif not isinstance(a, dict) or not _is_id(a.get("device")) or a.get("do") not in ("on", "off", "open", "close"):
+                    raise vol.Invalid("rule action needs a device and do on/off/open/close/say/play/notify")
         if "vent" in r:
             _validate_vent(r, r["vent"])
         if "boiler" in r:
@@ -324,7 +358,7 @@ def _validate_rules(rules: object) -> None:
         if "motionLight" in r:
             _validate_motion_light(r, r["motionLight"])
         if "control" in r:
-            refs.extend(_validate_control(r, r["control"]))
+            refs.extend(_validate_control(r, r["control"], devices))
         graph[r["id"]] = refs
     state: dict[str, int] = {}
 
@@ -342,15 +376,20 @@ def _validate_rules(rules: object) -> None:
             visit(rid)
 
 
-def _validate_devices(levels: list) -> set[str]:
+def _validate_devices(levels: list) -> tuple[set[str], dict[str, dict]]:
     """A virtual switch binds exactly its synthetic entity (control = virtual.<its id>) and no other device binds a
-    virtual entity; other bindings are not checked. Returns the virtual switch ids."""
+    virtual entity; a speaker binds only player (a media_player) and voice (a tts entity), each optional until bound; a
+    phone binds nothing and its notify, once set, is a notify service name. Other bindings are not checked. Returns the
+    virtual switch ids and the devices by id (the first of an id)."""
     out: set[str] = set()
+    by_id: dict[str, dict] = {}
     for level in levels:
         devices = level.get("devices") if isinstance(level, dict) else None
         for d in devices if isinstance(devices, list) else []:
             if not isinstance(d, dict):
                 continue
+            if _is_id(d.get("id")):
+                by_id.setdefault(d["id"], d)
             props = d.get("props")
             if isinstance(props, dict) and props.get("kind") == VIRTUAL_KIND:
                 if not _is_id(d.get("id")) or d.get("bindings") != {"control": virtual_entity(d["id"])}:
@@ -361,7 +400,18 @@ def _validate_devices(levels: list) -> set[str]:
             values = bindings.values() if isinstance(bindings, dict) else ()
             if any(isinstance(v, str) and v.startswith(VIRTUAL_PREFIX) for v in values):
                 raise vol.Invalid("only a virtual switch binds a virtual entity (virtual.<id>)")
-    return out
+            kind = props.get("kind") if isinstance(props, dict) else None
+            if kind == SPEAKER and bindings is not None and (
+                    not isinstance(bindings, dict) or not set(bindings) <= {"player", "voice"}
+                    or ("player" in bindings and not in_domain(bindings["player"], "media_player"))
+                    or ("voice" in bindings and not in_domain(bindings["voice"], "tts"))):
+                raise vol.Invalid("a speaker binds only player (a media_player entity) and voice (a tts entity)")
+            if kind == PHONE:
+                if bindings not in (None, {}):
+                    raise vol.Invalid("a phone binds no entity")
+                if "notify" in props and not service_ok(props["notify"]):
+                    raise vol.Invalid("a phone needs notify as a notify service name without the notify. prefix")
+    return out, by_id
 
 
 def _validate_virtual_reads(rules: list, virtual: set[str]) -> None:
@@ -389,13 +439,13 @@ def validate_plan(plan: dict) -> None:
     levels = plan.get("levels")
     if not isinstance(levels, list) or not levels:
         raise vol.Invalid("levels must be a non-empty list")
-    virtual = _validate_devices(levels)
+    virtual, devices = _validate_devices(levels)
     if "power" in plan:
         power = plan["power"]
         if not isinstance(power, dict) or not all(isinstance(power.get(k), list) for k in ("blocks", "wires")):
             raise vol.Invalid("power must have blocks and wires lists")
     if "rules" in plan:
-        _validate_rules(plan["rules"])
+        _validate_rules(plan["rules"], devices)
         _validate_virtual_reads(plan["rules"], virtual)
     try:
         size = len(json.dumps(plan).encode("utf-8"))

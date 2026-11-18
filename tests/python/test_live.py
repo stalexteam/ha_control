@@ -2446,3 +2446,97 @@ def test_normal_use_of_a_virtual_switch_never_trips_the_loop_breaker(env, caplog
         assert live.engine.snapshot("p1")["lc"]["status"] == "ok"
 
     asyncio.run(go())
+
+
+# --- announcements (say, play, notify) ------------------------------------------------
+
+AUTO_MP3 = "media-source://media_source/local/Auto.mp3"
+ANNOUNCE_SERVICES = {("tts", "speak"), ("media_player", "play_media"), ("notify", "mobile_app_phone")}
+
+
+def _announce_plan(*actions):
+    """The leak rule switching the socket off, plus announcements when true (all three by default)."""
+    p = _plan()
+    p["levels"][0]["devices"] += [
+        {"id": "sp", "name": "Speaker", "props": {"kind": "speaker"},
+         "bindings": {"player": "media_player.vlc", "voice": "tts.piper"}},
+        {"id": "ph", "name": "Phone", "props": {"kind": "phone", "notify": "mobile_app_phone"}, "bindings": {}},
+    ]
+    p["rules"][0]["onTrue"] += list(actions) or [
+        {"device": "sp", "do": "say", "text": "Go bathe"},
+        {"device": "sp", "do": "play", "media": AUTO_MP3},
+        {"device": "ph", "do": "notify", "text": "Go bathe", "title": "Boiler"},
+    ]
+    return p
+
+
+def test_announcements_are_one_call_each_with_their_service_data_own_context_and_no_expected_state(env):
+    async def go():
+        hass = FakeHass()
+        hass.services.known |= ANNOUNCE_SERVICES
+        hass.states.d["media_player.vlc"] = "idle"
+        live = await _start(env, hass, _announce_plan())
+        ignored = []
+        orig = live.runtime.ignore_context
+        live.runtime.ignore_context = lambda cid: (ignored.append(cid), orig(cid))[1]
+        hass.states.d["binary_sensor.leak"] = "on"
+        live.engine.handle_state("binary_sensor.leak")
+        assert hass.services.calls == []  # tasks: no reentrancy
+        await asyncio.gather(*hass.tasks)
+        assert [c[:4] for c in hass.services.calls] == [
+            ("switch", "turn_off", {"entity_id": "switch.sock"}, True),
+            ("tts", "speak", {"entity_id": "tts.piper", "media_player_entity_id": "media_player.vlc",
+                              "message": "Go bathe"}, True),
+            ("media_player", "play_media", {"entity_id": "media_player.vlc", "media_content_id": AUTO_MP3,
+                                            "media_content_type": "music"}, True),
+            ("notify", "mobile_app_phone", {"message": "Go bathe", "title": "Boiler"}, True),
+        ]
+        assert ignored == [c[4].id for c in hass.services.calls]
+        assert set(live._expected._records) == {"switch.sock"}  # the socket's expected state only
+        assert live.engine.snapshot("p1")["r1"]["status"] == "ok"
+
+    asyncio.run(go())
+
+
+def test_an_announcement_is_never_held_until_ha_has_started(env):
+    async def go():
+        hass = FakeHass()
+        hass.services.known |= ANNOUNCE_SERVICES
+        hass.states.d["media_player.vlc"] = "idle"
+        hass.state = CoreState.not_running
+        live = await _start(env, hass, _announce_plan())
+        hass.states.d["binary_sensor.leak"] = "on"
+        live.engine.handle_state("binary_sensor.leak")  # fired while HA starts: the socket waits, nothing is said
+        assert [d[:3] for d in live._deferred] == [("switch", "turn_off", "switch.sock")]
+        with pytest.raises(RuntimeError, match="not running"):
+            live._call("notify", "mobile_app_phone", None, lambda *a: None, data={"message": "x"})
+        assert len(live._deferred) == 1
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        assert [c[:2] for c in hass.services.calls] == [("switch", "turn_off")]
+
+    asyncio.run(go())
+
+
+def test_a_failed_announcement_is_service_failed_and_never_sent_again(env):
+    async def go():
+        hass = FakeHass()
+        hass.services.known |= ANNOUNCE_SERVICES
+        hass.states.d["media_player.vlc"] = "idle"
+        plan = _announce_plan()
+        plan["rules"][0]["onTrue"] = [{"device": "sp", "do": "play", "media": AUTO_MP3}]
+        live = await _start(env, hass, plan)
+        hass.services.fail = "boom"
+        hass.states.d["binary_sensor.leak"] = "on"
+        live.engine.handle_state("binary_sensor.leak")
+        await asyncio.gather(*hass.tasks, return_exceptions=True)
+        trace = live.engine.snapshot("p1")["r1"]
+        assert trace["status"] == "error" and trace["reason"] == "service failed"
+        assert {"action": "play", "error": "service failed"}.items() <= trace["last"].items()
+        hass.services.fail = None
+        hass.states.d["media_player.vlc"] = "playing"
+        live.engine.handle_state("media_player.vlc")
+        await asyncio.gather(*hass.tasks, return_exceptions=True)
+        assert [c[:2] for c in hass.services.calls] == [("media_player", "play_media")]
+
+    asyncio.run(go())

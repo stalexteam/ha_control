@@ -561,3 +561,99 @@ def test_validate_plan_rule_must_not_switch_a_virtual_switch_it_reads():
         {"inputs": [{"source": {"device": "s1"}}], "onTrue": [{"device": "x", "do": "on"}]},
     ):
         validate_plan({**base, "rules": [rule(**kw)]})
+
+
+# --- speaker, phone and the announcements ------------------------------------------
+
+SPEAKER = {"id": "sp", "name": "Speaker", "placement": {"mode": "free"}, "props": {"kind": "speaker"},
+           "bindings": {"player": "media_player.vlc", "voice": "tts.piper"}}
+MUTE = {**SPEAKER, "id": "mute", "bindings": {"player": "media_player.vlc"}}  # no voice: plays only
+PHONE = {"id": "ph", "name": "Phone", "placement": {"mode": "none"},
+         "props": {"kind": "phone", "notify": "mobile_app_phone"}}
+AUTO_MP3 = "media-source://media_source/local/Auto.mp3"
+
+
+def say(did="sp", text="Go bathe", **kw):
+    return {"device": did, "do": "say", "text": text, **kw}
+
+
+def play(did="sp", media=AUTO_MP3, **kw):
+    return {"device": did, "do": "play", "media": media, **kw}
+
+
+def notify(did="ph", text="Go bathe", **kw):
+    return {"device": did, "do": "notify", "text": text, **kw}
+
+
+def test_validate_plan_speaker_and_phone_devices():
+    validate_plan(with_devices(SPEAKER, MUTE, PHONE))
+    # not bound yet (the Binding step comes later): a speaker without a player, a phone without a notify service
+    validate_plan(with_devices({**SPEAKER, "bindings": {}}, {**SPEAKER, "id": "s2", "bindings": None},
+                               {k: v for k, v in SPEAKER.items() if k != "bindings"},
+                               {**PHONE, "props": {"kind": "phone"}}, {**PHONE, "id": "p2", "bindings": {}}))
+    for bindings in (
+        {"player": "light.vlc"}, {"player": "media_player"}, {"player": "media_player."}, {"player": ""},
+        {"player": 5}, {"voice": "media_player.vlc"}, {"player": "media_player.vlc", "voice": "tts"},
+        {"player": "media_player.vlc", "control": "switch.x"}, "media_player.vlc",
+    ):
+        with pytest.raises(vol.Invalid, match="a speaker binds only"):
+            validate_plan(with_devices({**SPEAKER, "bindings": bindings}))
+    with pytest.raises(vol.Invalid, match="a phone binds no entity"):
+        validate_plan(with_devices({**PHONE, "bindings": {"control": "switch.x"}}))
+    for name in ("", "notify.mobile_app_phone", "Mobile app", "mobile app", 5, None):
+        with pytest.raises(vol.Invalid, match="a phone needs notify as a notify service name"):
+            validate_plan(with_devices({**PHONE, "props": {"kind": "phone", "notify": name}}))
+
+
+def test_validate_plan_announcement_actions_of_a_condition_rule():
+    base = with_devices(SPEAKER, MUTE, PHONE, {"id": "x", "props": {"kind": "socket"}, "bindings": {"control": "switch.x"}})
+    for actions in (
+        [say(), play(), notify()],
+        [notify(title="Boiler"), play("mute"), {"device": "x", "do": "on"}],
+        [say("gone"), notify("gone")],  # a deleted device: the engine says "target missing"
+    ):
+        validate_plan({**base, "rules": [rule(onTrue=actions, onFalse=actions)]})
+    bad = [
+        ("rule say action needs a device and a text", {"device": "sp", "do": "say"}),
+        ("rule say action needs a device and a text", say(media=AUTO_MP3)),
+        ("rule say action needs a device and a text", say(title="t")),
+        ("rule say action needs a device and a text", say(device="")),
+        ("rule say action needs a non-empty text", say(text="")),
+        ("rule say action needs a non-empty text", say(text="   ")),
+        ("rule say action needs a non-empty text", say(text=5)),
+        ("rule play action needs a device and a media", {"device": "sp", "do": "play", "text": "x"}),
+        ("rule play action needs a non-empty media", play(media=" ")),
+        ("rule notify action needs a device, a text and optionally a title", notify(media=AUTO_MP3)),
+        ("rule notify action needs a non-empty text", notify(text="")),
+        ("rule notify action needs a non-empty title", notify(title="")),
+        ("rule notify action needs a non-empty title", notify(title=" ")),
+        ("rule say action needs a speaker with a voice", say("mute")),
+        ("rule say action needs a speaker with a voice", say("ph")),
+        ("rule say action needs a speaker with a voice", say("x")),
+        ("rule play action needs a speaker", play("ph")),
+        ("rule play action needs a speaker", play("x")),
+        ("rule notify action needs a phone with a notify service", notify("sp")),
+        ("rule action needs a device and do", {"device": "sp", "do": "speak", "text": "x"}),
+    ]
+    for match, action in bad:
+        for key in ("onTrue", "onFalse"):
+            with pytest.raises(vol.Invalid, match=match):
+                validate_plan({**base, "rules": [rule(**{key: [action]})]})
+    with pytest.raises(vol.Invalid, match="rule notify action needs a phone with a notify service"):
+        validate_plan({**with_devices({**PHONE, "props": {"kind": "phone"}}), "rules": [rule(onTrue=[notify()])]})
+
+
+def test_validate_plan_announcement_actions_of_a_load_control_rule():
+    base = with_devices(SPEAKER, MUTE, PHONE)
+    validate_plan({**base, "rules": [control_rule(control=ctl(
+        on=[say(), notify(title="Boiler")], off=[play("mute")], toggle=[{"device": "l", "do": "toggle"}, play()]))]})
+    validate_plan({**base, "rules": [control_rule(control=ctl(toggle=[], on=[play()]))]})  # announcements alone
+    bad = [
+        ctl(on=[say(text="")]), ctl(on=[play(media="")]), ctl(toggle=[notify(title="")]),
+        ctl(on=[say("mute")]), ctl(off=[play("ph")]), ctl(toggle=[notify("sp")]),
+        ctl(on=[{"device": "sp", "do": "say"}]),
+        ctl(on=[say(), play()]),  # a device once in a list
+    ]
+    for c in bad:
+        with pytest.raises(vol.Invalid, match="rule "):
+            validate_plan({**base, "rules": [control_rule(control=c)]})

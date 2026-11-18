@@ -1,5 +1,5 @@
 """The Load control rule, the event twin of the condition rule: sources (smart buttons, or any condition rule input)
-give on / off / toggle events; each event kind runs its own action list by direct calls.
+give on / off / toggle events; each event kind runs its own action list by direct calls (announcements included).
 
 Must not import homeassistant.
 
@@ -8,8 +8,14 @@ this module holds the rule's configuration, its runtime state and the decisions.
 
 from __future__ import annotations
 
+try:
+    from .announce import KINDS as ANNOUNCE
+except ImportError:  # pytest: module dir on sys.path
+    from announce import KINDS as ANNOUNCE
+
 ECHO = 10  # s a command counts as an expected change of its entity
 KINDS = ("on", "off", "toggle")
+DOS = ("on", "off", "toggle", "close") + ANNOUNCE  # the action `do` values a list keeps
 
 
 def _str(v: object) -> str | None:
@@ -40,13 +46,12 @@ class Control:
                 self.order.append(("input", len(self.inputs)))
                 self.inputs.append(s)
                 self.gives.append("on / off")
-        self.lists: dict[str, list[tuple[str, str]]] = {}
+        self.actions: dict[str, list[dict]] = {}  # per event kind the kept actions (an announcement has its text)
+        self.lists: dict[str, list[tuple[str, str]]] = {}  # the same as (device id, do)
         for kind in KINDS:
             actions = raw.get(kind) if isinstance(raw.get(kind), list) else []
-            self.lists[kind] = [
-                (a["device"], a["do"]) for a in actions
-                if isinstance(a, dict) and _str(a.get("device")) and a.get("do") in ("on", "off", "toggle", "close")
-            ]
+            self.actions[kind] = [a for a in actions if isinstance(a, dict) and _str(a.get("device")) and a.get("do") in DOS]
+            self.lists[kind] = [(a["device"], a["do"]) for a in self.actions[kind]]
         # runtime state, kept across an unchanged Save
         self.last: list[bool | None] = [None] * len(self.inputs)  # the remembered value of each input source
         self.event: dict | None = None  # the last event: {source, what, at, dropped?}

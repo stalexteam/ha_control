@@ -29,12 +29,13 @@ class World:
     def lookup(self, eid):
         return self.states.get(eid)
 
-    def call(self, domain, service, eid, on_error=None, current=None, by=None):
+    def call(self, domain, service, eid, on_error=None, current=None, by=None, data=None):
         self.on_error = on_error
         self.current = current
         self.by = by  # the rule a command belongs to (live.py records it with the expected state)
-        self.calls.append((domain, service, eid))
-        if eid in self.fail:
+        # a call with service data (an announcement) is recorded with it; eid is None for a notify
+        self.calls.append((domain, service, eid) if data is None else (domain, service, eid, data))
+        if eid in self.fail or f"{domain}.{service}" in self.fail:
             raise RuntimeError("boom")
         return self.hold or None
 

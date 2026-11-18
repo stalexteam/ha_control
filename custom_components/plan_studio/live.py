@@ -339,10 +339,11 @@ class LiveRuntime:
         self,
         domain: str,
         service: str,
-        entity_id: str,
+        entity_id: str | None,
         on_error: Callable[..., None],
         current: Callable[[], bool] = lambda: True,
         by: object = None,
+        data: dict | None = None,
     ) -> bool:
         """Send a rule action as a task; a missing service fails now, a failing call is reported later.
 
@@ -351,20 +352,24 @@ class LiveRuntime:
         firing is still the rule's latest one (current()); a missing service is reported through on_error, and so is
         a target that is unavailable at that moment (with the reason "target unavailable"; the call is still sent).
         by: the rule the command belongs to, told when the device never confirms it (engine.command_unconfirmed).
-        A virtual switch is never called nor held: turn_on / turn_off / toggle set it on the next loop turn (_send)."""
+        A virtual switch is never called nor held: turn_on / turn_off / toggle set it on the next loop turn (_send).
+        data: the service data of an announcement (merged after the entity id; entity_id None for a notify): never
+        held, it fails at once before HA has started (an announcement is never sent late)."""
         if virtual_device(entity_id) is not None:
             if service not in ("turn_on", "turn_off", "toggle"):
                 raise RuntimeError(f"service {domain}.{service} not found")
             self._dispatch(domain, service, entity_id, on_error, by)
             return False
         if self._hass.state is not CoreState.running:
+            if data is not None:
+                raise RuntimeError(f"{domain}.{service}: Home Assistant is not running")
             self._deferred.append((domain, service, entity_id, on_error, current, by))
             if self._unstarted is None:
                 self._unstarted = async_at_started(self._hass, self._started)
             return True
         if not self._hass.services.has_service(domain, service):
             raise RuntimeError(f"service {domain}.{service} not found")
-        self._dispatch(domain, service, entity_id, on_error, by)
+        self._dispatch(domain, service, entity_id, on_error, by, data=data)
         return False
 
     @callback
@@ -386,11 +391,12 @@ class LiveRuntime:
             self._dispatch(domain, service, entity_id, on_error, by)
 
     def _dispatch(
-        self, domain: str, service: str, entity_id: str, on_error: Callable[..., None], by: object = None,
-        retry: bool = False,
+        self, domain: str, service: str, entity_id: str | None, on_error: Callable[..., None], by: object = None,
+        retry: bool = False, data: dict | None = None,
     ) -> None:
         """Send one call with its own context. The state it should bring is recorded as the entity's latest command of
-        the rule `by`; a retry keeps the first send's record."""
+        the rule `by`; a retry keeps the first send's record. An announcement (tts.speak, media_player.play_media,
+        notify.*) brings no state (expect: None): nothing is recorded, so nothing retries it."""
         ctx = Context()
         self.runtime.ignore_context(ctx.id)  # its state change is not a press for a wall switch
         state = expect(domain, service)
@@ -400,7 +406,8 @@ class LiveRuntime:
                 self._warned.pop(entity_id, None)  # another command: a new episode
         # A background task that starts on the next loop turn: the call cannot re-enter the engine from inside a firing.
         task = self._hass.async_create_background_task(
-            self._send(domain, service, entity_id, ctx, by), f"plan_studio rule {domain}.{service}", eager_start=False
+            self._send(domain, service, entity_id, ctx, by, data), f"plan_studio rule {domain}.{service}",
+            eager_start=False,
         )
 
         def done(t: asyncio.Future) -> None:
@@ -411,13 +418,18 @@ class LiveRuntime:
 
         task.add_done_callback(done)
 
-    async def _send(self, domain: str, service: str, entity_id: str, ctx: Context, by: object = None) -> None:
+    async def _send(
+        self, domain: str, service: str, entity_id: str | None, ctx: Context, by: object = None,
+        data: dict | None = None,
+    ) -> None:
         if virtual_device(entity_id) is not None:  # the integration's own switch: no Home Assistant call
             self._virtual_set(entity_id, service, ctx, by)
             return
         self._arm()  # the wake for the retry / expiry of the expected state, once the call goes out
+        service_data = {} if entity_id is None else {"entity_id": entity_id}
+        service_data.update(data or {})
         await asyncio.wait_for(  # a hung blocking call ends as a recorded failure
-            self._hass.services.async_call(domain, service, {"entity_id": entity_id}, blocking=True, context=ctx),
+            self._hass.services.async_call(domain, service, service_data, blocking=True, context=ctx),
             CALL_TIMEOUT,
         )
 
