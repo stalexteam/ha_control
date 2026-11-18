@@ -29,6 +29,7 @@ SILENT = 2  # periods
 SETTLE = 10  # s, a meter whose period is unknown (the 0.23.1 rule)
 CAP = 30  # s: a real overload is never left unjudged longer
 TICK = 1  # s: while the meters settle the rule looks again this often (a same-value report wakes nobody)
+REPEAT = 10  # s: a safety off (limit / blackout) the relay does not read is sent again this often (AppDaemon: 5 s)
 NO_REPORTS: "tuple[float | None, float | None]" = (None, None)  # a meter's (last report epoch s, period s)
 BUTTONS = ("wall_switch", "smart_button")
 RELAY_DOMAINS = ("light", "switch", "fan")  # entities with turn_on / turn_off
@@ -93,6 +94,7 @@ class Boiler:
         self.phase: str | None = None  # heating / waiting / blackout / limit / done; None in manual
         self.last_on: float | None = None  # epoch s of the rule's last on (or auto entered with the relay on)
         self.last_off: float | None = None  # epoch s of the rule's last off, held at now while an off reason lasts
+        self.off_sent: float | None = None  # epoch s the last off command was sent (a safety off is repeated from it)
         self.holding = False  # blackout / limit at the last auto evaluation
         self.cmd: str | None = None  # the last command sent, until the relay moves away from it
         self.last_do: str | None = None  # the last command sent, kept
@@ -110,7 +112,7 @@ class Boiler:
     def take(self, old: "Boiler") -> None:
         self.mode, self.phase, self.last_on, self.last_off = old.mode, old.phase, old.last_on, old.last_off
         self.holding, self.cmd, self.seen, self.sends = old.holding, old.cmd, old.seen, old.sends
-        self.last_do, self.switched = old.last_do, old.switched
+        self.last_do, self.switched, self.off_sent = old.last_do, old.switched, old.off_sent
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -170,7 +172,7 @@ class Boiler:
         if do == "on":
             self.last_on = now
         else:
-            self.last_off = now
+            self.last_off = self.off_sent = now
         return do
 
     def _want(self, do: str, relay: str | None, now: float) -> str | None:
@@ -210,6 +212,9 @@ class Boiler:
         if self.settling is not None:  # look again every second: a report of the same value wakes nobody
             tick = min(self.settling, now + TICK)
             self.until = tick if self.until is None else min(self.until, tick)
+        if self.mode == "auto" and self.holding and relay == "on" and self.cmd == "off" and self.off_sent is not None:
+            again = self.off_sent + REPEAT  # the safety off the relay does not read goes again then
+            self.until = again if self.until is None else min(self.until, again)
         return out
 
     def _over(self, grid: float, power: float | None, relay: str | None) -> bool | None:
@@ -232,8 +237,9 @@ class Boiler:
             over = self._over(grid, power, relay) if settle is None else None
             undecided = self.undecided = settle is None and over is None
             if over is None:
-                if self.holding:
-                    return None, ""  # the off reason in force stays: same phase, the 15 s wait not started yet
+                if self.holding:  # the off reason in force stays: same phase, the 15 s wait not started yet
+                    again = self._again(now, relay)
+                    return again, ("blackout" if self.phase == "blackout" else "power limit") if again else ""
             elif over:
                 return self._off(now, relay, "limit", "power limit")
         if self.holding:
@@ -259,7 +265,14 @@ class Boiler:
 
     def _off(self, now: float, relay: str | None, phase: str, why: str) -> "tuple[str | None, str]":
         self.phase, self.holding, self.last_off = phase, True, now
-        return self._want("off", relay, now), why
+        return self._want("off", relay, now) or self._again(now, relay), why
+
+    def _again(self, now: float, relay: str | None) -> str | None:
+        """The safety off once more: the relay still reads on REPEAT s after the off was sent (a lost off must not
+        leave the boiler drawing into an overload)."""
+        if relay == "on" and self.cmd == "off" and self.off_sent is not None and now - self.off_sent >= REPEAT:
+            return self.command("off", now)
+        return None
 
     def trace(self, grid: float | None, power: float | None, relay: str | None) -> dict:
         out = {

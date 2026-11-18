@@ -1055,7 +1055,8 @@ def test_stats_a_silent_boiler_meter_is_settled_after_two_of_its_periods():
     w.advance(1012)  # T + 2 + 2 * 5 s
     assert w.calls == [ON, OFF] and w.b()["phase"] == "limit" and "settling" not in w.b()
     assert w.engine.snapshot("p")["r"]["last"]["reason"] == "power limit"
-    assert w.pending() == []  # the tick stopped: a holding limit waits for a reading
+    # the tick stopped: a holding limit waits for a reading; the off the relay does not read goes again 10 s later
+    assert [t[0] for t in w.pending()] == [1022.0]
 
 
 def test_stats_a_same_value_report_is_caught_by_the_next_tick():
@@ -1196,7 +1197,8 @@ def test_no_boiler_data_between_the_bounds_keeps_a_holding_limit_and_waits_once_
     w.set("sensor.bp", "unavailable")  # the relay has not confirmed the off: an unknown draw
     w.advance(w.t + 30)
     w.set("sensor.grid", "2000", W)  # 2000 .. 3400: not judged, the limit stays
-    assert w.b()["phase"] == "limit" and "until" not in w.b() and w.calls == [OFF]
+    # the off the relay does not read went again at +10, +20 and +30 s
+    assert w.b()["phase"] == "limit" and "until" not in w.b() and w.calls == [OFF] * 4
     t = w.t
     w.set("sensor.grid", "1500", W)  # 2900 <= 3000 for sure: cleared, the 15 s wait starts now
     assert w.b()["phase"] == "waiting" and w.b()["until"] == int((t + 15) * 1000)
@@ -1367,3 +1369,58 @@ def test_a_lost_on_refused_by_a_limit_is_sent_anew_when_the_limit_clears():
     assert w.calls == [ON, ON] and w.b()["phase"] == "heating"
     w.advance(1079.9)  # the 60 s grace counts from the second on
     assert w.b()["phase"] == "heating" and w.b()["mode"] == "auto"
+
+
+def test_a_hand_flip_to_another_rules_lost_command_is_a_take_over():
+    """Probe R4: only the boiler's own latest command makes a change of its relay no take-over (as 0.24.0's cmd)."""
+    leak = dev("s", "leak_sensor", "Leak", leak="binary_sensor.s")
+    w = heating(binary_sensor__s="off")
+    w.engine.load_plans([boiler_plan([boiler_rule(), rule("c", ["s"], on_true=(("b", "off"),))],
+                                     devices=[BOILER, BUTTON, WALL, leak])], boot=False)
+    w.calls.clear()
+    w.set("binary_sensor.s", "on")  # the condition rule switches the relay off: the device loses it
+    assert w.calls == [OFF] and w.b()["mode"] == "auto"
+    w.advance(w.t + 3600)
+    w.set("switch.relay", "off")  # a person, an hour later
+    assert w.b()["mode"] == "manual" and w.calls == [OFF]
+
+
+def test_a_release_off_is_not_wanted_after_a_press_of_a_boiler_rule_on_the_relay():
+    """Probe release: r1 deleted in auto (its off lost), r2 new on the same relay, the person presses r2 "set on"."""
+    w = heating()
+    w.engine.load_plans([boiler_plan([boiler_rule(rid="r2", name="Boiler 2")])], boot=False)
+    assert w.calls == [OFF] and w.engine.still_wants(None, "switch.relay", "off") is True
+    w.press("set", "on")  # the relay reads on: manual, nothing sent
+    assert w.calls == [OFF] and w.engine.snapshot("p")["r2"]["boiler"]["mode"] == "manual"
+    assert w.engine.still_wants(None, "switch.relay", "off") is False
+
+
+def test_a_safety_off_the_relay_does_not_read_is_sent_again_every_10_s():
+    """Probe L: the limit's off is lost again and again; AppDaemon re-sent it every 5 s."""
+    w = heating()
+    w.set("sensor.grid", "3200", W)  # 3200 + 1400 - 1380 > 3000
+    assert w.calls == [OFF] and w.b()["phase"] == "limit"
+    t = w.t
+    w.advance(t + 9.9)
+    assert w.calls == [OFF]
+    w.advance(t + 10)
+    assert w.calls == [OFF, OFF]
+    w.advance(t + 20)
+    assert w.calls == [OFF, OFF, OFF] and w.engine.snapshot("p")["r"]["last"]["reason"] == "power limit"
+    w.set("switch.relay", "off", own=True)  # it got through
+    w.advance(t + 60)
+    assert w.calls == [OFF, OFF, OFF] and w.b()["phase"] == "limit"
+
+
+def test_a_safety_off_is_not_repeated_once_the_limit_ends_or_the_mode_leaves_auto():
+    w = heating()
+    w.set("sensor.grid", "3200", W)
+    w.set("sensor.grid", "1900", W)  # the limit ends (the relay still on): no repeat
+    w.advance(w.t + 30)
+    assert w.calls == [OFF]
+    w2 = heating()
+    w2.set("sensor.grid", "unavailable")  # blackout: the off, lost
+    assert w2.calls == [OFF] and w2.b()["phase"] == "blackout"
+    w2.press("set", "on")  # manual (the relay reads on: nothing sent)
+    w2.advance(w2.t + 30)
+    assert w2.calls == [OFF] and w2.b()["mode"] == "manual"
