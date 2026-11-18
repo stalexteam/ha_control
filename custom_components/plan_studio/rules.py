@@ -1424,15 +1424,15 @@ class RuleEngine:
         return False
 
     def _ref_real(self, pid: str, rid: "str | None") -> bool:
-        """Whether the referenced rule's latest verdict change was real. A timed or boiler rule moves its verdict by
-        presses, timers and the relay's state outside _commit: always real. Any other kind moves it through _commit by
-        its inputs (condition, vent, leak, outside light, beurer): rule.real; a light motion control rule likewise for its
-        sensor-driven step, and sets rule.real True wherever else its verdict moves (a press, a timer, the daylight, the
-        blocker, the light's own state, manual)."""
+        """Whether the referenced rule's latest verdict change was real. A timed, boiler or light motion control rule
+        moves its verdict by presses, timers and the device's state (often outside _commit, by holds that leave the
+        input basis behind): always real; known limit: a motion sensor dead longer than the off delay and back reporting
+        motion counts as real. Any other kind (condition, vent, leak, outside light, beurer) moves it through _commit by
+        its inputs: rule.real."""
         ref = self._rules.get((pid, rid or ""))
         if ref is None:
             return False
-        return ref.timed is not None or ref.boiler is not None or ref.real
+        return ref.timed is not None or ref.boiler is not None or ref.motion_light is not None or ref.real
 
     def _new_firing(self, rule: _Rule) -> None:
         rule.seq += 1
@@ -1968,7 +1968,6 @@ class RuleEngine:
                 m.stop()
             rule.cancel()
             rule.open, rule.verdict, m.entered = False, None, False
-            rule.real = True  # not moved by its sensors (see _ref_real)
             return rule.verdict != was
         m.stop()
         rule.open = True
@@ -2008,7 +2007,6 @@ class RuleEngine:
         assert m is not None and m.eid is not None
         rule.cancel()
         rule.verdict, m.on_at, m.dropped = on, None, None
-        rule.real = True  # the light's state, not its sensors (see _ref_real)
         if on:
             m.waiting = m.day_off = False
         self._new_firing(rule)
@@ -2053,7 +2051,6 @@ class RuleEngine:
         now = self._now()
         rule.raw = want  # the step after this one sees the decision, not the light's reading
         self._commit(rule, want, why)
-        rule.real = True  # a press, a timer, the daylight or the blocker, not a sensor's return (see _ref_real)
         for e in rule.entries:
             if e.get("sent") is not False:  # an off kept back by other holders says who keeps the light on
                 e["reason"] = why
@@ -2084,7 +2081,7 @@ class RuleEngine:
         m.dropped, m.day_off = None, False
         m.presses += 1  # an older press's command is no longer wanted
         rule.cancel()
-        rule.open, rule.verdict, rule.real = False, None, True
+        rule.open, rule.verdict = False, None
         self._drop_light(rule)  # the person took over: nothing may switch the light back
         entry = {"action": action, "target": m.label, "at": int(self._now() * 1000), "reason": "button: manual"}
         if not sent:
@@ -2101,7 +2098,6 @@ class RuleEngine:
         assert m is not None and m.eid is not None
         rule.cancel()
         rule.verdict, m.on_at, m.waiting = False, None, True
-        rule.real = True  # switched off elsewhere
         self._new_firing(rule)
         self._drop_light(rule)
         rule.last, rule.failed = {"action": "off", "target": m.label, "at": int(self._now() * 1000),
@@ -2126,7 +2122,7 @@ class RuleEngine:
         m.presses += 1  # a press's command is no longer wanted
         m.stop()
         rule.cancel()
-        rule.verdict, rule.real = None, True
+        rule.verdict = None
         rule.last, rule.failed = {"action": "auto", "target": m.label, "at": int(self._now() * 1000), "reason": why,
                                   "sent": False}, None
         if was != "auto":  # auto while auto restarts the start: no event
@@ -2160,7 +2156,7 @@ class RuleEngine:
                                  rule.verdict is True, self._now())
         if change == "back":
             rule.cancel()
-            rule.verdict, rule.real = None, True  # the auto start applies again
+            rule.verdict = None  # the auto start applies again
         elif change == "found" and rule.verdict is False:
             self._motion_hold(rule, True)  # switched on elsewhere: held from now
         elif change == "released":

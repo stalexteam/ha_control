@@ -440,9 +440,10 @@ def ml_world(rules):
     return w
 
 
-def test_a_motion_light_flip_by_its_sensor_returning_is_not_real_downstream():
-    """M1: the motion sensor without data counts as no motion (off after the off delay); back with the same value it
-    switches the light on again: no announcement downstream. Real motion changes announce."""
+def test_known_limit_a_motion_light_flip_by_its_sensor_returning_counts_as_real():
+    """Known limit (ruling, fix round 4): a light motion control verdict always counts as real downstream. A PIR dead
+    longer than the off delay (no data = no motion: the light goes off) and back reporting on (the light goes on)
+    announces both moves. Real motion changes announce too."""
     from test_motion_light import ml_rule
     w = ml_world([ml_rule(), rule("y", [ref("m")], onTrue=[SAY], onFalse=[PLAY]),
                   control([{"source": {"rule": "m"}}], on=[NOTE], rid="lc")])
@@ -450,14 +451,45 @@ def test_a_motion_light_flip_by_its_sensor_returning_is_not_real_downstream():
     assert w.tr()["verdict"] is True and said(w) == [SPEAK, PUSH]
     w.pir("unavailable")
     w.advance(w.t + 181)
-    assert w.tr()["verdict"] is False and said(w) == [SPEAK, PUSH]
-    w.pir("on")  # back with the same value
-    assert w.tr()["verdict"] is True and said(w) == [SPEAK, PUSH]
+    assert w.tr()["verdict"] is False and said(w) == [SPEAK, PUSH, SOUND]
+    w.pir("on")  # back with the same value: announced (the known limit)
+    assert w.tr()["verdict"] is True and said(w) == [SPEAK, PUSH, SOUND, SPEAK, PUSH]
     w.pir("off")
     w.advance(w.t + 181)
     assert w.tr()["verdict"] is False and said(w)[-1] == SOUND
     w.pir("on")
     assert said(w)[-2:] == [SPEAK, PUSH]
+
+
+def test_a_light_found_on_by_hand_then_off_after_the_off_delay_announces_both():
+    """M4: switched on by hand without motion (found on, held), off after the off delay: both moves announce."""
+    from test_motion_light import ml_rule
+    w = ml_world([ml_rule(), rule("y", [ref("m")], onTrue=[SAY], onFalse=[PLAY]),
+                  control([{"source": {"rule": "m"}}], off=[NOTE], rid="lc")])
+    w.light("on")
+    assert w.tr()["verdict"] is True and said(w) == [SPEAK]
+    w.advance(w.t + 181)
+    assert w.tr()["verdict"] is False and said(w) == [SPEAK, SOUND, PUSH]
+
+
+@pytest.mark.parametrize("how", ["start", "changed save"])
+def test_a_light_on_at_the_rule_start_then_real_motion_on_and_off_announces_the_off(how):
+    """M5: the light reads on when the rule starts (HA start, a changed Save): held; real motion on, then off: the off
+    after the off delay announces."""
+    from test_motion_light import DEVICES as ML_DEVICES, MWorld, ml_rule
+    w = MWorld(media_player__vlc="idle", light__k="on")
+    consumers = [rule("y", [ref("m")], onTrue=[SAY], onFalse=[PLAY]),
+                 control([{"source": {"rule": "m"}}], off=[NOTE], rid="lc")]
+    off = 180
+    if how == "changed save":
+        w.engine.load_plans([plan(ML_DEVICES + [SPK, PHONE], [ml_rule()] + consumers)], boot=False)
+        off = 120
+    w.engine.load_plans([plan(ML_DEVICES + [SPK, PHONE], [ml_rule(off=off)] + consumers)], boot=False)
+    assert w.tr()["verdict"] is True and said(w) == []
+    w.pir("on")
+    w.pir("off")
+    w.advance(w.t + off + 1)
+    assert w.tr()["verdict"] is False and said(w) == [SOUND, PUSH]
 
 
 def test_a_motion_light_verdict_moved_by_hand_or_by_a_button_is_real_downstream():
