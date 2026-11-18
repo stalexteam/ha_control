@@ -436,6 +436,21 @@ def test_validate_plan_motion_light_rule():
             validate_plan({**plan("p"), "rules": [{**other, "motionLight": good}]})
 
 
+def test_validate_plan_motion_light_blocker():
+    """0.26.0: an optional blocker {device, is: on | off}; the device must not be the light."""
+    good = motion_rule()["motionLight"]
+    for is_ in ("on", "off"):
+        validate_plan({**plan("p"), "rules": [motion_rule(ml={**good, "blocker": {"device": "vs", "is": is_}})]})
+    bad = [
+        "vs", None, [], {}, {"device": "vs"}, {"is": "on"}, {"device": "", "is": "on"}, {"device": 3, "is": "on"},
+        {"device": "vs", "is": "x"}, {"device": "vs", "is": True}, {"device": "vs", "is": "on", "x": 1},
+        {"device": "l", "is": "on"},
+    ]
+    for b in bad:
+        with pytest.raises(vol.Invalid, match="rule motionLight"):
+            validate_plan({**plan("p"), "rules": [motion_rule(ml={**good, "blocker": b})]})
+
+
 def ctl(**kw):
     c = {"sources": [{"button": "b"}], "on": [], "off": [], "toggle": [{"device": "l", "do": "toggle"}]}
     c.update(kw)

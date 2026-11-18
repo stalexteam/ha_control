@@ -27,20 +27,36 @@ ENT = dev("ent", "wall_light", "Light entrance", control="switch.entrance")
 SWE = dev("swe", "wall_switch", "Switch entrance", state="switch.entrance")
 SWE["props"].update(autoByDoubleToggle=True, windowSec=3)
 TB = dev("tb", "smart_button", "Timer button", action="sensor.tact")
-DEVICES = [LAMP, LAMP2, PIR1, PIR2, LS, BTN, WS, WSP, WS2, WSX, ENT, SWE, TB]
+# the sleep blocker (spec virtual switch §4): the virtual switch Sleep (kept by the integration, entity virtual.<id>),
+# the round button toggling it through a Load control rule, any other on / off device
+VS = dev("vs", "virtual_switch", "Sleep", control="virtual.vs")
+RB = dev("rb", "smart_button", "Round button: Sleep", action="sensor.ract")
+SOCK = dev("sock", "socket", "Socket", control="switch.sock")
+SOCKX = dev("sockx", "socket", "Unbound socket")  # no control entity: cannot be read as an on / off input
+LS60 = sensor("ls60", "LightSensor 60", debounce=60)  # the same lux entity, debounced 60 s
+DEVICES = [LAMP, LAMP2, PIR1, PIR2, LS, BTN, WS, WSP, WS2, WSX, ENT, SWE, TB, VS, RB, SOCK, SOCKX, LS60]
 ON, OFF = ("light", "turn_on", "light.k"), ("light", "turn_off", "light.k")
 ON2, OFF2 = ("light", "turn_on", "light.k2"), ("light", "turn_off", "light.k2")
 E_ON, E_OFF = ("switch", "turn_on", "switch.entrance"), ("switch", "turn_off", "switch.entrance")
+VS_ON, VS_OFF = ("virtual", "turn_on", "virtual.vs"), ("virtual", "turn_off", "virtual.vs")
 DAY, NIGHT, DUSK = lux(100), lux(5), lux(30)
 T0 = 1000.0
 
 
 def ml_rule(rid="m", sensors=("pir1",), daylight=None, min_on=0, off=180, buttons=(), auto_after=0, light="lamp",
-            name="Light motion control", **extra):
+            name="Light motion control", blocker=None, **extra):
     m = {"light": light, "sensors": list(sensors), "minOn": min_on, "buttons": list(buttons), "autoAfter": auto_after}
     if daylight is not None:
         m["daylight"] = {"sensor": daylight[0], "is": daylight[1]}
+    if blocker is not None:
+        m["blocker"] = {"device": blocker[0], "is": blocker[1]}
     return rule(rid, [], name=name, off_delay=off, motionLight=m, **extra)
+
+
+def sleep_rule(rid="sb"):
+    """Load control "Sleep button" (spec virtual switch §5): the round button's toggle toggles the virtual switch."""
+    return rule(rid, [], name="Sleep button",
+                control={"sources": [{"button": "rb"}], "on": [], "off": [], "toggle": [{"device": "vs", "do": "toggle"}]})
 
 
 def pair_rule(rid="cr", name="Pair"):
@@ -61,7 +77,7 @@ class MWorld(World):
 
     def __init__(self, **states):
         base = {"light__k": "off", "light__k2": "off", "binary_sensor__pir1": "off", "binary_sensor__pir2": "off",
-                "sensor__lux": NIGHT}
+                "sensor__lux": NIGHT, "virtual__vs": "off", "switch__sock": "off"}
         base.update(states)
         super().__init__(**base)
         self.saved = []
@@ -88,6 +104,10 @@ class MWorld(World):
 
     def pir(self, state, n=1):
         self.set(f"binary_sensor.pir{n}", state)
+
+    def sleep(self, state):
+        """The virtual switch Sleep changes as the runtime applies a command to it: at once, Plan Studio's context."""
+        self.set("virtual.vs", state, own=True)
 
     def tr(self, rid="m"):
         return self.engine.snapshot("p")[rid]
@@ -325,20 +345,17 @@ def test_min_on_time():
     assert w.calls == [OFF]
 
 
-def test_daylight_blocks_switching_on_only():
-    """Review focus 3."""
+def test_daylight_blocks_switching_on():
+    """Review focus 3. Since 0.26.0 (spec virtual switch §4a) the block no longer applies to switching on only: the
+    daylight coming switches a held light off at once, so a sensor that sees the lamp switches it off (known limit)."""
     w = loaded([ml_rule(daylight=("ls", "night"))], sensor__lux=DAY)
     w.pir("on")
     assert w.calls == [] and w.tr()["verdict"] is False
     w.set("sensor.lux", *NIGHT)
     assert w.calls == [ON]
     w.light("on", own=True)
-    w.set("sensor.lux", *DAY)  # the sensor sees the lamp: nothing while the motion lasts
-    w.advance(T0 + 600)
-    assert w.calls == [ON] and w.tr()["verdict"] is True
-    w.pir("off")
-    w.advance(T0 + 780)
-    assert w.calls == [ON, OFF]
+    w.set("sensor.lux", *DAY)  # the sensor sees the lamp: off at once although the motion lasts
+    assert w.calls == [ON, OFF] and w.tr()["verdict"] is False
 
 
 def test_dusk_with_motion_switches_on():
@@ -1422,3 +1439,387 @@ def test_manual_by_a_wall_switch_is_stored_and_restored():
     w.change("light.k", "on")  # a double flip: auto, motion, the light on: held
     t = w.tr()
     assert w.calls == [] and t["motionLight"]["mode"] == "auto" and t["verdict"] is True and w.saved[-1] == {}
+
+
+# --- the sleep blocker (spec virtual switch §4) ---------------------------------------------------------------------
+
+def test_blocker_follows_the_known_reading():
+    devices = {d["id"]: d for d in DEVICES}
+    raw = {"light": "lamp", "sensors": ["pir1"], "minOn": 0, "buttons": [], "autoAfter": 0,
+           "daylight": {"sensor": "ls", "is": "dark"}, "blocker": {"device": "vs", "is": "on"}}
+    m = MotionLight(raw, devices, "light.k", "virtual.vs")
+    assert m.blocker == ("vs", "on") and m.blocked is None and not m.missing
+    # the blocker is the last input, true (after NOT) while it does not read `is`: the rule may act
+    assert m.inputs()[-1] == {"source": {"device": "vs"}, "not": True}
+    assert m.block([False, True, False]) is None and m.blocked is True  # the rule's first evaluation is no change
+    assert m.block([False, True, True]) == "end" and m.blocked is False
+    assert m.block([False, True, True]) is None
+    assert m.block([False, True, False]) == "start" and m.blocked is True
+    assert m.block([False, True, None]) is None and m.blocked is True  # no data keeps a block
+    assert m.block([False, True, False]) is None
+    assert m.block([False, True, None]) is None
+    assert m.block([False, True, True]) == "end" and m.blocked is False
+    m = MotionLight(raw, devices, "light.k", "virtual.vs")
+    assert m.block([False, True, None]) is None and m.blocked is False  # without data at the start: not blocking
+    assert m.block([False, True, False]) == "start"
+    off = MotionLight({**raw, "blocker": {"device": "vs", "is": "off"}}, devices, "light.k", "virtual.vs")
+    assert off.inputs()[-1] == {"source": {"device": "vs"}, "not": False}
+    assert MotionLight(raw, devices, "light.k", None).missing  # not readable as an on / off input
+    for bad in ({"device": "vs", "is": "x"}, {"device": "", "is": "on"}, "vs"):
+        m = MotionLight({**raw, "blocker": bad}, devices, "light.k", None)
+        assert m.blocker is None and not m.missing and len(m.inputs()) == 2, bad
+        assert m.block([False, True, False]) is None and not m.blocked, bad
+
+
+def test_light_changed_while_blocked():
+    m = make()
+    m.blocked = True
+    m.seen = "off"
+    assert m.light_changed("on", False, True, False) is None  # switched on elsewhere: left alone, not held
+    assert m.light_changed("off", False, True, True) is None  # switched off elsewhere: nothing to let go
+    m.decide("off", 0, 10)
+    m.seen = "on"
+    assert m.light_changed("off", False, True, False, 1) is None and m.own == []  # its own echo is used up
+    assert m.light_changed(None, False, True, False) is None
+    assert m.light_changed("on", False, True, False) is None  # back from no data: no auto start while blocked
+    m.blocked = False
+    m.seen = "off"
+    assert m.light_changed("on", False, True, False) == "found"
+
+
+def test_sleep_switches_the_light_off_at_once_and_motion_does_nothing():
+    """Review focus 3: the blocker is the virtual switch Sleep, toggled by a Load control rule from the round button
+    (the runtime applies the toggle at once with Plan Studio's context)."""
+    w = lit([ml_rule(blocker=("vs", "on")), sleep_rule()])
+    t = w.tr()
+    assert "blocked" not in t["motionLight"] and t["motionLight"]["blocker"] == {"name": "Sleep", "state": "off", "is": "on"}
+    assert t["last"]["reason"] == "became true: Motion 1 motion, Sleep off"
+    assert "virtual.vs" in w.engine.entity_ids()
+    w.press("rb", "toggle")
+    assert w.calls == [VS_ON]
+    w.sleep("on")
+    t = w.tr()
+    assert w.calls == [VS_ON, OFF] and t["verdict"] is False and t["status"] == "ok" and not w.pending()
+    assert t["motionLight"]["blocked"] is True and t["motionLight"]["blocker"]["state"] == "on"
+    assert t["last"] == {"action": "off", "target": "Lamp", "at": T0 * 1000, "reason": "blocked"}
+    assert "holders" not in t and t["motionLight"]["mode"] == "auto" and w.saved == []
+    assert w.engine.still_wants(("p", "m"), "light.k", "off")  # the runtime may repeat an unconfirmed off
+    w.light("off", own=True)  # its echo
+    t = w.tr()
+    assert t["verdict"] is False and "waiting" not in t["motionLight"] and t["last"]["reason"] == "blocked"
+    w.advance(T0 + 60)
+    w.pir("off")
+    w.advance(T0 + 600)
+    w.pir("on")  # new motion while asleep
+    w.advance(T0 + 7200)
+    assert w.calls == [VS_ON, OFF] and w.tr()["verdict"] is False and w.ml()["blocked"] is True
+    w.press("rb", "toggle")
+    assert w.calls[-1] == VS_OFF
+    w.sleep("off")  # sleep ends while the motion lasts, dark: on at once
+    t = w.tr()
+    assert w.calls == [VS_ON, OFF, VS_OFF, ON] and t["verdict"] is True and "blocked" not in t["motionLight"]
+    assert t["last"]["action"] == "on" and t["last"]["reason"] == "unblocked: motion"
+    w.light("on", own=True)
+    w.pir("off")
+    w.advance(T0 + 7379)
+    assert w.calls[-1] == ON
+    w.advance(T0 + 7380)
+    assert w.calls[-1] == OFF
+
+
+def test_sleep_leaves_a_manual_light_alone():
+    """Review focus 3: a light in manual stays as it is through sleep on and off."""
+    w = loaded([ml_rule(buttons=("btn",), blocker=("vs", "on"))])
+    w.press("btn", "toggle")  # manual: the lamp on
+    w.light("on", own=True)
+    w.pir("on")
+    w.sleep("on")
+    t = w.tr()
+    assert w.calls == [ON] and t["motionLight"]["mode"] == "manual" and t["verdict"] is None
+    assert "blocked" not in t["motionLight"] and t["last"]["reason"] == "button: manual"
+    w.pir("off")
+    w.advance(T0 + 3600)
+    w.sleep("off")
+    t = w.tr()
+    assert w.calls == [ON] and t["motionLight"]["mode"] == "manual" and t["motionLight"]["light"] == "on"
+    w.press("btn", "toggle")  # manual: the lamp off
+    w.light("off", own=True)
+    w.pir("on")
+    w.sleep("on")
+    w.sleep("off")
+    assert w.calls == [ON, OFF] and w.ml()["mode"] == "manual" and w.tr()["verdict"] is None
+
+
+def test_auto_entered_while_blocked_switches_off_at_once():
+    for auto_after in (0, 10):
+        w = loaded([ml_rule(buttons=("btn",), blocker=("vs", "on"), auto_after=auto_after)])
+        w.press("btn", "toggle")  # manual at T0: the lamp on
+        w.light("on", own=True)
+        w.sleep("on")  # manual: nothing
+        w.pir("on")
+        w.pir("off")
+        assert w.calls == [ON]
+        if auto_after:
+            w.advance(T0 + 600)
+        else:
+            w.press("btn", "auto")
+        t = w.tr()
+        assert w.calls == [ON, OFF] and t["motionLight"]["mode"] == "auto" and t["motionLight"]["blocked"] is True
+        assert t["last"]["action"] == "off" and t["last"]["reason"] == "blocked" and t["verdict"] is False
+        w.light("off", own=True)
+        w.pir("on")
+        w.advance(T0 + 3600)
+        assert w.calls == [ON, OFF] and w.tr()["verdict"] is False
+    w = loaded([ml_rule(buttons=("btn",), blocker=("vs", "on"))])
+    w.press("btn", "set", "off")  # manual, already off
+    w.sleep("on")
+    w.pir("on")
+    w.press("btn", "auto")  # blocked, the light off: nothing to send
+    t = w.tr()
+    assert w.calls == [] and t["motionLight"]["blocked"] is True and t["verdict"] is False
+    assert t["last"]["reason"] == "button: auto"
+
+
+def test_blocking_start_switches_off_an_on_on_its_way():
+    w = loaded([ml_rule(blocker=("vs", "on"))])
+    w.pir("on")
+    assert w.calls == [ON]  # not confirmed yet: the rule holds the light
+    w.sleep("on")
+    assert w.calls == [ON, OFF] and w.tr()["last"]["reason"] == "blocked"
+    w.light("on", own=True)  # the late on is the rule's own: not found on
+    t = w.tr()
+    assert t["verdict"] is False and t["last"]["reason"] == "blocked"
+    w.light("off", own=True)
+    w.advance(T0 + 3600)
+    assert w.calls == [ON, OFF] and w.tr()["verdict"] is False
+    w = loaded([ml_rule(blocker=("vs", "on"))])
+    w.sleep("on")  # the light off and not held: nothing to send
+    t = w.tr()
+    assert w.calls == [] and t["motionLight"]["blocked"] is True and "last" not in t
+
+
+def test_a_light_switched_on_while_blocked_is_left_alone():
+    w = loaded([ml_rule(blocker=("vs", "on"))])
+    w.sleep("on")
+    w.light("on")  # by hand while asleep: not held, not switched off
+    w.advance(T0 + 3600)
+    w.pir("on")
+    t = w.tr()
+    assert w.calls == [] and t["verdict"] is False and t["motionLight"]["light"] == "on" and "last" not in t
+    w.sleep("off")  # motion while dark, the light on: held
+    t = w.tr()
+    assert w.calls == [] and t["verdict"] is True and "blocked" not in t["motionLight"]
+    w.pir("off")
+    w.advance(T0 + 3779)
+    assert w.calls == []
+    w.advance(T0 + 3780)
+    assert w.calls == [OFF]
+
+    w = loaded([ml_rule(blocker=("vs", "on"))])
+    w.sleep("on")
+    w.light("on")
+    w.advance(T0 + 60)
+    w.sleep("off")  # no motion: off at once
+    t = w.tr()
+    assert w.calls == [OFF] and t["verdict"] is False and t["last"]["reason"] == "unblocked: no motion"
+
+    w = loaded([ml_rule(blocker=("vs", "on"), daylight=("ls", "dark"))], sensor__lux=DAY)
+    w.sleep("on")
+    w.light("on")
+    w.pir("on")
+    w.sleep("off")  # motion in daylight: off at once
+    assert w.calls == [OFF] and w.tr()["last"]["reason"] == "unblocked: not dark"
+
+    w = loaded([ml_rule(blocker=("vs", "on")), timed_rule()])  # switched on by another slot participant
+    w.sleep("on")
+    w.press("tb", "set", "on")
+    assert w.calls == [ON]
+    w.light("on", own=True)
+    w.pir("on")
+    t = w.tr()
+    assert t["verdict"] is False and "last" not in t
+    w.advance(T0 + 60)  # the timed run ends: its off is not kept back by this rule
+    assert w.calls == [ON, OFF]
+
+
+def test_a_blocker_without_data_does_not_block_and_no_data_keeps_a_block():
+    w = loaded([ml_rule(blocker=("sock", "on"))], switch__sock="unavailable")
+    w.pir("on")
+    assert w.calls == [ON] and "blocked" not in w.ml()
+    assert w.ml()["blocker"] == {"name": "Socket", "state": None, "is": "on"}
+    w.light("on", own=True)
+    w.set("switch.sock", "on")  # starts blocking: off at once
+    assert w.calls == [ON, OFF] and w.ml()["blocked"] is True and w.tr()["last"]["reason"] == "blocked"
+    w.light("off", own=True)
+    w.set("switch.sock", "unavailable")  # no data keeps the block
+    w.pir("off")
+    w.pir("on")
+    t = w.tr()
+    assert w.calls == [ON, OFF] and t["motionLight"]["blocked"] is True and t["motionLight"]["blocker"]["state"] is None
+    w.set("switch.sock", "on")
+    assert w.calls == [ON, OFF] and w.ml()["blocked"] is True
+    w.set("switch.sock", "unavailable")
+    w.set("switch.sock", "off")  # the other known reading ends it: a fresh decision
+    t = w.tr()
+    assert w.calls == [ON, OFF, ON] and t["last"]["reason"] == "unblocked: motion" and "blocked" not in t["motionLight"]
+
+
+def test_any_on_off_device_blocks_while_it_reads_the_chosen_state():
+    w = loaded([ml_rule(blocker=("sock", "off"))])  # blocked while the socket reads off
+    w.pir("on")
+    assert w.calls == [] and w.ml()["blocked"] is True and w.tr()["verdict"] is False
+    w.set("switch.sock", "on")
+    assert w.calls == [ON] and w.tr()["last"]["reason"] == "unblocked: motion"
+    for bad in (("nope", "on"), ("ls", "on"), ("btn", "on"), ("sockx", "on")):
+        w = loaded([ml_rule(blocker=bad)])
+        w.pir("on")
+        t = w.tr()
+        assert t["status"] == "error" and t["reason"] == "device missing" and w.calls == [], bad
+
+
+def test_blocked_at_ha_start_or_a_changed_save_leaves_the_light_alone():
+    w = MWorld(light__k="on", binary_sensor__pir1="on", virtual__vs="on")
+    w.load([ml_rule(blocker=("vs", "on"))], boot=True)
+    w.engine.started()
+    t = w.tr()
+    assert w.calls == [] and t["verdict"] is False and t["motionLight"]["blocked"] is True and "last" not in t
+    w.advance(T0 + 3600)
+    assert w.calls == []
+    w.sleep("off")  # motion while dark, the light on: held
+    assert w.calls == [] and w.tr()["verdict"] is True
+
+    w = lit([ml_rule(blocker=("vs", "on"))])
+    w.sleep("on")
+    w.light("off", own=True)
+    w.light("on")  # by hand while asleep
+    w.load([ml_rule(blocker=("vs", "on"), off=60)])  # changed: starts anew, already blocked
+    t = w.tr()
+    assert w.calls == [OFF] and t["verdict"] is False and t["motionLight"]["blocked"] is True
+    w.load([ml_rule(blocker=("vs", "on"), off=60, name="Renamed")])  # unchanged: still blocked
+    w.pir("on")
+    assert w.calls == [OFF] and w.ml()["blocked"] is True
+    w.load([ml_rule(off=60)])  # the blocker removed: the light found on is held
+    t = w.tr()
+    assert w.calls == [OFF] and t["verdict"] is True and "blocked" not in t["motionLight"]
+    assert t["last"]["reason"] == "found on" and "blocker" not in t["motionLight"]
+
+
+def test_a_disabled_rule_ignores_the_blocker():
+    w = lit([ml_rule(blocker=("vs", "on"))])
+    w.load([ml_rule(blocker=("vs", "on"), enabled=False)])
+    w.sleep("on")
+    w.sleep("off")
+    w.sleep("on")
+    assert w.calls == [] and w.tr()["status"] == "disabled"
+    w.load([ml_rule(blocker=("vs", "on"))])  # enabled again while asleep: blocked from the start, the light alone
+    t = w.tr()
+    assert w.calls == [] and t["motionLight"]["blocked"] is True and t["verdict"] is False
+    w.sleep("off")  # motion while dark, the light on: held
+    assert w.calls == [] and w.tr()["verdict"] is True
+
+
+# --- daylight switches off too (spec virtual switch §4a) -------------------------------------------------------------
+
+def test_day_came_between_known_readings():
+    m = make(daylight={"sensor": "ls", "is": "night"})
+    assert not m.day_came([False, False, True]) and m.met is True
+    assert m.day_came([False, False, False])  # met -> not met
+    assert not m.day_came([False, False, False])
+    assert not m.day_came([False, False, True])
+    assert not m.day_came([False, False, None])  # to no data
+    assert not m.day_came([False, False, False])  # from no data: no change
+    assert not make().day_came([False, False])  # no daylight sensor
+
+
+def test_daylight_switches_the_light_off_at_once():
+    """Review focus 4: morning: the debounced day switches the light off at once although the motion continues; it
+    stays off while the motion goes on in daylight; dusk again with motion switches it on."""
+    w = lit([ml_rule(daylight=("ls60", "dark"))])
+    w.advance(T0 + 10)
+    w.set("sensor.lux", *DAY)  # pending for 60 s
+    w.advance(T0 + 69)
+    w.pir("on")
+    assert w.calls == [] and w.tr()["verdict"] is True
+    w.advance(T0 + 70)
+    t = w.tr()
+    assert w.calls == [OFF] and t["verdict"] is False and t["motionLight"]["dark"] is False and not w.pending()
+    assert t["last"] == {"action": "off", "target": "Lamp", "at": (T0 + 70) * 1000, "reason": "daylight"}
+    assert w.engine.still_wants(("p", "m"), "light.k", "off")
+    w.pir("on")  # the motion continues before the off arrives
+    assert w.calls == [OFF] and w.tr()["verdict"] is False
+    w.light("off", own=True)  # its echo
+    t = w.tr()
+    assert t["verdict"] is False and "waiting" not in t["motionLight"] and t["last"]["reason"] == "daylight"
+    w.pir("off")
+    w.advance(T0 + 600)
+    w.pir("on")  # still day
+    assert w.calls == [OFF]
+    w.set("sensor.lux", *DUSK)  # twilight is dark once it has held 60 s
+    w.advance(T0 + 659)
+    assert w.calls == [OFF]
+    w.advance(T0 + 660)
+    assert w.calls == [OFF, ON] and w.tr()["verdict"] is True
+
+
+def test_daylight_is_night_switches_off_at_twilight_and_min_on_does_not_apply():
+    w = lit([ml_rule(daylight=("ls", "night"), min_on=3600)])
+    w.advance(T0 + 5)
+    w.set("sensor.lux", *DUSK)  # twilight is not night
+    t = w.tr()
+    assert w.calls == [OFF] and t["last"]["reason"] == "daylight" and "minUntil" not in t["motionLight"]
+    w = lit([ml_rule(daylight=("ls", "dark"))])
+    w.set("sensor.lux", *DUSK)  # twilight is dark
+    assert w.calls == [] and w.tr()["verdict"] is True
+
+
+def test_daylight_switches_off_a_light_found_on():
+    w = loaded([ml_rule(daylight=("ls", "dark"))], light__k="on")  # found on at the start
+    w.set("sensor.lux", *DAY)
+    assert w.calls == [OFF] and w.tr()["last"]["reason"] == "daylight"
+    w = loaded([ml_rule(daylight=("ls", "dark"))])
+    w.light("on")  # switched on elsewhere: held
+    w.set("sensor.lux", *DAY)
+    assert w.calls == [OFF] and w.tr()["last"]["reason"] == "daylight"
+
+
+def test_daylight_leaves_manual_and_no_data_alone():
+    w = loaded([ml_rule(buttons=("btn",), daylight=("ls", "dark"))])
+    w.press("btn", "toggle")
+    w.light("on", own=True)
+    w.pir("on")
+    w.set("sensor.lux", *DAY)
+    assert w.calls == [ON] and w.ml()["mode"] == "manual"
+    w = lit([ml_rule(daylight=("ls", "dark"))])
+    w.set("sensor.lux", "unavailable")  # no data counts as dark
+    w.set("sensor.lux", *DAY)  # day after no data is no change: held while the motion lasts
+    assert w.calls == [] and w.tr()["verdict"] is True
+    w.pir("off")
+    w.advance(T0 + 179)
+    assert w.calls == []
+    w.advance(T0 + 180)
+    assert w.calls == [OFF]
+
+
+def test_no_flapping_between_blocked_and_daylight():
+    w = lit([ml_rule(daylight=("ls", "dark"), blocker=("vs", "on"))])
+    w.sleep("on")
+    assert w.calls == [OFF] and w.tr()["last"]["reason"] == "blocked"
+    w.light("off", own=True)
+    w.light("on")  # by hand while asleep
+    w.set("sensor.lux", *DAY)  # the day comes while blocked: nothing
+    t = w.tr()
+    assert w.calls == [OFF] and t["last"]["reason"] == "blocked" and t["motionLight"]["blocked"] is True
+    w.sleep("off")  # motion in daylight, the light on: off at once
+    t = w.tr()
+    assert w.calls == [OFF, OFF] and t["last"]["reason"] == "unblocked: not dark"
+    w.light("off", own=True)
+    w.pir("on")
+    assert w.calls == [OFF, OFF]
+    w.set("sensor.lux", *NIGHT)
+    assert w.calls == [OFF, OFF, ON] and w.tr()["last"]["reason"].startswith("became true")
+    w.light("on", own=True)
+    w.sleep("on")  # blocked at night
+    w.light("off", own=True)
+    w.set("sensor.lux", *DAY)
+    w.sleep("off")  # the daylight change was taken while blocked: no "daylight" off later
+    assert w.calls == [OFF, OFF, ON, OFF] and w.tr()["last"]["reason"] == "blocked"

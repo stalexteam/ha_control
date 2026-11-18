@@ -193,11 +193,11 @@ def _validate_beurer(r: dict, b: object) -> None:
 
 def _validate_motion_light(r: dict, m: object) -> None:
     """A light motion control rule: motion sensors (optional) switch one light, buttons (optional; the engine accepts smart buttons and wall switches with
-    a state entity, this check only ids) set the mode,
+    a state entity, this check only ids) set the mode, an optional blocker (any on / off device, the engine checks it reads as one) keeps auto from acting,
     offDelay = off after; no inputs, gate, other kinds or actions."""
     keys = {"light", "sensors", "minOn", "buttons", "autoAfter"}
-    if not isinstance(m, dict) or not keys <= set(m) <= keys | {"daylight"}:
-        raise vol.Invalid("rule motionLight needs light, sensors, minOn, buttons, autoAfter and optional daylight")
+    if not isinstance(m, dict) or not keys <= set(m) <= keys | {"daylight", "blocker"}:
+        raise vol.Invalid("rule motionLight needs light, sensors, minOn, buttons, autoAfter and optional daylight, blocker")
     if not _is_id(m["light"]):
         raise vol.Invalid("rule motionLight needs a light device id")
     for key in ("sensors", "buttons"):
@@ -210,6 +210,12 @@ def _validate_motion_light(r: dict, m: object) -> None:
         d = m["daylight"]
         if not isinstance(d, dict) or set(d) != {"sensor", "is"} or not _is_id(d["sensor"]) or d["is"] not in ("night", "dark"):
             raise vol.Invalid("rule motionLight daylight needs a sensor id and is night or dark")
+    if "blocker" in m:
+        b = m["blocker"]
+        if not isinstance(b, dict) or set(b) != {"device", "is"} or not _is_id(b["device"]) or b["is"] not in ("on", "off"):
+            raise vol.Invalid("rule motionLight blocker needs a device id and is on or off")
+        if b["device"] == m["light"]:
+            raise vol.Invalid("rule motionLight light must not be its blocker")
     for key, top, unit in (("minOn", 3600, "seconds"), ("autoAfter", 1440, "minutes")):
         if type(m[key]) is not int or not 0 <= m[key] <= top:
             raise vol.Invalid(f"rule motionLight {key} must be a whole number of {unit} 0..{top}")

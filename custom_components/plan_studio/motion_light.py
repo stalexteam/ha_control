@@ -1,7 +1,9 @@
 """The Light motion control rule: motion sensors (any of them) switch one light while it is dark, with an off delay, a
 minimum on time and a manual / auto mode set by its buttons only: smart buttons and wall switches, also the light's own
 relay (without a button the rule is always in auto). A change of the light made elsewhere never changes the mode: in
-auto the rule adapts to it. Must not import homeassistant.
+auto the rule adapts to it. In auto the daylight coming switches a held light off at once, and an optional blocker (any
+on / off device, normally a virtual switch "Sleep") switches it off and keeps the rule from acting while it reads the
+chosen state. Must not import homeassistant.
 
 The rule engine owns the I/O (the sensor and daylight inputs, the holder slots, timers and trace frames); this module
 holds the rule's configuration, its runtime state and the decisions."""
@@ -41,25 +43,36 @@ def _whole(v: object, top: int) -> int:
     return v if type(v) is int and 0 <= v <= top else 0
 
 
+def _name(device: "dict | None", fallback: str) -> str:
+    name = device.get("name") if isinstance(device, dict) else None
+    return name if isinstance(name, str) and name else fallback
+
+
 class MotionLight:
-    def __init__(self, raw: dict, devices: dict, eid: str | None) -> None:
-        """eid: the light's on / off control entity (None when it cannot be switched on and off)."""
+    def __init__(self, raw: dict, devices: dict, eid: str | None, blocker: str | None = None) -> None:
+        """eid: the light's on / off control entity (None when it cannot be switched on and off); blocker: the blocker
+        device's on / off input entity (None when it cannot be read as one)."""
         self.light = _str(raw.get("light"))
         self.sensors = [s for s in raw.get("sensors") or [] if isinstance(s, str)]
         d = raw.get("daylight")
         ok = isinstance(d, dict) and _str(d.get("sensor")) is not None and d.get("is") in ("night", "dark")
         self.daylight: "tuple[str, str] | None" = (d["sensor"], d["is"]) if ok else None
+        bl = raw.get("blocker")
+        ok = isinstance(bl, dict) and _str(bl.get("device")) is not None and bl.get("is") in ("on", "off")
+        self.blocker: "tuple[str, str] | None" = (bl["device"], bl["is"]) if ok else None  # blocked while it reads `is`
+        self.blocker_at = len(self.sensors) + (self.daylight is not None)  # the blocker's index among the inputs
         self.min_on = _whole(raw.get("minOn"), 3600)
         self.buttons = [b for b in raw.get("buttons") or [] if isinstance(b, str)]
         self.auto_after = _whole(raw.get("autoAfter"), 1440)
         light = devices.get(self.light) if self.light else None
-        name = light.get("name") if light else None
-        self.label = name if isinstance(name, str) and name else self.light or ""
+        self.label = _name(light, self.light or "")
+        self.blocker_label = _name(devices.get(self.blocker[0]), self.blocker[0]) if self.blocker is not None else ""
         self.eid = eid
         self.missing = light is None \
             or any(_kind(devices.get(s)) != "motion_sensor" for s in self.sensors) \
             or (self.daylight is not None and _kind(devices.get(self.daylight[0])) != "illuminance_sensor") \
-            or any(not _button(devices.get(b)) for b in self.buttons)
+            or any(not _button(devices.get(b)) for b in self.buttons) \
+            or (self.blocker is not None and blocker is None)
         # the wall switch buttons over the light's own entity: a flip of one is the press and the light's change at once
         self.relays = {b for b in self.buttons if eid is not None and _kind(devices.get(b)) == "wall_switch"
                        and _state_entity(devices.get(b)) == eid}
@@ -79,18 +92,24 @@ class MotionLight:
         self.waiting = False  # switched off elsewhere while held: no switch-on until every motion sensor was clear
         self.presses = 0  # button presses and mode changes: a press's command is wanted only until the next one
         self.timer: "tuple[float, Callable[[], None]] | None" = None  # the auto-return
+        # the blocker's last known reading: True while it reads `is` (None until the rule's first evaluation)
+        self.blocked: bool | None = None
+        self.met: bool | None = None  # the daylight condition at the previous evaluation (None: no data)
 
     def inputs(self) -> "list[dict]":
-        """The rule's inputs, in this order: the motion sensors, then the daylight (when set)."""
+        """The rule's inputs, in this order: the motion sensors, then the daylight (when set), then the blocker (when
+        set; true after its NOT while it does not read `is`: the rule may act)."""
         out: list[dict] = [{"source": {"device": s}} for s in self.sensors]
         if self.daylight is not None:
             out.append({"source": {"daylight": self.daylight[0], "is": self.daylight[1]}})
+        if self.blocker is not None:
+            out.append({"source": {"device": self.blocker[0]}, "not": self.blocker[1] == "on"})
         return out
 
     def take(self, old: "MotionLight") -> None:
         self.mode, self.since, self.moving, self.on_at = old.mode, old.since, old.moving, old.on_at
         self.seen, self.entered, self.own, self.waiting = old.seen, old.entered, list(old.own), old.waiting
-        self.dropped, self.presses = old.dropped, old.presses
+        self.dropped, self.presses, self.blocked, self.met = old.dropped, old.presses, old.blocked, old.met
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -118,10 +137,36 @@ class MotionLight:
         n = len(self.sensors)
         return (values[n] if len(values) > n else None) is not False
 
+    def block(self, values: "list[bool | None]") -> str | None:
+        """Follow the blocker's reading (values after NOT): "start" / "end" when its known reading changed, None
+        otherwise. No data keeps the last known reading; at the rule's first evaluation (HA start, a new rule, a changed
+        Save) the reading is taken without a change, no data there counting as not blocking."""
+        if self.blocker is None:
+            return None
+        k = self.blocker_at
+        free = values[k] if len(values) > k else None
+        if self.blocked is None:
+            self.blocked = free is False
+            return None
+        if free is None or (free is False) == self.blocked:
+            return None
+        self.blocked = free is False
+        return "start" if self.blocked else "end"
+
+    def day_came(self, values: "list[bool | None]") -> bool:
+        """The daylight condition went from met to not met since the previous evaluation (between known readings: to
+        or from no data is no change, as no data counts as dark)."""
+        if self.daylight is None:
+            return False
+        n = len(self.sensors)
+        was, self.met = self.met, values[n] if len(values) > n else None
+        return was is True and self.met is False
+
     def raw(self, values: "list[bool | None]", light_on: bool) -> "bool | None":
-        """Want the light on: motion, and dark unless the light is on already (the block applies to switching on).
-        None without motion sensors (auto does nothing). While waiting for new motion: not while the motion lasts; the
-        wait ends once every sensor is clear."""
+        """Want the light on: motion, and dark unless the light is on already (a light found on in daylight stays while
+        the motion lasts; the daylight coming switches a held light off: see day_came). None without motion sensors
+        (auto does nothing). While waiting for new motion: not while the motion lasts; the wait ends once every sensor
+        is clear."""
         if not self.sensors:
             return None
         motion = self.motion(values)
@@ -162,8 +207,9 @@ class MotionLight:
         "found" for a change to on while the rule does not hold the light (switched on elsewhere, also by another slot
         participant: held from now) and "released" for a change to off while it holds the light that does not confirm
         the slots' last command (switched off elsewhere: the rule lets go). "back" and "released" drop the recorded
-        decisions (a later change is foreign). Else None (manual, no motion sensors). Any reading other than on clears
-        `dropped` (the off of entering auto has arrived)."""
+        decisions (a later change is foreign). While blocked a change elsewhere (also a return from no data) is left
+        alone: None. Else None (manual, no motion sensors). Any reading other than on clears `dropped` (the off of
+        entering auto has arrived)."""
         was, self.seen = self.seen, state
         if state != "on":
             self.dropped = None
@@ -172,10 +218,12 @@ class MotionLight:
             return None
         if was is None:
             self.own = []  # the light is taken as it is: older decisions are stale
-            return "back"
+            return None if self.blocked else "back"
         mine = next((o for o in self.own if o[0] == state), None)  # in decision order: the earliest
         if mine is not None:
             self.own.remove(mine)
+            return None
+        if self.blocked:
             return None
         if state == "on":
             return None if held else "found"
@@ -206,6 +254,8 @@ class MotionLight:
         }
         if self.waiting:
             out["waiting"] = True
+        if self.mode == "auto" and self.blocked:
+            out["blocked"] = True
         if off_at is not None:
             out["offAt"] = off_at
         if self.on_at is not None and self.on_at + self.min_on > now:

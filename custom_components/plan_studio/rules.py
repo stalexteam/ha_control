@@ -479,7 +479,11 @@ class _Rule:
         if isinstance(motion, dict):
             light = motion.get("light") if isinstance(motion.get("light"), str) else ""
             call = _Action({"device": light, "do": "on"}, devices).call
-            self.motion_light = MotionLight(motion, devices, call[2] if call is not None else None)
+            # the blocker is read as a device input: its kind's input role must be bound
+            b = motion.get("blocker") if isinstance(motion.get("blocker"), dict) else {}
+            blocker = devices.get(b.get("device")) if isinstance(b.get("device"), str) else None
+            read = _bound(blocker, INPUT_ROLE.get(_kind(blocker) or "")) if blocker is not None else None
+            self.motion_light = MotionLight(motion, devices, call[2] if call is not None else None, read)
         beurer = raw.get("beurer")
         self.beurer: Beurer | None = None
         if isinstance(beurer, dict):
@@ -939,8 +943,8 @@ class RuleEngine:
 
     def _load_motion(self, rule: _Rule, prev: "_Rule | None", motion_modes: "dict | None") -> None:
         """Keep the mode of the same motion light rule (light entity and buttons unchanged; a changed Save ends a wait for
-        new motion); one not loaded yet takes its stored mode when it has a button (without one it is always in auto);
-        any other one starts in auto."""
+        new motion and takes the blocker and the daylight anew, without a change); one not loaded yet takes its stored
+        mode when it has a button (without one it is always in auto); any other one starts in auto."""
         m = rule.motion_light
         assert m is not None
         old = prev.motion_light if prev is not None else None
@@ -950,6 +954,7 @@ class RuleEngine:
             rule.last, rule.failed = prev.last, prev.failed
             if prev.sig != rule.sig:
                 m.waiting = False  # the rule starts anew: it takes the light as it is
+                m.blocked = m.met = None
             return
         m.seen = m.state(self._lookup)
         stored = self._motion_modes.get(rule.key[0], {}).get(rule.key[1]) if prev is None and motion_modes is not None else None
@@ -1833,16 +1838,21 @@ class RuleEngine:
 
     def _motion(self, rule: _Rule, due: "_Pending | None") -> bool:
         """Evaluate a motion light rule. In auto with motion sensors it is the condition machinery over its inputs (the
-        light held through the slots; a light found on is held; the off waits for the minimum on time). In manual, in
-        auto without motion sensors (inert), while HA starts, disabled or with a static problem it is out of the slots
-        (verdict None, nothing sent); manual arms the auto-return. True when the verdict changed."""
+        light held through the slots; a light found on is held; the off waits for the minimum on time; the daylight
+        coming switches a held light off at once). While its blocker reads the chosen state (auto) it holds nothing and
+        sends nothing: blocking starting (or auto entered while blocked) switches the light off, ending it takes a fresh
+        decision. In manual, in auto without motion sensors (inert), while HA starts, disabled or with a static problem
+        it is out of the slots (verdict None, nothing sent); manual arms the auto-return. True when the verdict changed."""
         m = rule.motion_light
         assert m is not None
         self._compute(rule)
         was, now = rule.verdict, self._now()
+        values = self._motion_values(rule)
+        # followed at every evaluation: manual, a blocked rule and an inactive one take the changes without acting
+        change, day = m.block(values), m.day_came(values)
         active = rule.enabled and not m.missing and m.eid is not None and not self._booting
         if active and m.mode == "manual":
-            wake = m.auto_due(now, m.motion([t["value"] for t in rule.trace_inputs]))
+            wake = m.auto_due(now, m.motion(values))
             if wake is not None and wake <= now:
                 self._motion_auto(rule, "auto again")
             else:
@@ -1855,11 +1865,23 @@ class RuleEngine:
             return rule.verdict != was
         m.stop()
         rule.open = True
+        if m.blocked:
+            m.waiting = False
+            if change == "start" or m.entered:
+                self._motion_block(rule)
+            elif rule.verdict is not False:  # HA start, a changed Save while blocked: the light is left as it is
+                self._motion_hold(rule, False, note=False)
+            rule.raw, m.entered = False, False
+            return rule.verdict != was
         if rule.verdict is None:
             if m.entered:  # entering auto: a fresh decision at once
                 self._motion_enter(rule)
             else:  # rule start, the light back from no data: take the light as it is
                 self._motion_hold(rule, m.state(self._lookup) == "on")
+        elif change == "end":  # blocking ended: a fresh decision at once, as entering auto
+            self._motion_enter(rule, "unblocked")
+        elif day and rule.verdict is True:  # the daylight came: a held light goes off at once
+            self._motion_decide(rule, False, "daylight")
         m.entered = False
         if self._step(rule, due):
             # the rule decided to switch the light on: the minimum on time counts from here
@@ -1884,21 +1906,36 @@ class RuleEngine:
             rule.last, rule.failed = {"action": "on", "target": m.label, "at": int(self._now() * 1000),
                                       "reason": "found on", "sent": False}, None
 
-    def _motion_enter(self, rule: _Rule) -> None:
-        """Entering auto (a button's auto intent or the auto-return): a fresh decision from the current readings, at
-        once (spec §11): want = motion and dark. The light on and wanted: held (off after the off delay once the motion
-        ends; the minimum on time does not apply). Otherwise the rule's own decision through the slots: off now, or on
-        now (the minimum on time counts from here). The mode entry stays the last one when nothing is decided."""
+    def _motion_values(self, rule: _Rule) -> "list[bool | None]":
+        """The values of a motion light rule's inputs after NOT (the blocker's is negated for "is on")."""
+        return [t["value"] if t["value"] is None or not i.negate else not t["value"]
+                for i, t in zip(rule.inputs, rule.trace_inputs)]
+
+    def _motion_enter(self, rule: _Rule, prefix: str = "back to auto") -> None:
+        """Entering auto (a button's auto intent or the auto-return; prefix "back to auto"), or the blocking ended
+        (prefix "unblocked"): a fresh decision from the current readings, at once (spec §11): want = motion and dark.
+        The light on and wanted: held (off after the off delay once the motion ends; the minimum on time does not
+        apply). Otherwise the rule's own decision through the slots: off now, or on now (the minimum on time counts from
+        here). The previous entry stays the last one when nothing is decided."""
         m = rule.motion_light
         assert m is not None
-        values = [t["value"] for t in rule.trace_inputs]
-        motion, on, now = m.motion(values), m.state(self._lookup) == "on", self._now()
+        values = self._motion_values(rule)
+        motion, on = m.motion(values), m.state(self._lookup) == "on"
         want = motion and m.dark(values)
         rule.raw = want  # the step after this one sees the decision, not the light's reading (dark matters here)
         self._motion_hold(rule, on, note=False)
         if want == on:
             return
-        why = "back to auto: motion" if want else "back to auto: not dark" if motion else "back to auto: no motion"
+        self._motion_decide(rule, want, f"{prefix}: {'motion' if want else 'not dark' if motion else 'no motion'}")
+
+    def _motion_decide(self, rule: _Rule, want: bool, why: str) -> None:
+        """The rule's own decision at once through the slots (entering auto, blocked, unblocked, daylight): its entry
+        says why (an off kept back by other holders says who keeps the light on); its late echo is not a foreign change;
+        the minimum on time counts from an on and does not hold back an off."""
+        m = rule.motion_light
+        assert m is not None
+        now = self._now()
+        rule.raw = want  # the step after this one sees the decision, not the light's reading
         self._commit(rule, want, why)
         for e in rule.entries:
             if e.get("sent") is not False:  # an off kept back by other holders says who keeps the light on
@@ -1908,6 +1945,17 @@ class RuleEngine:
         # an off sent now is on its way for ON_WAY s (a lost one must not keep the light on); one kept back is not
         sent = any(e["action"] == "off" and e.get("sent") is not False for e in rule.entries)
         m.dropped = now + ON_WAY if not want and sent else None
+
+    def _motion_block(self, rule: _Rule) -> None:
+        """Blocking started in auto, or auto was entered while blocked: a light the rule holds (also an on of its own
+        still on its way) or that reads on goes off at once (reason "blocked"); then the rule holds nothing while
+        blocked (verdict false, nothing pending)."""
+        m = rule.motion_light
+        assert m is not None
+        on = rule.verdict is True or m.state(self._lookup) == "on"
+        self._motion_hold(rule, False, note=False)
+        if on:
+            self._motion_decide(rule, False, "blocked")
 
     def _motion_manual(self, rule: _Rule, action: str, sent: bool) -> dict:
         """Enter (or stay in) manual by a button press: out of the slots at once, nothing owed or waiting for the light
@@ -2051,7 +2099,7 @@ class RuleEngine:
     def _motion_trace(self, rule: _Rule) -> dict:
         m = rule.motion_light
         assert m is not None
-        values = [t["value"] for t in rule.trace_inputs]
+        values = self._motion_values(rule)
         labels = [t["label"] for t in rule.trace_inputs]
         off_at = rule.pending.at if rule.pending is not None and not rule.pending.to else None
         out = m.trace(values, labels, m.state(self._lookup), self._now(), off_at)
@@ -2059,6 +2107,11 @@ class RuleEngine:
             t = rule.trace_inputs[len(m.sensors)] if len(rule.trace_inputs) > len(m.sensors) else {}
             d = self._days.get((rule.key[0], m.daylight[0]))
             out["daylight"] = {"state": d.state if d is not None else None, "detail": t.get("detail", "missing")}
+        if m.blocker is not None:  # the device's own reading (before NOT)
+            k = m.blocker_at
+            v = rule.trace_inputs[k]["value"] if len(rule.trace_inputs) > k else None
+            out["blocker"] = {"name": m.blocker_label, "state": None if v is None else "on" if v else "off",
+                              "is": m.blocker[1]}
         return out
 
     # --- beurer heater ---------------------------------------------------------
