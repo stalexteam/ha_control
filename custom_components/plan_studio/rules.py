@@ -427,10 +427,11 @@ class _Hold:
 class _Command:
     """The engine's latest command to one entity, until the entity reads its state (see RuleEngine._command). kind
     tells how its sender decides (still_wants): "slot" (an arbitrated command; token: the hold and its attempt),
-    "action" (a firing's action; token: the rule and its firing seq), "control" (a load control event; token: the
-    event), "boiler" (a boiler button command; token: the boiler and its send count), "press" (a light motion control
-    button command; token: the rule's light and its press count); None: never sent again (a power-cycle off, the
-    off of a relay or device whose rule went away)."""
+    "action" (a firing's action; token: the rule and its firing seq), "control" (a load control event's direct
+    command; decided by the rule's latest event), "boiler" (a boiler button command; token: the boiler's ident and its
+    send count), "press" (a light motion control button command; token: the light's ident and the press count),
+    "release" (the safety off of the relay of a boiler rule gone while auto); None: never sent again (a power-cycle
+    off, the final command of a timed run whose rule went away)."""
 
     __slots__ = ("by", "entry", "state", "kind", "token")
 
@@ -565,6 +566,7 @@ class _Rule:
         self.seq = 0  # verdict change counter: a late failure or a re-send counts only for the firing that sent it
         self.failed: str | None = None  # "service failed" / "target unavailable" for the last firing
         self.entries: list[dict] = []  # the trace entries of the last firing
+        self.acted: dict | None = None  # load control: the event whose actions `entries` are
         self.sent: list[_Sent] = []  # its actions with a target, while that firing is the latest one
         self.open = self.timed is not None  # the gate (always open without one) as of the last evaluation
         # derived on every evaluation
@@ -575,7 +577,7 @@ class _Rule:
     def adopt(self, old: "_Rule") -> None:
         self.verdict, self.pending, self.last, self.failed = old.verdict, old.pending, old.last, old.failed
         self.seq, self.entries, self.sent, self.open = old.seq, old.entries, old.sent, old.open
-        self.seen = dict(old.seen)
+        self.seen, self.acted = dict(old.seen), old.acted
         if self.outside is not None and old.outside is not None:
             old.outside.stop()
             self.outside.take(old.outside)
@@ -871,7 +873,7 @@ class RuleEngine:
             _LOGGER.warning("boiler relay %s: turn_off failed: %s", relay, err)
 
         try:
-            self._command(relay.split(".", 1)[0], "turn_off", relay, by=None, entry=None, kind=None, token=None,
+            self._command(relay.split(".", 1)[0], "turn_off", relay, by=None, entry=None, kind="release", token=None,
                           on_error=on_error)
         except Exception as err:  # noqa: BLE001 - a failing relay must not stop the engine
             _LOGGER.warning("boiler relay %s: turn_off failed: %s", relay, err)
@@ -2209,7 +2211,7 @@ class RuleEngine:
         group = c.want([s for a, s in zip(actions, effective) if a.do == "toggle"])
         rule.seq += 1  # a late failure of an older event must not mark this one
         seq, reason = rule.seq, f"{source}: {what}"
-        rule.entries = []
+        rule.entries, rule.acted = [], c.event
         for a, state in zip(actions, effective):
             do = group if a.do == "toggle" else a.do
             entry = {"action": do, "target": a.label, "at": at, "reason": reason}
@@ -2252,8 +2254,7 @@ class RuleEngine:
             self._flush()
 
         try:
-            self._command(domain, service, eid, by=rule.key, entry=entry, kind="control",
-                          token=rule.control.event if rule.control is not None else None, on_error=on_error)
+            self._command(domain, service, eid, by=rule.key, entry=entry, kind="control", token=None, on_error=on_error)
         except Exception as err:  # noqa: BLE001 - one failing device must not stop the others
             _LOGGER.warning("rule %s: %s.%s %s failed: %s", rule.name, domain, service, eid, err)
             entry["error"] = "service failed"
@@ -2315,16 +2316,16 @@ class RuleEngine:
 
     def _boiler_drop_on(self, rule: _Rule, relay: str | None) -> None:
         """Auto no longer wants the relay on (blackout, limit, undecided): a switch-on of this rule still waiting to be
-        sent again is given up, so the relay coming back is not switched on into an overload; never an off. A given-up
-        on is forgotten too, so a later legitimate on is sent; an on on its way (delivered, not confirmed yet) keeps its
-        command: its late confirmation stays the rule's own and the next evaluation switches it off."""
+        sent again is given up, so the relay coming back is not switched on into an overload; never an off. An on the
+        relay does not read is forgotten (waiting, failed, lost or on its way), so the next legitimate on is sent; the
+        late confirmation of one on its way is still Plan Studio's own (the engine's latest command reached, the
+        expected states in live.py) and the next evaluation switches it off."""
         b = rule.boiler
         assert b is not None and b.relay is not None
         hold = self._holds.get(b.relay)
-        waiting = hold is not None and hold.cmd == "on" and bool(hold.waiting) and hold.by == rule.key
         if hold is not None and hold.cmd == "on":
             self._give_up(b.relay, rule.key)  # an arbitrated on of this rule waiting for the relay
-        if b.cmd == "on" and relay != "on" and (waiting or rule.failed is not None):
+        if b.cmd == "on" and relay != "on":
             b.cmd = None
             if rule.failed is not None:  # a button's on waiting for the relay (_boiler_relay would send it again)
                 if rule.last is not None:
@@ -2496,7 +2497,8 @@ class RuleEngine:
         relay is not a take-over of that boiler (a configuration conflict, not a human)."""
         st = self._lookup(entity_id)
         cmd = self._commands.get(entity_id)
-        cleared = cmd is not None and st is not None and st[0] == cmd.state and self._unmark(entity_id)  # it got there
+        reached = cmd is not None and st is not None and st[0] == cmd.state  # the engine's latest command got there
+        cleared = reached and self._unmark(entity_id)
         keys = self._readers.get(entity_id)
         if not keys and entity_id not in self._targets:
             if cleared:
@@ -2514,7 +2516,7 @@ class RuleEngine:
         for key in keys or ():
             rule = self._rules[key]
             if rule.boiler is not None and rule.boiler.relay == entity_id:
-                self._boiler_relay(rule, own)
+                self._boiler_relay(rule, own or reached)  # a late confirmation is no take-over (also without a context)
             if rule.timed is not None and rule.timed.eid == entity_id:
                 self._timed_device(rule, own)
             if rule.outside is not None and rule.outside.eid == entity_id:
@@ -2546,7 +2548,12 @@ class RuleEngine:
         cmd = self._commands.get(entity_id)
         if by is None or cmd is None or cmd.by != by or cmd.entry is None:
             return  # another sender's or a newer command, or one without a rule (a released relay)
-        rule, entry, st = self._rules.get(cmd.by), cmd.entry, self._lookup(entity_id)
+        rule, st = self._rules.get(cmd.by), self._lookup(entity_id)
+        if rule is not None and cmd.kind == "control":  # the latest event asking for the same state shows it
+            latest = self._control_latest(rule, entity_id)
+            if latest is not None and latest[1] == cmd.state:
+                cmd.entry = latest[0]
+        entry = cmd.entry
         if rule is None or "error" in entry or (st is not None and st[0] == cmd.state):
             return
         entry["error"] = NOT_CONFIRMED
@@ -2558,18 +2565,27 @@ class RuleEngine:
         """Whether the sender of the latest command to the entity wants `state` NOW (live.py asks before it sends a
         command the device did not confirm once more). Answered from the sender's current decision, per kind of
         command (see _Command), never from the past send; another sender's or an older command, a rule that is gone or
-        disabled, or a kind that is never sent again: False."""
+        disabled (except a boiler's relay released into its safe off), or a kind that is never sent again: False."""
         cmd = self._commands.get(entity_id)
-        rule = self._rules.get(by) if isinstance(by, tuple) else None
-        if cmd is None or cmd.by != by or cmd.state != state or rule is None or not rule.enabled:
+        if cmd is None or cmd.by != by or cmd.state != state:
             return False
+        if cmd.kind == "release":  # the relay of a boiler rule gone while auto
+            return self._released(entity_id)
+        rule = self._rules.get(by) if isinstance(by, tuple) else None
+        if rule is None:
+            return False
+        if not rule.enabled:  # a boiler disabled in auto switched its relay off: the same safety off as a release
+            b = rule.boiler  # (its hold is forgotten with the load; the record is still the relay's latest command)
+            return (cmd.kind == "slot" and state == "off" and b is not None and b.relay == entity_id
+                    and self._released(entity_id))
         if cmd.kind == "slot":
             return self._slot_wants(rule, entity_id, state, cmd.token)
         if cmd.kind == "action":  # no later firing (a verdict change, a press of a timed rule), the gate still open
             sender, seq = cmd.token
             return self._current(sender, seq) is not None and rule.open
-        if cmd.kind == "control":  # no later event of the rule (also one dropped or sending nothing)
-            return rule.control is not None and rule.control.event is cmd.token
+        if cmd.kind == "control":  # the rule's latest event asks the device for this state (sent, or on its way)
+            latest = self._control_latest(rule, entity_id)
+            return latest is not None and latest[1] == state
         if cmd.kind == "boiler":  # manual: the rule's last button command, no press since (every press counts)
             b, (ident, sends) = rule.boiler, cmd.token
             return b is not None and b.ident == ident and b.sends == sends and b.mode == "manual"
@@ -2583,8 +2599,7 @@ class RuleEngine:
         given up) and what the slots want now. A boiler's own command: on only while auto heats and does not refuse
         it (limit, blackout, undecided), off only while the limit, the blackout or "heating done" is in force. Any
         other: on while any rule keeps the device on; off while nobody does and its sender wants it off now."""
-        hold, attempt = token
-        if self._holds.get(eid) is not hold or hold.attempt != attempt or hold.cmd != state:
+        if not self._outstanding(eid, state, token):
             return False
         b = rule.boiler
         if b is not None and b.relay == eid:
@@ -2595,6 +2610,34 @@ class RuleEngine:
         if state == "on":
             return bool(holders)
         return not holders and self._wants_off(rule, eid)
+
+    def _outstanding(self, eid: str, state: str, token: object) -> bool:
+        """An arbitrated command (token: its hold and attempt) is still the device's outstanding one: not replaced,
+        not given up."""
+        hold, attempt = token
+        return self._holds.get(eid) is hold and hold.attempt == attempt and hold.cmd == state
+
+    def _released(self, eid: str) -> bool:
+        """A boiler relay switched off because its rule left auto (deleted, rewired, disabled) still needs that off:
+        it reads on, no boiler rule in auto owns it and no rule keeps it on (as when the off was sent)."""
+        st = self._lookup(eid)
+        if st is None or st[0] != "on" or self._holders(eid):
+            return False
+        return not any(r.enabled and r.boiler is not None and r.boiler.relay == eid and r.boiler.mode == "auto"
+                       for r in self._rules.values())
+
+    def _control_latest(self, rule: _Rule, eid: str) -> "tuple[dict, str] | None":
+        """Load control: the rule's latest event's entry for the entity and the state it asks for; None when that
+        event did not act (dropped, nothing in its list) or has no action on the entity."""
+        c = rule.control
+        if c is None or c.event is None or rule.acted is not c.event:
+            return None
+        for a, e in zip(rule.control_actions.get(c.event["what"], []), rule.entries):
+            if a.call is not None and a.call[2] == eid:
+                if e["action"] == "close":  # the valve services; a switch-backed valve reads off when closed
+                    return e, "closed" if a.call[0] == "valve" else "off"
+                return e, e["action"]
+        return None
 
     def _wants_off(self, rule: _Rule, eid: str) -> bool:
         """Whether the rule's current decision switches the shared device off: a timed run not running; any other

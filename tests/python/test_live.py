@@ -1626,6 +1626,7 @@ def test_a_burst_keeps_one_record_for_the_last_command(env):
 
 
 BOILER_ON_LOST = {"switch.relay": "off", "sensor.grid": "500", "sensor.bp": "0", "sensor.act": ""}
+BOILER_HEATING = {**BOILER_ON_LOST, "switch.relay": "on", "sensor.bp": "1500"}
 
 
 async def _boiler_on_lost(env, hass, clock):
@@ -1762,16 +1763,74 @@ def _control_plan():
     }
 
 
-def test_a_lost_load_control_on_is_not_sent_again_after_a_later_event_that_sent_nothing(env):
+async def _control_on_lost(env, hass, clock):
+    live = await _xstart(env, hass, _control_plan(), clock, **{"switch.l1": "off", "sensor.act": ""})
+    live.engine.on_intent("p1", "btn", {"action": "set", "value": "on"})
+    await asyncio.gather(*hass.tasks)
+    assert [c[1] for c in hass.services.calls] == ["turn_on"]
+    clock[0] = 3.0
+    return live
+
+
+def test_a_lost_load_control_on_is_sent_again_after_a_repeated_press_and_its_latest_entry_shows_the_error(env):
     async def go():
         hass, clock = FakeHass(), [0.0]
-        live = await _xstart(env, hass, _control_plan(), clock, **{"switch.l1": "off", "sensor.act": ""})
-        live.engine.on_intent("p1", "btn", {"action": "set", "value": "on"})
+        live = await _control_on_lost(env, hass, clock)
+        live.engine.on_intent("p1", "btn", {"action": "set", "value": "on"})  # nothing happened: pressed again
+        assert live.engine.snapshot("p1")["r1"]["last"]["sent"] is False  # the on is on its way: nothing sent
+        assert await _calls_after_retry(env, hass, clock) == ["turn_on", "turn_on"]  # the rule's latest decision
+        _tick(env, clock, 60.0)
+        tr = live.engine.snapshot("p1")["r1"]
+        assert tr["status"] == "error" and tr["reason"] == "not confirmed"
+        assert tr["last"]["error"] == "not confirmed" and tr["last"]["sent"] is False  # the latest event's entry
+        _boiler_event(env, hass, "switch.l1", "on", old="off")
+        assert "error" not in live.engine.snapshot("p1")["r1"]["last"]
+
+    asyncio.run(go())
+
+
+def test_a_lost_load_control_on_is_not_sent_again_after_an_opposite_event(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _control_on_lost(env, hass, clock)
+        live.engine.on_intent("p1", "btn", {"action": "set", "value": "off"})
+        assert await _calls_after_retry(env, hass, clock) == ["turn_on", "turn_off"]
+
+    asyncio.run(go())
+
+
+def test_a_lost_boiler_release_off_is_sent_once_more(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        FakeStore.contents[BOILER_KEY] = {"p1": {"r1": "auto"}}
+        live = await _xstart(env, hass, _boiler_plan(), clock, **BOILER_HEATING)
         await asyncio.gather(*hass.tasks)
-        assert [c[1] for c in hass.services.calls] == ["turn_on"]
-        clock[0] = 3.0
-        live.engine.on_intent("p1", "btn", {"action": "set", "value": "on"})  # on its way already: nothing sent
-        assert await _calls_after_retry(env, hass, clock) == ["turn_on"]
+        assert hass.services.calls == []  # auto heating, the relay on already
+        gone = _boiler_plan()
+        gone["rules"] = []
+        live._plans._plans = [gone]
+        live.reload()  # the rule is deleted in auto: its relay goes off (inverter protection)
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_off"]
+        assert await _calls_after_retry(env, hass, clock) == ["turn_off", "turn_off"]
+
+    asyncio.run(go())
+
+
+def test_a_lost_boiler_release_off_is_not_sent_again_once_another_boiler_rule_in_auto_owns_the_relay(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        FakeStore.contents[BOILER_KEY] = {"p1": {"r1": "auto"}}
+        live = await _xstart(env, hass, _boiler_plan(), clock, **BOILER_HEATING)
+        await asyncio.gather(*hass.tasks)
+        renamed = _boiler_plan()
+        renamed["rules"][0]["id"] = "r2"
+        live._plans._plans = [renamed]
+        live.reload()  # r1 deleted in auto (its off is lost), r2 new in manual
+        await asyncio.gather(*hass.tasks)
+        live.engine.on_intent("p1", "btn", {"action": "auto"})  # r2 auto: the relay reads on, heating, nothing sent
+        assert live.engine.snapshot("p1")["r2"]["boiler"]["mode"] == "auto"
+        assert await _calls_after_retry(env, hass, clock) == ["turn_off"]
 
     asyncio.run(go())
 

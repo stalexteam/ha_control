@@ -1338,3 +1338,32 @@ def test_a_lost_button_command_is_wanted_until_the_next_press():
     w.press("set", "on")  # the relay reads off: sent again, a newer command
     w.press("set", "off")  # the relay reads off: nothing sent
     assert len(w.calls) == 2 and w.engine.still_wants(("p", "r"), "switch.relay", "on") is False
+
+
+def test_a_lost_off_of_a_boiler_disabled_in_auto_is_wanted_until_another_auto_boiler_owns_the_relay():
+    w = heating()
+    disabled = boiler_rule(enabled=False)
+    w.engine.load_plans([boiler_plan([disabled])], boot=False)
+    assert w.calls == [OFF]  # inverter protection; the device loses it
+    assert w.engine.still_wants(("p", "r"), "switch.relay", "off") is True
+    w.engine.load_plans([boiler_plan([disabled, boiler_rule(rid="r2", button="ws", name="Boiler 2")])], boot=False)
+    w.press("auto", button="ws")  # the relay reads on: heating, nothing sent
+    assert w.engine.snapshot("p")["r2"]["boiler"]["mode"] == "auto" and w.calls == [OFF]
+    assert w.engine.still_wants(("p", "r"), "switch.relay", "off") is False
+
+
+def test_a_lost_on_refused_by_a_limit_is_sent_anew_when_the_limit_clears():
+    """The probe: the ON is lost, a limit appears (the relay reads off: nothing to send), the limit clears."""
+    w = loaded()
+    w.press("auto")
+    assert w.calls == [ON]
+    w.advance(1003)
+    w.set("sensor.grid", "2000", W)
+    assert w.b()["phase"] == "limit" and w.calls == [ON]
+    w.advance(1005)
+    w.set("sensor.grid", "500", W)
+    assert w.b()["phase"] == "waiting" and w.calls == [ON]
+    w.advance(1020)  # the 15 s wait after the limit
+    assert w.calls == [ON, ON] and w.b()["phase"] == "heating"
+    w.advance(1079.9)  # the 60 s grace counts from the second on
+    assert w.b()["phase"] == "heating" and w.b()["mode"] == "auto"

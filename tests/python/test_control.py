@@ -932,3 +932,33 @@ def test_a_direct_command_never_confirmed_shows_not_confirmed_until_the_load_arr
     w.set("switch.l2", "on")
     tr = w.tr()
     assert tr["status"] == "ok" and "error" not in tr["last"]
+
+
+def test_a_lost_command_is_wanted_while_the_latest_event_asks_for_the_same_state():
+    R = ("p", "r")
+    w = loaded()
+    w.press("btn", SET_ON)  # switch.l2 loses it
+    assert w.engine.still_wants(R, "switch.l2", "on") is True
+    w.advance(w.t + 3)
+    w.press("btn", SET_ON)  # pressed again: on its way, nothing sent
+    assert len(w.calls) == 2 and w.tr()["last"]["sent"] is False
+    assert w.engine.still_wants(R, "switch.l2", "on") is True
+    w.engine.command_unconfirmed("switch.l2", R)  # live's expiry: the latest event's entry shows it
+    tr = w.tr()
+    assert tr["status"] == "error" and tr["last"]["error"] == "not confirmed" and tr["last"]["sent"] is False
+    w.set("switch.l2", "on")
+    assert w.tr()["status"] == "ok" and "error" not in w.tr()["last"]
+
+
+def test_a_lost_command_is_not_wanted_after_an_opposite_event_or_one_without_the_device():
+    R = ("p", "r")
+    w = loaded()
+    w.press("btn", SET_ON)
+    w.set("switch.l2", "unavailable")
+    w.press("btn", SET_OFF)  # l2 without data: its off is not sent, the lost on stays its latest command
+    assert w.calls[-1] == off("switch.l1") and w.engine.still_wants(R, "switch.l2", "on") is False
+    w2 = loaded([control_rule(sources=[btn("btn")], on=[("l1", "on"), ("l2", "on")], off=[("l1", "off")])])
+    w2.press("btn", SET_ON)
+    w2.press("btn", SET_OFF)  # the latest event does not act on l2
+    assert w2.calls == [on("switch.l1"), on("switch.l2"), off("switch.l1")]
+    assert w2.engine.still_wants(R, "switch.l2", "on") is False
