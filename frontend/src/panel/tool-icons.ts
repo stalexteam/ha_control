@@ -1,8 +1,8 @@
 import { html, svg, type TemplateResult } from 'lit';
 import {
-  mdiBatteryHigh, mdiBrightness5, mdiCeilingLight, mdiChartPie, mdiCubeOutline, mdiCursorDefaultOutline, mdiDoor,
+  mdiBatteryHigh, mdiBrightness5, mdiCeilingLight, mdiCellphone, mdiChartPie, mdiCubeOutline, mdiCursorDefaultOutline, mdiDoor,
   mdiDoorOpen, mdiFan, mdiGestureTapButton, mdiLightSwitch, mdiMotionSensor, mdiPowerSocketEu, mdiRayStartEnd,
-  mdiSolarPowerVariant, mdiSourceBranch, mdiTextureBox, mdiThermometerWater, mdiToggleSwitchVariant, mdiValve, mdiVectorSquare, mdiWall,
+  mdiSolarPowerVariant, mdiSourceBranch, mdiSpeaker, mdiTextureBox, mdiThermometerWater, mdiToggleSwitchVariant, mdiValve, mdiVectorSquare, mdiWall,
   mdiWallSconceRound, mdiWaterAlert, mdiWindowClosedVariant,
 } from '@mdi/js';
 import type { ToolId } from './tool-factory';
@@ -28,6 +28,8 @@ export const TOOL_ICONS: Record<ToolId, string> = {
   leak_sensor: mdiWaterAlert,
   socket: mdiPowerSocketEu,
   virtual_switch: mdiToggleSwitchVariant,
+  speaker: mdiSpeaker,
+  phone: mdiCellphone,
   exhaust_fan: mdiFan,
   equipment: mdiCubeOutline,
   'binding-select': mdiCursorDefaultOutline,

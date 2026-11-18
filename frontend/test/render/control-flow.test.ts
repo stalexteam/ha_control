@@ -24,7 +24,7 @@ function draw(r: Rule, trace?: RuleTrace, over: Record<string, unknown> = {}): {
   const onFocus = vi.fn();
   const host = document.createElement('div');
   render(renderControlFlow({
-    rule: r, trace, now: NOW, nameOf: id => names[id] ?? 'x', sourceLabel: s => (isButtonSource(s) ? names[s.button] : 'device' in s.source ? names[s.source.device] : 'x'),
+    rule: r, trace, now: NOW, nameOf: id => names[id] ?? 'x', sourceLabel: s => (isButtonSource(s) ? names[s.button] : 'source' in s && 'device' in s.source ? names[s.source.device] : 'x'),
     gives: s => (isButtonSource(s) && s.button === 'btn' ? 'toggle' : 'on / off'), focused: null, onFocus, ...over,
   }), host);
   return { host, onFocus };

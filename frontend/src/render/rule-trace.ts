@@ -1,5 +1,5 @@
 import { html, nothing, svg, type TemplateResult } from 'lit';
-import type { Rule, RuleDo, RuleInput, RuleSource } from '../model/types';
+import { isAnnounce, type Rule, type RuleDo, type RuleInput, type RuleSource } from '../model/types';
 import type { RuleGateTrace, RuleTrace } from '../live/rules-feed';
 import { lastText } from '../panel/rules-panel';
 import { t } from '../i18n';
@@ -221,7 +221,7 @@ export function renderRuleTrace(o: RuleTraceOpts): TemplateResult {
             ? svg`<text class="fc-t2" text-anchor="middle" x=${s.x + SW / 2} y=${yAct + BH / 2 + 4}>${t('rules.noActions')}</text>`
             : s.list.map((a, k) => block({
               x: s.x, y: yAct + k * (BH + ACT_GAP), w: SW, field: `action-${s.side}-${k}`,
-              target: { action: s.side, index: k }, cls: '', lines: [o.actionName(a.device), actText(a.do)],
+              target: { action: s.side, index: k }, cls: '', lines: [o.actionName(a.device), isAnnounce(a.do) ? `${actText(a.do)}: ${(a.do === 'play' ? a.media : a.text) ?? ''}` : actText(a.do)],
             }))}`)}
       </svg>
       ${unknown > 0 ? html`<p class="fc-warn">${unknown === 1 ? t('rules.unknown1') : t('rules.unknownN').replace('{n}', String(unknown))}</p>` : nothing}

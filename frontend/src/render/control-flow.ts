@@ -1,5 +1,5 @@
 import { html, nothing, svg, type TemplateResult } from 'lit';
-import { isButtonSource, type ControlAction, type ControlSource, type Id, type Rule } from '../model/types';
+import { isAnnounce, isButtonSource, isEventSource, type ControlAction, type ControlSource, type Id, type Rule } from '../model/types';
 import { keptOn, notConfirmed, type RuleLast, type RuleTrace } from '../live/rules-feed';
 import { clock, lastFlowLine, lastText } from '../panel/rules-panel';
 import { CX, IN_W, MW, ACT_GAP, HEAD_H, WIDTH, FLOW_MAX_SCALE, gateLines, inputGrid, liveDetail, tone } from './rule-trace';
@@ -16,7 +16,9 @@ export interface ControlFlowOpts {
   nameOf(id: Id): string;
   /** A source's name, and what it gives ("toggle" or "on / off"), before live values. */
   sourceLabel(s: ControlSource): string;
-  gives(s: ControlSource): 'toggle' | 'on / off';
+  /** An event source's two lines: the rule's name and the event ("entered auto"); its label is too long for one block line. */
+  eventLines?(s: ControlSource): string[];
+  gives(s: ControlSource): 'toggle' | 'on / off' | 'on';
   /** The block id last focused from the chart or the form, highlighted. */
   focused: string | null;
   onFocus(block: string): void;
@@ -55,7 +57,7 @@ export function renderControlFlow(o: ControlFlowOpts): TemplateResult {
   const ct = trace?.control;
   const ev = ct?.event;
 
-  const bh = blockH(live ? 3 : 2), eh = blockH(ev?.dropped ? 3 : 2);
+  const bh = blockH(live || c.sources.some(isEventSource) ? 3 : 2), eh = blockH(ev?.dropped ? 3 : 2);
   const grid = inputGrid(n, bh);
   const yEv = n === 0 ? PAD : grid.bottom + VGAP;
   const yGate = yEv + eh + VGAP;
@@ -73,17 +75,21 @@ export function renderControlFlow(o: ControlFlowOpts): TemplateResult {
 
   const eventLines = [
     t('control.flow.event'),
-    ev ? t('control.flow.eventLine').replace('{source}', ev.source).replace('{what}', t(`control.do.${ev.what}`)).replace('{at}', clock(ev.at)) : t('control.flow.noEvent'),
+    // An event of a purpose-built rule is worded by that rule's event ("... heating done"), any other by the action list it ran.
+    ev ? t('control.flow.eventLine').replace('{source}', ev.source).replace('{what}', ev.origin ? t(`control.event.${ev.origin.what}`) : t(`control.do.${ev.what}`)).replace('{at}', clock(ev.at)) : t('control.flow.noEvent'),
     ...(ev?.dropped ? [t('control.flow.dropped')] : []),
   ];
   const stateOf = (id: Id): 'on' | 'off' | 'open' | 'closed' | null | undefined => ct?.devices.find(d => d.id === id)?.state;
   const last = trace?.last;
   // The last action is written in the column of the latest event on the block of the device it names, unless that event was dropped.
   const lastHere = (list: typeof LISTS[number], a: ControlAction): RuleLast | undefined =>
-    last && ev && !ev.dropped && ev.what === list && last.target === o.nameOf(a.device) ? last : undefined;
+    last && ev && !ev.dropped && ev.what === list && last.target === o.nameOf(a.device) && (!isAnnounce(a.do) || last.action === a.do) ? last : undefined;
   const actionBlock = (list: typeof LISTS[number], a: ControlAction, k: number, x: number, y: number): { svg: TemplateResult; h: number } => {
     const st = stateOf(a.device), l = lastHere(list, a);
-    const lines = [o.nameOf(a.device), t(`control.do.${a.do}`), ...(ct ? [t('control.flow.now').replace('{s}', st ?? t('control.flow.noData'))] : []), ...(l ? [lastLine(l)] : [])];
+    // An announcement shows what it says (it has no state to show); a switch shows its state.
+    const doLine = isAnnounce(a.do) ? `${t(`control.do.${a.do}`)}: ${(a.do === 'play' ? a.media : a.text) ?? ''}` : t(`control.do.${a.do}`);
+    const now = ct && !isAnnounce(a.do) ? [t('control.flow.now').replace('{s}', st ?? t('control.flow.noData'))] : [];
+    const lines = [o.nameOf(a.device), doLine, ...now, ...(l ? [lastLine(l)] : [])];
     const h = blockH(lines.length + (l?.error ? 1 : 0));
     return { svg: block({ x, y, w: CW, h, field: `${list}:${k}`, cls: ct ? tone(st == null ? null : st === 'on' || st === 'open') : '', lines, err: l?.error }), h };
   };
@@ -107,11 +113,12 @@ export function renderControlFlow(o: ControlFlowOpts): TemplateResult {
         ${links.map(d => svg`<path class="fc-link" d=${d}></path>`)}
         ${c.sources.map((s, k) => {
           const tr = live?.[k];
-          const detail = tr && tr.detail !== '' && 'source' in s ? liveDetail(tr, o.now, s.source) : tr?.detail;
+          const detail = tr && tr.detail !== '' && 'source' in s ? liveDetail(tr, o.now, s.source) : isEventSource(s) ? undefined : tr?.detail;
           const gives = t('control.gives').replace('{what}', tr?.gives ?? o.gives(s));
           return block({
-            x: grid.xs[k], y: grid.inY(k), w: IN_W, h: bh, field: `source:${k}`, cls: tr && !isButtonSource(s) ? tone(tr.value) : '',
-            lines: [`${'not' in s && s.not ? 'NOT ' : ''}${tr?.label ?? o.sourceLabel(s)}`, ...(detail ? [detail] : []), gives],
+            x: grid.xs[k], y: grid.inY(k), w: IN_W, h: bh, field: `source:${k}`, cls: tr && !isButtonSource(s) && !isEventSource(s) ? tone(tr.value) : '',
+            lines: isEventSource(s) ? [...(o.eventLines?.(s) ?? [o.sourceLabel(s)]), gives]
+              : [`${'not' in s && s.not ? 'NOT ' : ''}${tr?.label ?? o.sourceLabel(s)}`, ...(detail ? [detail] : []), gives],
           });
         })}
         ${block({

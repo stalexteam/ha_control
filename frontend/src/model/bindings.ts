@@ -45,6 +45,10 @@ export const ROLE_SPECS: Record<DeviceKind, RoleSpec[]> = {
   socket: [{ role: 'control', domains: ['switch'], primary: true }, POWER],
   // Fixed by the device (virtual.<id>, see virtualEntity); never chosen, so the Binding step shows no field for it.
   virtual_switch: [{ role: 'control', domains: ['virtual'], primary: true }],
+  // Announcements: the integration binds a speaker strictly to a player and an optional voice (needed to say text); a phone binds
+  // no entity (its notify service is a prop).
+  speaker: [{ role: 'player', domains: ['media_player'], primary: true }, { role: 'voice', domains: ['tts'], primary: false }],
+  phone: [],
   exhaust_fan: [{ role: 'control', domains: ['switch', 'fan'], primary: true }],
   // Every role optional (a dummy has none); active roles depend on the inverter flag: see activeRoleSpecs.
   equipment: [{ role: 'control', domains: ['switch'], primary: false }, POWER, VOLTAGE, POWER_IN, POWER_OUT],
@@ -104,6 +108,8 @@ export function setBinding(level: Level, deviceId: Id, role: BindingRole, entity
 
 /** A device whose roles are all optional (equipment) is bound with nothing bound: a dummy needs nothing. */
 export function bindingStatus(d: Device, presence: (eid: string) => Presence): BindStatus {
+  // A phone is bound by the notify service it names (a prop), not by an entity.
+  if (d.props.kind === 'phone') return d.props.notify ? 'bound' : 'unbound';
   // A virtual switch is always bound: its entity has no state until the integration knows the device (unsaved, or after a disconnect).
   if (d.props.kind === 'virtual_switch') return 'bound';
   const b = d.bindings ?? {};

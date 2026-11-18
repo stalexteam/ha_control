@@ -3,7 +3,7 @@ import type { ContainerState } from '../src/live/container-feed';
 import type { Plan } from '../src/model/types';
 import type { PowerFrame } from '../src/model/power';
 import type { RuleTrace } from '../src/live/rules-feed';
-import { DEMO_REGISTRY, DEMO_STATES } from './demo-ha';
+import { DEMO_REGISTRY, DEMO_SERVICES, DEMO_STATES } from './demo-ha';
 
 /** localStorage key holding { plans: { [id]: Plan } } — same shape as the HA Store data. */
 export const STORAGE_KEY = 'plan_studio/plans';
@@ -64,7 +64,7 @@ export function createMockHass(
   const storage = opts.storage ?? localStorage;
   return {
     themes: { darkMode: opts.darkMode ?? true },
-    ...(opts.demo ? { states: { ...DEMO_STATES, ...opts.states } } : {}),
+    ...(opts.demo ? { states: { ...DEMO_STATES, ...opts.states }, services: DEMO_SERVICES } : {}),
     connection: {
       sendMessagePromise<T>(msg: Record<string, unknown>): Promise<T> {
         if (opts.demo && String(msg.type) in DEMO_REGISTRY) return Promise.resolve(structuredClone(DEMO_REGISTRY[String(msg.type)]) as T);

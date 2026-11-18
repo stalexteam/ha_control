@@ -80,6 +80,13 @@ export function deviceLive(d: Device, states: HassStates): DeviceLive {
       break;
     }
     case 'wall_switch': read(b.state, ON, OFF); break;
+    // A speaker is on while its player plays.
+    case 'speaker': {
+      if (!b.player) break;
+      const v = getState(states, b.player)?.state;
+      look = v === 'playing' ? 'on' : v === undefined || v === 'unavailable' || v === 'unknown' ? 'no-data' : 'off';
+      break;
+    }
     // A valve may be a `switch` entity: the server maps open = on, closed = off.
     case 'valve': read(b.state, ['open', 'on'], ['closed', 'off']); break;
     default: break;

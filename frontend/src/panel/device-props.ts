@@ -324,13 +324,8 @@ export function renderEquipmentProps(o: EquipmentPropsOpts): TemplateResult {
     ${o.notice ? html`<p class="warn">${o.notice}</p>` : nothing}
     ${device ? nothing : renderUnplacedDevices({
       level, onPick: id => o.pickDevice(id),
-      onNew: () => {
-        const made = newUnplacedDevice(level);
-        o.commit(made.level);
-        o.pickDevice(made.id);
-      },
-      onNewVirtual: () => {
-        const made = newUnplacedDevice(level, 'virtual_switch');
+      onNew: kind => {
+        const made = newUnplacedDevice(level, kind);
         o.commit(made.level);
         o.pickDevice(made.id);
       },

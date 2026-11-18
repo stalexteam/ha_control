@@ -1,5 +1,5 @@
 import type { HassLike } from '../api';
-import type { Id } from '../model/types';
+import type { AnnounceDo, Id } from '../model/types';
 import { messageOf } from '../errors';
 import { t } from '../i18n';
 
@@ -44,7 +44,7 @@ export interface RuleGateTrace { value: boolean | null; detail: string; until?: 
  * `ended: switched elsewhere`), or another automation keeps the shared device on (reason "kept on by <rules>" /
  * "already on by <rules>").
  */
-export interface RuleLast { action: 'on' | 'off' | 'open' | 'close'; target: string; at: number; reason: string; error?: string; sent?: false }
+export interface RuleLast { action: 'on' | 'off' | 'open' | 'close' | AnnounceDo; target: string; at: number; reason: string; error?: string; sent?: false }
 
 /**
  * The server's entry errors the panel words itself (status reason and `RuleLast.error`); any other error ("target
@@ -136,7 +136,8 @@ export interface BeurerTrace {
  * stopped it) and every device of the three lists once with its state (null = no data; open / closed for a valve).
  */
 export interface ControlTrace {
-  event?: { source: string; what: 'on' | 'off' | 'toggle'; at: number; dropped?: 'gate closed' };
+  /** `origin` = the purpose-built rule's event that gave it (a motion light entered auto, a boiler's heating done). */
+  event?: { source: string; what: 'on' | 'off' | 'toggle'; at: number; dropped?: 'gate closed'; origin?: { rule: Id; what: string } };
   devices: { id: Id; name: string; state: 'on' | 'off' | 'open' | 'closed' | null }[];
 }
 

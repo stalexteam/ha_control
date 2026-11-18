@@ -2,9 +2,10 @@
 import { zoneMembers } from '../geometry/zones';
 import { newId } from './ids';
 import type { PowerSchema } from './power';
-import { isButtonSource, type ControlAction, type ControlDo, type ControlSource, type Device, type Id, type Level, type Rule, type RuleDo, type RuleInput } from './types';
+import { t } from '../i18n';
+import { isAnnounce, isButtonSource, isEventSource, type ControlAction, type ControlDo, type ControlSource, type Device, type Id, type Level, type Rule, type RuleAction, type RuleDo, type RuleInput } from './types';
 
-export { isButtonSource };
+export { isButtonSource, isEventSource };
 
 export const RULE_DELAY_MAX = 3600;
 
@@ -31,10 +32,22 @@ const inputRefs = (i: RuleInput): Id[] => {
 };
 
 /** The condition inputs of a load control rule's sources (buttons are not inputs). */
-const controlInputs = (r: Rule): RuleInput[] => (Array.isArray(r.control?.sources) ? r.control.sources : []).filter((s): s is RuleInput => typeof s === 'object' && s !== null && !isButtonSource(s));
+const controlInputs = (r: Rule): RuleInput[] => (Array.isArray(r.control?.sources) ? r.control.sources : []).filter((s): s is RuleInput => typeof s === 'object' && s !== null && !isButtonSource(s) && !isEventSource(s));
 
-/** Every rule id the rule references: inputs, the gate, held sources and a load control rule's sources. */
-export const ruleRefs = (r: Rule): Id[] => [...r.inputs, ...controlInputs(r), ...(r.gate ? [r.gate] : [])].flatMap(inputRefs);
+/** The purpose-built rule ids a load control rule's event sources name. */
+const controlEventRules = (r: Rule): Id[] => (Array.isArray(r.control?.sources) ? r.control.sources : [])
+  .flatMap(s => (typeof s === 'object' && s !== null && isEventSource(s) && typeof s.event === 'object' && s.event !== null && typeof s.event.rule === 'string' ? [s.event.rule] : []));
+
+/** Every rule id the rule references: inputs, the gate, held sources, a load control rule's sources and its event sources. */
+export const ruleRefs = (r: Rule): Id[] => [...[...r.inputs, ...controlInputs(r), ...(r.gate ? [r.gate] : [])].flatMap(inputRefs), ...controlEventRules(r)];
+
+/** The events a rule gives to a load control rule: a light motion control rule auto / manual, a boiler rule auto / manual / done; none for any other kind (by the rule's kind, never its name). */
+export function controlEvents(r: Rule): string[] {
+  return r.motionLight ? ['auto', 'manual'] : r.boiler ? ['auto', 'manual', 'done'] : [];
+}
+
+/** "<rule name>: entered auto" / "entered manual" / "heating done". */
+export const eventSourceLabel = (ruleName: string, what: string): string => `${ruleName}: ${t(`control.event.${what}`)}`;
 
 const inputDevices = (i: RuleInput): Id[] => {
   const s = i.source;
@@ -70,7 +83,7 @@ export function ruleCycle(rules: Rule[], candidate: Rule): Id[] | null {
   return null;
 }
 
-export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'daylight' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto' | 'leak' | 'timed' | 'outside' | 'beurer' | 'control' | 'motionLight' | 'virtual-read';
+export type RuleProblem = 'name' | 'inputs' | 'device-missing' | 'rule-missing' | 'cycle' | 'delay' | 'action' | 'light' | 'daylight' | 'time' | 'held' | 'vent' | 'boiler' | 'boiler-auto' | 'leak' | 'timed' | 'outside' | 'beurer' | 'control' | 'motionLight' | 'virtual-read' | 'announce';
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
@@ -173,9 +186,10 @@ export function ruleProblems(
   if (r.timed && timedProblem(r, r.timed)) out.push('timed');
   if (r.outside && outsideProblem(r, r.outside)) out.push('outside');
   if (r.beurer && beurerProblem(r, r.beurer)) out.push('beurer');
-  if (r.control && controlProblem(r, r.control)) out.push('control');
+  if (r.control && controlProblem(r, r.control, rules)) out.push('control');
   if (r.motionLight && motionLightProblem(r, r.motionLight)) out.push('motionLight');
   if (isVirtual && readsWhatItSwitches(r, isVirtual)) out.push('virtual-read');
+  if ([...r.onTrue, ...r.onFalse, ...ctlTargets].some(a => typeof a === 'object' && a !== null && isAnnounce(a.do) && announceBad(a))) out.push('announce');
   if (r.boiler?.button && buttonAutoOk && !out.includes('device-missing') && !buttonAutoOk(r.boiler.button)) out.push('boiler-auto');
   if (actionsOf && [...r.onTrue, ...r.onFalse].some(a => { const ok = actionsOf(a.device); return ok !== undefined && !ok.includes(a.do); })) out.push('action');
   if (ctl && ctlTargets.some(a => !CONTROL_DOS.includes(a.do) || (actionsOf && !controlDoOk(a.do, actionsOf(a.device))))) out.push('action');
@@ -259,17 +273,45 @@ function beurerProblem(r: Rule, b: NonNullable<Rule['beurer']>): boolean {
   return ![b.keep, b.every].every(n => Number.isInteger(n) && n >= 0 && n <= 1440);
 }
 
-const CONTROL_DOS: ControlDo[] = ['on', 'off', 'toggle', 'close'];
+const CONTROL_DOS: ControlDo[] = ['on', 'off', 'toggle', 'close', 'say', 'play', 'notify'];
 
-/** The actions a device takes in a load control rule: on / off / toggle when it takes on and off, close for a valve, else none. */
+/** The actions a device takes in a load control rule: on / off / toggle when it takes on and off, close for a valve, the announcements of a speaker or a phone, else none. */
 export function controlActionsFor(d: Device): ControlDo[] {
   const a = ruleActionsFor(d);
-  return a.includes('on') && a.includes('off') ? ['on', 'off', 'toggle'] : a.includes('close') ? ['close'] : [];
+  const say = a.filter(isAnnounce);
+  return say.length > 0 ? say : a.includes('on') && a.includes('off') ? ['on', 'off', 'toggle'] : a.includes('close') ? ['close'] : [];
 }
 
 /** `do` against what the device takes as a rule action (`ruleActionsFor`); undefined (device unknown) is no problem. */
 const controlDoOk = (d: ControlDo, taken: RuleDo[] | undefined): boolean =>
-  taken === undefined || (d === 'close' ? taken.includes('close') : taken.includes('on') && taken.includes('off'));
+  taken === undefined || (isAnnounce(d) ? taken.includes(d) : d === 'close' ? taken.includes('close') : taken.includes('on') && taken.includes('off'));
+
+const filled = (v: unknown): boolean => typeof v === 'string' && v.trim() !== '';
+
+/**
+ * An announcement's exact shape as the integration reads it: say = text; play = media; notify = text and an optional title;
+ * every given text non-empty (trimmed); no other key.
+ */
+function announceBad(a: RuleAction | ControlAction): boolean {
+  const v = a as unknown as Record<string, unknown>;
+  const need = a.do === 'play' ? 'media' : 'text';
+  const opt = a.do === 'notify' ? 'title' : null;
+  return !filled(v[need]) || Object.keys(v).some(k => k !== 'device' && k !== 'do' && k !== need && k !== opt) || (opt !== null && opt in v && !filled(v[opt]));
+}
+
+/** What a load control list keeps once: a device for on / off / toggle / close, a device and its action for an announcement. */
+const listKey = (a: ControlAction): string => (isAnnounce(a.do) ? `${a.device}|${a.do}` : a.device);
+
+/** One event source as the integration reads it: exactly `{ event: { rule, what } }`; a rule that exists must give that event. A missing rule passes here (the engine shows "rule missing"; `ruleProblems` names it). */
+function eventSourceOk(s: unknown, rules: Rule[]): boolean {
+  if (typeof s !== 'object' || s === null || Object.keys(s).length !== 1) return false;
+  const e = (s as { event: unknown }).event;
+  if (typeof e !== 'object' || e === null || Object.keys(e).sort().join() !== 'rule,what') return false;
+  const { rule, what } = e as { rule: unknown; what: unknown };
+  if (typeof rule !== 'string' || rule === '' || typeof what !== 'string' || what === '') return false;
+  const target = rules.find(r => r.id === rule);
+  return target === undefined || controlEvents(target).includes(what);
+}
 
 /** JSON equality whatever the key order. */
 function jsonEqual(a: unknown, b: unknown): boolean {
@@ -279,18 +321,18 @@ function jsonEqual(a: unknown, b: unknown): boolean {
 }
 
 /** A load control rule's fixed shape and data bounds; true = violated. */
-function controlProblem(r: Rule, c: NonNullable<Rule['control']>): boolean {
+function controlProblem(r: Rule, c: NonNullable<Rule['control']>, rules: Rule[]): boolean {
   if (r.vent || r.boiler || r.leak || r.timed || r.outside || r.beurer || r.motionLight || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
   const lists = [c.on, c.off, c.toggle];
   if (!Array.isArray(c.sources) || c.sources.length === 0 || !lists.every(Array.isArray) || lists.every(l => l.length === 0)) return true;
-  const sourceOk = (s: unknown): boolean => typeof s === 'object' && s !== null && (isButtonSource(s as ControlSource)
+  const sourceOk = (s: unknown): boolean => typeof s === 'object' && s !== null && (isEventSource(s as ControlSource) ? eventSourceOk(s, rules) : isButtonSource(s as ControlSource)
     ? typeof (s as { button: unknown }).button === 'string' && (s as { button: string }).button !== '' : typeof (s as RuleInput).source === 'object' && (s as RuleInput).source !== null);
   if (!c.sources.every(sourceOk) || c.sources.some((s, i) => c.sources.some((o, k) => k < i && jsonEqual(s, o)))) return true;
-  const listOk = (l: ControlAction[]): boolean => l.every(a => typeof a === 'object' && a !== null && typeof a.device === 'string' && a.device !== '') && new Set(l.map(a => a.device)).size === l.length;
+  const listOk = (l: ControlAction[]): boolean => l.every(a => typeof a === 'object' && a !== null && typeof a.device === 'string' && a.device !== '') && new Set(l.map(listKey)).size === l.length;
   if (!lists.every(listOk)) return true;
   const read = new Set(controlInputs(r).flatMap(inputDevices));
-  return lists.some(l => l.some(a => read.has(a.device)));
+  return lists.some(l => l.some(a => !isAnnounce(a.do) && read.has(a.device)));
 }
 
 export const isControlRule = (r: Rule): boolean => r.control !== undefined;
@@ -483,6 +525,9 @@ export const isRuleInputDevice = (d: Device): boolean => INPUT_KINDS.has(d.props
 export function ruleActionsFor(d: Device): RuleDo[] {
   const p = d.props;
   if (p.kind === 'valve') return ['close'];
+  // Announcements are fire and forget: a speaker plays a file, and says text only with a voice; a phone notifies.
+  if (p.kind === 'speaker') return d.bindings?.voice ? ['say', 'play'] : ['play'];
+  if (p.kind === 'phone') return ['notify'];
   if (p.kind === 'equipment') return p.controllable === true ? ['on', 'off'] : [];
   if (p.kind === 'ceiling_light' || p.kind === 'wall_light' || p.kind === 'socket' || p.kind === 'exhaust_fan' || p.kind === 'virtual_switch') return ['on', 'off'];
   return [];

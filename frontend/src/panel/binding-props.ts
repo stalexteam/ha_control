@@ -41,6 +41,8 @@ export interface BindingPropsOpts {
   onRetry(): void;
   /** Live container states of the open plan, for the output line. */
   feed: Pick<ContainerFeed, 'ready' | 'error' | 'stateOf'>;
+  /** The notify services Home Assistant offers (the names under `notify`, without the prefix), sorted: a phone picks one. */
+  notifyServices?: readonly string[];
 }
 
 /**
@@ -101,6 +103,30 @@ function virtualFields(o: BindingPropsOpts, d: Device): TemplateResult {
     <p class="muted" data-note="virtual-hint">${t('virtual.hint')}</p>`;
 }
 
+/**
+ * A phone has no entity to bind: it names one of the notify services Home Assistant offers (a select, never typed). A stored
+ * service Home Assistant no longer offers stays in the select, flagged.
+ */
+function phoneFields(o: BindingPropsOpts, d: Device): TemplateResult {
+  const cur = d.props.kind === 'phone' ? d.props.notify ?? '' : '';
+  const services = o.notifyServices ?? [];
+  const gone = cur !== '' && !services.includes(cur);
+  return html`<div class="role" data-role="notify">
+    <div class="role-head"><span class="role-label" data-field="notify-label">${t('phone.notify')}</span></div>
+    <select class="val wide" data-field="notify" @change=${(e: Event) => {
+      const v = (e.target as HTMLSelectElement).value;
+      o.commit(setDeviceProps(o.level, d.id, { notify: v === '' ? undefined : v }));
+    }}>
+      <option value="" ?selected=${cur === ''}>${t('phone.pick')}</option>
+      ${gone ? html`<option value=${cur} selected>${cur}</option>` : nothing}
+      ${services.map(n => html`<option value=${n} ?selected=${n === cur}>${n}</option>`)}
+    </select>
+    ${gone ? html`<p class="warn" data-note="notify-missing">${t('phone.missing')}</p>` : nothing}
+    ${services.length === 0 ? html`<p class="note" data-note="notify-none">${t('phone.noServices')}</p>` : nothing}
+    <p class="muted" data-note="phone-hint">${t('phone.hint')}</p>
+  </div>`;
+}
+
 /** Notes under a bound field: missing or unavailable in HA, and the other devices bound to the same entity (or trigger). */
 function notes(o: BindingPropsOpts, d: Device, role: BindingRole, eid: string): TemplateResult {
   const p = presence(o.meta, eid, o.states);
@@ -159,7 +185,9 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
       ${deviceNameRow(d, name => o.commit(setDeviceProps(o.level, d.id, {}, name)))}
       ${outputLine(o, d)}
       ${d.props.kind === 'virtual_switch' ? virtualFields(o, d)
+        : d.props.kind === 'phone' ? phoneFields(o, d)
         : activeRoleSpecs(d).map(spec => html`${roleField(o, d, spec)}${containerFlags(o, d, spec.role)}`)}
+      ${d.props.kind === 'speaker' ? html`<p class="muted" data-note="speaker-hint">${t('speaker.hint')}</p>` : nothing}
       ${containerFields(d)}
       ${daylightFields(o, d)}`
     : html`<p class="muted">${t('binding.pick')}</p>`}

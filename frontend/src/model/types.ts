@@ -77,7 +77,7 @@ export type SwitchKind = 'wall_switch' | 'smart_button';
 export const isSwitchKind = (kind: DeviceKind): kind is SwitchKind => kind === 'wall_switch' || kind === 'smart_button';
 /** True for the input-container kinds. */
 export const isContainerKind = (kind: DeviceKind): kind is ContainerKind => kind === 'wall_switch' || kind === 'smart_button' || kind === 'valve';
-export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | ContainerKind | 'socket' | 'equipment' | 'climate_sensor' | 'exhaust_fan' | 'leak_sensor' | 'virtual_switch';
+export type DeviceKind = 'ceiling_light' | 'wall_light' | 'motion_sensor' | 'illuminance_sensor' | ContainerKind | 'socket' | 'equipment' | 'climate_sensor' | 'exhaust_fan' | 'leak_sensor' | 'virtual_switch' | 'speaker' | 'phone';
 export type DevicePlacement =
   | { mode: 'wall'; wallId: Id; side: Side; offset: number; aim?: number } // offset: along axis from node A to device centre; aim: degrees off the face normal, counter-clockwise on screen, integer -90..90 (default 0)
   | { mode: 'free'; x: number; y: number; rotation: number } // rotation in degrees
@@ -97,6 +97,8 @@ export type DeviceProps =
   | { kind: 'socket' } | { kind: 'climate_sensor' } | { kind: 'leak_sensor' }
   // A state the integration keeps (on / off, never sent to Home Assistant); its only binding is `control` = virtual.<device id>.
   | { kind: 'virtual_switch' }
+  // Announcements: a speaker (player + optional voice bindings) and a phone (a notify service name, never on the plan).
+  | { kind: 'speaker' } | { kind: 'phone'; notify?: string }
   // inverter: Power is replaced by Input / Output power; controllable: Plan Studio may switch its control.
   // A missing flag means false. Shape, size, icon and label matter only while the device is on the plan.
   | { kind: 'equipment'; shape: 'rect' | 'circle'; width: number; depth: number; diameter: number;
@@ -113,7 +115,7 @@ export const DEFAULT_EQUIPMENT_ICON = 'mdi:cube-outline';
 export const TRIGGER_EVENTS = ['single', 'double', 'hold'] as const;
 
 export type BindingRole = 'control' | 'motion' | 'illuminance' | 'temperature' | 'humidity' | 'state' | 'power'
-  | 'leak' | 'on' | 'off' | 'auto' | 'voltage' | 'power_in' | 'power_out' | 'sun';
+  | 'leak' | 'on' | 'off' | 'auto' | 'voltage' | 'power_in' | 'power_out' | 'sun' | 'player' | 'voice';
 
 /** zoneBlacklist: zones the device opts out of (missing = []; the field is removed when it becomes empty). */
 export interface Device {
@@ -150,7 +152,11 @@ export interface Plan {
   rules?: Rule[];
 }
 
-export type RuleDo = 'on' | 'off' | 'open' | 'close';
+/** Announcements: fire and forget, never a switch (see model/rules). */
+export type AnnounceDo = 'say' | 'play' | 'notify';
+export const ANNOUNCE_DOS: readonly AnnounceDo[] = ['say', 'play', 'notify'];
+export const isAnnounce = (d: string): d is AnnounceDo => (ANNOUNCE_DOS as readonly string[]).includes(d);
+export type RuleDo = 'on' | 'off' | 'open' | 'close' | AnnounceDo;
 export type RuleSource =
   | { device: Id } | { rule: Id }
   | { light: Id; below: number; hysteresis: number; unknownDark?: true }
@@ -160,11 +166,15 @@ export type RuleSource =
   | { time: { from: string; to: string } }
   | { held: { sources: ({ device: Id } | { rule: Id })[]; state: 'on' | 'off' | 'any'; seconds: number } };
 export interface RuleInput { source: RuleSource; not?: true }
-export interface RuleAction { device: Id; do: RuleDo }
-export type ControlDo = 'on' | 'off' | 'toggle' | 'close';
-export type ControlSource = RuleInput | { button: Id };
-export interface ControlAction { device: Id; do: ControlDo }
+/** say: `text`; play: `media`; notify: `text` and an optional `title`. */
+export interface RuleAction { device: Id; do: RuleDo; text?: string; media?: string; title?: string }
+export type ControlDo = 'on' | 'off' | 'toggle' | 'close' | AnnounceDo;
+/** An event of a purpose-built rule (light motion: auto, manual; boiler: auto, manual, done); it gives an `on` event. */
+export interface RuleEvent { rule: Id; what: string }
+export type ControlSource = RuleInput | { button: Id } | { event: RuleEvent };
+export interface ControlAction { device: Id; do: ControlDo; text?: string; media?: string; title?: string }
 export const isButtonSource = (s: ControlSource): s is { button: Id } => 'button' in s;
+export const isEventSource = (s: ControlSource): s is { event: RuleEvent } => 'event' in s;
 /** zoneId only says where the rule is listed; enabled missing = enabled; delays are whole seconds 0..3600. */
 export interface Rule {
   id: Id; name: string; zoneId: Id | null; enabled?: false; combine: 'all' | 'any';
@@ -230,6 +240,9 @@ export const DEVICE_PLACEMENTS: Record<DeviceKind, ('wall' | 'free')[]> = {
   smart_button: ['wall', 'free'],
   socket: ['wall'],
   virtual_switch: ['free', 'wall'],
+  speaker: ['free', 'wall'],
+  // A phone is never on the plan: it is added under Not on the plan.
+  phone: [],
   equipment: ['free', 'wall'],
   climate_sensor: ['free', 'wall'],
   exhaust_fan: ['wall'],

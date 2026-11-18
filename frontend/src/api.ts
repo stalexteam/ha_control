@@ -17,6 +17,8 @@ export interface HassLike {
   };
   themes?: { darkMode?: boolean };
   states?: Record<string, unknown>;
+  /** Home Assistant's service registry: domain -> service name -> description (the phone's notify services). */
+  services?: Record<string, Record<string, unknown>>;
 }
 
 export interface PlanSummary { id: Id; name: string; revision: number }

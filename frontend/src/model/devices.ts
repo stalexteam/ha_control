@@ -37,8 +37,8 @@ export function addDevice(
   return { level: withDevices(level, [...level.devices, d]), deviceId: d.id };
 }
 
-/** A new device that is not on the plan, with the free defaults: equipment, or a virtual switch (bound to its own entity). */
-export function addUnplacedDevice(level: Level, name: string, kind: Extract<DeviceKind, 'equipment' | 'virtual_switch'> = 'equipment'): { level: Level; id: Id } {
+/** A new device that is not on the plan, with the free defaults: equipment, a virtual switch (bound to its own entity), a speaker or a phone. */
+export function addUnplacedDevice(level: Level, name: string, kind: Extract<DeviceKind, 'equipment' | 'virtual_switch' | 'speaker' | 'phone'> = 'equipment'): { level: Level; id: Id } {
   const id = newId();
   const d: Device = { id, name, placement: { mode: 'none' }, props: deviceDefaults(kind, 'free'), invalid: false };
   if (kind === 'virtual_switch') d.bindings = { control: virtualEntity(id) };

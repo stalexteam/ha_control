@@ -212,6 +212,11 @@ function iconShape(d: Device, R: number, color: string, fill: string, dash?: str
       return svg`<rect class="icon" x=${-R} y=${-R * 0.55} width=${R * 2} height=${R * 1.1} rx=${R * 0.55} fill=${common.fill}
         stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></rect>
         <circle class="dot" cx=${-R * 0.45} r=${R * 0.3} fill=${ink}></circle>`;
+    case 'speaker': // a cabinet with a woofer and a tweeter
+      return svg`<rect class="icon" x=${-R * 0.7} y=${-R} width=${R * 1.4} height=${R * 2} rx=${R * 0.25} fill=${common.fill}
+        stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></rect>
+        <circle class="dot" cy=${R * 0.3} r=${R * 0.42} fill="none" stroke=${ink} stroke-width="1.5" vector-effect=${NS}></circle>
+        <circle class="dot" cy=${-R * 0.55} r=${R * 0.16} fill=${ink}></circle>`;
     case 'climate_sensor':
       return svg`<circle class="icon" cx=${-R * 0.3} r=${R * 0.45} fill=${common.fill} stroke=${common.stroke} stroke-width="1.5" stroke-dasharray=${da} vector-effect=${NS}></circle>
         <path class="thermo" d=${`M${-R * 0.3} ${-R * 0.45}V${-R * 1.1}M${-R * 0.3} ${-R * 0.45}H${-R * 1.1}`} fill="none" stroke=${color} stroke-width="1.5" vector-effect=${NS}></path>

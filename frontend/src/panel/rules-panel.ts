@@ -1,5 +1,5 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import type { Id, Level, Rule } from '../model/types';
+import { isAnnounce, type Id, type Level, type Rule } from '../model/types';
 import type { Selection } from '../editor/tools/types';
 import { keptOn, motionModeLast, switchedElsewhere, type RuleLast, type RuleTrace } from '../live/rules-feed';
 import { ruleEqual, rulesFor } from '../model/rules';
@@ -39,7 +39,8 @@ export function lastText(l: RuleLast, motionLight = false): string {
     return t(switchedElsewhere(l) ? 'rules.last.elsewhere' : 'rules.last.already')
       .replace('{target}', l.target).replace('{s}', l.action).replace('{at}', clock(l.at)).trim();
   }
-  const base = `${t(`rules.did.${l.action}`)} ${l.target} ${clock(l.at)}`.trim();
+  // An announcement: "Speaker: said 21:43" (the target is where it went).
+  const base = isAnnounce(l.action) ? `${l.target}: ${t(`rules.did.${l.action}`)} ${clock(l.at)}`.trim() : `${t(`rules.did.${l.action}`)} ${l.target} ${clock(l.at)}`.trim();
   return l.error ? `${base}: ${l.error}` : base;
 }
 

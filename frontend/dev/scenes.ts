@@ -712,6 +712,53 @@ const CONTROL_TRACE: RuleTrace = {
   last: { action: 'on', target: 'Socket', at: at(21, 43), reason: 'Button hall: toggle', error: 'target unavailable' },
 };
 
+/**
+ * Scene `announce`: the boiler room plus the speaker "Speaker" (player + voice), a second speaker "Hall speaker" with no voice, the phone
+ * "Phone" (a notify service, not on the plan), the light motion rule `rule-ml-main` and the Load control rule `rule-announce` "Auto sound":
+ * sources = the light rule entering auto and the boiler's heating done; When on: say, play on Speaker, notify on Phone.
+ * Live: the latest event was the boiler's heating done, all three announcements went out.
+ */
+function announcePlan(): Plan {
+  const p = boilerPlan();
+  p.levels[0].devices.push(
+    {
+      id: 'd-speaker', name: 'Speaker', invalid: false, bindings: { player: 'media_player.living_room', voice: 'tts.piper' },
+      placement: { mode: 'free', x: 3000, y: 800, rotation: 0 }, props: { kind: 'speaker' },
+    },
+    {
+      id: 'd-speaker2', name: 'Hall speaker', invalid: false, bindings: { player: 'media_player.hall' },
+      placement: { mode: 'wall', wallId: 'w3', side: 'right', offset: 800 }, props: { kind: 'speaker' },
+    },
+    { id: 'd-phone', name: 'Phone', invalid: false, placement: { mode: 'none' }, props: { kind: 'phone', notify: 'mobile_app_phone' } },
+  );
+  const fixed = { combine: 'any' as const, inputs: [], onDelay: 0, offDelay: 0, onTrue: [], onFalse: [] };
+  p.rules!.push(
+    { id: 'rule-ml-main', name: 'Light motion control Main', zoneId: 'r0', ...fixed, offDelay: 180,
+      motionLight: { light: 'd-light', sensors: ['d-motion'], minOn: 0, buttons: [], autoAfter: 0 } },
+    { id: 'rule-announce', name: 'Auto sound', zoneId: 'r0', ...fixed,
+      control: {
+        sources: [{ event: { rule: 'rule-ml-main', what: 'auto' } }, { event: { rule: 'rule-boiler', what: 'done' } }],
+        on: [
+          { device: 'd-speaker', do: 'say', text: 'Go bathe' },
+          { device: 'd-speaker', do: 'play', media: 'media-source://media_source/local/Auto.mp3' },
+          { device: 'd-phone', do: 'notify', text: 'The boiler is hot', title: 'Boiler' },
+        ],
+        off: [], toggle: [],
+      } },
+  );
+  return p;
+}
+
+const ANNOUNCE_TRACE: RuleTrace = {
+  status: 'ok', verdict: null, unknownInputs: 0,
+  inputs: [{ label: 'Light motion control Main', value: null, detail: '', gives: 'on' }, { label: 'Cost effective boiler Utility', value: null, detail: '', gives: 'on' }],
+  control: {
+    event: { source: 'Cost effective boiler Utility', what: 'on', at: at(21, 43), origin: { rule: 'rule-boiler', what: 'done' } },
+    devices: [],
+  },
+  last: { action: 'notify', target: 'Phone', at: at(21, 43), reason: 'Cost effective boiler Utility: done' },
+};
+
 const beurerTrace = (b: Partial<BeurerTrace>, over: Partial<RuleTrace> = {}): RuleTrace => ({
   status: 'ok', verdict: true, unknownInputs: 0, inputs: [],
   beurer: { watts: 312, detail: '312 W', heater: 'on', fresh: true, cycleAt: Date.now() + 754_000, ...b },
@@ -900,6 +947,7 @@ export const SCENES: Record<string, Scene> = {
   'motionlight-waiting': { plans: [motionLightPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_WAITING } },
   'motionlight-sleep': { plans: [sleepPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_SLEEP }, virtualStates: { 'd-sleep': 'on' } },
   'motionlight-sleep-off': { plans: [sleepPlan()], rulesFrame: { ...ROOM_RULES, 'rule-ml': MOTION_LIGHT_SLEEP_OFF }, virtualStates: { 'd-sleep': 'off' } },
+  announce: { plans: [announcePlan()], rulesFrame: { ...BOILER_RULES, 'rule-announce': ANNOUNCE_TRACE } },
   beurer: { plans: [beurerPlan()], rulesFrame: BEURER_RULES },
   'beurer-cycle': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ cycleAt: undefined, pausedUntil: Date.now() + 3_000, heater: 'off' }) } },
   'beurer-kept': { plans: [beurerPlan()], rulesFrame: { ...ROOM_RULES, 'rule-beurer': beurerTrace({ watts: null, detail: 'no data, kept', keptUntil: Date.now() + 252_000 }, { pending: { to: false, at: Date.now() + 45_000 } }) } },

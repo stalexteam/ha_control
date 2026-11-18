@@ -1,5 +1,5 @@
 import { html, nothing, type TemplateResult } from 'lit';
-import type { Device, Id, Rule, RuleAction, RuleDo, RuleInput, RuleSource } from '../model/types';
+import { isAnnounce, type AnnounceDo, type Device, type Id, type Rule, type RuleAction, type RuleDo, type RuleInput, type RuleSource } from '../model/types';
 import type { RuleProblem } from '../model/rules';
 import { ruleActionsFor, RULE_DELAY_MAX } from '../model/rules';
 import type { RuleTrace } from '../live/rules-feed';
@@ -118,10 +118,14 @@ export function sourceOptions(o: RuleDialogOpts, placeholder: string, more?: Tem
     ${more ?? nothing}`;
 }
 
+/** An action of a list: a device and what it does; an announcement also carries its `text`, `media` or `title`. */
+export interface ActionItem<D extends string> { device: Id; do: D; text?: string; media?: string; title?: string }
+
 /**
  * One action list of a rule dialog: the condition rule's "When true" / "When false" or a load control rule's "When on" /
  * "When off" / "When toggle". The device selects offer `o.actionDevices`; `actionsFor` is what a device takes (its Do
- * select), `firstDo` the Do of a newly picked device; `unique` = a device already in the list is not offered again.
+ * select), `firstDo` the Do of a newly picked device; `unique` = a device already in the list is not offered again (a speaker
+ * or a phone is offered again for an announcement it does not have yet).
  */
 export interface ActionListSpec<D extends string> {
   label: string;
@@ -131,41 +135,79 @@ export interface ActionListSpec<D extends string> {
   addField?: string;
   /** The `data-field` of row k. */
   field(k: number): string;
-  list: { device: Id; do: D }[];
-  set(next: { device: Id; do: D }[]): void;
+  list: ActionItem<D>[];
+  set(next: ActionItem<D>[]): void;
   actionsFor(d: Device): D[];
   firstDo(d: Device): D;
   doText(d: D): string;
   unique?: boolean;
 }
 
-function actionRow<D extends string>(o: RuleDialogOpts, s: ActionListSpec<D>, k: number, a: { device: Id; do: D }): TemplateResult {
+/** The fields each announcement carries: say `text`; play `media`; notify `text` and an optional `title`. */
+const FIELDS: Record<AnnounceDo, { need: 'text' | 'media'; opt?: 'title' }> = { say: { need: 'text' }, play: { need: 'media' }, notify: { need: 'text', opt: 'title' } };
+
+/** The item with its Do changed: an announcement keeps the fields its new Do shares (text between say and notify), starts the others blank and drops the rest. */
+function withDo<D extends string>(x: ActionItem<D>, to: D, device: Id = x.device): ActionItem<D> {
+  const out: ActionItem<D> = { device, do: to };
+  if (!isAnnounce(to)) return out;
+  const f = FIELDS[to];
+  out[f.need] = x[f.need] ?? '';
+  if (f.opt && x[f.opt] !== undefined) out[f.opt] = x[f.opt];
+  return out;
+}
+
+/** The Dos a device offers for row `except` (a new row: undefined): in a unique list a device is offered once, a speaker or a phone once per announcement. */
+function freeDos<D extends string>(s: ActionListSpec<D>, d: Device, except?: number): D[] {
+  const takes = s.actionsFor(d);
+  if (!s.unique) return takes;
+  const used = s.list.filter((x, j) => j !== except && x.device === d.id).map(x => x.do);
+  return takes.some(isAnnounce) ? takes.filter(x => !used.includes(x)) : used.length > 0 ? [] : takes;
+}
+
+function actionRow<D extends string>(o: RuleDialogOpts, s: ActionListSpec<D>, k: number, a: ActionItem<D>): TemplateResult {
   const list = s.list;
   const dev = o.deviceById(a.device);
-  const takes = dev ? s.actionsFor(dev) : [];
+  const takes = dev ? freeDos(s, dev, k) : [];
   const acts: D[] = takes.includes(a.do) ? takes : [...takes, a.do]; // a stale action stays visible (and flagged)
-  const offered = s.unique ? o.actionDevices.filter(d => d.id === a.device || !list.some(x => x.device === d.id)) : o.actionDevices;
+  const offered = s.unique ? o.actionDevices.filter(d => d.id === a.device || freeDos(s, d, k).length > 0) : o.actionDevices;
+  const f = isAnnounce(a.do) ? FIELDS[a.do] : undefined;
+  const setField = (key: 'text' | 'media' | 'title', v: string): void => {
+    s.set(list.map((x, j) => {
+      if (j !== k) return x;
+      const { [key]: _old, ...rest } = x;
+      return key === 'title' && v === '' ? rest : { ...rest, [key]: v };
+    }));
+  };
+  const field = (key: 'text' | 'media' | 'title'): TemplateResult => html`
+    <input class="grow" type="text" data-part=${key} placeholder=${t(`rules.field.${key}`)} .value=${a[key] ?? ''}
+      @input=${(e: Event) => setField(key, (e.target as HTMLInputElement).value)} />`;
   return html`
     <div class="rline" data-field=${s.field(k)} tabindex="-1">
       <select class="grow" data-part="device" data-value=${a.device}
         @change=${(e: Event) => {
           const d = o.deviceById((e.target as HTMLSelectElement).value);
-          if (d) s.set(list.map((x, j) => (j === k ? { device: d.id, do: s.actionsFor(d).includes(x.do) ? x.do : s.firstDo(d) } : x)));
+          if (!d) return;
+          const free = freeDos(s, d, k);
+          const first = s.firstDo(d);
+          const to = free.includes(a.do) ? a.do : free.includes(first) ? first : free[0];
+          if (to !== undefined) s.set(list.map((x, j) => (j === k ? withDo(x, to, d.id) : x)));
         }}>
         ${dev && !o.actionDevices.includes(dev) ? html`<option value=${dev.id}>${dev.name}</option>` : nothing}
         ${dev ? nothing : html`<option value=${a.device}>${t('rules.missingDevice')}</option>`}
         ${offered.map(d => html`<option value=${d.id}>${d.name}</option>`)}
       </select>
       <select data-part="do" data-value=${a.do}
-        @change=${(e: Event) => s.set(list.map((x, j) => (j === k ? { ...x, do: (e.target as HTMLSelectElement).value as D } : x)))}>
+        @change=${(e: Event) => s.set(list.map((x, j) => (j === k ? withDo(x, (e.target as HTMLSelectElement).value as D) : x)))}>
         ${acts.map(d => html`<option value=${d}>${s.doText(d)}</option>`)}
       </select>
       <button class="btn" data-action="remove-action" title=${t('rules.remove')} @click=${() => s.set(list.filter((_, j) => j !== k))}>&times;</button>
+      ${f ? html`<div class="rparams">${field(f.need)}${f.opt ? field(f.opt) : nothing}</div>` : nothing}
+      ${dev?.props.kind === 'speaker' && !dev.bindings?.voice ? html`<p class="muted" data-note="no-voice">${t('rules.announce.noVoice')}</p>` : nothing}
     </div>`;
 }
 
 export function actionList<D extends string>(o: RuleDialogOpts, s: ActionListSpec<D>): TemplateResult {
-  const offered = s.unique ? o.actionDevices.filter(d => !s.list.some(x => x.device === d.id)) : o.actionDevices;
+  const offered = s.unique ? o.actionDevices.filter(d => freeDos(s, d).length > 0) : o.actionDevices;
   return html`
     <div class="rgroup">
       <div class="rlabel">${s.label}</div>
@@ -175,7 +217,11 @@ export function actionList<D extends string>(o: RuleDialogOpts, s: ActionListSpe
           const sel = e.target as HTMLSelectElement;
           const d = o.deviceById(sel.value);
           sel.value = '';
-          if (d && s.actionsFor(d).length > 0) s.set([...s.list, { device: d.id, do: s.firstDo(d) }]);
+          if (!d || s.actionsFor(d).length === 0) return;
+          const free = freeDos(s, d);
+          const first = s.firstDo(d);
+          const to = free.includes(first) ? first : free[0];
+          if (to !== undefined) s.set([...s.list, withDo({ device: d.id, do: to }, to)]);
         }}>
         <option value="">${s.addText}</option>
         ${offered.map(d => html`<option value=${d.id}>${d.name}</option>`)}

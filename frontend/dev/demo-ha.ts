@@ -22,6 +22,7 @@ const DEVICES = [
   { id: 'boiler', name: 'Boiler', model: 'B-80', area_id: 'utility' },
   { id: 'bath_leak', name: 'Bath leak sensor', model: 'LS-1', area_id: 'bath' },
   { id: 'water_valve', name: 'Water valve', model: 'V-1', area_id: 'utility' },
+  { id: 'living_speaker', name: 'Living room speaker', model: 'SP-1', area_id: 'hall' },
 ];
 
 const ENTITIES: DemoEntity[] = [
@@ -41,6 +42,9 @@ const ENTITIES: DemoEntity[] = [
   { id: 'sensor.boiler_power', name: 'Boiler power', state: '1.8', device: 'boiler', cls: 'power', unit: 'kW' },
   { id: 'binary_sensor.bath_leak', name: 'Bath leak', state: 'on', device: 'bath_leak', cls: 'moisture' },
   { id: 'valve.water_valve', name: 'Water valve', state: 'open', device: 'water_valve' },
+  { id: 'media_player.living_room', name: 'Living room speaker', state: 'idle', device: 'living_speaker' },
+  { id: 'media_player.hall', name: 'Hall player', state: 'playing' },
+  { id: 'tts.piper', name: 'Piper', state: 'unknown' },
   { id: 'sun.sun', name: 'Sun', state: 'above_horizon', attrs: { elevation: 24.5 } },
   { id: 'sensor.porch_lux', name: 'Porch illuminance', state: 'unavailable', cls: 'illuminance', unit: 'lx' },
   { id: 'sensor.boiler_voltage', name: 'Boiler voltage', state: '229', device: 'boiler', cls: 'voltage', unit: 'V' },
@@ -70,4 +74,9 @@ export const DEMO_REGISTRY: Record<string, unknown> = {
   })),
   'config/device_registry/list': DEVICES,
   'config/area_registry/list': AREAS,
+};
+
+/** The notify services of the sample (a phone's Binding select); the names under `hass.services.notify`. */
+export const DEMO_SERVICES: Record<string, Record<string, unknown>> = {
+  notify: { mobile_app_phone: {}, notify: {}, persistent_notification: {} },
 };

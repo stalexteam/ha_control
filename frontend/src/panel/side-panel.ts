@@ -34,7 +34,7 @@ function bindingSide(h: PlanStudioPanel, level: Level): TemplateResult {
     commit: next => h.commit(next), onNextUnbound: () => h.nextUnboundDevice(),
     notice: h.notice, fieldNotice: h.fieldNotice, setFieldNotice: msg => { h.fieldNotice = msg; },
     registryError: h.haMeta.error, registryLoading: h.haMeta.loading, onRetry: () => h.haMeta.retry(),
-    feed: h.feed,
+    feed: h.feed, notifyServices: Object.keys(h.hass?.services?.notify ?? {}).sort(),
   });
 }
 
