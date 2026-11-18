@@ -20,7 +20,8 @@ export interface VentSensorTrace { t: number | null; rh: number | null; ah: numb
 /**
  * A boiler rule's state: `grid` and `boilerW` in W (null = no data; `grid` also null without a power limit),
  * `headroom` = grid + nominal - boiler (unknown boiler = 0), the value compared with the limit (null without grid data
- * or limit), `phase` null in manual, `until` = epoch ms of the next self-check (waiting, or the heating grace).
+ * or limit), `phase` null in manual, `until` = epoch ms of the next self-check (waiting, or the heating grace),
+ * `settling` = epoch ms when the power limit is judged at the latest, present while the meters settle after a switch.
  */
 export interface BoilerTrace {
   mode: 'auto' | 'manual';
@@ -28,6 +29,7 @@ export interface BoilerTrace {
   grid: number | null; boilerW: number | null; headroom: number | null;
   relay: 'on' | 'off' | null;
   until?: number;
+  settling?: number;
 }
 
 /** One valve of a leak protection rule: `state` null = no data (unavailable, unknown, no entity). */

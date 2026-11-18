@@ -76,7 +76,9 @@ export function renderBoilerTrace(o: BoilerTraceOpts): TemplateResult {
   };
 
   if (g) {
-    add('boiler-grid', b ? (b.grid === null ? tone(null) : '') : '', [o.gridName(g.block), b ? watts(b.grid) : t('boiler.flow.gridPower')]);
+    const settling = b?.settling !== undefined && b.settling > o.now
+      ? [t('boiler.flow.settling').replace('{left}', countdown(Math.ceil((b.settling - o.now) / 1000)))] : [];
+    add('boiler-grid', b ? (b.grid === null ? tone(null) : '') : '', [o.gridName(g.block), b ? watts(b.grid) : t('boiler.flow.gridPower'), ...settling]);
     const formula = t('boiler.flow.formula').replace('{nominal}', shown(g.nominal));
     const over = b && b.headroom !== null ? b.headroom > g.limit : null;
     add('boiler-limit', b ? tone(over === null ? null : !over) : '', [

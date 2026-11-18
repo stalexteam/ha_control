@@ -108,6 +108,7 @@ class LiveRuntime:
             on_runs=self._save_runs,
             on_pauses=self._save_pauses,
             on_motion_modes=self._save_motion_modes,
+            reports=lambda eid: (self.readings.last(eid), self.readings.period(eid)),
         )
         self.reload()
 

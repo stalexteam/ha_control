@@ -20,9 +20,16 @@ Lookup = Callable[[str], "tuple[str, dict] | None"]
 OFF_WAIT = 15  # s after the rule's last off before it may switch on again
 ON_WAIT = 60  # s after an on before "heating done" may be concluded
 IDLE_W = 1.0  # a boiler drawing no more than this is done heating
-# s after the relay's on <-> off change before the power limit is judged: the grid and the boiler meters report about
-# every 5 s in either order, so right after a switch one of them is stale (spec §11)
-SETTLE = 10
+# After the relay's on <-> off change at T the grid and the boiler meters report about every 5 s in either order, so
+# for some seconds one of them is stale. A meter's reading is SETTLED when it reported at or after T + LAG, or stayed
+# silent SILENT of its own periods after T + LAG, or (period unknown) SETTLE s after T, or in any case CAP s after T.
+# The power limit is judged only when both meters are settled (spec reading-stats §4, replacing boiler spec §11's 10 s).
+LAG = 2  # s: a report this soon after the switch may still carry a measurement taken before it
+SILENT = 2  # periods
+SETTLE = 10  # s, a meter whose period is unknown (the 0.23.1 rule)
+CAP = 30  # s: a real overload is never left unjudged longer
+TICK = 1  # s: while the meters settle the rule looks again this often (a same-value report wakes nobody)
+NO_REPORTS: "tuple[float | None, float | None]" = (None, None)  # a meter's (last report epoch s, period s)
 BUTTONS = ("wall_switch", "smart_button")
 RELAY_DOMAINS = ("light", "switch", "fan")  # entities with turn_on / turn_off
 MODES = ("auto", "manual")
@@ -31,6 +38,15 @@ MODES = ("auto", "manual")
 def watts(lookup: Lookup, eid: str) -> float | None:
     """A power reading in W as the Power step reads it (W, kW, MW, mW; no unit = W); None for no data."""
     return _read(lookup, eid, "power")
+
+
+def settle_at(switched: float, last: float | None, period: float | None) -> float:
+    """The moment a meter counts as settled after the relay switched at `switched` when it stays silent."""
+    return min(switched + CAP, switched + LAG + SILENT * period if period is not None else switched + SETTLE)
+
+
+def settled(switched: float, last: float | None, period: float | None, now: float) -> bool:
+    return (last is not None and last >= switched + LAG) or now >= settle_at(switched, last, period)
 
 
 def _w(v: float | None) -> float | None:
@@ -86,6 +102,7 @@ class Boiler:
         # derived on every evaluation
         self.until: float | None = None  # the time to look again (the engine's timer)
         self.due: float | None = None  # the phase's own deadline (waiting / grace), shown in the trace
+        self.settling: float | None = None  # the latest moment the limit is judged while the meters settle
         self.timer: "tuple[float, Callable[[], None]] | None" = None
         self.view: dict = {}
 
@@ -176,27 +193,45 @@ class Boiler:
 
     # --- auto -------------------------------------------------------------------
 
-    def auto(self, now: float, grid: float | None, power: float | None, relay: str | None) -> "tuple[str | None, str]":
-        """One auto evaluation: (command to send or None, reason); sets the phase and the time to look again."""
-        # the readings settle after the relay switched: the limit is judged again no later than the settle end
-        settle = self.switched + SETTLE if self.limited and self.switched is not None \
-            and now - self.switched < SETTLE else None
-        out = self._auto(now, grid, power, relay, settle is not None)
+    def auto(self, now: float, grid: float | None, power: float | None, relay: str | None,
+             grid_meter: "tuple[float | None, float | None]" = NO_REPORTS,
+             power_meter: "tuple[float | None, float | None]" = NO_REPORTS) -> "tuple[str | None, str]":
+        """One auto evaluation: (command to send or None, reason); sets the phase and the time to look again.
+        grid_meter / power_meter: (last report, period) of the grid and the boiler meters, None for unknown."""
+        # the latest moment both meters count as settled after the relay switched; None: settled (or nothing switched)
+        waits = [settle_at(self.switched, *m) for m in (grid_meter, power_meter)
+                 if not settled(self.switched, *m, now)] if self.limited and self.switched is not None else []
+        self.settling = None
+        out = self._auto(now, grid, power, relay, max(waits) if waits else None)
         self.due = self.until
-        if settle is not None and self.mode == "auto":
-            self.until = settle if self.until is None else min(self.until, settle)
+        if self.mode != "auto":
+            self.settling = None
+        if self.settling is not None:  # look again every second: a report of the same value wakes nobody
+            tick = min(self.settling, now + TICK)
+            self.until = tick if self.until is None else min(self.until, tick)
         return out
 
+    def _over(self, grid: float, power: float | None, relay: str | None) -> bool | None:
+        """Over the power limit; None when it cannot be told. A boiler meter without data is an unknown draw between 0
+        and the nominal power (0 while the relay is known off), judged by its bounds (spec reading-stats §4.1)."""
+        if power is None and relay != "off":
+            if grid > self.limit:
+                return True  # an overload whatever the boiler draws
+            return False if grid + self.nominal <= self.limit else None
+        return grid + self.nominal - (power or 0.0) > self.limit
+
     def _auto(self, now: float, grid: float | None, power: float | None, relay: str | None,
-              settling: bool) -> "tuple[str | None, str]":
+              settle: float | None) -> "tuple[str | None, str]":
         self.until = None
         if self.limited:
             if grid is None:
                 return self._off(now, relay, "blackout", "blackout")  # never delayed
-            if settling:
+            self.settling = settle  # the limit is not judged until the meters settle
+            over = self._over(grid, power, relay) if settle is None else None
+            if over is None:
                 if self.holding:
                     return None, ""  # the off reason in force stays: same phase, the 15 s wait not started yet
-            elif grid + self.nominal - (power or 0.0) > self.limit:
+            elif over:
                 return self._off(now, relay, "limit", "power limit")
         if self.holding:
             # the off reason lasted until now (AppDaemon re-sent off every 5 s): the 15 s wait counts from here
@@ -230,4 +265,6 @@ class Boiler:
         }
         if self.until is not None and self.due is not None:  # until None: not evaluated in auto this time
             out["until"] = int(self.due * 1000)
+        if self.settling is not None:
+            out["settling"] = int(self.settling * 1000)
         return out

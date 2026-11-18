@@ -128,6 +128,13 @@ describe('boiler diagram', () => {
     expect(cls(none, 'boiler-nominal')).toContain('nodata');
   });
 
+  it('while the meters settle the grid block counts down to the moment the limit is judged', () => {
+    const { host } = draw({ trace: live({ settling: NOW + 4_200 }) });
+    expect(text(host, 'boiler-grid')).toBe('AC-IN | 546 W | limit not judged until the meters report (0:05)');
+    expect(text(draw({ trace: live({ settling: NOW - 100 }) }).host, 'boiler-grid')).toBe('AC-IN | 546 W');
+    expect(text(draw({ trace: live({}) }).host, 'boiler-grid')).toBe('AC-IN | 546 W');
+  });
+
   it('a failed last call adds the error line; an error status shows under the diagram', () => {
     const { host } = draw({
       trace: live({ relay: 'off' }, {

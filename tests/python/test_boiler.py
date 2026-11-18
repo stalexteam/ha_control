@@ -4,7 +4,8 @@ import copy
 
 import pytest
 
-from boiler import Boiler
+from boiler import Boiler, settle_at
+from readings import Readings
 from rules import RuleEngine
 from test_rules import World, dev, plan, rule
 
@@ -58,15 +59,40 @@ class BWorld(World):
         return self.engine.snapshot("p")[rid]["boiler"]
 
 
-def loaded(rules=None, modes=None, **states):
-    w = BWorld(**states)
+class SWorld(BWorld):
+    """BWorld whose engine reads report statistics: set() reports the new state with the time, same() repeats the
+    current value without a state change (HA's state_reported: the engine is not told)."""
+
+    def __init__(self, **states):
+        super().__init__(**states)
+        self.readings = Readings()
+        self.engine = RuleEngine(self.lookup, lambda: self.t, self.call, self.schedule,
+                                 changed_at=self.changed.get, on_modes=lambda m: self.saved.append(copy.deepcopy(m)),
+                                 reports=lambda eid: (self.readings.last(eid), self.readings.period(eid)))
+
+    def set(self, eid, state, attrs=None, own=False):
+        self.readings.report(eid, state, self.t)
+        super().set(eid, state, attrs, own)
+
+    def same(self, eid):
+        self.readings.report(eid, self.states[eid][0], self.t)
+
+    def history(self, *eids, every=5.0, n=4):
+        """n earlier reports of the current values, `every` s apart, the latest `every` s ago: the period is known."""
+        for k in range(n, 0, -1):
+            for eid in eids:
+                self.readings.report(eid, self.states[eid][0], self.t - k * every)
+
+
+def loaded(rules=None, modes=None, world=BWorld, **states):
+    w = world(**states)
     w.engine.load_plans([boiler_plan(rules)], boot=False, modes=modes)
     return w
 
 
-def heating(**states):
+def heating(world=BWorld, **states):
     """Auto with the relay on and the boiler drawing 1380 W, past the 60 s grace."""
-    w = loaded(**states)
+    w = loaded(world=world, **states)
     w.press("auto")
     w.set("switch.relay", "on", own=True)
     w.set("sensor.bp", "1380", W)
@@ -187,8 +213,8 @@ def test_power_limit_turns_off_and_back_on_15_s_after_it_clears_without_flapping
     assert w.calls == [OFF, ON]
 
 
-def test_limit_counts_unknown_boiler_power_as_zero():
-    w = loaded(sensor__bp="unavailable", sensor__grid=("1700", W))  # 1700 + 1400 = 3100
+def test_limit_counts_unknown_boiler_power_as_zero_while_the_relay_is_known_off():
+    w = loaded(sensor__bp="unavailable", sensor__grid=("1700", W))  # relay off: no draw; 1700 + 1400 = 3100
     w.press("auto")
     assert w.calls == [] and w.b()["phase"] == "limit" and w.b()["headroom"] == 3100.0
 
@@ -897,12 +923,16 @@ def pure():
     return b
 
 
-def test_pure_limit_is_not_judged_inside_the_settle_time_and_looks_again_at_its_end():
+def test_pure_limit_is_not_judged_inside_the_settle_time_and_looks_again_every_second():
+    """0.24.0: without reports the settle time is the 10 s of 0.23.1; the rule looks again every second (a same-value
+    report wakes nobody) and the trace shows when the limit is judged at the latest."""
     b = pure()
     b.command("on", 99.0)
     assert b.auto(103.7, 2054.0, 0.0, "on") == (None, "auto")
-    assert b.phase == "heating" and b.until == 110.0
-    assert b.trace(2054.0, 0.0, "on")["until"] == 159000  # the trace keeps the 60 s grace
+    assert b.phase == "heating" and b.until == pytest.approx(104.7) and b.settling == 110.0
+    tr = b.trace(2054.0, 0.0, "on")
+    assert tr["until"] == 159000 and tr["settling"] == 110000  # the trace keeps the 60 s grace
+    assert b.auto(109.5, 2054.0, 0.0, "on") == (None, "auto") and b.until == 110.0  # the tick never passes the end
 
 
 def test_pure_limit_is_judged_once_the_settle_time_is_over():
@@ -917,8 +947,9 @@ def test_pure_a_holding_limit_stays_inside_the_settle_time():
     b.relay_changed("off", True, True, 105.0)
     b.phase, b.holding, b.last_off, b.cmd = "limit", True, 104.0, "off"
     assert b.auto(108.0, 1000.0, 0.0, "off") == (None, "")
-    assert b.phase == "limit" and b.holding and b.last_off == 104.0 and b.until == 115.0
-    assert "until" not in b.trace(1000.0, 0.0, "off")
+    assert b.phase == "limit" and b.holding and b.last_off == 104.0 and b.until == 109.0
+    tr = b.trace(1000.0, 0.0, "off")
+    assert "until" not in tr and tr["settling"] == 115000
     assert b.auto(115.0, 1000.0, 0.0, "off") == (None, "")
     assert b.phase == "waiting" and not b.holding and b.last_off == 115.0 and b.until == 130.0
 
@@ -928,7 +959,7 @@ def test_pure_waiting_looks_again_no_later_than_the_settle_end():
     b.relay_changed("off", True, True, 100.0)
     b.command("off", 100.0)
     assert b.auto(102.0, 2110.0, 0.0, "off") == (None, "")
-    assert b.phase == "waiting" and b.until == 110.0
+    assert b.phase == "waiting" and b.until == 103.0
     assert b.trace(2110.0, 0.0, "off")["until"] == 115000
 
 
@@ -966,7 +997,7 @@ def test_pure_an_unchanged_save_keeps_the_change_time():
     new = Boiler({"device": "b", "button": "btn", "grid": dict(GRID)}, {"b": BOILER, "btn": BUTTON},
                  {"g": {"id": "g", "kind": "grid", "power": "sensor.grid"}})
     new.take(old)
-    assert new.auto(103.0, 2054.0, None, "on") == (None, "auto") and new.until == 110.0
+    assert new.auto(103.0, 2054.0, None, "on") == (None, "auto") and new.until == 104.0 and new.settling == 110.0
 
 
 def test_unchanged_save_inside_the_settle_time_keeps_it():
@@ -975,3 +1006,218 @@ def test_unchanged_save_inside_the_settle_time_keeps_it():
     w.engine.load_plans([boiler_plan()])
     w.set("sensor.grid", "2054", W)
     assert w.calls == [ON] and w.b()["phase"] == "heating"
+
+
+# --- 0.24.0: the limit is judged on readings that arrived after the switch (reading-stats §4) -------------
+
+def stats_switched_on():
+    """Both meters report every 5 s (period known, the latest at 995); auto switched the boiler on at T = 1000."""
+    w = loaded(world=SWorld)
+    w.history("sensor.grid", "sensor.bp")
+    w.press("auto")
+    w.set("switch.relay", "on", own=True)
+    assert w.calls == [ON] and w.b()["phase"] == "heating"
+    return w
+
+
+@pytest.mark.parametrize("last,period,at", [
+    (None, None, 110.0), (95.0, None, 110.0), (95.0, 5.0, 112.0), (95.0, 4.0, 110.0), (95.0, 14.0, 130.0),
+    (40.0, 60.0, 130.0),
+])
+def test_pure_settle_at(last, period, at):
+    assert settle_at(100.0, last, period) == at
+
+
+def test_stats_live_case_is_judged_once_both_meters_reported_after_the_switch():
+    """Review focus 1 (live 2026-11-18): the grid report at T+3.7 meets a boiler reading from before the switch."""
+    w = stats_switched_on()
+    assert w.b()["settling"] == 1012000
+    w.advance(1003.7)
+    w.set("sensor.grid", "2054", W)  # 2054 + 1400 - 0 = 3454 with the boiler meter's report from 995
+    assert w.calls == [ON] and w.b()["phase"] == "heating" and w.b()["settling"] == 1012000
+    assert w.b()["until"] == 1060000  # the trace still counts down the 60 s grace
+    w.advance(1003.8)
+    w.set("sensor.bp", "1440", W)  # both settled: 2054 + 1400 - 1440 = 2014
+    assert w.calls == [ON] and w.b()["phase"] == "heating" and "settling" not in w.b()
+    assert [t[0] for t in w.pending()] == [1060.0]  # the 1 s tick stopped: only the grace end is left
+    w.advance(1100)
+    assert w.calls == [ON] and w.b()["phase"] == "heating" and w.b()["mode"] == "auto"
+
+
+def test_stats_a_silent_boiler_meter_is_settled_after_two_of_its_periods():
+    """Review focus 2: the thermostat is open, the boiler meter stays at 0 W and sends nothing new."""
+    w = stats_switched_on()
+    w.advance(1004)
+    w.set("sensor.grid", "5000", W)  # a real overload
+    assert w.calls == [ON] and w.b()["settling"] == 1012000
+    w.advance(1011.9)
+    assert w.calls == [ON]
+    w.advance(1012)  # T + 2 + 2 * 5 s
+    assert w.calls == [ON, OFF] and w.b()["phase"] == "limit" and "settling" not in w.b()
+    assert w.engine.snapshot("p")["r"]["last"]["reason"] == "power limit"
+
+
+def test_stats_a_same_value_report_is_caught_by_the_next_tick():
+    w = stats_switched_on()
+    w.advance(1003)
+    w.set("sensor.grid", "5000", W)
+    w.advance(1004.5)
+    w.same("sensor.bp")  # 0 W again after T + 2: settled, but nobody wakes the engine
+    assert w.calls == [ON]
+    w.advance(1005)
+    assert w.calls == [ON, OFF] and w.b()["phase"] == "limit"
+
+
+def test_stats_without_statistics_the_10_s_rule():
+    """Review focus 3: right after an HA restart no meter has reports yet."""
+    w = loaded(world=SWorld)
+    w.press("auto")
+    w.set("switch.relay", "on", own=True)
+    assert w.b()["settling"] == 1010000
+    w.advance(1004)
+    w.set("sensor.grid", "5000", W)  # the grid is settled by this report; the boiler meter has none
+    w.advance(1009.9)
+    assert w.calls == [ON]
+    w.advance(1010)
+    assert w.calls == [ON, OFF] and w.b()["phase"] == "limit"
+
+
+def test_stats_a_slow_meter_is_judged_at_the_30_s_cap():
+    """Review focus 3: a meter reporting every 60 s."""
+    w = loaded(world=SWorld)
+    w.history("sensor.bp", every=60.0)
+    w.history("sensor.grid")
+    w.press("auto")
+    w.set("switch.relay", "on", own=True)
+    assert w.b()["settling"] == 1030000
+    w.advance(1004)
+    w.set("sensor.grid", "5000", W)
+    w.advance(1029.9)
+    assert w.calls == [ON]
+    w.advance(1030)
+    assert w.calls == [ON, OFF] and w.b()["phase"] == "limit"
+
+
+def test_stats_a_report_inside_the_first_2_s_does_not_settle_the_meter():
+    w = stats_switched_on()
+    w.advance(1001)
+    w.set("sensor.bp", "1440", W)  # may still carry a measurement taken before the switch
+    w.advance(1003)
+    w.set("sensor.grid", "5000", W)
+    assert w.calls == [ON] and w.b()["settling"] == 1012000
+    w.advance(1011.9)
+    assert w.calls == [ON]
+    w.advance(1012)
+    assert w.calls == [ON, OFF]
+
+
+def test_stats_both_meters_reported_after_t_plus_2_are_judged_at_once():
+    w = stats_switched_on()
+    w.advance(1002.2)
+    w.set("sensor.bp", "1440", W)
+    assert w.calls == [ON] and w.b()["settling"] == 1012000  # the grid meter is still stale
+    w.advance(1002.5)
+    w.set("sensor.grid", "5000", W)
+    assert w.calls == [ON, OFF] and w.b()["phase"] == "limit"
+
+
+def test_stats_a_holding_limit_stays_while_the_meters_settle_and_the_wait_starts_when_found_cleared():
+    w = heating(world=SWorld)
+    w.history("sensor.grid", "sensor.bp")
+    w.set("sensor.grid", "4200", W)  # 4220 > 3000
+    assert w.calls == [OFF] and w.b()["phase"] == "limit"
+    t = w.t
+    w.set("switch.relay", "off", own=True)
+    w.advance(t + 1)
+    w.set("sensor.bp", "0", W)  # inside the first 2 s
+    w.advance(t + 3)
+    w.set("sensor.grid", "800", W)  # would clear the limit: not judged yet, the 15 s wait does not start
+    b = w.b()
+    assert b["phase"] == "limit" and "until" not in b and b["settling"] == int((t + 12) * 1000) and w.calls == [OFF]
+    w.advance(t + 4.5)
+    w.same("sensor.bp")
+    w.advance(t + 5)  # the tick: both settled, the limit is found cleared
+    b = w.b()
+    assert b["phase"] == "waiting" and b["until"] == int((t + 20) * 1000) and "settling" not in b
+    w.advance(t + 19.9)
+    assert w.calls == [OFF]
+    w.advance(t + 20)
+    assert w.calls == [OFF, ON]
+
+
+def test_stats_blackout_while_the_meters_settle_switches_off_at_once():
+    w = stats_switched_on()
+    w.advance(1001)
+    w.set("sensor.grid", "unavailable")
+    assert w.calls == [ON, OFF] and w.b()["phase"] == "blackout" and "settling" not in w.b()
+    assert w.engine.snapshot("p")["r"]["last"]["reason"] == "blackout"
+
+
+def test_stats_the_tick_sends_no_frame_while_nothing_changes():
+    w = stats_switched_on()
+    w.advance(1003)
+    w.set("sensor.grid", "2054", W)
+    frames = []
+    w.engine.subscribe("p", lambda full, rules: frames.append(rules))
+    before = w.engine.snapshot("p")["r"]
+    w.advance(1008)
+    assert len([t for t in w.timers if 1003 < t[0] <= 1008]) >= 5  # it looked every second
+    assert w.engine.snapshot("p")["r"] == before and frames == []
+
+
+# --- 0.24.0: a boiler meter without data (reading-stats §4.1) -------------------------------------------------
+
+def test_no_boiler_data_with_the_relay_known_off_counts_no_draw():
+    w = loaded(sensor__bp="unavailable", sensor__grid=("2000", W))
+    w.press("auto")
+    assert w.calls == [] and w.b()["phase"] == "limit"  # 2000 + 1400 - 0 > 3000: stays off
+
+
+def test_no_boiler_data_with_the_relay_on_and_room_for_the_nominal_is_no_limit():
+    w = loaded(switch__relay="on", sensor__bp="unavailable", sensor__grid=("1500", W))
+    w.press("auto")
+    assert w.calls == [] and w.b()["phase"] == "heating"  # 1500 + 1400 <= 3000
+
+
+def test_no_boiler_data_with_the_relay_on_between_the_bounds_is_not_judged():
+    w = loaded(switch__relay="on", sensor__bp="unavailable", sensor__grid=("2023", W))
+    w.press("auto")
+    assert w.calls == [] and w.b()["phase"] == "heating" and "settling" not in w.b()
+    assert [t[0] for t in w.pending()] == [1060.0]  # no tick: the data coming back wakes the rule
+    w.set("sensor.grid", "3001", W)  # over the limit whatever the boiler draws
+    assert w.calls == [OFF] and w.b()["phase"] == "limit"
+
+
+def test_no_boiler_data_between_the_bounds_keeps_a_holding_limit_and_waits_once_cleared():
+    w = heating()
+    w.set("sensor.grid", "4200", W)
+    assert w.calls == [OFF] and w.b()["phase"] == "limit"
+    w.set("sensor.bp", "unavailable")  # the relay has not confirmed the off: an unknown draw
+    w.advance(w.t + 30)
+    w.set("sensor.grid", "2000", W)  # 2000 .. 3400: not judged, the limit stays
+    assert w.b()["phase"] == "limit" and "until" not in w.b() and w.calls == [OFF]
+    t = w.t
+    w.set("sensor.grid", "1500", W)  # 2900 <= 3000 for sure: cleared, the 15 s wait starts now
+    assert w.b()["phase"] == "waiting" and w.b()["until"] == int((t + 15) * 1000)
+
+
+def test_ha_restart_while_heating_without_boiler_data_is_no_limit():
+    """Review focus 6 (live 2026-11-18 10:20): the grid meter is back first, the boiler meter and relay are not."""
+    w = BWorld(switch__relay="unknown", sensor__bp="unknown", sensor__grid=("2023", W))
+    w.engine.load_plans([boiler_plan()], boot=True, modes={"p": {"r": "auto"}})
+    w.engine.started()
+    assert OFF not in w.calls and w.b()["mode"] == "auto" and w.b()["phase"] == "heating"
+    assert "settling" not in w.b()
+    w.set("switch.relay", "on")  # back from no data: no take-over, no switch
+    w.set("sensor.bp", "1431", W)  # 2023 + 1400 - 1431 = 1992
+    w.advance(w.t + 120)
+    assert OFF not in w.calls and w.b()["mode"] == "auto" and w.b()["phase"] == "heating"
+
+
+def test_ha_restart_with_the_grid_over_the_limit_and_no_boiler_data_switches_off_at_once():
+    """Review focus 6: grid 3200 W is an overload whatever the boiler draws."""
+    w = BWorld(switch__relay="unknown", sensor__bp="unknown", sensor__grid=("3200", W))
+    w.engine.load_plans([boiler_plan()], boot=True, modes={"p": {"r": "auto"}})
+    w.engine.started()
+    assert w.calls == [OFF] and w.b()["phase"] == "limit"
+    assert w.engine.snapshot("p")["r"]["last"]["reason"] == "power limit"

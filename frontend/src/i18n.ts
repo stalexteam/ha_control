@@ -499,6 +499,7 @@ const en: Dict = {
   'boiler.phase.done': 'heating done',
   'boiler.flow.title': 'Boiler diagram',
   'boiler.flow.gridPower': 'grid power',
+  'boiler.flow.settling': 'limit not judged until the meters report ({left})',
   'boiler.flow.headroom': 'Headroom',
   'boiler.flow.formula': 'grid + {nominal} - boiler',
   'boiler.flow.ok': 'ok',

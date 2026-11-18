@@ -352,6 +352,16 @@ const BOILER_HEAT_RULES: Record<string, RuleTrace> = {
   },
 };
 
+/** The limited boiler rule just switched on (scene `boiler-settling`): the grid meter reported, the boiler meter not yet. */
+const BOILER_SETTLING_RULES: Record<string, RuleTrace> = {
+  ...BOILER_HEAT_RULES,
+  'rule-boiler': {
+    status: 'ok', verdict: true, inputs: [], unknownInputs: 0,
+    last: { action: 'on', target: 'Boiler', at: Date.now() - 3_000, reason: 'auto' },
+    boiler: { mode: 'auto', phase: 'heating', grid: 2054, boilerW: 0, headroom: 3454, relay: 'on', until: Date.now() + 57_000, settling: Date.now() + 9_000 },
+  },
+};
+
 /**
  * Scene `leak`: the room with a second leak sensor (Leak WC) and a second valve (Hot water valve), and the leak
  * protection rule `rule-leakp` over both (live: dry, both valves open). Scene `leak-wet`: Leak WC wet, both valves
@@ -851,6 +861,7 @@ export const SCENES: Record<string, Scene> = {
   'leak-na': { plans: [leakPlan()], rulesFrame: { ...ROOM_RULES, 'rule-leakp': LEAK_NA } },
   'boiler-limit': { plans: [boilerPlan()], rulesFrame: BOILER_LIMIT_RULES },
   'boiler-heat': { plans: [boilerPlan()], rulesFrame: BOILER_HEAT_RULES },
+  'boiler-settling': { plans: [boilerPlan()], rulesFrame: BOILER_SETTLING_RULES },
   timed: { plans: [timedPlan()], rulesFrame: TIMED_IDLE },
   'timed-run': { plans: [timedPlan()], rulesFrame: TIMED_RUN },
   'timed-else': { plans: [timedPlan()], rulesFrame: TIMED_ELSE },

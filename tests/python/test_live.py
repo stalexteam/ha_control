@@ -1311,6 +1311,18 @@ def test_readings_fed_by_state_change_and_state_report(env):
     asyncio.run(go())
 
 
+def test_engine_reads_the_report_statistics(env):
+    async def go():
+        hass = FakeHass()
+        live = await _start(env, hass)
+        for at in (100, 105, 110, 115):
+            live.readings.report("sensor.grid", "500", at)
+        assert live.engine._reports("sensor.grid") == (115, 5)
+        assert live.engine._reports("sensor.none") == (None, None)
+
+    asyncio.run(go())
+
+
 def test_state_report_does_not_reach_engine_or_power(env):
     async def go():
         hass = FakeHass()

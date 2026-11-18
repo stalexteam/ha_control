@@ -658,6 +658,7 @@ class RuleEngine:
         on_runs: "Callable[[dict[str, dict[str, float]]], None]" = lambda runs: None,
         on_pauses: "Callable[[dict[str, dict[str, float]]], None]" = lambda pauses: None,
         on_motion_modes: "Callable[[dict[str, dict[str, dict]]], None]" = lambda modes: None,
+        reports: "Callable[[str], tuple[float | None, float | None]]" = lambda eid: (None, None),
     ) -> None:
         self._lookup = lookup
         self._now = now  # epoch seconds
@@ -665,6 +666,7 @@ class RuleEngine:
         self._schedule = schedule
         self._local = local  # epoch seconds -> aware datetime in the HA time zone
         self._changed_at = changed_at  # entity id -> epoch seconds of its HA last_changed
+        self._reports = reports  # entity id -> (its latest report epoch s, its report period s), None for unknown
         self._started = False  # the first load_plans is the HA start
         self._rules: dict[Key, _Rule] = {}
         self._order: dict[Key, int] = {}  # referenced rules before their consumers
@@ -1598,10 +1600,11 @@ class RuleEngine:
         b = rule.boiler
         assert b is not None
         grid, power, relay = b.readings(self._lookup)
-        b.until = None
+        b.until = b.settling = None
         active = rule.enabled and not b.missing
         if active and b.mode == "auto" and not self._booting:  # §9: auto is evaluated once HA has started
-            do, why = b.auto(self._now(), grid, power, relay)
+            meters = [self._reports(eid) if eid else (None, None) for eid in (b.grid, b.power)]
+            do, why = b.auto(self._now(), grid, power, relay, *meters)
             if do is not None:
                 # blackout / limit: a safety off (inverter protection), never kept back by other rules
                 self._boiler_auto(rule, do, why, safety=b.phase in ("blackout", "limit"))
