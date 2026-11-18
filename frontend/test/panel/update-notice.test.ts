@@ -106,3 +106,79 @@ describe('UpdateCheck', () => {
     expect(changes).not.toHaveBeenCalled();
   });
 });
+
+describe('UpdateCheck retries', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** A connection whose `plan_studio/info` answers from `answer()` (a version, or null = unknown command). */
+  function flaky(answer: () => string | null) {
+    let asked = 0;
+    const listeners: Listener[] = [];
+    const connection: HassLike['connection'] = {
+      async sendMessagePromise<T>(): Promise<T> {
+        asked++;
+        const v = answer();
+        if (v === null) throw { code: 'unknown_command', message: 'Unknown command' };
+        return { version: v } as T;
+      },
+      addEventListener(_t, cb) { listeners.push(cb); },
+      removeEventListener(_t, cb) { listeners.splice(listeners.indexOf(cb), 1); },
+    };
+    return { connection, asked: () => asked, ready: () => listeners.slice().forEach(l => l()) };
+  }
+
+  it('asks again every 5 s after a failure and shows the notice when the answer differs', async () => {
+    vi.useFakeTimers();
+    let v: string | null = null;
+    const c = flaky(() => v);
+    const check = new UpdateCheck(() => c.connection, '1.0.0', () => undefined);
+    check.watch();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(c.asked()).toBe(1);
+    v = '2.0.0';
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(c.asked()).toBe(2);
+    expect(check.serverVersion).toBe('2.0.0');
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(c.asked()).toBe(2);
+  });
+
+  it('an equal version after a retry shows no notice and ends the retries', async () => {
+    vi.useFakeTimers();
+    let v: string | null = null;
+    const c = flaky(() => v);
+    const check = new UpdateCheck(() => c.connection, '1.0.0', () => undefined);
+    check.watch();
+    await vi.advanceTimersByTimeAsync(0);
+    v = '1.0.0';
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(check.serverVersion).toBeNull();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(c.asked()).toBe(2);
+  });
+
+  it('gives up after 12 retries; ready starts a new budget', async () => {
+    vi.useFakeTimers();
+    const c = flaky(() => null);
+    const check = new UpdateCheck(() => c.connection, '1.0.0', () => undefined);
+    check.watch();
+    await vi.advanceTimersByTimeAsync(5000 * 30);
+    expect(c.asked()).toBe(13); // the first ask and 12 retries
+    c.ready();
+    await vi.advanceTimersByTimeAsync(5000 * 30);
+    expect(c.asked()).toBe(26);
+  });
+
+  it('stop() cancels a pending retry', async () => {
+    vi.useFakeTimers();
+    const c = flaky(() => null);
+    const check = new UpdateCheck(() => c.connection, '1.0.0', () => undefined);
+    check.watch();
+    await vi.advanceTimersByTimeAsync(0);
+    check.stop();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(c.asked()).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+

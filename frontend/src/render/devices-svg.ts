@@ -1,5 +1,5 @@
 import { svg, nothing, type SVGTemplateResult } from 'lit';
-import { keyed } from 'lit/directives/keyed.js';
+import { repeat } from 'lit/directives/repeat.js';
 import { mdiAlert } from '@mdi/js';
 import { isContainerKind, type Device, type Level, type Pt } from '../model/types';
 import type { BindStatus } from '../model/bindings';
@@ -293,18 +293,20 @@ function renderBubbles(level: Level, d: Device, pose: DevicePose, b: { shown: Li
   const nShown = Math.max(1, b.shown.length);
   const side = bubbleSide(level, d, pose, { w: Math.max(...widths.slice(0, nShown)), h: h + step * (nShown - 1) }, gap);
   const origin = stackOrigin(side, stack, gap);
-  return svg`${all.map(([x, cls], i) => {
+  // Identity: the class (shown / leaving), the bubble's id and its action time; a bubble with neither falls back to its index.
+  const ident = ([x, cls]: (typeof all)[number], i: number): string => `${cls}:${x.id ?? (x.key === undefined ? `#${i}` : '')}:${x.key ?? ''}`;
+  return svg`${repeat(all.map((a, i) => [a, i] as const), ([a, i]) => ident(a, i), ([[x, cls], i]) => {
     const w = widths[i];
     const bx = origin.x + (stack.w - w) / 2;
     const by = origin.y + (side.startsWith('up') ? all.length - 1 - i : i) * step;
     const c = toneColor(x.tone, o.palette);
     // A keyed (action) bubble that is replaced is a new element, so its pop-in plays again.
-    return keyed(`${cls}:${x.key ?? ''}`, svg`<g class=${`bubble ${cls}`} data-tone=${x.tone}>
+    return svg`<g class=${`bubble ${cls}`} data-tone=${x.tone}>
       <rect x=${bx} y=${by} width=${w} height=${h} rx=${h / 2} fill=${o.palette.background} stroke=${c} stroke-width="1.5"
         vector-effect=${NS}></rect>
       <text x=${bx + w / 2} y=${by + h / 2} text-anchor="middle" dominant-baseline="central" fill=${c} font-weight="700"
         font-size=${BUBBLE_FONT_PX * k} font-family="system-ui, sans-serif">${x.text}</text>
-    </g>`);
+    </g>`;
   })}`;
 }
 

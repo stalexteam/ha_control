@@ -1,4 +1,5 @@
 // Smoke test for plan_studio websocket API. Env: HA_URL, HA_TOKEN.
+import { readFileSync } from "node:fs";
 const base = (process.env.HA_URL || "").replace(/\/+$/, "");
 const token = process.env.HA_TOKEN;
 if (!base || !token) { console.error("HA_URL/HA_TOKEN required"); process.exit(1); }
@@ -84,6 +85,11 @@ const same = (a, b, what) => {
 async function run() {
   const info = expectOk(await call({ type: "plan_studio/info" }), "info");
   if (typeof info.version !== "string" || !info.version) fail("info: no version");
+  // Release guard: the served version is the local manifest's, and the local bundle was built from it.
+  const local = (f) => readFileSync(new URL(`../custom_components/plan_studio/${f}`, import.meta.url), "utf-8");
+  const manifestVersion = JSON.parse(local("manifest.json")).version;
+  if (info.version !== manifestVersion) fail(`info version ${info.version} != manifest ${manifestVersion}`);
+  if (!local("frontend/plan-studio-panel.js").includes(`"${manifestVersion}"`)) fail(`bundle was not built for ${manifestVersion}`);
   const id = `smoke-${Date.now()}`;
   const level = { id: `${id}-l1`, name: "Level 1", kind: "floor", order: 0, nodes: [], walls: [], openings: [], zones: [] };
   const plan = { id, name: "Smoke", schemaVersion: 2, levels: [level] };

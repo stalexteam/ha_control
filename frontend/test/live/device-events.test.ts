@@ -92,7 +92,7 @@ describe('DeviceEventTracker', () => {
     t.update(l, { 'binary_sensor.m': st('on') }, since + 42_000);
     expect(t.leaving('d1', since + 42_000)).toEqual([]);
     t.update(l, { 'binary_sensor.m': st('off') }, since + 43_000);
-    expect(t.leaving('d1', since + 43_000 + FADE_MS - 1)).toEqual([{ text: '43', tone: 'motion' }]);
+    expect(t.leaving('d1', since + 43_000 + FADE_MS - 1)).toEqual([{ text: '43', tone: 'motion', id: 'timer' }]);
     expect(t.leaving('d1', since + 43_000 + FADE_MS)).toEqual([]);
   });
   it('a fading timer shows the value at the exit time, not at the last update', () => {
@@ -101,7 +101,7 @@ describe('DeviceEventTracker', () => {
     const since = Date.parse('2026-11-16T10:00:00Z');
     t.update(l, { 'light.a': st('on') }, since + 5000);
     t.update(l, { 'light.a': st('off') }, since + 65_500);
-    expect(t.leaving('d1', since + 65_500)).toEqual([{ text: '1:05', tone: 'device' }]);
+    expect(t.leaving('d1', since + 65_500)).toEqual([{ text: '1:05', tone: 'device', id: 'timer' }]);
   });
   it('event entity: the state alone is the change value; unknown/unavailable keep the baseline', () => {
     const t = new DeviceEventTracker();

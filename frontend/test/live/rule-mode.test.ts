@@ -15,9 +15,9 @@ const of = (m: Record<string, RuleTrace>) => (id: string) => m[id];
 
 describe('ruleModeBubbles', () => {
   it('motion light auto: verdict true is on, false is off, no key', () => {
-    expect(ruleModeBubbles([ml('a')], of({ a: mlTrace('auto', true) }), 'L')).toEqual([{ text: 'auto: on', tone: 'mode' }]);
+    expect(ruleModeBubbles([ml('a')], of({ a: mlTrace('auto', true) }), 'L')).toEqual([{ text: 'auto: on', tone: 'mode', id: 'mode:a' }]);
     const off = ruleModeBubbles([ml('a')], of({ a: mlTrace('auto', false) }), 'L');
-    expect(off).toEqual([{ text: 'auto: off', tone: 'mode' }]);
+    expect(off).toEqual([{ text: 'auto: off', tone: 'mode', id: 'mode:a' }]);
     expect('key' in off[0]).toBe(false);
   });
   it('gives none for manual, inert auto, no trace, disabled rule and another device', () => {
@@ -28,9 +28,9 @@ describe('ruleModeBubbles', () => {
     expect(ruleModeBubbles([ml('a')], of({ a: mlTrace('auto', true) }), 'other')).toEqual([]);
   });
   it('boiler: auto heating is on, auto otherwise off, manual none', () => {
-    expect(ruleModeBubbles([boiler('b')], of({ b: bTrace('auto', 'heating') }), 'B')).toEqual([{ text: 'auto: on', tone: 'mode' }]);
-    expect(ruleModeBubbles([boiler('b')], of({ b: bTrace('auto', 'waiting') }), 'B')).toEqual([{ text: 'auto: off', tone: 'mode' }]);
-    expect(ruleModeBubbles([boiler('b')], of({ b: bTrace('auto', null) }), 'B')).toEqual([{ text: 'auto: off', tone: 'mode' }]);
+    expect(ruleModeBubbles([boiler('b')], of({ b: bTrace('auto', 'heating') }), 'B')).toEqual([{ text: 'auto: on', tone: 'mode', id: 'mode:b' }]);
+    expect(ruleModeBubbles([boiler('b')], of({ b: bTrace('auto', 'waiting') }), 'B')).toEqual([{ text: 'auto: off', tone: 'mode', id: 'mode:b' }]);
+    expect(ruleModeBubbles([boiler('b')], of({ b: bTrace('auto', null) }), 'B')).toEqual([{ text: 'auto: off', tone: 'mode', id: 'mode:b' }]);
     expect(ruleModeBubbles([boiler('b')], of({ b: bTrace('manual', null) }), 'B')).toEqual([]);
   });
   it('two rules on one device give two bubbles in rule order', () => {

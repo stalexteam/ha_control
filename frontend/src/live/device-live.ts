@@ -9,8 +9,11 @@ export type HassStates = Record<string, unknown> | undefined;
 /** 'none': the kind has no live look or its driving role is unbound; 'active': motion detected / leak wet. */
 export type LiveLook = 'none' | 'on' | 'off' | 'no-data' | 'active';
 export type BubbleTone = 'device' | 'motion' | 'leak' | 'event' | 'mode' | 'unmatched';
-/** key: set on an action bubble (its time), so a replaced one is drawn anew and pops again. */
-export interface LiveBubble { text: string; tone: BubbleTone; key?: number }
+/**
+ * key: set on an action bubble (its time), so a replaced one is drawn anew and pops again. id: a stable identity of
+ * the bubble (mode:<rule id>, timer, power, daylight) so it keeps its element when others come or go before it.
+ */
+export interface LiveBubble { text: string; tone: BubbleTone; key?: number; id?: string }
 /**
  * timerSince: epoch ms of last_changed when a timer applies; power: W > 0 when a power bubble applies; daylight: an
  * illuminance sensor's raw daylight state and source ("night 8 lx", "twilight (sun)", "no data") while lux or sun is bound.
@@ -107,9 +110,9 @@ export function liveBubbles(live: DeviceLive, d: Device, now: number): LiveBubbl
   const out: LiveBubble[] = [];
   if (live.timerSince !== undefined) {
     const k = d.props.kind;
-    out.push({ text: formatDuration(now - live.timerSince), tone: k === 'motion_sensor' ? 'motion' : k === 'leak_sensor' ? 'leak' : 'device' });
+    out.push({ text: formatDuration(now - live.timerSince), tone: k === 'motion_sensor' ? 'motion' : k === 'leak_sensor' ? 'leak' : 'device', id: 'timer' });
   }
-  if (live.power !== undefined) out.push({ text: formatWatts(live.power), tone: 'device' });
-  if (live.daylight !== undefined) out.push({ text: live.daylight, tone: 'device' });
+  if (live.power !== undefined) out.push({ text: formatWatts(live.power), tone: 'device', id: 'power' });
+  if (live.daylight !== undefined) out.push({ text: live.daylight, tone: 'device', id: 'daylight' });
   return out;
 }

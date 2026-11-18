@@ -651,6 +651,28 @@ describe('live looks and bubbles', () => {
     expect(leak.querySelector('g.bubble rect')!.getAttribute('stroke')).toBe(ALERT);
   });
 
+  it('bubbles keep their elements while shown, whatever is added or removed before them', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const draw = (shown: { text: string; tone: 'device' | 'event' | 'mode'; id?: string; key?: number }[]) => {
+      render(html`<svg xmlns="http://www.w3.org/2000/svg">${renderDevices(lv(), { ...base, scale: 0.1, bubbles: (d: Device) => ({ shown: d.id === 'so' ? shown : [], leaving: [] }) } as DevOpts)}</svg>`, host);
+      return new Map([...host.querySelectorAll('g.device-bubbles[data-id="so"] g.bubble')].map(g => [g.textContent!.trim(), g]));
+    };
+    const timer = { text: '3:20', tone: 'device' as const, id: 'timer' }, power = { text: '309 W', tone: 'device' as const, id: 'power' };
+    const act = { text: 'single', tone: 'event' as const, key: 1000 };
+    const modeA = { text: 'auto: on', tone: 'mode' as const, id: 'mode:a' }, modeB = { text: 'auto: off', tone: 'mode' as const, id: 'mode:b' };
+    const before = draw([timer, power, act]);
+    const withMode = draw([modeA, timer, power, act]);
+    for (const k of ['3:20', '309 W', 'single']) expect(withMode.get(k)).toBe(before.get(k));
+    const without = draw([timer, power, act]);
+    for (const k of ['3:20', '309 W', 'single']) expect(without.get(k)).toBe(before.get(k));
+    // A replaced action (new time) is a new element.
+    expect(draw([timer, power, { ...act, key: 2000 }]).get('single')).not.toBe(before.get('single'));
+    // Two mode bubbles: the second keeps its element when the first goes.
+    const two = draw([modeA, modeB]);
+    expect(draw([modeB]).get('auto: off')).toBe(two.get('auto: off'));
+  });
+
   it('bubbles sit in their own group after the devices, at the device position, and dim with it', () => {
     const root = drawDevs(lv(), {
       bubbles: d => ({ shown: d.id === 'so' || d.id === 'sb' ? [{ text: '1', tone: 'device' }] : [], leaving: [] }),
