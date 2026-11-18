@@ -62,6 +62,7 @@ class MotionLight:
         # the rule's own recent decisions (state, until epoch s): a late echo of one is never a foreign change
         self.own: list[tuple[str, float]] = []
         self.waiting = False  # switched off elsewhere while held: no switch-on until every motion sensor was clear
+        self.presses = 0  # button presses and mode changes: a press's command is wanted only until the next one
         self.timer: "tuple[float, Callable[[], None]] | None" = None  # the auto-return
 
     def inputs(self) -> "list[dict]":
@@ -74,7 +75,7 @@ class MotionLight:
     def take(self, old: "MotionLight") -> None:
         self.mode, self.since, self.moving, self.on_at = old.mode, old.since, old.moving, old.on_at
         self.seen, self.entered, self.own, self.waiting = old.seen, old.entered, list(old.own), old.waiting
-        self.dropped = old.dropped
+        self.dropped, self.presses = old.dropped, old.presses
 
     def stop(self) -> None:
         if self.timer is not None:

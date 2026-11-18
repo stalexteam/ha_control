@@ -2,7 +2,7 @@
 
 import pytest
 
-from expected import EXPIRE, RETRY, Expected, expect, service
+from expected import EXPIRE, RETRY, Expected, expect, passing, service
 
 E = "switch.relay"
 
@@ -44,6 +44,22 @@ def test_no_data_or_a_moving_valve_keeps_the_record(state):
     x.sent(E, "on", 0.0, "r1")
     assert x.arrived(E, state, 3.0) is False
     assert x.arrived(E, "on", 4.0) is True
+
+
+def test_back_from_no_data_is_a_fresh_reading():
+    x = Expected()
+    x.sent(E, "on", 0.0, "r1")
+    x.arrived(E, "unavailable", 1.0)
+    assert x.arrived(E, "off", 2.0, back=True) is False  # the old state: the command is not applied yet, kept
+    assert x.due(10.0) == [(E, "on", "r1", "retry")]
+    assert x.arrived(E, "on", 11.0, back=True) is True  # the expected state: ours
+    x.sent(E, "on", 20.0, "r1")
+    assert x.arrived(E, "off", 21.0, back=False) is False and x.next_at() is None  # a change between known states
+
+
+def test_passing_states():
+    assert [passing(s) for s in (None, "unavailable", "unknown", "opening", "closing", "on", "off", "closed")] == [
+        True, True, True, True, True, False, False, False]
 
 
 def test_retried_once_at_10_s_then_expires_at_60_s():

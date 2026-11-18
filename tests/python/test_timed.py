@@ -605,3 +605,11 @@ def test_a_sent_command_has_no_sent_field():
     w = loaded()
     w.start()
     assert "sent" not in w.tr()["last"]
+
+
+def test_a_lost_start_is_not_wanted_after_the_stop():
+    w = loaded()
+    w.start()  # the device loses the on
+    assert w.engine.still_wants(("p", "r"), "fan.vent", "on") is True
+    w.stop()
+    assert w.engine.still_wants(("p", "r"), "fan.vent", "on") is False

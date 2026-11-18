@@ -1615,9 +1615,220 @@ def test_a_burst_keeps_one_record_for_the_last_command(env):
         for do in ("turn_on", "turn_off", "turn_on"):
             live._call("switch", do, "switch.sock", on_error=lambda *a: None, by=("p1", "r1"))
         await asyncio.gather(*hass.tasks)
+        asked = []
+        live.engine.still_wants = lambda by, eid, state: asked.append((by, eid, state)) or True
         _tick(env, clock, 10.0)
         await asyncio.gather(*hass.tasks)
+        assert asked == [(("p1", "r1"), "switch.sock", "on")]  # one record: the last command
         assert [c[1] for c in hass.services.calls] == ["turn_on", "turn_off", "turn_on", "turn_on"]  # the last, once
+
+    asyncio.run(go())
+
+
+BOILER_ON_LOST = {"switch.relay": "off", "sensor.grid": "500", "sensor.bp": "0", "sensor.act": ""}
+
+
+async def _boiler_on_lost(env, hass, clock):
+    """Auto sends the relay on; the device loses it (the relay stays off)."""
+    FakeStore.contents[BOILER_KEY] = {"p1": {"r1": "auto"}}
+    live = await _xstart(env, hass, _boiler_plan(), clock, **BOILER_ON_LOST)
+    await asyncio.gather(*hass.tasks)
+    assert [c[1] for c in hass.services.calls] == ["turn_on"]
+    clock[0] = 3.0
+    return live
+
+
+def _calls_after_retry(env, hass, clock):
+    async def go():
+        _tick(env, clock, 10.0)
+        await asyncio.gather(*hass.tasks)
+        return [c[1] for c in hass.services.calls]
+
+    return go()
+
+
+def test_a_lost_boiler_on_is_not_sent_again_into_the_power_limit(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _boiler_on_lost(env, hass, clock)
+        _boiler_event(env, hass, "sensor.grid", "2000", old="500")  # 2000 + 1400 > 3000: limit
+        assert live.engine.snapshot("p1")["r1"]["boiler"]["phase"] == "limit"
+        assert await _calls_after_retry(env, hass, clock) == ["turn_on"]
+
+    asyncio.run(go())
+
+
+def test_a_lost_boiler_on_is_not_sent_again_in_a_blackout(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _boiler_on_lost(env, hass, clock)
+        _boiler_event(env, hass, "sensor.grid", "unavailable", old="500")
+        assert live.engine.snapshot("p1")["r1"]["boiler"]["phase"] == "blackout"
+        assert await _calls_after_retry(env, hass, clock) == ["turn_on"]
+
+    asyncio.run(go())
+
+
+def test_a_lost_boiler_on_is_not_sent_again_after_a_set_off_that_sent_nothing(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _boiler_on_lost(env, hass, clock)
+        live.engine.on_intent("p1", "btn", {"action": "set", "value": "off"})  # relay reads off: manual, nothing sent
+        assert live.engine.snapshot("p1")["r1"]["boiler"]["mode"] == "manual"
+        assert await _calls_after_retry(env, hass, clock) == ["turn_on"]
+
+    asyncio.run(go())
+
+
+def test_a_lost_boiler_limit_off_is_sent_once_more(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        FakeStore.contents[BOILER_KEY] = {"p1": {"r1": "auto"}}
+        states = {**BOILER_ON_LOST, "switch.relay": "on", "sensor.bp": "1500"}
+        live = await _xstart(env, hass, _boiler_plan(), clock, **states)
+        await asyncio.gather(*hass.tasks)
+        assert hass.services.calls == []  # heating, the relay on already
+        _boiler_event(env, hass, "sensor.grid", "3200", old="500")  # 3200 + 1400 - 1500 > 3000: the safety off
+        await asyncio.gather(*hass.tasks)
+        assert live.engine.snapshot("p1")["r1"]["boiler"]["phase"] == "limit"
+        assert await _calls_after_retry(env, hass, clock) == ["turn_off", "turn_off"]
+
+    asyncio.run(go())
+
+
+async def _motion_toggle_on_lost(env, hass, clock):
+    hass.services.known |= {("light", "turn_on"), ("light", "turn_off")}
+    live = await _xstart(env, hass, _motion_plan(), clock, **{"light.k": "off", "binary_sensor.pir": "off"})
+    live.engine.on_intent("p1", "btn", {"action": "toggle"})  # manual, a direct on the device loses
+    await asyncio.gather(*hass.tasks)
+    assert [c[1] for c in hass.services.calls] == ["turn_on"]
+    clock[0] = 3.0
+    return live
+
+
+def test_a_lost_press_on_is_not_sent_again_after_a_set_off_that_sent_nothing(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _motion_toggle_on_lost(env, hass, clock)
+        live.engine.on_intent("p1", "btn", {"action": "set", "value": "off"})  # the light reads off: nothing sent
+        assert await _calls_after_retry(env, hass, clock) == ["turn_on"]
+
+    asyncio.run(go())
+
+
+def test_a_lost_press_on_is_not_sent_again_after_auto_without_motion(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _motion_toggle_on_lost(env, hass, clock)
+        live.engine.on_intent("p1", "btn", {"action": "auto"})  # no motion, the light reads off: nothing sent
+        assert live.engine.snapshot("p1")["r1"]["motionLight"]["mode"] == "auto"
+        assert await _calls_after_retry(env, hass, clock) == ["turn_on"]
+
+    asyncio.run(go())
+
+
+def test_a_lost_slot_off_is_not_sent_again_after_a_set_on_that_sent_nothing(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        hass.services.known |= {("light", "turn_on"), ("light", "turn_off")}
+        plan = _motion_plan()
+        plan["rules"][0]["offDelay"] = 0
+        live = await _xstart(env, hass, plan, clock, **{"light.k": "on", "binary_sensor.pir": "on"})  # found on, held
+        _boiler_event(env, hass, "binary_sensor.pir", "off", old="on")  # the motion ends: the slot's off, lost
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_off"]
+        clock[0] = 3.0
+        live.engine.on_intent("p1", "btn", {"action": "set", "value": "on"})  # the light reads on: manual, nothing sent
+        assert live.engine.snapshot("p1")["r1"]["motionLight"]["mode"] == "manual"
+        assert await _calls_after_retry(env, hass, clock) == ["turn_off"]
+
+    asyncio.run(go())
+
+
+def _control_plan():
+    def dev(i, kind, bindings):
+        return {"id": i, "name": i, "props": {"kind": kind}, "bindings": bindings}
+
+    return {
+        "id": "p1",
+        "levels": [{"devices": [dev("btn", "smart_button", {"action": "sensor.act"}),
+                                dev("l1", "socket", {"control": "switch.l1"})]}],
+        "rules": [{
+            "id": "r1", "name": "LC", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+            "inputs": [], "onTrue": [], "onFalse": [],
+            "control": {"sources": [{"button": "btn"}], "on": [{"device": "l1", "do": "on"}],
+                        "off": [{"device": "l1", "do": "off"}], "toggle": []},
+        }],
+    }
+
+
+def test_a_lost_load_control_on_is_not_sent_again_after_a_later_event_that_sent_nothing(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _control_plan(), clock, **{"switch.l1": "off", "sensor.act": ""})
+        live.engine.on_intent("p1", "btn", {"action": "set", "value": "on"})
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_on"]
+        clock[0] = 3.0
+        live.engine.on_intent("p1", "btn", {"action": "set", "value": "on"})  # on its way already: nothing sent
+        assert await _calls_after_retry(env, hass, clock) == ["turn_on"]
+
+    asyncio.run(go())
+
+
+def test_a_lost_slot_on_with_nothing_changed_is_sent_once_more(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        plan = _ws_plan()
+        plan["rules"][0]["onFalse"] = [{"device": "sw", "do": "off"}]  # an on / off pair: the holder slots
+        await _xstart(env, hass, plan, clock, **WS_OFF)
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_off", "turn_on"]  # the start's off, then the on (lost)
+        assert await _calls_after_retry(env, hass, clock) == ["turn_off", "turn_on", "turn_on"]
+
+    asyncio.run(go())
+
+
+def test_a_no_data_blip_back_in_the_old_state_keeps_the_record(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        clock[0] = 2.0
+        _boiler_event(env, hass, "switch.sock", "unavailable", old="off")
+        clock[0] = 3.0
+        _boiler_event(env, hass, "switch.sock", "off", old="unavailable")  # back, the command not applied
+        assert _press(live) is None
+        assert await _calls_after_retry(env, hass, clock) == ["turn_on", "turn_on"]
+        _tick(env, clock, 60.0)
+        assert live.engine.snapshot("p1")["r1"]["last"]["error"] == "not confirmed"
+
+    asyncio.run(go())
+
+
+def test_a_failing_still_wants_is_logged_and_the_other_records_go_on(env, caplog):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        live._call("switch", "turn_on", "switch.a", on_error=lambda *a: None, by=("p1", "r1"))
+        live._call("switch", "turn_on", "switch.b", on_error=lambda *a: None, by=("p1", "r1"))
+        hass.states.d.update({"switch.a": "off", "switch.b": "off"})
+        await asyncio.gather(*hass.tasks)
+
+        def boom(by, eid, state):
+            if eid == "switch.a":
+                raise RuntimeError("bug")
+            return True
+
+        live.engine.still_wants = boom
+        with caplog.at_level("ERROR"):
+            _tick(env, clock, 10.0)
+        await asyncio.gather(*hass.tasks)
+        assert [c[2]["entity_id"] for c in hass.services.calls] == ["switch.a", "switch.b", "switch.b"]
+        assert "bug" in caplog.text
+        assert [t for t in env.later if t["on"]]  # re-armed for the expiries
 
     asyncio.run(go())
 

@@ -17,6 +17,11 @@ _SWITCHED = ("light", "switch", "fan", "input_boolean")
 _VALVE = {"open_valve": "open", "close_valve": "closed"}
 
 
+def passing(state: str | None) -> bool:
+    """No data or a valve on its way: a state that neither confirms a command nor contradicts it."""
+    return state in _PASSING
+
+
 def expect(domain: str, service: str) -> str | None:
     """The state a service call should bring the entity to; None for a call that is not recorded."""
     if domain in _SWITCHED and service in ("turn_on", "turn_off"):
@@ -46,14 +51,20 @@ class Expected:
         """A command to the entity was sent by `by` (opaque here); it replaces the entity's record."""
         self._records[entity_id] = _Record(state, now, by)
 
-    def arrived(self, entity_id: str, state: str | None, now: float) -> bool:
+    def arrived(self, entity_id: str, state: str | None, now: float, back: bool = False) -> bool:
         """One change of the entity's state: True when it is the expected one (the record is used up). Another known
-        state drops the record; no data or a moving valve keeps it; a record past EXPIRE is left to due()."""
+        state drops the record, except back from no data (back: the state before was passing): that is a fresh
+        reading of a device that has not applied the command yet, kept for the retry and the expiry. No data or a
+        moving valve keeps the record; a record past EXPIRE is left to due()."""
         r = self._records.get(entity_id)
-        if r is None or state in _PASSING or now >= r.at + EXPIRE:
+        if r is None or passing(state) or now >= r.at + EXPIRE:
             return False
-        del self._records[entity_id]
-        return state == r.state
+        if state == r.state:
+            del self._records[entity_id]
+            return True
+        if not back:
+            del self._records[entity_id]
+        return False
 
     def due(self, now: float) -> "list[tuple[str, str, object, str]]":
         """The records needing action, (entity id, state, by, "retry" | "expire"): a retry is reported once (the record

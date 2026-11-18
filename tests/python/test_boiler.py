@@ -1314,3 +1314,27 @@ def test_an_on_on_its_way_confirmed_late_during_a_blackout_is_switched_off_at_on
     w.set("switch.relay", "on")
     assert w.b()["mode"] == "auto" and w.calls == [ON, OFF] and w.b()["phase"] == "blackout"
     assert w.engine.snapshot("p")["r"]["last"]["reason"] == "blackout"
+
+
+# --- a lost command: still wanted? (live.py asks before it sends it once more) ---------------
+
+def test_a_lost_auto_on_is_wanted_only_while_heating_and_not_refused():
+    w = loaded()
+    w.press("auto")
+    assert w.calls == [ON]  # the device loses it: the relay stays off
+    assert w.engine.still_wants(("p", "r"), "switch.relay", "on") is True
+    w.set("sensor.bp", "unavailable")
+    w.set("switch.relay", "unknown")  # the boiler's draw cannot be bounded: the limit is undecided
+    w.set("sensor.grid", "2000", W)
+    assert w.b()["phase"] == "heating" and w.engine.still_wants(("p", "r"), "switch.relay", "on") is False
+    assert w.engine.still_wants(("p", "q"), "switch.relay", "on") is False  # not its sender
+    assert w.engine.still_wants(("p", "r"), "switch.relay", "off") is False  # not its command
+
+
+def test_a_lost_button_command_is_wanted_until_the_next_press():
+    w = loaded()
+    w.press("set", "on")
+    assert w.calls == [ON] and w.engine.still_wants(("p", "r"), "switch.relay", "on") is True
+    w.press("set", "on")  # the relay reads off: sent again, a newer command
+    w.press("set", "off")  # the relay reads off: nothing sent
+    assert len(w.calls) == 2 and w.engine.still_wants(("p", "r"), "switch.relay", "on") is False

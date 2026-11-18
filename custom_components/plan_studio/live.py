@@ -30,7 +30,7 @@ from .const import (
     RUNTIME_STORAGE_KEY,
     TIMED_STORAGE_KEY,
 )
-from .expected import EXPIRE, Expected, expect, service as service_for
+from .expected import EXPIRE, Expected, expect, passing, service as service_for
 from .power import PowerHub, device_bindings, entity_ids as power_entity_ids
 from .readings import Readings
 from .rules import RuleEngine
@@ -275,11 +275,12 @@ class LiveRuntime:
                 self._returned.pop(data["entity_id"], None)
         context = (event.context.id, event.context.parent_id)
         # Plan Studio's own change: its context, or the first change to the state one of its commands expects (however
-        # late; asked once per change of the state value, an attribute update is no change). Both consumers get it.
+        # late; asked once per change of the state value, an attribute update is no change; a return from no data is
+        # a fresh reading). Both consumers get it.
         own = self.runtime.is_own(context)
         was, now = (None if old is None else old.state), (None if new is None else new.state)
         if was != now:
-            own = self._expected.arrived(data["entity_id"], now, self._now()) or own
+            own = self._expected.arrived(data["entity_id"], now, self._now(), back=passing(was)) or own
             self._arm()
         # intents first (runtime listeners are synchronous): the engine must know them before the state change
         self.runtime.handle_state(data["entity_id"], _pair(data["old_state"]), _pair(data["new_state"]), context, own=own)
@@ -309,7 +310,7 @@ class LiveRuntime:
             return True
         if not self._hass.services.has_service(domain, service):
             raise RuntimeError(f"service {domain}.{service} not found")
-        self._dispatch(domain, service, entity_id, on_error, by, current)
+        self._dispatch(domain, service, entity_id, on_error, by)
         return False
 
     @callback
@@ -328,19 +329,19 @@ class LiveRuntime:
             if st is None or st.state in ("unavailable", "unknown"):
                 # still sent (HA may accept it); the rule re-sends it when the target becomes available
                 on_error("target unavailable", "target unavailable")
-            self._dispatch(domain, service, entity_id, on_error, by, current)
+            self._dispatch(domain, service, entity_id, on_error, by)
 
     def _dispatch(
         self, domain: str, service: str, entity_id: str, on_error: Callable[..., None], by: object = None,
-        current: Callable[[], bool] = lambda: True, retry: bool = False,
+        retry: bool = False,
     ) -> None:
-        """Send one call with its own context. The state it should bring is recorded as the entity's latest command
-        with its sender (the rule `by` and whether it still wants it, current()); a retry keeps the first one's record."""
+        """Send one call with its own context. The state it should bring is recorded as the entity's latest command of
+        the rule `by`; a retry keeps the first send's record."""
         ctx = Context()
         self.runtime.ignore_context(ctx.id)  # its state change is not a press for a wall switch
         state = expect(domain, service)
         if state is not None and not retry:
-            self._expected.sent(entity_id, state, self._now(), (by, current))
+            self._expected.sent(entity_id, state, self._now(), by)
         # A background task that starts on the next loop turn: the call cannot re-enter the engine from inside a firing.
         task = self._hass.async_create_background_task(
             self._send(domain, service, entity_id, ctx), f"plan_studio rule {domain}.{service}", eager_start=False
@@ -378,17 +379,17 @@ class LiveRuntime:
             self._expected_timer = None
 
     def _expected_due(self) -> None:
-        """A command without its confirmation: sent once more after RETRY s with Plan Studio's context (not while the
-        entity has no data: the engine's "waiting for target" re-send covers its return; not when its sender no longer
-        wants it: its firing is no longer the latest one); given up after EXPIRE s with a warning and "not confirmed"
-        on the entry of the rule that sent it. An entity already reading the expected state (its change was not seen,
-        or the command found it there) is confirmed silently."""
+        """A command without its confirmation: sent once more after RETRY s with Plan Studio's context when the engine
+        says its sender still wants it now (engine.still_wants; never while the entity has no data: the engine's
+        "waiting for target" re-send covers its return; on False the record stays, so a late confirmation is still
+        ours); given up after EXPIRE s with a warning and "not confirmed" on the entry of the rule that sent it. An
+        entity already reading the expected state (its change was not seen, or the command found it there) is
+        confirmed silently."""
         self._expected_timer = None
         if self._stopped:
             return
         now = self._now()
-        for entity_id, state, sender, what in self._expected.due(now):
-            by, current = sender
+        for entity_id, state, by, what in self._expected.due(now):
             st = self._hass.states.get(entity_id)
             domain = entity_id.split(".", 1)[0]
             if st is not None and st.state == state:
@@ -397,7 +398,14 @@ class LiveRuntime:
                 continue
             if what == "retry":
                 svc = service_for(domain, state)
-                if svc is not None and st is not None and st.state not in ("unavailable", "unknown") and current():
+                if svc is None or st is None or st.state in ("unavailable", "unknown"):
+                    continue
+                try:
+                    wanted = self.engine.still_wants(by, entity_id, state)
+                except Exception:  # noqa: BLE001 - a failing answer must not stop the other records
+                    _LOGGER.exception("asking whether %s still wants %s failed", by, entity_id)
+                    continue
+                if wanted:
                     self._dispatch(domain, svc, entity_id, lambda *_: None, retry=True)  # a failure is logged
                 continue
             _LOGGER.warning("%s did not confirm %s within %s s", entity_id, service_for(domain, state), EXPIRE)
