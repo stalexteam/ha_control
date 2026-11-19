@@ -136,7 +136,9 @@ class MotionLight:
         self.dropped, self.presses, self.blocked, self.met = old.dropped, old.presses, old.blocked, old.met
         self.day_off = old.day_off
         self.hold_from, self.left = old.hold_from, old.left
-        self.zone_was, self.next_to = list(old.zone_was), list(old.next_to)
+        self.zone_was = list(old.zone_was)
+        # other neighbours (a neighbours-only Save): read anew, no transition from that first read
+        self.next_to = list(old.next_to) if old.neighbours == self.neighbours else []
 
     def stop(self) -> None:
         if self.timer is not None:
@@ -217,20 +219,20 @@ class MotionLight:
         is kept on for someone still in the zone.
         The zone's motion END while the rule holds the light (the zone read motion at the previous evaluation and every
         own sensor that did now reads a known off): a neighbour reading motion (known on) at that moment is a departure
-        (`left`; no hold, the off delay starts at once), otherwise the hold starts. While held, a neighbour's known
-        off -> on is a departure (the off delay starts). A neighbour's activity while the zone still reads motion that
-        ended before the zone's motion end does not count (another person, or the neighbour seeing into the zone). No
-        data tells nothing. The hold lasts while no departure comes and HOLD_MAX has not passed. A light taken as found
-        on without a motion end is not held. Motion in the zone or the rule no longer holding the light ends the hold
-        and a departure. Never without neighbour sensors."""
+        (`left`; no hold, the off delay starts at once), otherwise the hold starts. While held, a neighbour going to on
+        from off or from no data (§7: its first report after an HA start) is a departure (the off delay starts). A
+        neighbour's activity while the zone still reads motion that ended before the zone's motion end does not count
+        (another person, or the neighbour seeing into the zone). Otherwise no data tells nothing. A neighbour read for
+        the first time (`next_to` empty: after a reset or a neighbours-only Save) gives no transition. The hold lasts
+        while no departure comes and HOLD_MAX has not passed. A light taken as found on without a motion end is not
+        held. Motion in the zone or the rule no longer holding the light ends the hold and a departure. Never without
+        neighbour sensors (also when a Save removed them all)."""
         n, k = len(self.sensors), self.neighbour_at
         own = [values[i] if len(values) > i else None for i in range(n)]
         seen = [values[k + j] if len(values) > k + j else None for j in range(len(self.neighbours))]
         was, self.zone_was = self.zone_was, own
         prev, self.next_to = self.next_to, seen
-        if not self.neighbours:
-            return False
-        if True in own or not holding:
+        if not self.neighbours or True in own or not holding:
             self.hold_from = self.left = None
             return False
         if True in was and all(s is False for p, s in zip(was, own) if p is True):  # the zone's motion ended
@@ -240,7 +242,8 @@ class MotionLight:
             else:
                 self.hold_from, self.left = now, None
         elif self.present(now):
-            j = next((j for j, (p, s) in enumerate(zip(prev, seen)) if p is False and s is True), None)  # BECAME active
+            # BECAME active: off -> on, or no data -> on (spec §7: the first report after an HA start)
+            j = next((j for j, (p, s) in enumerate(zip(prev, seen)) if p is not True and s is True), None)
             if j is not None:
                 self.left = self.neighbour_names[j]
         return self.present(now)

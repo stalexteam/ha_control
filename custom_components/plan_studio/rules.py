@@ -574,10 +574,17 @@ class _Rule:
             self.pairs = {self.boiler.relay}
         self.on_delay = _delay(raw.get("onDelay"))
         self.off_delay = _delay(raw.get("offDelay"))
+        # name and zoneId are cosmetic: changing only them keeps the runtime state; so do a motion light rule's
+        # neighbours (derived by the panel at every Save, spec presence hold §7): its neighbour inputs, appended after
+        # all the others, are rebuilt and read anew (adopt, MotionLight.take)
+        core = {k: v for k, v in raw.items() if k not in ("name", "zoneId")}
+        self.own_inputs = len(self.inputs)  # the inputs whose runtime state an unchanged rule keeps
+        if self.motion_light is not None:
+            core["motionLight"] = {k: v for k, v in core["motionLight"].items() if k != "neighbours"}
+            self.own_inputs = self.motion_light.neighbour_at
         self.sig = (
-            # name and zoneId are cosmetic: changing only them keeps the runtime state
-            json.dumps({k: v for k, v in raw.items() if k not in ("name", "zoneId")}, sort_keys=True, default=str),
-            tuple(i.sig for i in self.all_inputs),
+            json.dumps(core, sort_keys=True, default=str),
+            tuple(i.sig for i in self.inputs[:self.own_inputs] + ([self.gate] if self.gate is not None else [])),
             tuple(a.call for a in self.on_true + self.on_false),
         )
         # runtime state, kept across a reload that leaves the rule unchanged
@@ -604,7 +611,9 @@ class _Rule:
         self.verdict, self.pending, self.last, self.failed = old.verdict, old.pending, old.last, old.failed
         self.seq, self.entries, self.sent, self.open = old.seq, old.entries, old.sent, old.open
         self.seen, self.acted = dict(old.seen), old.acted
-        self.known, self.basis, self.real = list(old.known), list(old.basis), old.real
+        # per input, by position: kept for the inputs of the same sig; neighbour inputs (after them) start unknown
+        k, fresh = self.own_inputs, [None] * (len(self.inputs) - self.own_inputs)
+        self.known, self.basis, self.real = list(old.known[:k]) + fresh, list(old.basis[:k]) + fresh, old.real
         if self.outside is not None and old.outside is not None:
             old.outside.stop()
             self.outside.take(old.outside)
@@ -613,8 +622,10 @@ class _Rule:
             self.beurer.take(old.beurer)
         if self.control is not None and old.control is not None:
             self.control.take(old.control)
-        for new, prev in zip(self.all_inputs, old.all_inputs):
+        for prev in old.all_inputs:
             prev.stop()
+        gates = [(self.gate, old.gate)] if self.gate is not None and old.gate is not None else []
+        for new, prev in list(zip(self.inputs[:self.own_inputs], old.inputs[:old.own_inputs])) + gates:
             new.take(prev)
 
     def cancel(self) -> None:
@@ -2921,7 +2932,8 @@ class RuleEngine:
         if rule.pending is not None:
             out["pending"] = {"to": rule.pending.to, "at": rule.pending.at}
         out["inputs"] = [dict(t) for t in rule.trace_inputs]
-        out["unknownInputs"] = sum(1 for t in rule.trace_inputs if t["value"] is None)
+        # a motion light rule's neighbour inputs (after its own) only end a presence hold: no data there tells nothing
+        out["unknownInputs"] = sum(1 for t in rule.trace_inputs[:rule.own_inputs] if t["value"] is None)
         if rule.gate_trace is not None:
             out["gate"] = dict(rule.gate_trace)
             if rule.enabled and not rule.open and rule.actions():

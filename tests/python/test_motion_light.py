@@ -38,7 +38,9 @@ LS60 = sensor("ls60", "LightSensor 60", debounce=60)  # the same lux entity, deb
 # motion sensors of the neighbouring zones (spec presence hold §3)
 PIR3 = dev("pir3", "motion_sensor", "Motion Entrance", motion="binary_sensor.pir3")
 PIR4 = dev("pir4", "motion_sensor", "Motion Transit", motion="binary_sensor.pir4")
-DEVICES = [LAMP, LAMP2, PIR1, PIR2, LS, BTN, WS, WSP, WS2, WSX, ENT, SWE, TB, VS, RB, SOCK, SOCKX, LS60, PIR3, PIR4]
+PIR5 = dev("pir5", "motion_sensor", "Motion unbound")  # no motion entity bound
+DEVICES = [LAMP, LAMP2, PIR1, PIR2, LS, BTN, WS, WSP, WS2, WSX, ENT, SWE, TB, VS, RB, SOCK, SOCKX, LS60, PIR3, PIR4,
+           PIR5]
 ON, OFF = ("light", "turn_on", "light.k"), ("light", "turn_off", "light.k")
 ON2, OFF2 = ("light", "turn_on", "light.k2"), ("light", "turn_off", "light.k2")
 E_ON, E_OFF = ("switch", "turn_on", "switch.entrance"), ("switch", "turn_off", "switch.entrance")
@@ -1972,8 +1974,14 @@ def test_presence_table():
     assert m.hold([False, False], 70, True) is True and m.hold_from == 70  # the zone's motion ends: held
     assert m.hold_until(70) == 70 + HOLD
     assert m.hold([False, None], 80, True) is True  # no data tells nothing
-    assert m.hold([False, True], 90, True) is True  # nor does a return from no data
-    assert m.hold([False, False], 100, True) is True
+    # spec §7: from no data to on while held is BECAME active too (a first report after HA start)
+    assert m.hold([False, True], 90, True) is False and m.left == "Motion Entrance"
+    assert m.hold([True, True], 95, True) is False and m.left is None
+    assert m.hold([True, None], 97, True) is False
+    assert m.hold([True, False], 99, True) is False
+    assert m.hold([False, False], 100, True) is True and m.hold_from == 100
+    assert m.hold([False, None], 105, True) is True
+    assert m.hold([False, False], 107, True) is True  # from no data to off: nothing
     assert m.hold([False, True], 110, True) is False and m.left == "Motion Entrance"  # BECAME active while held
     assert m.hold_until(110) is None
     assert m.hold([True, True], 120, True) is False and m.hold_from is None and m.left is None  # back in the zone
@@ -2016,6 +2024,8 @@ def test_presence_table():
     m = make(sensors=["pir1"], presence=True)
     assert m.hold([True], 0, True) is False and m.hold([False], 1, True) is False  # no neighbour sensors: as today
     assert m.hold_from is None
+    m.hold_from, m.left = 5.0, "x"  # taken from a rule that had neighbours (a neighbours-only Save)
+    assert m.hold([False], 6, True) is False and m.hold_from is None and m.left is None
 
 
 def test_a_still_person_keeps_the_light_on_up_to_the_max_hold():
@@ -2234,11 +2244,12 @@ def test_sleep_or_daylight_switch_a_held_light_off_at_once():
 
 
 def test_a_dead_neighbour_sensor_holds_up_to_the_max_hold():
-    """Review focus 4."""
+    """Review focus 4. (0.28.2: a neighbour back from no data reading motion is a departure, see
+    test_a_neighbour_first_report_on_after_ha_start_is_a_departure; back reading off tells nothing.)"""
     w = lit([ml_rule(**PRESENT)], binary_sensor__pir3="unavailable")
     w.pir("off")
     assert w.ml()["present"] is True
-    w.pir("on", 3)  # back from no data reading motion: tells nothing
+    w.pir("off", 3)  # back from no data reading no motion: tells nothing
     w.pir("unavailable", 3)
     w.advance(T0 + HOLD - 1)
     assert w.calls == [] and w.ml()["present"] is True
@@ -2521,6 +2532,116 @@ def test_a_neighbour_becoming_active_while_held_starts_the_off_delay():
     assert w.calls == []
     w.advance(T0 + 480)
     assert w.calls == [OFF]
+
+
+def test_a_neighbour_first_report_on_after_ha_start_is_a_departure():
+    """0.28.2 review focus 1: after an HA start the neighbour stays unknown until its first report; the WC is held
+    (the neighbour without data at the zone's motion end tells nothing); its first report 'on' is BECAME active."""
+    w = MWorld(light__k="on", binary_sensor__pir1="on", binary_sensor__pir3="unknown")
+    w.load([ml_rule(**PRESENT)], boot=True)
+    w.engine.started()
+    w.advance(T0 + 20)
+    w.pir("off")
+    t = w.tr()
+    assert t["motionLight"]["present"] is True and "pending" not in t
+    w.advance(T0 + 300)
+    w.pir("on", 3)  # its first report
+    t = w.tr()
+    assert t["motionLight"]["left"] == "Motion Entrance" and t["pending"]["at"] == (T0 + 480) * 1000
+    assert "present" not in t["motionLight"]
+    w.advance(T0 + 479)
+    assert w.calls == []
+    w.advance(T0 + 480)
+    assert w.calls == [OFF]
+
+
+def test_a_neighbours_only_save_while_held_keeps_the_hold():
+    """0.28.2 review focus 2: the panel recomputes the neighbours at a Save; a Save that changes only them keeps the
+    runtime state: still held, the same holdUntil, no found on, nothing sent. The new neighbours are read fresh: one
+    reading motion at the Save is no departure; its next off -> on is."""
+    w = lit([ml_rule(**PRESENT)])
+    w.pir("off")
+    last = w.tr()["last"]
+    w.advance(T0 + 100)
+    w.set("binary_sensor.pir4", "on")  # not read by the rule yet
+    w.load([ml_rule(presence=True, neighbours=("pir3", "pir4"))])
+    t = w.tr()
+    assert w.calls == [] and t["verdict"] is True and t["last"] == last and "pending" not in t
+    assert t["motionLight"]["present"] is True and t["motionLight"]["holdUntil"] == (T0 + HOLD) * 1000
+    assert [n["id"] for n in t["motionLight"]["neighbours"]] == ["pir3", "pir4"] and len(w.pending()) == 1
+    assert "binary_sensor.pir4" in w.engine.entity_ids()
+    w.advance(T0 + 120)
+    w.pir("off", 4)
+    assert w.ml()["present"] is True
+    w.advance(T0 + 200)
+    w.pir("on", 4)
+    t = w.tr()
+    assert t["motionLight"]["left"] == "Motion Transit" and t["pending"]["at"] == (T0 + 380) * 1000
+    w.advance(T0 + 380)
+    assert w.calls == [OFF]
+    w = lit([ml_rule(**PRESENT)])  # the hold's end still comes at its time
+    w.pir("off")
+    w.load([ml_rule(presence=True, neighbours=("pir4",))])
+    w.advance(T0 + HOLD + 179)
+    assert w.calls == []
+    w.advance(T0 + HOLD + 180)
+    assert w.calls == [OFF]
+    w = lit([ml_rule(**PRESENT)])  # the neighbours all gone: no hold, the off delay from the Save
+    w.pir("off")
+    w.advance(T0 + 100)
+    w.load([ml_rule(presence=True, neighbours=())])
+    t = w.tr()
+    assert "present" not in t["motionLight"] and t["pending"]["at"] == (T0 + 280) * 1000 and len(w.pending()) == 1
+    assert t["last"]["reason"] != "found on"
+    w = lit([ml_rule(buttons=("btn",), **PRESENT)])  # manual is kept as for any Save with the same light and buttons
+    w.press("btn", "set", "on")
+    w.load([ml_rule(buttons=("btn",), presence=True, neighbours=("pir4",))])
+    assert w.ml()["mode"] == "manual" and w.calls == []
+
+
+def test_a_neighbours_only_save_while_a_departure_off_delay_runs_keeps_it():
+    """0.28.2 review focus 3: the off still comes at the same time, also when the departed neighbour is no longer one."""
+    for after in (("pir3", "pir4"), ("pir4",)):
+        w = lit([ml_rule(**PRESENT)])
+        w.pir("off")
+        w.advance(T0 + 100)
+        w.pir("on", 3)
+        assert w.tr()["pending"]["at"] == (T0 + 280) * 1000
+        w.advance(T0 + 150)
+        w.load([ml_rule(presence=True, neighbours=after)])
+        t = w.tr()
+        assert t["pending"]["at"] == (T0 + 280) * 1000 and t["motionLight"]["left"] == "Motion Entrance", after
+        assert "present" not in t["motionLight"], after
+        w.advance(T0 + 279)
+        assert w.calls == [], after
+        w.advance(T0 + 280)
+        assert w.calls == [OFF], after
+
+
+def test_a_real_change_with_new_neighbours_still_restarts_the_rule():
+    """0.28.2 review focus 4: offDelay or the sensors changed (with or without new neighbours): the rule restarts (the
+    light found on, no hold, the off delay from the Save)."""
+    for changed in (ml_rule(off=60, presence=True, neighbours=("pir3", "pir4")),
+                    ml_rule(sensors=("pir1", "pir2"), presence=True, neighbours=("pir3",)),
+                    ml_rule(off=60, **PRESENT)):
+        w = lit([ml_rule(**PRESENT)])
+        w.pir("off")
+        w.advance(T0 + 100)
+        w.load([changed])
+        t = w.tr()
+        delay = 60 if changed["offDelay"] == 60 else 180
+        assert t["last"]["reason"] == "found on" and "present" not in t["motionLight"], changed
+        assert t["pending"]["at"] == (T0 + 100 + delay) * 1000, changed
+
+
+def test_unknown_inputs_do_not_count_the_neighbours():
+    """0.28.2: an unbound, unavailable or unknown neighbour never shows as an unknown input of the rule."""
+    w = loaded([ml_rule(presence=True, neighbours=("pir5", "pir3", "pir4"))], binary_sensor__pir3="unavailable",
+               binary_sensor__pir4="unknown")
+    t = w.tr()
+    assert t["unknownInputs"] == 0 and len(t["inputs"]) == 4 and t["status"] == "ok"
+    w = loaded([ml_rule(presence=True, neighbours=("pir5",))], binary_sensor__pir1="unavailable")
+    assert w.tr()["unknownInputs"] == 1  # the rule's own sensor still counts
 
 
 def test_a_neighbour_without_data_at_the_zone_motion_end_tells_nothing():
