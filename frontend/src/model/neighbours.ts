@@ -143,7 +143,11 @@ function coneOf(level: Level, d: Device): Pt[][] {
   let m = cones.get(level);
   if (!m) cones.set(level, m = new Map());
   let c = m.get(d.id);
-  if (!c) m.set(d.id, c = clippedCone(level, d));
+  if (!c) {
+    // A geometry failure must never block a Save or a draft: the sensor then sees nothing.
+    try { c = clippedCone(level, d); } catch { c = []; }
+    m.set(d.id, c);
+  }
   return c;
 }
 const covers = (rings: Pt[][], p: Pt): boolean => rings.reduce((inside, ring) => (pointInPolygon(p, ring) ? !inside : inside), false);

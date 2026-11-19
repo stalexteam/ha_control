@@ -468,7 +468,7 @@ const en: Dict = {
   'motionLight.presence': 'Keep on while someone is present',
   'motionLight.neighbours': 'Neighbours: {list}',
   'motionLight.outside': 'outside',
-  'motionLight.noNeighbours': 'No neighbouring zone with a motion sensor on the plan: this has no effect.',
+  'motionLight.noNeighbours': 'No motion sensor sees past the zone\'s doors or passages: this has no effect.',
   'motionLight.problem.light': 'Choose the light',
   'motionLight.flow.title': 'Light motion control diagram',
   'motionLight.flow.motion': 'motion',

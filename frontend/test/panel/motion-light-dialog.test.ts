@@ -453,7 +453,7 @@ describe('Light motion control blocker', () => {
       expect(note(el)).toBeNull();
     });
 
-    it('without a neighbouring zone (no door) or without a zone the note says it has no effect', async () => {
+    it('without a sensor seeing past a passage (no door) or without a zone the note says it has no effect', async () => {
       for (const zone of ['r0', null]) {
         document.body.innerHTML = ''; localStorage.clear();
         const el = await open([], withHall(zone === 'r0' ? false : true));
@@ -462,7 +462,7 @@ describe('Light motion control blocker', () => {
         box(el).checked = true;
         box(el).dispatchEvent(new Event('change', { bubbles: true, composed: true }));
         await el.updateComplete;
-        expect(note(el)!.textContent).toBe('No neighbouring zone with a motion sensor on the plan: this has no effect.');
+        expect(note(el)!.textContent).toBe("No motion sensor sees past the zone's doors or passages: this has no effect.");
       }
     });
 

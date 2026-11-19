@@ -34,8 +34,7 @@ describe('neighbourZones by cones', () => {
     expect(ids(level, 'a')).toEqual(['b:look']);
   });
 
-  it('where the sensor hangs does not matter: a sensor in a third zone whose cone covers the door counts', () => {
-    // Hangs in zone c's strip? no: in B's far corner area is not needed; it stands outside every zone and looks through the door.
+  it('a sensor standing in the destination zone and looking at the door counts; one looking at another part of the plan does not', () => {
     const level = scene(midGap('door'), [pir('far', 5000, 1500, 180)]);
     expect(ids(level, 'a')).toEqual(['b:far']);
     const elsewhere = scene(midGap('door'), [pir('c-side', 1500, -1500, 270)]);
@@ -81,13 +80,13 @@ describe('neighbourZones by cones', () => {
   });
 
   it('a wall-mounted sensor looking through the door counts', () => {
+    // On the face of the partition wall 'mid' beside the door (y 600), aimed straight at the face's normal: it looks into one room only.
     const wall: Device = {
-      ...pir('pw', 0, 0, 0), placement: { mode: 'wall', wallId: 'w2', side: 'left', offset: 1500, aim: 0 } as DevicePlacement,
+      ...pir('pw', 0, 0, 0), placement: { mode: 'wall', wallId: 'mid', side: 'right', offset: 600, aim: 0 } as DevicePlacement,
       props: deviceDefaults('motion_sensor', 'wall'),
     };
     const level = scene(midGap('door'), [wall]);
-    // w2 runs n2 (6000,3000) -> n3 ... on the plan's south side: whichever room it faces, it sees at most one of the two rooms' door areas.
-    expect(ids(level, 'a').length + ids(level, 'b').length).toBeLessThanOrEqual(1);
+    expect([ids(level, 'a'), ids(level, 'b')].flat()).toHaveLength(1);
   });
 
   it('the result is cached per level object and rule: the same array comes back', () => {
@@ -110,6 +109,12 @@ describe('zones touching without a wall', () => {
     const level = open(east, [pir('in-q', 1800, -2500, 180), pir('in-p', 200, -2500, 0), pir('away', 1800, -2500, 0)]);
     expect(ids(level, 'p', ['in-p'])).toEqual(['q:in-q']);
     expect(ids(level, 'q', ['in-q'])).toEqual(['p:in-p']);
+  });
+
+  it('a sensor hung in a third zone (neither the rule zone nor the destination) whose cone covers the shared edge counts', () => {
+    const level = open(east, [pir('in-r', 3000, -2500, 180)]);
+    level.zones.push(box('r', 2500, -3000, 3500, -2000));
+    expect(ids(level, 'p')).toEqual(['q:in-r']);
   });
 
   it('a shared edge along a wall (the centreline of mid, x 3000) is not a passage', () => {
