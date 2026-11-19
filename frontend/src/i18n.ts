@@ -467,6 +467,7 @@ const en: Dict = {
   'motionLight.autoAfterNote': '0 = never',
   'motionLight.presence': 'Keep on while someone is present',
   'motionLight.neighbours': 'Neighbours: {list}',
+  'motionLight.outside': 'outside',
   'motionLight.noNeighbours': 'No neighbouring zone with a motion sensor on the plan: this has no effect.',
   'motionLight.problem.light': 'Choose the light',
   'motionLight.flow.title': 'Light motion control diagram',

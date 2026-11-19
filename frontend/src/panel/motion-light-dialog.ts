@@ -149,7 +149,7 @@ export function renderMotionLightDialog(o: MotionLightDialogOpts): TemplateResul
           set((e.target as HTMLInputElement).checked ? { ...rest, presence: true } : rest);
         }} /> ${t('motionLight.presence')}</label>
       ${c.presence === true ? html`<span class="muted" data-note="motionlight-neighbours">${o.neighbours.length > 0
-        ? t('motionLight.neighbours').replace('{list}', () => o.neighbours.map(n => `${n.zone.name} — ${n.sensors.map(s => s.name).join(', ')}`).join('; '))
+        ? t('motionLight.neighbours').replace('{list}', () => o.neighbours.map(n => `${n.zone?.name ?? t('motionLight.outside')} — ${n.sensors.map(s => s.name).join(', ')}`).join('; '))
         : t('motionLight.noNeighbours')}</span>` : nothing}
       ${noAuto ? html`<p class="muted" data-note="motionlight-noauto">${t('motionLight.noAutoNote')}</p>` : nothing}`,
     diagram: renderMotionLightTrace({

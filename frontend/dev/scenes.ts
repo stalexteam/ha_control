@@ -639,7 +639,7 @@ function motionLightPresence(): Plan {
   const l = p.levels[0];
   l.openings.push({ id: 'o-east', wallId: 'w1', kind: 'door', offset: 1200, width: 900, invalid: false });
   l.zones.push({ id: 'z-hall', name: 'Hall', invalid: false, shape: { kind: 'polygon', vertices: [[4100, 50], [6000, 50], [6000, 2950], [4100, 2950]].map(([x, y]) => ({ kind: 'free' as const, x, y })) } });
-  l.devices.push({ id: 'd-motion-east', name: 'Motion east', invalid: false, bindings: { motion: 'binary_sensor.east_motion' }, placement: { mode: 'free', x: 5000, y: 1500, rotation: 0 }, props: { kind: 'motion_sensor', zoneAngle: 110, zoneRange: 3000 } });
+  l.devices.push({ id: 'd-motion-east', name: 'Motion east', invalid: false, bindings: { motion: 'binary_sensor.east_motion' }, placement: { mode: 'free', x: 5000, y: 1500, rotation: 180 }, props: { kind: 'motion_sensor', zoneAngle: 110, zoneRange: 3000 } });
   return p;
 }
 const MOTION_LIGHT_NOSENSORS = motionLightTrace(
