@@ -2006,7 +2006,7 @@ class RuleEngine:
         if rule.verdict is True:
             m.day_off = False  # the rule holds a light again
         else:
-            m.hold_from = None  # nothing held (a departure seen meanwhile still counts)
+            m.hold_from = None  # nothing held
         self._motion_arm(rule, m.hold_until(now))  # the hold's end (auto has no other timer)
         return rule.verdict != was
 

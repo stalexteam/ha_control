@@ -1961,39 +1961,43 @@ def test_neighbours_are_motion_sensors_of_the_plan_and_only_with_presence():
 
 
 def test_presence_table():
-    """Arguments: values (the zone's sensor, the neighbour), now, the rule holds the light (amended spec §3: a
-    departure counts from the zone's last motion start; the hold starts only at the zone's motion end)."""
+    """Arguments: values (the zone's sensor, the neighbour), now, the rule holds the light. Spec §6 (owner): the person
+    left when the zone's sensor stopped being active and a neighbour is STILL active (at the zone's motion end) or
+    BECAME active (while held); the hold starts only at the zone's motion end."""
     m = make(sensors=["pir1"], presence=True, neighbours=["pir3"])
     assert m.hold([False, False], 0, True) is False and m.hold_from is None  # held without a motion end: no hold
-    assert m.hold([False, True], 5, True) is False and m.left == "Motion Entrance"  # off -> on: recorded
-    assert m.hold([True, True], 10, True) is False and m.left is None  # the zone's motion starts: forgotten
-    # the neighbour already read motion when the zone's motion started (someone came in from there): no departure
+    assert m.hold([False, True], 5, True) is False and m.left is None  # off -> on without a hold: nothing
+    assert m.hold([True, True], 10, True) is False and m.left is None
     assert m.hold([True, False], 25, True) is False and m.left is None
     assert m.hold([False, False], 70, True) is True and m.hold_from == 70  # the zone's motion ends: held
     assert m.hold_until(70) == 70 + HOLD
     assert m.hold([False, None], 80, True) is True  # no data tells nothing
     assert m.hold([False, True], 90, True) is True  # nor does a return from no data
     assert m.hold([False, False], 100, True) is True
-    assert m.hold([False, True], 110, True) is False and m.left == "Motion Entrance"  # off -> on: may have left
+    assert m.hold([False, True], 110, True) is False and m.left == "Motion Entrance"  # BECAME active while held
     assert m.hold_until(110) is None
     assert m.hold([True, True], 120, True) is False and m.hold_from is None and m.left is None  # back in the zone
     assert m.hold([True, False], 125, True) is False
-    # a departure while the zone still reads motion (its sensor's timeout after the last movement) is recorded
-    assert m.hold([True, True], 130, True) is False and m.left == "Motion Entrance"
-    assert m.hold([False, True], 190, True) is False and m.hold_from is None  # the zone clears: no hold, off delay
-    assert m.hold([True, True], 200, True) is False and m.left is None  # back: the departure no longer counts
-    # final review: a neighbour reading motion at the zone's motion end is a departure (a short visit re-triggers it
-    # on the way out without a new off -> on); one without data tells nothing
-    assert m.hold([False, True], 218, True) is False and m.hold_from is None and m.left == "Motion Entrance"
-    assert m.hold([True, True], 230, True) is False and m.left is None
+    # the neighbour active and clear again while the zone still reads motion (another person, or it sees into the
+    # zone): no departure
+    assert m.hold([True, True], 130, True) is False and m.left is None
+    assert m.hold([True, False], 148, True) is False and m.left is None
+    assert m.hold([False, False], 160, True) is True and m.hold_from == 160
+    assert m.hold([True, False], 170, True) is False and m.hold_from is None
+    # the neighbour STILL active at the zone's motion end: a departure (no hold, the off delay at once)
+    assert m.hold([True, True], 175, True) is False and m.left is None
+    assert m.hold([False, True], 190, True) is False and m.hold_from is None and m.left == "Motion Entrance"
+    assert m.hold([False, False], 195, True) is False and m.left == "Motion Entrance"  # it clearing changes nothing
+    assert m.hold([True, False], 200, True) is False and m.left is None  # back: the departure no longer counts
     assert m.hold([True, None], 235, True) is False
-    assert m.hold([False, None], 250, True) is True and m.hold_from == 250
+    assert m.hold([False, None], 250, True) is True and m.hold_from == 250  # without data at the end: nothing
     assert m.hold([True, None], 255, True) is False and m.hold_from is None
     assert m.hold([True, False], 258, True) is False
     assert m.hold([False, False], 260, True) is True and m.hold_from == 260
     assert m.hold([False, False], 260 + HOLD - 1, True) is True
     assert m.hold([False, False], 260 + HOLD, True) is False and m.left is None  # the maximum hold has passed
-    assert m.hold([False, False], 260 + HOLD + 1, False) is False and m.hold_from is None  # the light let go
+    assert m.hold([False, True], 260 + HOLD + 1, True) is False and m.left is None  # no longer held: nothing
+    assert m.hold([False, False], 260 + HOLD + 2, False) is False and m.hold_from is None  # the light let go
     # a motion end while the light is not held, then the light held: no hold (no motion end while held)
     assert m.hold([True, False], 3000, False) is False
     assert m.hold([False, False], 3060, False) is False and m.hold_from is None
@@ -2113,7 +2117,8 @@ def test_a_neighbour_already_on_when_the_zone_motion_started_does_not_count():
 
 def test_a_departure_while_the_zone_still_reads_motion_starts_the_off_delay_at_the_clear():
     """Review finding I1, probe A: a motion sensor reads motion for its timeout after the last movement, so the person
-    leaving triggers the neighbour before the zone clears: the off delay starts when the zone clears (no hold)."""
+    leaving triggers the neighbour before the zone clears; the neighbour is STILL active when the zone clears: the off
+    delay starts then (no hold)."""
     w = lit([ml_rule(**PRESENT)])
     w.advance(T0 + 5)
     w.pir("on", 3)  # the person leaves: the neighbour sees them, the zone still reads motion
@@ -2153,9 +2158,8 @@ def test_a_person_moving_on_in_the_neighbouring_zone_is_not_held():
 
 def test_a_walk_out_and_back_with_sensor_timeouts():
     """The owner's "a walk to the kitchen and back" with sensor timeouts (live ~18 s after the last movement): the
-    departure is seen while the zone still reads motion; the zone clears: the off delay; the return's motion cancels it
-    and the departure; the next clear holds again (the neighbour read motion before the zone's motion started and has
-    cleared since: no departure)."""
+    zone clears while the neighbour is STILL active: the off delay; the return's motion cancels it and the departure;
+    the next clear holds again (the neighbour has cleared by then: no departure)."""
     w = lit([ml_rule(**PRESENT)])
     w.advance(T0 + 5)
     w.pir("on", 3)  # leaves: the neighbour sees them, the zone still reads motion
@@ -2441,6 +2445,82 @@ def test_staying_in_the_zone_after_entering_from_a_neighbour_is_held():
     w.pir("off")
     t = w.tr()
     assert t["motionLight"]["present"] is True and "left" not in t["motionLight"] and "pending" not in t
+
+
+def test_wc_sit_still_after_entering_from_the_hall_is_held():
+    """0.28.1 review focus 1 (18 s on-periods): Motion Entrance on at -3, off at +15; the zone's motion until +60,
+    clear at +78: held; 10 min still: still held, nothing sent."""
+    w = entered_from_the_neighbour([ml_rule(**PRESENT)])
+    w.advance(T0 + 15)
+    w.pir("off", 3)
+    w.advance(T0 + 78)
+    w.pir("off")
+    t = w.tr()
+    assert t["motionLight"]["present"] is True and t["motionLight"]["holdUntil"] == (T0 + 78 + HOLD) * 1000
+    assert "pending" not in t and "left" not in t["motionLight"]
+    w.advance(T0 + 678)
+    assert w.calls == [] and w.ml()["present"] is True
+
+
+def test_wc_exit_with_the_neighbour_still_active_at_the_zone_motion_end():
+    """0.28.1 review focus 2: moves until +60, walks out at +62 past Motion Entrance (on until +80); the zone clears at
+    +78 while it is STILL active: a departure, the off delay at once."""
+    w = entered_from_the_neighbour([ml_rule(**PRESENT)])
+    w.advance(T0 + 15)
+    w.pir("off", 3)
+    w.advance(T0 + 62)
+    w.pir("on", 3)  # the zone still reads motion: nothing yet
+    t = w.tr()
+    assert "pending" not in t and "left" not in t["motionLight"] and "present" not in t["motionLight"]
+    w.advance(T0 + 78)
+    w.pir("off")
+    t = w.tr()
+    assert "present" not in t["motionLight"] and t["motionLight"]["left"] == "Motion Entrance"
+    assert t["pending"] == {"to": False, "at": (T0 + 258) * 1000}
+    w.advance(T0 + 80)
+    w.pir("off", 3)
+    w.advance(T0 + 257)
+    assert w.calls == []
+    w.advance(T0 + 258)
+    assert w.calls == [OFF]
+
+
+def test_another_person_next_door_while_the_zone_reads_motion_is_no_departure():
+    """0.28.1 review focus 3: Motion Entrance active from +30 to +48 while the zone still reads motion (another person
+    in the hall, or the sensor seeing into the zone), clear before the zone clears at +78: held."""
+    w = entered_from_the_neighbour([ml_rule(**PRESENT)])
+    w.advance(T0 + 15)
+    w.pir("off", 3)
+    w.advance(T0 + 30)
+    w.pir("on", 3)
+    w.advance(T0 + 48)
+    w.pir("off", 3)
+    w.advance(T0 + 78)
+    w.pir("off")
+    t = w.tr()
+    assert t["motionLight"]["present"] is True and "left" not in t["motionLight"] and "pending" not in t
+    w.advance(T0 + 678)
+    assert w.calls == []
+
+
+def test_a_neighbour_becoming_active_while_held_starts_the_off_delay():
+    w = entered_from_the_neighbour([ml_rule(**PRESENT)])
+    w.advance(T0 + 15)
+    w.pir("off", 3)
+    w.advance(T0 + 78)
+    w.pir("off")
+    assert w.ml()["present"] is True
+    w.advance(T0 + 300)
+    w.pir("on", 3)  # BECAME active while held
+    t = w.tr()
+    assert t["motionLight"]["left"] == "Motion Entrance" and t["pending"]["at"] == (T0 + 480) * 1000
+    assert "present" not in t["motionLight"]
+    w.advance(T0 + 318)
+    w.pir("off", 3)
+    w.advance(T0 + 479)
+    assert w.calls == []
+    w.advance(T0 + 480)
+    assert w.calls == [OFF]
 
 
 def test_a_neighbour_without_data_at_the_zone_motion_end_tells_nothing():
