@@ -102,3 +102,21 @@ export function visibilityPolygon(origin: Pt, obstacles: Segment[], radius: numb
   if (ring.length > 1 && first.x === last.x && first.y === last.y) ring.pop();
   return ring;
 }
+
+// Line-of-sight obstacles depend only on the walls, nodes and openings: cached per medium on the identity of those three
+// arrays (nested WeakMaps; levels and their arrays are immutable snapshots), so an edit that keeps them (a device or aim
+// drag, a rule edit) reuses them. Shared by the plan render and the neighbour derivation.
+type ByMedium = Partial<Record<Medium, Segment[]>>;
+type ByOpenings = WeakMap<Level['openings'], ByMedium>;
+const obstacleCache = new WeakMap<Level['walls'], WeakMap<Level['nodes'], ByOpenings>>();
+
+/** `lineOfSightObstacles(level, medium)`, built once per medium for the same walls, nodes and openings. */
+export function cachedObstacles(level: Level, medium: Medium): Segment[] {
+  let byNodes = obstacleCache.get(level.walls);
+  if (!byNodes) obstacleCache.set(level.walls, byNodes = new WeakMap());
+  let byOpenings = byNodes.get(level.nodes);
+  if (!byOpenings) byNodes.set(level.nodes, byOpenings = new WeakMap());
+  let byMedium = byOpenings.get(level.openings);
+  if (!byMedium) byOpenings.set(level.openings, byMedium = {});
+  return (byMedium[medium] ??= lineOfSightObstacles(level, medium));
+}

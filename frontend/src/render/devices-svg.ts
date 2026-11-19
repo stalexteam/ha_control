@@ -7,7 +7,7 @@ import type { ContainerState } from '../live/container-feed';
 import type { BubbleTone, DeviceLive, LiveBubble } from '../live/device-live';
 import type { Preview, Selection } from '../editor/tools/types';
 import { clippedCone, coneMedium, devicePose, directionHandle, type DevicePose } from '../geometry/devices';
-import { lineOfSightObstacles, type Medium, type Segment } from '../geometry/visibility';
+import { cachedObstacles, type Segment } from '../geometry/visibility';
 import type { PlanPalette } from './theme';
 import { bubbleSide, stackOrigin } from './bubble-side';
 import { cached, ringD } from './shared';
@@ -126,24 +126,15 @@ const BIND_STROKE: Record<Exclude<BindStatus, 'bound'>, string> = {
   unbound: 'var(--secondary-text-color, #94a3b8)', partial: '#f59e0b', missing: '#f43f5e',
 };
 
-// Line-of-sight obstacles depend only on the walls, nodes and openings: they are cached per medium on the identity of
-// those three arrays (nested WeakMaps; levels and their arrays are immutable snapshots), so a device or aim drag,
-// which keeps them, reuses them. A clipped cone is cached on its obstacle array (which pins the walls and nodes that
-// pose the device) and the device object: a drag recomputes only the dragged device's cone. The device object (not
-// its id) is the key so the placement preview, a fresh object with a fixed id on every render, never reads a stale cone.
-type ByMedium = Partial<Record<Medium, Segment[]>>;
-type ByOpenings = WeakMap<Level['openings'], ByMedium>;
-const obstacleCache = new WeakMap<Level['walls'], WeakMap<Level['nodes'], ByOpenings>>();
-function obstaclesOf(level: Level, medium: Medium): Segment[] {
-  const byNodes = cached(obstacleCache, level.walls, () => new WeakMap<Level['nodes'], ByOpenings>());
-  const byOpenings = cached(byNodes, level.nodes, (): ByOpenings => new WeakMap());
-  return (cached(byOpenings, level.openings, (): ByMedium => ({}))[medium] ??= lineOfSightObstacles(level, medium));
-}
+// A clipped cone is cached on its obstacle array (which pins the walls and nodes that pose the device) and the device
+// object: a drag recomputes only the dragged device's cone. The device object (not its id) is the key so the placement
+// preview, a fresh object with a fixed id on every render, never reads a stale cone. The obstacles themselves are
+// cached per medium in geometry/visibility (cachedObstacles), shared with the neighbour derivation.
 const coneCache = new WeakMap<Segment[], WeakMap<Device, Pt[][]>>();
 function coneRings(level: Level, d: Device): Pt[][] {
   const medium = coneMedium(d.props.kind);
   if (!medium) return [];
-  const obstacles = obstaclesOf(level, medium);
+  const obstacles = cachedObstacles(level, medium);
   const byDevice = cached(coneCache, obstacles, () => new WeakMap<Device, Pt[][]>());
   let rings = byDevice.get(d);
   if (!rings) { rings = clippedCone(level, d, () => obstacles); byDevice.set(d, rings); }

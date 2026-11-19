@@ -574,7 +574,7 @@ export class PlanStudioPanel extends LitElement {
         blockers: devices.filter(isBlocker),
         deviceById: id => devices.find(x => x.id === id),
         zones, problems, trace, note, now: Date.now(),
-        neighbours: planNeighbours(levels, rule.zoneId, rule.motionLight!.sensors),
+        neighbours: rule.motionLight!.presence === true ? planNeighbours(levels, rule.zoneId, rule.motionLight!.sensors) : [],
         onChange: r => { this.ruleDraft = { ...(this.ruleDraft ?? d), rule: r }; },
         onFocus: f => this.focusRuleField(f, motionLightFocus(f)),
         onOk: () => this.commitRuleDraft(),

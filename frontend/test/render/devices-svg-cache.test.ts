@@ -4,7 +4,7 @@ import { html, render } from 'lit';
 import { renderDevices } from '../../src/render/devices-svg';
 import { paletteFor } from '../../src/render/theme';
 import { clippedCone } from '../../src/geometry/devices';
-import { lineOfSightObstacles } from '../../src/geometry/visibility';
+import { wallPieces } from '../../src/geometry/walls';
 import { moveDevice } from '../../src/model/devices';
 import { deviceDefaults, type Device, type DeviceKind, type Level } from '../../src/model/types';
 import { rectRoomLevel } from '../fixtures';
@@ -14,13 +14,14 @@ vi.mock('../../src/geometry/devices', async importOriginal => {
   const m = await importOriginal<typeof import('../../src/geometry/devices')>();
   return { ...m, clippedCone: vi.fn(m.clippedCone) };
 });
-vi.mock('../../src/geometry/visibility', async importOriginal => {
-  const m = await importOriginal<typeof import('../../src/geometry/visibility')>();
-  return { ...m, lineOfSightObstacles: vi.fn(m.lineOfSightObstacles) };
+// lineOfSightObstacles (one per medium) builds the wall pieces exactly once per call.
+vi.mock('../../src/geometry/walls', async importOriginal => {
+  const m = await importOriginal<typeof import('../../src/geometry/walls')>();
+  return { ...m, wallPieces: vi.fn(m.wallPieces) };
 });
 
 const cones = vi.mocked(clippedCone);
-const obstacles = vi.mocked(lineOfSightObstacles);
+const obstacles = vi.mocked(wallPieces);
 
 const free = (id: string, kind: DeviceKind, x: number, y: number): Device =>
   ({ id, name: id, invalid: false, placement: { mode: 'free', x, y, rotation: 0 }, props: deviceDefaults(kind, 'free') });
@@ -62,7 +63,7 @@ describe('cone caches', () => {
     const lv = level();
     const before = coneDs(draw(lv));
     expect(computed()).toEqual(['wl1', 'wl2', 'ms1', 'ms2']);
-    expect(obstacles.mock.calls.map(([, m]) => m)).toEqual(['light', 'motion']);
+    expect(obstacles).toHaveBeenCalledTimes(2); // light and motion
 
     // The same level again: nothing is recomputed.
     cones.mockClear();
@@ -106,7 +107,7 @@ describe('cone caches', () => {
       obstacles.mockClear();
       draw(next);
       expect(computed()).toEqual(['wl1', 'wl2', 'ms1', 'ms2']);
-      expect(obstacles.mock.calls.map(([, m]) => m)).toEqual(['light', 'motion']);
+      expect(obstacles).toHaveBeenCalledTimes(2); // light and motion
     }
   });
 });

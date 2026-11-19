@@ -1,5 +1,6 @@
 import type { Device, Id, Level, Pt, Rule, Zone } from './types';
 import { clippedCone } from '../geometry/devices';
+import { cachedObstacles } from '../geometry/visibility';
 import { wallFrame, wallLocal } from '../geometry/walls';
 import { segmentsMeet, zoneContains, zoneLabelPoint, zoneOutline } from '../geometry/zones';
 import { dist, distToSegment, dot, perpLeft, pointInPolygon, polygonArea, sub } from '../geometry/vec';
@@ -145,7 +146,7 @@ function coneOf(level: Level, d: Device): Pt[][] {
   let c = m.get(d.id);
   if (!c) {
     // A geometry failure must never block a Save or a draft: the sensor then sees nothing.
-    try { c = clippedCone(level, d); } catch { c = []; }
+    try { c = clippedCone(level, d, cachedObstacles); } catch { c = []; }
     m.set(d.id, c);
   }
   return c;
