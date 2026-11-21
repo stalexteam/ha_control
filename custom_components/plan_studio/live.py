@@ -35,6 +35,7 @@ from .const import (
 from .expected import EXPIRE, Expected, expect, passing, service as service_for
 from .power import PowerHub, device_bindings, entity_ids as power_entity_ids
 from .readings import Readings
+from .repo import LIGHT_KINDS, brightness_ok
 from .rules import RuleEngine
 from .runtime import Runtime
 from .store import PlanStore
@@ -54,6 +55,28 @@ def _pair(st: State | None) -> tuple[str, dict] | None:
 def _clock() -> str:
     """ISO 8601 UTC time of an intent."""
     return dt_util.utcnow().isoformat()
+
+
+def _brightness(plans: list[dict]) -> dict[str, int]:
+    """light entity -> brightness_pct of every light.turn_on Plan Studio sends it: the brightness of the ceiling and
+    wall light devices bound to a light entity; for an entity shared by several devices the first device with one (in
+    plan, level and device order) gives it."""
+    out: dict[str, int] = {}
+    for plan in plans:
+        levels = plan.get("levels") if isinstance(plan, dict) else None
+        for level in levels if isinstance(levels, list) else []:
+            devices = level.get("devices") if isinstance(level, dict) else None
+            for d in devices if isinstance(devices, list) else []:
+                props = d.get("props") if isinstance(d, dict) else None
+                bindings = d.get("bindings") if isinstance(d, dict) else None
+                if not isinstance(props, dict) or not isinstance(bindings, dict):
+                    continue
+                if props.get("kind") not in LIGHT_KINDS:
+                    continue
+                eid, value = bindings.get("control"), props.get("brightness")
+                if isinstance(eid, str) and eid.startswith("light.") and brightness_ok(value):
+                    out.setdefault(eid, value)
+    return out
 
 
 class LiveRuntime:
@@ -96,6 +119,7 @@ class LiveRuntime:
         self._warned: dict[str, tuple[str, object]] = {}
         # entity -> whether its latest filtered bounce carried an own context (the change _unhide delivers late)
         self._bounce_own: dict[str, bool] = {}
+        self._brightness: dict[str, int] = {}  # light entity -> brightness_pct of its turn_on, from the saved plans
 
     async def async_start(self) -> None:
         # The v0.4 runtime store held persisted outputs; it is no longer used.
@@ -132,6 +156,7 @@ class LiveRuntime:
     @callback
     def reload(self) -> None:
         plans = self._plans.plans()
+        self._brightness = _brightness(plans)  # before a load sends anything
         self._keep_virtual(plans)  # before the loads read them
         self.runtime.load_plans(plans)
         # only the first load while HA is still starting is the HA start; an entry reload is not
@@ -454,6 +479,9 @@ class LiveRuntime:
             return
         self._arm()  # the wake for the retry / expiry of the expected state, once the call goes out
         service_data = {} if entity_id is None else {"entity_id": entity_id}
+        if domain == "light" and service == "turn_on" and entity_id in self._brightness:
+            # every switch-on of a light device with a brightness (any rule, a retry, a bounce's re-send, a held call)
+            service_data["brightness_pct"] = self._brightness[entity_id]
         service_data.update(data or {})
         await asyncio.wait_for(  # a hung blocking call ends as a recorded failure
             self._hass.services.async_call(domain, service, service_data, blocking=True, context=ctx),

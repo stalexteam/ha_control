@@ -602,6 +602,23 @@ def test_validate_plan_only_a_virtual_switch_binds_a_virtual_entity():
     validate_plan(with_devices({"id": "x", "props": {"kind": "socket"}, "bindings": {"control": "switch.virtual_x"}}))
 
 
+def lamp(did="l1", kind="ceiling_light", **props):
+    return {"id": did, "name": "Lamp", "props": {"kind": kind, **props}, "bindings": {"control": "light.k"}}
+
+
+def test_validate_plan_light_brightness_is_an_optional_whole_percent():
+    validate_plan(with_devices(lamp(), lamp("l2", brightness=49), lamp("l3", "wall_light", brightness=1),
+                               lamp("l4", brightness=100)))
+    for bad in (0, 101, 1.5, 49.0, "49", True, None):
+        with pytest.raises(vol.Invalid, match="brightness must be a whole number 1-100"):
+            validate_plan(with_devices(lamp(brightness=bad)))
+    for kind in ("motion_sensor", "socket", "smart_button"):
+        with pytest.raises(vol.Invalid, match="only a ceiling or wall light has a brightness"):
+            validate_plan(with_devices(lamp(kind=kind, brightness=49)))
+    with pytest.raises(vol.Invalid, match="only a ceiling or wall light has a brightness"):
+        validate_plan(with_devices(vswitch(props={"kind": "virtual_switch", "brightness": 49})))
+
+
 def test_validate_plan_rule_must_not_switch_a_virtual_switch_it_reads():
     base = with_devices(vswitch("s1"), {"id": "x", "props": {"kind": "socket"}, "bindings": {"control": "switch.x"}})
     for kw in (

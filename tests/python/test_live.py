@@ -2400,6 +2400,131 @@ def test_a_rule_evaluated_inside_the_bounce_reads_the_commanded_state(env):
     asyncio.run(go())
 
 
+# --- brightness on switch-on: every light.turn_on of a light device with the prop carries brightness_pct ----------------
+
+LAMP_ON = ("light", "turn_on", {"entity_id": "light.k", "brightness_pct": 49})
+
+
+def _bright_plan(brightness=49):
+    plan = _motion_plan()
+    plan["levels"][0]["devices"][0]["props"]["brightness"] = brightness
+    return plan
+
+
+def _sent(hass):
+    return [c[:3] for c in hass.services.calls]
+
+
+def test_a_light_switches_on_with_its_brightness_and_off_plainly(env):
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_start(env, hass, clock, _bright_plan())
+        _boiler_event(env, hass, "binary_sensor.pir", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        assert _sent(hass) == [LAMP_ON]
+        clock[0] = 100.06
+        _boiler_event(env, hass, "light.k", "on", ctx=hass.services.calls[0][4], old="off")
+        assert "light.k" not in live._expected._records  # the plain "on" confirms it
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})  # manual off
+        await asyncio.gather(*hass.tasks)
+        assert _sent(hass)[1] == ("light", "turn_off", {"entity_id": "light.k"})
+
+    asyncio.run(go())
+
+
+def test_a_retry_and_a_bounce_re_send_of_a_light_carry_its_brightness(env):
+    """Review focus 4."""
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        await _light_start(env, hass, clock, _bright_plan())
+        _boiler_event(env, hass, "binary_sensor.pir", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        _tick(env, clock, 110.0)  # lost: the retry
+        await asyncio.gather(*hass.tasks)
+        assert _sent(hass) == [LAMP_ON] * 2
+        clock[0] = 110.06
+        _boiler_event(env, hass, "light.k", "on", ctx=hass.services.calls[1][4], old="off")
+        clock[0] = 110.07
+        _boiler_event(env, hass, "light.k", "off", ctx=hass.services.calls[1][4], old="on")  # the bounce
+        await asyncio.gather(*hass.tasks)
+        assert _sent(hass) == [LAMP_ON] * 3
+
+    asyncio.run(go())
+
+
+def test_a_call_held_until_ha_has_started_carries_the_brightness(env):
+    async def go():
+        hass = FakeHass()
+        hass.state = CoreState.not_running
+        plan = _bright_plan()
+        plan["rules"] = [{"id": "r1", "name": "R", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+                          "inputs": [{"source": {"device": "pir"}}], "onTrue": [{"device": "lamp", "do": "on"}],
+                          "onFalse": []}]
+        hass.services.known |= {("light", "turn_on"), ("light", "turn_off")}
+        hass.states.d.update({"light.k": "off", "binary_sensor.pir": "off"})
+        live = env.live.LiveRuntime(hass, FakePlans([plan]))
+        await live.async_start()
+        hass.states.d["binary_sensor.pir"] = "on"
+        live.engine.handle_state("binary_sensor.pir")  # fires during the boot: the call is held
+        assert [d[:3] for d in live._deferred] == [("light", "turn_on", "light.k")] and hass.tasks == []
+        _fire_started(env, hass)
+        await asyncio.gather(*hass.tasks)
+        assert _sent(hass) == [LAMP_ON]
+
+    asyncio.run(go())
+
+
+def test_a_switch_entity_and_a_light_without_the_prop_switch_on_plainly(env):
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        plan = _bright_plan()
+        plan["levels"][0]["devices"][0]["bindings"]["control"] = "switch.k"  # a relay behind a ceiling light
+        await _light_start(env, hass, clock, plan, **{"switch.k": "off"})
+        _boiler_event(env, hass, "binary_sensor.pir", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        assert _sent(hass) == [("switch", "turn_on", {"entity_id": "switch.k"})]
+
+        hass2 = FakeHass()
+        await _light_start(env, hass2, [100.0])  # no brightness prop
+        _boiler_event(env, hass2, "binary_sensor.pir", "on", old="off")
+        await asyncio.gather(*hass2.tasks)
+        assert _sent(hass2) == [("light", "turn_on", {"entity_id": "light.k"})]
+
+    asyncio.run(go())
+
+
+def test_the_first_light_device_of_a_shared_entity_gives_the_brightness_and_a_save_updates_it(env):
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        plan = _bright_plan(30)
+        second = {"id": "lamp2", "name": "lamp2", "props": {"kind": "wall_light", "brightness": 70},
+                  "bindings": {"control": "light.k"}}
+        plan["levels"].append({"devices": [second]})
+        other = {"id": "p0", "levels": [{"devices": [
+            {"id": "x", "name": "x", "props": {"kind": "ceiling_light"}, "bindings": {"control": "light.k"}},
+            {"id": "y", "name": "y", "props": {"kind": "wall_light", "brightness": 20}, "bindings": {"control": "light.z"}},
+        ]}]}
+        hass.services.known |= {("light", "turn_on"), ("light", "turn_off")}
+        hass.states.d.update({"light.k": "off", "binary_sensor.pir": "off"})
+        live = env.live.LiveRuntime(hass, FakePlans([other, plan]))
+        live._now = lambda: clock[0]
+        await live.async_start()
+        live._call("light", "turn_on", "light.k", on_error=lambda *a: None)  # p0's x has no prop: the next device
+        live._call("light", "turn_on", "light.z", on_error=lambda *a: None)
+        await asyncio.gather(*hass.tasks)
+        assert [c[2] for c in hass.services.calls] == [
+            {"entity_id": "light.k", "brightness_pct": 30}, {"entity_id": "light.z", "brightness_pct": 20}]
+        plan["levels"][0]["devices"][0]["props"]["brightness"] = 55
+        live.reload()  # a save
+        live._call("light", "turn_on", "light.k", on_error=lambda *a: None)
+        live._call("light", "turn_off", "light.z", on_error=lambda *a: None)
+        await asyncio.gather(*hass.tasks)
+        assert [c[2] for c in hass.services.calls[2:]] == [
+            {"entity_id": "light.k", "brightness_pct": 55}, {"entity_id": "light.z"}]
+
+    asyncio.run(go())
+
+
 # --- virtual switches (kept by the integration, never Home Assistant entities) -----------------------------------------
 
 VIRTUAL_KEY = "plan_studio.virtual"

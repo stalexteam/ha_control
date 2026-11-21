@@ -21,6 +21,12 @@ except ImportError:  # pytest: module dir on sys.path
     from virtual import KIND as VIRTUAL_KIND, PREFIX as VIRTUAL_PREFIX, entity_id as virtual_entity
 
 MAX_PLAN_BYTES = 5 * 1024 * 1024
+LIGHT_KINDS = ("ceiling_light", "wall_light")  # the kinds with a brightness when switched on (props.brightness, %)
+
+
+def brightness_ok(v: object) -> bool:
+    """A light's brightness when switched on: a whole percent 1-100 (bool and float rejected)."""
+    return type(v) is int and 1 <= v <= 100
 
 
 class RevisionConflict(Exception):
@@ -410,8 +416,9 @@ def _validate_rules(rules: object, devices: dict) -> None:
 def _validate_devices(levels: list) -> tuple[set[str], dict[str, dict]]:
     """A virtual switch binds exactly its synthetic entity (control = virtual.<its id>) and no other device binds a
     virtual entity; a speaker binds only player (a media_player) and voice (a tts entity), each optional until bound; a
-    phone binds nothing and its notify, once set, is a notify service name. Other bindings are not checked. Returns the
-    virtual switch ids and the devices by id (the first of an id)."""
+    phone binds nothing and its notify, once set, is a notify service name; a brightness (optional) is a whole percent
+    1-100 of a ceiling or wall light. Other bindings are not checked. Returns the virtual switch ids and the devices by
+    id (the first of an id)."""
     out: set[str] = set()
     by_id: dict[str, dict] = {}
     for level in levels:
@@ -422,6 +429,11 @@ def _validate_devices(levels: list) -> tuple[set[str], dict[str, dict]]:
             if _is_id(d.get("id")):
                 by_id.setdefault(d["id"], d)
             props = d.get("props")
+            if isinstance(props, dict) and "brightness" in props:
+                if props.get("kind") not in LIGHT_KINDS:
+                    raise vol.Invalid("only a ceiling or wall light has a brightness")
+                if not brightness_ok(props["brightness"]):
+                    raise vol.Invalid("brightness must be a whole number 1-100 (%)")
             if isinstance(props, dict) and props.get("kind") == VIRTUAL_KIND:
                 if not _is_id(d.get("id")) or d.get("bindings") != {"control": virtual_entity(d["id"])}:
                     raise vol.Invalid("a virtual switch binds only control = virtual.<its device id>")
