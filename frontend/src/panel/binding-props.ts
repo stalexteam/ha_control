@@ -11,6 +11,7 @@ import { deviceNameRow } from './device-props';
 import { deviceTitle } from './unplaced-devices';
 import { containerFields, containerFlags, triggerFields } from './container-fields';
 import { daylightFields } from './daylight-fields';
+import { brightnessFields } from './brightness-fields';
 import type { ContainerFeed, ContainerIntent, ContainerState } from '../live/container-feed';
 import { t } from '../i18n';
 
@@ -189,6 +190,7 @@ export function renderBindingProps(o: BindingPropsOpts): TemplateResult {
         : activeRoleSpecs(d).map(spec => html`${roleField(o, d, spec)}${containerFlags(o, d, spec.role)}`)}
       ${d.props.kind === 'speaker' ? html`<p class="muted" data-note="speaker-hint">${t('speaker.hint')}</p>` : nothing}
       ${containerFields(d)}
+      ${brightnessFields(o, d)}
       ${daylightFields(o, d)}`
     : html`<p class="muted">${t('binding.pick')}</p>`}
     <div class="bfoot">

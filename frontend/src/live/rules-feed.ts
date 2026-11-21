@@ -50,7 +50,8 @@ export interface RuleLast { action: 'on' | 'off' | 'open' | 'close' | AnnounceDo
  * The server's entry errors the panel words itself (status reason and `RuleLast.error`); any other error ("target
  * unavailable", "service failed", "waiting for target", ...) is shown as the server sends it.
  */
-const ERROR_WORDS = new Map([['not confirmed', 'rules.error.notConfirmed'], ['virtual switch loop', 'rules.error.virtualLoop']]);
+const ERROR_WORDS = new Map([['not confirmed', 'rules.error.notConfirmed'], ['virtual switch loop', 'rules.error.virtualLoop'],
+  ['device switched back', 'rules.error.switchedBack']]);
 
 /** The trace with the server's error codes worded for the panel. */
 export function wordErrors(tr: RuleTrace): RuleTrace {

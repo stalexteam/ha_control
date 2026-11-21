@@ -26,7 +26,7 @@ const DEVICES = [
 ];
 
 const ENTITIES: DemoEntity[] = [
-  { id: 'light.kitchen_ceiling', name: 'Kitchen ceiling', state: 'on', device: 'kitchen_ceiling' },
+  { id: 'light.kitchen_ceiling', name: 'Kitchen ceiling', state: 'on', device: 'kitchen_ceiling', attrs: { supported_color_modes: ['brightness'] } },
   { id: 'light.hall_sconce', name: 'Hall sconce', state: 'off', device: 'hall_sconce' },
   { id: 'binary_sensor.hall_motion', name: 'Hall motion', state: 'on', device: 'hall_motion', cls: 'motion' },
   { id: 'sensor.hall_lux', name: 'Hall illuminance', state: '120', device: 'hall_motion', cls: 'illuminance', unit: 'lx' },

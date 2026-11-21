@@ -87,8 +87,8 @@ export const defaultsMode = (mode: DevicePlacement['mode']): 'wall' | 'free' => 
 export const FAN_DIAMETERS = [100, 125, 150] as const;
 export type FanDiameter = typeof FAN_DIAMETERS[number];
 export type DeviceProps =
-  | { kind: 'ceiling_light'; shape: 'round' | 'linear' | 'spot'; diameter: number; length: number; width: number; poolRadius: number | null }
-  | { kind: 'wall_light'; coneAngle: number; coneRange: number }
+  | { kind: 'ceiling_light'; shape: 'round' | 'linear' | 'spot'; diameter: number; length: number; width: number; poolRadius: number | null; brightness?: number }
+  | { kind: 'wall_light'; coneAngle: number; coneRange: number; brightness?: number }
   | { kind: 'motion_sensor'; zoneAngle: number; zoneRange: number }
   | { kind: 'exhaust_fan'; diameter: FanDiameter }
   // A climate sensor's reading applies to the zones containing it (its stage-2a `zoneIds` is retired).
