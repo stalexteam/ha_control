@@ -8,7 +8,7 @@ E = "switch.relay"
 
 
 def test_constants():
-    assert (RETRY, EXPIRE, BOUNCE) == (10, 60, 2)
+    assert (RETRY, EXPIRE, BOUNCE) == (10, 60, 1)
 
 
 def test_a_match_is_ours_and_uses_the_record_up():
@@ -169,10 +169,11 @@ def test_another_known_state_within_2_s_of_the_confirmation_is_a_bounce(state, o
     assert x.bounce(E, state, 0.08) is None  # used up: told once per confirmation
 
 
-def test_a_change_2_s_after_the_confirmation_is_no_bounce():
+@pytest.mark.parametrize("after,bounce", [(0.9, True), (1.0, False), (1.1, False)])
+def test_the_window_is_1_s_after_the_confirmation(after, bounce):
     x = _confirmed()
-    assert x.bounce(E, "off", 2.06) is None
-    assert x.bounce(E, "off", 1.0) is None  # the window is gone with it
+    assert (x.bounce(E, "off", 0.06 + after) is not None) is bounce
+    assert x.bounce(E, "off", 0.5) is None  # told once, or the window is gone with it
 
 
 @pytest.mark.parametrize("gap", [None, "unavailable", "unknown"])

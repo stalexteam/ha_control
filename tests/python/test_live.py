@@ -2125,6 +2125,24 @@ def test_an_off_that_bounces_back_on_is_filtered_and_the_off_is_sent_once_more(e
     asyncio.run(go())
 
 
+@pytest.mark.parametrize("after,filtered", [(0.9, True), (1.1, False)])
+def test_the_bounce_window_is_1_s_after_the_confirmation(env, after, filtered):
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_start(env, hass, clock)
+        ctx = await _light_on_confirmed(env, hass, clock, live)
+        clock[0] = 100.06 + after
+        _boiler_event(env, hass, "light.k", "off", ctx=ctx, old="on")
+        await asyncio.gather(*hass.tasks)
+        tr = _ml(live)
+        if filtered:
+            assert len(hass.services.calls) == 2 and tr["verdict"] is True and tr["last"]["reason"] != RELEASED
+        else:
+            assert len(hass.services.calls) == 1 and tr["verdict"] is False and tr["last"]["reason"] == RELEASED
+
+    asyncio.run(go())
+
+
 def test_a_person_switching_off_3_s_after_the_confirmation_is_a_switch_elsewhere(env):
     """Review focus 2."""
     async def go():
@@ -2232,7 +2250,7 @@ def test_a_bounce_its_sender_no_longer_wants_is_a_change_as_today(env):
         clock[0] = 0.06
         _boiler_event(env, hass, "switch.sock", "on", ctx=ctx, old="off")
         clock[0] = 0.07
-        _boiler_event(env, hass, "switch.sock", "off", old="on")  # within 2 s, but nobody wants the on any more
+        _boiler_event(env, hass, "switch.sock", "off", old="on")  # within 1 s, but nobody wants the on any more
         assert _press(live)["value"] == "off"  # delivered: the wall switch sees a press
         await asyncio.gather(*hass.tasks)
         assert len(hass.services.calls) == 1

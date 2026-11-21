@@ -18,7 +18,9 @@ from __future__ import annotations
 
 RETRY = 10  # s after the command without a confirmation: it is sent once more
 EXPIRE = 60  # s after the command without a confirmation: given up, a command the device lost
-BOUNCE = 2  # s after a confirmation: the device switching to another known state within it did not keep the command
+# s after a confirmation: the device switching to another known state within it did not keep the command (bounces were
+# seen 2-360 ms after the confirmation; a person cannot react within 1 s)
+BOUNCE = 1
 
 # neither the confirmation nor another state: no data, or a valve on its way
 _PASSING = (None, "unavailable", "unknown", "opening", "closing")
