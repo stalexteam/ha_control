@@ -94,6 +94,8 @@ class LiveRuntime:
         # entity -> (state, by) of the command whose expiry was warned: its identical repeats expire at debug level
         # until the entity reaches a state or another command replaces it (one warning per episode)
         self._warned: dict[str, tuple[str, object]] = {}
+        # entity -> whether its latest filtered bounce carried an own context (the change _unhide delivers late)
+        self._bounce_own: dict[str, bool] = {}
 
     async def async_start(self) -> None:
         # The v0.4 runtime store held persisted outputs; it is no longer used.
@@ -302,8 +304,8 @@ class LiveRuntime:
 
     def _view(self, entity_id: str) -> tuple[str, dict] | None:
         """The state the containers runtime and the rules read: the commanded one while the entity's latest change is
-        a bounce whose re-send has not arrived (that change is none of theirs); the power hub reads the device as it
-        is."""
+        a bounce whose re-send has not arrived, until the re-send's retry point at most (that change is none of theirs
+        unless the re-send fails: _unhide); the power hub reads the device as it is."""
         shown = self._expected.hidden(entity_id)
         st = self._lookup(entity_id)
         return st if shown is None or st is None else (shown, st[1])
@@ -340,13 +342,18 @@ class LiveRuntime:
             # commanded once more and the change goes to the power hub only (the rules and the containers keep
             # reading the commanded state, _view); a repeat goes everywhere and the sender shows "device switched back"
             bounced = self._expected.bounce(entity_id, now, at)
-            if bounced is not None and not bounced[2] and self._bounce_resend(entity_id, bounced[0], bounced[1]):
+            if bounced is not None and not bounced[2] and self._bounce_resend(entity_id, bounced[0], bounced[1], own):
                 self.power.handle_state(entity_id)
                 return
             own = self._expected.arrived(entity_id, now, at, back=passing(was), keep=True) or own
             self._arm()
             if not passing(now):
                 self._warned.pop(entity_id, None)  # it reached a state: a new episode
+        elif self._expected.hidden(entity_id) is not None:
+            # an attribute update of a hidden bounce: none of theirs either (the engine would read the hidden state
+            # as the command arriving)
+            self.power.handle_state(entity_id)
+            return
         # intents first (runtime listeners are synchronous): the engine must know them before the state change
         self.runtime.handle_state(entity_id, old, new, context, own=own)
         self.power.handle_state(entity_id)
@@ -509,7 +516,8 @@ class LiveRuntime:
         "waiting for target" re-send covers its return; on False the record stays, so a late confirmation is still
         ours); given up after EXPIRE s with a warning and "not confirmed" on the entry of the rule that sent it. An
         entity already reading the expected state (its change was not seen, or the command found it there) is
-        confirmed silently."""
+        confirmed silently. The re-send of a bounce hides it until its retry point at most: then the retry is asked
+        from the device as it reads, and the change the rules and the containers did not see is delivered (_unhide)."""
         self._expected_timer = None
         if self._stopped:
             return
@@ -522,16 +530,10 @@ class LiveRuntime:
                     self._expected.arrived(entity_id, state, now)  # uses the record up
                 continue
             if what == "retry":
-                svc = service_for(domain, state)
-                if svc is None or st is None or st[0] in ("unavailable", "unknown"):
-                    continue
-                try:
-                    wanted = self.engine.still_wants(by, entity_id, state)
-                except Exception:  # noqa: BLE001 - a failing answer must not stop the other records
-                    _LOGGER.exception("asking whether %s still wants %s failed", by, entity_id)
-                    continue
-                if wanted:
-                    self._dispatch(domain, svc, entity_id, lambda *_: None, retry=True)  # a failure is logged
+                hidden = self._expected.reveal(entity_id)
+                self._retry(entity_id, domain, state, by, st)
+                if hidden is not None:
+                    self._unhide(entity_id, hidden)
                 continue
             if self._warned.get(entity_id) == (state, by):  # the same episode: warned at its first expiry
                 _LOGGER.debug("%s did not confirm %s within %s s again", entity_id, service_for(domain, state), EXPIRE)
@@ -544,9 +546,34 @@ class LiveRuntime:
                 _LOGGER.exception("reporting an unconfirmed command failed")
         self._arm()
 
-    def _bounce_resend(self, entity_id: str, state: str, by: object) -> bool:
+    def _retry(self, entity_id: str, domain: str, state: str, by: object, st: tuple[str, dict] | None) -> None:
+        """The command once more when its sender still wants it (never while the entity has no data)."""
+        svc = service_for(domain, state)
+        if svc is None or st is None or st[0] in ("unavailable", "unknown"):
+            return
+        try:
+            wanted = self.engine.still_wants(by, entity_id, state)
+        except Exception:  # noqa: BLE001 - a failing answer must not stop the other records
+            _LOGGER.exception("asking whether %s still wants %s failed", by, entity_id)
+            return
+        if wanted:
+            self._dispatch(domain, svc, entity_id, lambda *_: None, retry=True)  # a failure is logged
+
+    def _unhide(self, entity_id: str, hidden: str) -> None:
+        """The re-send of a bounce got no confirmation by its retry point: the containers runtime and the rules read the
+        device as it is from now and are told of the change they did not see (from the hidden state, Plan Studio's
+        own when the bounce carried an own context, as it would have been at the bounce)."""
+        own = self._bounce_own.pop(entity_id, False)
+        try:
+            self.runtime.handle_state(entity_id, (hidden, {}), self._lookup(entity_id), (None, None), own=own)
+            self.engine.handle_state(entity_id, own=own)
+        except Exception:  # noqa: BLE001 - a failing consumer must not stop the other records
+            _LOGGER.exception("delivering the state of %s after a bounce failed", entity_id)
+
+    def _bounce_resend(self, entity_id: str, state: str, by: object, own: bool) -> bool:
         """A bounce (expected.bounce): the command is sent once more at once with Plan Studio's context when its sender
-        still wants it (engine.command_bounced, as the retry); True when it was sent."""
+        still wants it (engine.command_bounced, as the retry); True when it was sent. own: whether the bounce carried
+        an own context (kept for _unhide)."""
         domain = entity_id.split(".", 1)[0]
         svc = service_for(domain, state)
         if svc is None:
@@ -559,6 +586,7 @@ class LiveRuntime:
         if not wanted:
             return False
         _LOGGER.debug("%s left %s right after confirming it: %s sent once more", entity_id, state, svc)
+        self._bounce_own[entity_id] = own
         self._dispatch(domain, svc, entity_id, lambda *_: None, by, bounce=True)  # a failure is logged
         return True
 

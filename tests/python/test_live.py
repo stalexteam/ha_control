@@ -2196,23 +2196,113 @@ def test_a_second_bounce_is_a_switch_elsewhere_and_the_rule_shows_device_switche
     asyncio.run(go())
 
 
-def test_a_lost_re_send_after_a_bounce_is_retried_and_shows_not_confirmed(env):
+async def _bounce_lost(env, hass, clock, live):
+    """On confirmed, the bounce at +0.07 s, the re-send goes out and the device loses it."""
+    ctx = await _light_on_confirmed(env, hass, clock, live)
+    clock[0] = 100.07
+    _boiler_event(env, hass, "light.k", "off", ctx=ctx, old="on")
+    await asyncio.gather(*hass.tasks)
+    assert len(hass.services.calls) == 2
+    return ctx
+
+
+def test_a_lost_re_send_is_retried_and_the_rules_see_the_device_at_its_retry_point(env):
+    """Controller ruling: the hiding ends at the re-send's retry point at the latest; the change the rules did not
+    see is delivered then; the retry still goes out and "not confirmed" still comes at +60 s."""
     async def go():
         hass, clock = FakeHass(), [100.0]
         live = await _light_start(env, hass, clock)
-        ctx = await _light_on_confirmed(env, hass, clock, live)
-        clock[0] = 100.07
-        _boiler_event(env, hass, "light.k", "off", ctx=ctx, old="on")
-        await asyncio.gather(*hass.tasks)
-        assert len(hass.services.calls) == 2  # sent once more; the device loses it
+        told = _told(live, "light.k")
+        await _bounce_lost(env, hass, clock, live)
+        clock[0] = 110.0
+        assert live.engine._lookup("light.k")[0] == "on" and _ml(live)["verdict"] is True  # still hidden
+        n = len(told)
         _tick(env, clock, 110.07)  # a fresh 10 s from the re-send
         await asyncio.gather(*hass.tasks)
-        assert [c[1] for c in hass.services.calls] == ["turn_on"] * 3
-        assert _ml(live)["status"] == "ok" and live.engine._lookup("light.k")[0] == "on"
+        assert [c[1] for c in hass.services.calls] == ["turn_on"] * 3  # the retry goes out
+        assert told[n:] == [("runtime", "off"), ("engine", "off")]  # the change they did not see
+        assert live.engine._lookup("light.k")[0] == "off"  # any reader sees the device as it is
+        tr = _ml(live)
+        assert tr["verdict"] is False and tr["motionLight"]["waiting"] is True and tr["last"]["reason"] == RELEASED
         _tick(env, clock, 160.07)
         tr = _ml(live)
         assert tr["status"] == "error" and tr["reason"] == "not confirmed" and tr["last"]["error"] == "not confirmed"
-        assert live.engine._lookup("light.k")[0] == "off"  # given up: the rules read the device as it is
+        assert len(hass.services.calls) == 3
+
+    asyncio.run(go())
+
+
+def test_an_attribute_update_inside_a_hidden_bounce_goes_to_the_power_hub_only(env):
+    """Review important 1: the update must not read as the command arriving (the retry and "not confirmed" stay)."""
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_start(env, hass, clock)
+        told = _told(live, "light.k")
+        ctx = await _bounce_lost(env, hass, clock, live)
+        n = len(told)
+        clock[0] = 100.1
+        _boiler_event(env, hass, "light.k", "off", ctx=ctx, old="off")  # an attribute update, the same value
+        assert told[n:] == [("power", "off")]
+        _tick(env, clock, 110.07)
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_on"] * 3
+        _tick(env, clock, 160.07)
+        tr = _ml(live)
+        assert tr["status"] == "error" and tr["reason"] == "not confirmed"
+
+    asyncio.run(go())
+
+
+def test_a_load_control_rule_reading_the_light_sees_a_lost_re_send_at_its_retry_point(env):
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        plan = _motion_plan()
+        plan["levels"][0]["devices"].append(
+            {"id": "sw", "name": "sw", "props": {"kind": "socket"}, "bindings": {"control": "switch.sock"}})
+        plan["rules"].append({
+            "id": "lc", "name": "Follow", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+            "inputs": [], "onTrue": [], "onFalse": [],
+            "control": {"sources": [{"source": {"device": "lamp"}}], "on": [{"device": "sw", "do": "on"}],
+                        "off": [{"device": "sw", "do": "off"}], "toggle": []},
+        })
+        live = await _light_start(env, hass, clock, plan, **{"switch.sock": "off"})
+        ctx = await _light_on_confirmed(env, hass, clock, live)
+        await asyncio.gather(*hass.tasks)
+        sock = next(c[4] for c in hass.services.calls if c[2]["entity_id"] == "switch.sock")
+        clock[0] = 100.065
+        _boiler_event(env, hass, "switch.sock", "on", ctx=sock, old="off")  # the follower confirms
+        clock[0] = 100.07
+        _boiler_event(env, hass, "light.k", "off", ctx=ctx, old="on")  # filtered: no off event
+        await asyncio.gather(*hass.tasks)
+
+        def calls(eid):
+            return [c[1] for c in hass.services.calls if c[2]["entity_id"] == eid]
+
+        assert calls("switch.sock") == ["turn_on"] and calls("light.k") == ["turn_on"] * 2
+        _tick(env, clock, 110.07)  # the re-send was lost: the off reaches the rule now, a change as any other
+        await asyncio.gather(*hass.tasks)
+        assert calls("switch.sock") == ["turn_on", "turn_off"] and calls("light.k") == ["turn_on"] * 3
+
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize("own", [True, False])
+def test_the_late_delivery_keeps_the_bounce_context_for_a_wall_switch(env, own):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        ctx = hass.services.calls[0][4]
+        clock[0] = 0.06
+        _boiler_event(env, hass, "switch.sock", "on", ctx=ctx, old="off")
+        clock[0] = 0.07
+        _boiler_event(env, hass, "switch.sock", "off", ctx=ctx if own else Context(), old="on")
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 2 and _press(live) is None
+        _tick(env, clock, 10.07)  # the re-send was lost
+        await asyncio.gather(*hass.tasks)
+        assert _press(live) is None if own else _press(live)["value"] == "off"  # as it would have been at the bounce
 
     asyncio.run(go())
 

@@ -10,7 +10,8 @@ RETRY s and given up after EXPIRE s ("not confirmed"). The caller owns the clock
 A device that leaves the state of a command for another known state within BOUNCE s of confirming it (a real change,
 arrived with keep) did not keep the command: a bounce, told once per confirmation by bounce(); no data in between ends
 the window (a return is a fresh reading). The caller sends the command once more (sent with bounce: a fresh record, its
-RETRY / EXPIRE clock restarts, and the bounced state is hidden from the rules until the entity changes again: hidden()).
+RETRY / EXPIRE clock restarts, and the bounced state is hidden from the rules until the entity changes again or, at the
+latest, the re-send's retry point: hidden(), reveal()).
 The command episode keeps its bounced mark, so its next bounce is told as a repeat (not filtered by the caller). A
 different command (another state or sender) starts a new episode; an identical one continues it."""
 
@@ -55,7 +56,7 @@ class _Record:
         self.state, self.at, self.by, self.retried = state, at, by, False
         self.lapsed = False  # the entity had no data since the first send
         self.bounced = bounced  # its episode had a bounce: the next one is told as a repeat
-        self.hiding = hiding  # the re-send of a bounce: the bounced state is hidden until the entity changes again
+        self.hiding = hiding  # the re-send of a bounce: the bounced state is hidden until a change or reveal()
 
 
 class _Kept:
@@ -138,9 +139,18 @@ class Expected:
 
     def hidden(self, entity_id: str) -> str | None:
         """The commanded state while the entity's latest change was a bounce whose re-send has not arrived (no change
-        since): what the rules read instead of the bounced state."""
+        since, not revealed): what the rules read instead of the bounced state."""
         r = self._records.get(entity_id)
         return r.state if r is not None and r.hiding else None
+
+    def reveal(self, entity_id: str) -> str | None:
+        """End the hiding of a bounce (the caller does at the re-send's retry point); the state that was hidden, None
+        when nothing was."""
+        r = self._records.get(entity_id)
+        if r is None or not r.hiding:
+            return None
+        r.hiding = False
+        return r.state
 
     def due(self, now: float) -> "list[tuple[str, str, object, str]]":
         """The records needing action, (entity id, state, by, "retry" | "expire"): a retry is reported once (the record

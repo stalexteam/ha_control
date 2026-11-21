@@ -163,7 +163,7 @@ def _confirmed(state="on", by="r1", at=0.0):
 
 
 @pytest.mark.parametrize("state,other", [("on", "off"), ("off", "on")])
-def test_another_known_state_within_2_s_of_the_confirmation_is_a_bounce(state, other):
+def test_another_known_state_within_1_s_of_the_confirmation_is_a_bounce(state, other):
     x = _confirmed(state)
     assert x.bounce(E, other, 0.07) == (state, "r1", False)
     assert x.bounce(E, state, 0.08) is None  # used up: told once per confirmation
@@ -223,13 +223,22 @@ def test_the_re_send_is_a_fresh_record_hiding_the_bounce_and_its_next_bounce_is_
     assert x.bounce(E, "off", 100.3) == ("on", "r1", True)  # the episode bounced before
 
 
-def test_any_change_ends_the_hiding_and_an_unconfirmed_re_send_still_retries():
+@pytest.mark.parametrize("state", ["unavailable", "on"])
+def test_any_change_ends_the_hiding(state):
     x = _confirmed()
     x.bounce(E, "off", 0.07)
     x.sent(E, "on", 0.07, "r1", bounce=True)
-    assert x.due(10.07) == [(E, "on", "r1", "retry")] and x.hidden(E) == "on"  # retried: still hidden
-    x.arrived(E, "unavailable", 11.0, keep=True)
-    assert x.hidden(E) is None
+    x.arrived(E, state, 0.5, keep=True)
+    assert x.hidden(E) is None and x.reveal(E) is None
+
+
+def test_reveal_ends_the_hiding_once_and_the_re_send_still_retries_and_expires():
+    x = _confirmed()
+    x.bounce(E, "off", 0.07)
+    x.sent(E, "on", 0.07, "r1", bounce=True)
+    assert x.due(10.07) == [(E, "on", "r1", "retry")]
+    assert x.reveal(E) == "on" and x.hidden(E) is None and x.reveal(E) is None
+    assert x.due(60.07) == [(E, "on", "r1", "expire")]
 
 
 def test_a_new_command_after_a_reported_second_bounce_starts_a_new_episode():
