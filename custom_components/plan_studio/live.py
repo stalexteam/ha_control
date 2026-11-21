@@ -104,7 +104,7 @@ class LiveRuntime:
         data = await self._power_store.async_load()
         positions = data.get("positions") if isinstance(data, dict) else None
         self.power = PowerHub(self._lookup, positions if isinstance(positions, dict) else None, self._save_positions)
-        self.runtime = Runtime(self._lookup, time.monotonic, _clock)
+        self.runtime = Runtime(self._view, time.monotonic, _clock)
         self.runtime.add_listener(self._on_container)
         stored = await self._boiler_store.async_load()
         self._modes = stored if isinstance(stored, dict) else {}
@@ -116,7 +116,7 @@ class LiveRuntime:
         self._motion_modes = motion_modes if isinstance(motion_modes, dict) else {}
         self.virtual.load(await self._virtual_store.async_load())  # before the first load reads them
         self.engine = RuleEngine(
-            self._lookup, time.time, self._call, self._schedule,
+            self._view, time.time, self._call, self._schedule,
             local=lambda ts: dt_util.as_local(dt_util.utc_from_timestamp(ts)),  # the real zone: DST-safe
             changed_at=self._changed_at,
             on_modes=self._save_modes,
@@ -300,6 +300,14 @@ class LiveRuntime:
             return None if state is None else (state, {})
         return _pair(self._hass.states.get(entity_id))
 
+    def _view(self, entity_id: str) -> tuple[str, dict] | None:
+        """The state the containers runtime and the rules read: the commanded one while the entity's latest change is
+        a bounce whose re-send has not arrived (that change is none of theirs); the power hub reads the device as it
+        is."""
+        shown = self._expected.hidden(entity_id)
+        st = self._lookup(entity_id)
+        return st if shown is None or st is None else (shown, st[1])
+
     @callback
     def _on_state(self, event: Event[EventStateChangedData]) -> None:
         data = event.data
@@ -325,8 +333,17 @@ class LiveRuntime:
         # a fresh reading). Both consumers get it.
         own = self.runtime.is_own(context)
         was, now = (None if old is None else old[0]), (None if new is None else new[0])
+        bounced = None
         if was != now:
-            own = self._expected.arrived(entity_id, now, self._now(), back=passing(was)) or own
+            at = self._now()
+            # the device left a command's state right after confirming it: the first time in a command episode it is
+            # commanded once more and the change goes to the power hub only (the rules and the containers keep
+            # reading the commanded state, _view); a repeat goes everywhere and the sender shows "device switched back"
+            bounced = self._expected.bounce(entity_id, now, at)
+            if bounced is not None and not bounced[2] and self._bounce_resend(entity_id, bounced[0], bounced[1]):
+                self.power.handle_state(entity_id)
+                return
+            own = self._expected.arrived(entity_id, now, at, back=passing(was), keep=True) or own
             self._arm()
             if not passing(now):
                 self._warned.pop(entity_id, None)  # it reached a state: a new episode
@@ -334,6 +351,8 @@ class LiveRuntime:
         self.runtime.handle_state(entity_id, old, new, context, own=own)
         self.power.handle_state(entity_id)
         self.engine.handle_state(entity_id, own=own)
+        if bounced is not None and bounced[2]:
+            self._switched_back(entity_id, bounced[0], bounced[1])
 
     def _call(
         self,
@@ -392,16 +411,17 @@ class LiveRuntime:
 
     def _dispatch(
         self, domain: str, service: str, entity_id: str | None, on_error: Callable[..., None], by: object = None,
-        retry: bool = False, data: dict | None = None,
+        retry: bool = False, data: dict | None = None, bounce: bool = False,
     ) -> None:
         """Send one call with its own context. The state it should bring is recorded as the entity's latest command of
-        the rule `by`; a retry keeps the first send's record. An announcement (tts.speak, media_player.play_media,
-        notify.*) brings no state (expect: None): nothing is recorded, so nothing retries it."""
+        the rule `by`; a retry keeps the first send's record, the re-send of a bounce gets a fresh one (bounce). An
+        announcement (tts.speak, media_player.play_media, notify.*) brings no state (expect: None): nothing is
+        recorded, so nothing retries it."""
         ctx = Context()
         self.runtime.ignore_context(ctx.id)  # its state change is not a press for a wall switch
         state = expect(domain, service)
         if state is not None and not retry:
-            self._expected.sent(entity_id, state, self._now(), by)
+            self._expected.sent(entity_id, state, self._now(), by, bounce=bounce)
             if self._warned.get(entity_id) != (state, by):
                 self._warned.pop(entity_id, None)  # another command: a new episode
         # A background task that starts on the next loop turn: the call cannot re-enter the engine from inside a firing.
@@ -523,6 +543,34 @@ class LiveRuntime:
             except Exception:  # noqa: BLE001 - a failing report must not stop the other records
                 _LOGGER.exception("reporting an unconfirmed command failed")
         self._arm()
+
+    def _bounce_resend(self, entity_id: str, state: str, by: object) -> bool:
+        """A bounce (expected.bounce): the command is sent once more at once with Plan Studio's context when its sender
+        still wants it (engine.command_bounced, as the retry); True when it was sent."""
+        domain = entity_id.split(".", 1)[0]
+        svc = service_for(domain, state)
+        if svc is None:
+            return False
+        try:
+            wanted = self.engine.command_bounced(entity_id, by, state)
+        except Exception:  # noqa: BLE001 - a failing answer: the change goes to the rules as it is
+            _LOGGER.exception("asking whether %s still wants %s failed", by, entity_id)
+            return False
+        if not wanted:
+            return False
+        _LOGGER.debug("%s left %s right after confirming it: %s sent once more", entity_id, state, svc)
+        self._dispatch(domain, svc, entity_id, lambda *_: None, by, bounce=True)  # a failure is logged
+        return True
+
+    def _switched_back(self, entity_id: str, state: str, by: object) -> None:
+        """The second bounce of a command episode (delivered as a change): a warning, and "device switched back" on the
+        entry of the rule that sent the command."""
+        _LOGGER.warning("%s switched back from %s right after confirming it, also after %s was sent once more",
+                        entity_id, state, service_for(entity_id.split(".", 1)[0], state))
+        try:
+            self.engine.command_switched_back(entity_id, by, state)
+        except Exception:  # noqa: BLE001 - a failing report must not stop the runtime
+            _LOGGER.exception("reporting a device that switched back failed")
 
     def _schedule(self, delay: float, cb: Callable[[], None]) -> CALLBACK_TYPE:
         @callback

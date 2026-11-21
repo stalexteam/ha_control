@@ -5,12 +5,20 @@ an identical repeat, the same state from the same sender, continues it: the time
 The first change of the entity to that state is Plan Studio's own whatever its context and delay (HA keeps a call's
 context only ~5 s; a slow relay confirms later without it), and uses the record up. A change to another known state
 drops the record (the device or a person went elsewhere). Without a confirmation the command is sent once more after
-RETRY s and given up after EXPIRE s ("not confirmed"). The caller owns the clock and the timers."""
+RETRY s and given up after EXPIRE s ("not confirmed"). The caller owns the clock and the timers.
+
+A device that leaves the state of a command for another known state within BOUNCE s of confirming it (a real change,
+arrived with keep) did not keep the command: a bounce, told once per confirmation by bounce(); no data in between ends
+the window (a return is a fresh reading). The caller sends the command once more (sent with bounce: a fresh record, its
+RETRY / EXPIRE clock restarts, and the bounced state is hidden from the rules until the entity changes again: hidden()).
+The command episode keeps its bounced mark, so its next bounce is told as a repeat (not filtered by the caller). A
+different command (another state or sender) starts a new episode; an identical one continues it."""
 
 from __future__ import annotations
 
 RETRY = 10  # s after the command without a confirmation: it is sent once more
 EXPIRE = 60  # s after the command without a confirmation: given up, a command the device lost
+BOUNCE = 2  # s after a confirmation: the device switching to another known state within it did not keep the command
 
 # neither the confirmation nor another state: no data, or a valve on its way
 _PASSING = (None, "unavailable", "unknown", "opening", "closing")
@@ -39,11 +47,22 @@ def service(domain: str, state: str) -> str | None:
 
 
 class _Record:
-    __slots__ = ("state", "at", "by", "retried", "lapsed")
+    __slots__ = ("state", "at", "by", "retried", "lapsed", "bounced", "hiding")
 
-    def __init__(self, state: str, at: float, by: object) -> None:
+    def __init__(self, state: str, at: float, by: object, bounced: bool = False, hiding: bool = False) -> None:
         self.state, self.at, self.by, self.retried = state, at, by, False
         self.lapsed = False  # the entity had no data since the first send
+        self.bounced = bounced  # its episode had a bounce: the next one is told as a repeat
+        self.hiding = hiding  # the re-send of a bounce: the bounced state is hidden until the entity changes again
+
+
+class _Kept:
+    """A command the entity confirmed by a change, kept BOUNCE s for bounce()."""
+
+    __slots__ = ("state", "by", "at", "bounced")
+
+    def __init__(self, state: str, by: object, at: float, bounced: bool) -> None:
+        self.state, self.by, self.at, self.bounced = state, by, at, bounced
 
 
 class Expected:
@@ -52,37 +71,74 @@ class Expected:
         # (entity, state, by, expired at) of records an identical repeat replaced at or after their expiry: due() still
         # reports them, so the lost command shows "not confirmed"
         self._expired: list[tuple[str, str, object, float]] = []
+        self._kept: dict[str, _Kept] = {}  # the latest confirmation per entity (checked against BOUNCE when used)
 
-    def sent(self, entity_id: str, state: str, now: float, by: object) -> None:
+    def sent(self, entity_id: str, state: str, now: float, by: object, bounce: bool = False) -> None:
         """A command to the entity was sent by `by` (opaque here); it replaces the entity's record. An identical repeat
         of the record (same state, same sender) keeps its first send time and its retried mark, so a command repeated
         every few seconds still fails after EXPIRE s; not after the entity had no data (the re-send when the device is
         back is a fresh send), and not at or after the record's expiry: the repeat is a fresh record (its late
-        confirmation is ours) and the old one's expiry is still reported by due()."""
+        confirmation is ours) and the old one's expiry is still reported by due(). bounce: the re-send of a bounce,
+        always a fresh record, marked bounced and hiding the bounced state. A different command ends the entity's
+        bounce window; an identical one keeps it and carries the episode's bounced mark."""
+        k = self._kept.get(entity_id)
+        if k is not None and (k.state != state or k.by != by or now >= k.at + BOUNCE):
+            del self._kept[entity_id]
+            k = None
         r = self._records.get(entity_id)
-        if r is not None and r.state == state and r.by == by:
+        if r is not None and (r.state != state or r.by != by):
+            r = None  # another command: nothing carries over
+        if r is not None and not bounce:
             if now >= r.at + EXPIRE:
                 self._expired.append((entity_id, r.state, r.by, r.at + EXPIRE))
             elif not r.lapsed:
                 return
-        self._records[entity_id] = _Record(state, now, by)
+        bounced = bounce or (k is not None and k.bounced) or (r is not None and r.bounced)
+        self._records[entity_id] = _Record(state, now, by, bounced, hiding=bounce)
 
-    def arrived(self, entity_id: str, state: str | None, now: float, back: bool = False) -> bool:
+    def arrived(self, entity_id: str, state: str | None, now: float, back: bool = False, keep: bool = False) -> bool:
         """One change of the entity's state: True when it is the expected one (the record is used up). Another known
         state drops the record, except back from no data (back: the state before was passing): that is a fresh
         reading of a device that has not applied the command yet, kept for the retry and the expiry. No data or a
-        moving valve keeps the record; a record past EXPIRE is left to due()."""
+        moving valve keeps the record; a record past EXPIRE is left to due(). Any change ends the hiding of a bounce.
+        keep: a real change of the entity (not a silent confirmation): the confirmation opens its bounce window."""
         r = self._records.get(entity_id)
-        if r is not None and state in _NO_DATA:
-            r.lapsed = True
+        if r is not None:
+            r.hiding = False
+            if state in _NO_DATA:
+                r.lapsed = True
         if r is None or passing(state) or now >= r.at + EXPIRE:
             return False
         if state == r.state:
             del self._records[entity_id]
+            if keep:
+                self._kept[entity_id] = _Kept(r.state, r.by, now, r.bounced)
             return True
         if not back:
             del self._records[entity_id]
         return False
+
+    def bounce(self, entity_id: str, state: str | None, now: float) -> "tuple[str, object, bool] | None":
+        """One change of the entity's state, asked before arrived(): when it leaves the state of a command confirmed
+        less than BOUNCE s ago for another known state, (the commanded state, its sender, whether its episode bounced
+        before); told once (the window is used up). No data ends the window; a moving valve or the commanded state
+        again keep it."""
+        k = self._kept.get(entity_id)
+        if k is None:
+            return None
+        if now >= k.at + BOUNCE or state in _NO_DATA:
+            del self._kept[entity_id]
+            return None
+        if passing(state) or state == k.state:
+            return None
+        del self._kept[entity_id]
+        return k.state, k.by, k.bounced
+
+    def hidden(self, entity_id: str) -> str | None:
+        """The commanded state while the entity's latest change was a bounce whose re-send has not arrived (no change
+        since): what the rules read instead of the bounced state."""
+        r = self._records.get(entity_id)
+        return r.state if r is not None and r.hiding else None
 
     def due(self, now: float) -> "list[tuple[str, str, object, str]]":
         """The records needing action, (entity id, state, by, "retry" | "expire"): a retry is reported once (the record

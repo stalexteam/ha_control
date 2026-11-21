@@ -2,13 +2,13 @@
 
 import pytest
 
-from expected import EXPIRE, RETRY, Expected, expect, passing, service
+from expected import BOUNCE, EXPIRE, RETRY, Expected, expect, passing, service
 
 E = "switch.relay"
 
 
 def test_constants():
-    assert (RETRY, EXPIRE) == (10, 60)
+    assert (RETRY, EXPIRE, BOUNCE) == (10, 60, 2)
 
 
 def test_a_match_is_ours_and_uses_the_record_up():
@@ -150,6 +150,96 @@ def test_records_are_per_entity():
     x.sent("light.b", "off", 2.0, "r2")
     assert x.arrived("light.b", "off", 3.0) is True
     assert x.due(10.0) == [("light.a", "on", "r1", "retry")]
+
+
+# --- the bounce filter: the device switching back right after it confirmed a command ---------------------------------
+
+
+def _confirmed(state="on", by="r1", at=0.0):
+    x = Expected()
+    x.sent(E, state, at, by)
+    assert x.arrived(E, state, at + 0.06, keep=True) is True
+    return x
+
+
+@pytest.mark.parametrize("state,other", [("on", "off"), ("off", "on")])
+def test_another_known_state_within_2_s_of_the_confirmation_is_a_bounce(state, other):
+    x = _confirmed(state)
+    assert x.bounce(E, other, 0.07) == (state, "r1", False)
+    assert x.bounce(E, state, 0.08) is None  # used up: told once per confirmation
+
+
+def test_a_change_2_s_after_the_confirmation_is_no_bounce():
+    x = _confirmed()
+    assert x.bounce(E, "off", 2.06) is None
+    assert x.bounce(E, "off", 1.0) is None  # the window is gone with it
+
+
+@pytest.mark.parametrize("gap", [None, "unavailable", "unknown"])
+def test_no_data_between_the_confirmation_and_another_state_is_no_bounce(gap):
+    x = _confirmed()
+    assert x.bounce(E, gap, 0.5) is None
+    assert x.bounce(E, "off", 0.8) is None  # back from no data: a fresh reading
+
+
+def test_a_moving_valve_keeps_the_window():
+    x = Expected()
+    x.sent("valve.v", "closed", 0.0, "r1")
+    x.arrived("valve.v", "closed", 0.5, keep=True)
+    assert x.bounce("valve.v", "opening", 0.6) is None
+    assert x.bounce("valve.v", "open", 0.9) == ("closed", "r1", False)
+
+
+def test_only_a_real_change_opens_the_window():
+    x = Expected()
+    x.sent(E, "on", 0.0, "r1")
+    assert x.arrived(E, "on", 10.0) is True  # confirmed silently (the entity read the state already): no window
+    assert x.bounce(E, "off", 10.5) is None
+
+
+@pytest.mark.parametrize("state,by", [("off", "r1"), ("on", "r2")])
+def test_a_different_command_ends_the_window(state, by):
+    x = _confirmed()
+    x.sent(E, state, 0.5, by)
+    assert x.bounce(E, "off", 0.6) is None
+
+
+def test_an_identical_command_keeps_the_window():
+    x = _confirmed()
+    x.sent(E, "on", 0.5, "r1")  # the same command again (the device reads on already)
+    assert x.bounce(E, "off", 0.6) == ("on", "r1", False)
+
+
+def test_the_re_send_is_a_fresh_record_hiding_the_bounce_and_its_next_bounce_is_reported_again():
+    x = _confirmed(at=100.0)
+    x.bounce(E, "off", 100.07)
+    assert x.hidden(E) is None
+    x.sent(E, "on", 100.07, "r1", bounce=True)  # sent once more
+    assert x.hidden(E) == "on"  # the rules keep reading the commanded state
+    assert x.next_at() == 110.07  # a fresh RETRY / EXPIRE clock
+    assert x.arrived(E, "on", 100.2, keep=True) is True
+    assert x.hidden(E) is None
+    assert x.bounce(E, "off", 100.3) == ("on", "r1", True)  # the episode bounced before
+
+
+def test_any_change_ends_the_hiding_and_an_unconfirmed_re_send_still_retries():
+    x = _confirmed()
+    x.bounce(E, "off", 0.07)
+    x.sent(E, "on", 0.07, "r1", bounce=True)
+    assert x.due(10.07) == [(E, "on", "r1", "retry")] and x.hidden(E) == "on"  # retried: still hidden
+    x.arrived(E, "unavailable", 11.0, keep=True)
+    assert x.hidden(E) is None
+
+
+def test_a_new_command_after_a_reported_second_bounce_starts_a_new_episode():
+    x = _confirmed()
+    x.bounce(E, "off", 0.07)
+    x.sent(E, "on", 0.07, "r1", bounce=True)
+    x.arrived(E, "on", 0.2, keep=True)
+    assert x.bounce(E, "off", 0.3)[2] is True
+    x.sent(E, "on", 30.0, "r1")  # the rule's next on (new motion)
+    x.arrived(E, "on", 30.06, keep=True)
+    assert x.bounce(E, "off", 30.07) == ("on", "r1", False)
 
 
 @pytest.mark.parametrize("domain,svc,state", [

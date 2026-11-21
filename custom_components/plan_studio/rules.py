@@ -67,6 +67,9 @@ STATIC_REASONS = ("cycle", "device missing", "rule missing", "target missing")
 WAITING = "waiting for target"
 NOT_CONFIRMED = "not confirmed"  # the device never reached the state of a command (live.py gives it up)
 LOOP = "virtual switch loop"  # a virtual switch refused the command: it changed too fast (live.py, virtual.Breaker)
+# the device left a command's state right after confirming it, again after the command was sent once more (live.py)
+SWITCHED_BACK = "device switched back"
+CMD_ERRORS = (NOT_CONFIRMED, LOOP, SWITCHED_BACK)  # the errors of a command live.py reports; cleared once it arrives
 ON_WAY = 10  # s an unconfirmed on of a shared device counts as on its way
 SUN = "sun.sun"
 SUN_STATES = {"below_horizon": (True, "below horizon"), "above_horizon": (False, "above horizon")}
@@ -438,7 +441,8 @@ class _Hold:
 
 
 class _Command:
-    """The engine's latest command to one entity, until the entity reads its state (see RuleEngine._command). kind
+    """The engine's latest command to one entity, until the entity reads its state (see RuleEngine._command; then kept
+    as reached until another command, for live.py's bounce filter: RuleEngine.command_bounced). kind
     tells how its sender decides (still_wants): "slot" (an arbitrated command; token: the hold and its attempt),
     "action" (a firing's action; token: the rule and its firing seq), "control" (a load control event's direct
     command; decided by the rule's latest event), "boiler" (a boiler button command; token: the boiler's ident and its
@@ -764,6 +768,9 @@ class RuleEngine:
         self._echo: bool | None = None  # whether that change is a load control command arriving; None: not asked yet
         # per entity the engine's latest command until the entity reads the commanded state, see _command
         self._commands: dict[str, _Command] = {}
+        # per entity that latest command once the entity read its state, until another command: live.py's bounce
+        # filter may make it the latest one again (_again)
+        self._reached: dict[str, _Command] = {}
 
     # --- loading -------------------------------------------------------------
 
@@ -1500,6 +1507,7 @@ class RuleEngine:
         still = old is not None and old.by == by and old.state == state and old.entry is not None \
             and old.entry.get("error") == NOT_CONFIRMED
         self._unmark(eid)
+        self._reached.pop(eid, None)
         if still and entry is not None and "error" not in entry:
             entry["error"] = NOT_CONFIRMED
         since = {r.key: r.boiler.sends for r in self._rules.values() if r.boiler is not None and r.boiler.relay == eid}
@@ -1507,10 +1515,10 @@ class RuleEngine:
         return self._call(domain, service, eid, on_error=on_error, current=current, by=by)
 
     def _unmark(self, eid: str) -> bool:
-        """Forget the entity's latest command; True when its entry said "not confirmed" or "virtual switch loop" (that
-        error is removed)."""
+        """Forget the entity's latest command; True when its entry said "not confirmed", "virtual switch loop" or
+        "device switched back" (that error is removed)."""
         cmd = self._commands.pop(eid, None)
-        if cmd is None or cmd.entry is None or cmd.entry.get("error") not in (NOT_CONFIRMED, LOOP):
+        if cmd is None or cmd.entry is None or cmd.entry.get("error") not in CMD_ERRORS:
             return False
         del cmd.entry["error"]
         return True
@@ -2748,6 +2756,8 @@ class RuleEngine:
         cmd = self._commands.get(entity_id)
         reached = cmd is not None and st is not None and st[0] == cmd.state  # the engine's latest command got there
         cleared = reached and self._unmark(entity_id)
+        if reached and cmd is not None:
+            self._reached[entity_id] = cmd
         keys = self._readers.get(entity_id)
         if not keys and entity_id not in self._targets:
             if cleared:
@@ -2817,6 +2827,34 @@ class RuleEngine:
         if any(e is entry for e in rule.entries):
             rule.last = next(e for e in rule.entries if "error" in e)  # the first entry with an error, as _refresh picks
         self._flush()
+
+    def command_bounced(self, entity_id: str, by: object, state: str) -> bool:
+        """The device left `state` right after confirming the latest command to it (live.py's bounce filter): True
+        when its sender `by` still wants it now (still_wants); the command is then the entity's latest again, on its
+        way (its arrival, its retry and "not confirmed" work as for a fresh send) and live.py sends it once more.
+        Otherwise it stays used up."""
+        back = entity_id not in self._commands and self._again(entity_id, by, state)
+        if self.still_wants(by, entity_id, state):
+            return True
+        if back:
+            self._reached[entity_id] = self._commands.pop(entity_id)
+        return False
+
+    def command_switched_back(self, entity_id: str, by: object, state: str) -> None:
+        """The device left `state` right after confirming the command a second time in one episode (live.py: the
+        change went to the rules as it is): the entry of the rule `by` that sent it says "device switched back" as
+        command_unconfirmed, until the entity reaches the state or another command is sent to it."""
+        if entity_id not in self._commands:
+            self._again(entity_id, by, state)
+        self.command_unconfirmed(entity_id, by, SWITCHED_BACK)
+
+    def _again(self, eid: str, by: object, state: str) -> bool:
+        """Make the command the entity reached last (sent by `by` for `state`) its latest command again."""
+        cmd = self._reached.get(eid)
+        if cmd is None or cmd.by != by or cmd.state != state:
+            return False
+        self._commands[eid] = self._reached.pop(eid)
+        return True
 
     def still_wants(self, by: object, entity_id: str, state: str) -> bool:
         """Whether the sender of the latest command to the entity wants `state` NOW (live.py asks before it sends a
@@ -2921,7 +2959,7 @@ class RuleEngine:
             status, reason = "disabled", None
         else:
             reason = rule.static_reason() or rule.failed or self._hold_reason(rule.key) or (
-                rule.last["error"] if rule.last is not None and rule.last.get("error") in (NOT_CONFIRMED, LOOP) else None)
+                rule.last["error"] if rule.last is not None and rule.last.get("error") in CMD_ERRORS else None)
             # a motion light rule without motion sensors has no want by design (inert in auto), not for lack of data
             inert = rule.motion_light is not None and not rule.motion_light.sensors
             status = "error" if reason else "waiting" if rule.raw is None and rule.control is None and not inert else "ok"

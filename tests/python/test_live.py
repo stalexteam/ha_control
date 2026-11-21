@@ -707,12 +707,14 @@ def _boiler_plan(button_kind="smart_button"):
     }
 
 
-async def _bstart(env, hass, plan, stored=None):
+async def _bstart(env, hass, plan, stored=None, clock=None):
     if stored is not None:
         FakeStore.contents[BOILER_KEY] = stored
     hass.services.known |= {("switch", "turn_on"), ("switch", "turn_off")}
     hass.states.d.update({"switch.relay": "off", "sensor.grid": "500", "sensor.bp": "0", "sensor.act": ""})
     live = env.live.LiveRuntime(hass, FakePlans([plan]))
+    if clock is not None:  # the clock of the expected states: a person's flip comes after the bounce window
+        live._now = lambda: clock[0]
     await live.async_start()
     return live
 
@@ -836,13 +838,14 @@ def test_boiler_status_events_are_not_intents(env):
 
 def test_boiler_own_context_relay_change_is_not_a_take_over(env):
     async def go():
-        hass = FakeHass()
-        live = await _bstart(env, hass, _boiler_plan(), stored={"p1": {"r1": "auto"}})
+        hass, clock = FakeHass(), [0.0]
+        live = await _bstart(env, hass, _boiler_plan(), stored={"p1": {"r1": "auto"}}, clock=clock)
         await asyncio.gather(*hass.tasks)  # auto sent on
         ctx = hass.services.calls[-1][4]
         _boiler_event(env, hass, "switch.relay", "off", old="off")
         _boiler_event(env, hass, "switch.relay", "on", ctx=ctx, old="off")
         assert live.engine.snapshot("p1")["r1"]["boiler"]["mode"] == "auto"
+        clock[0] = 3.0
         _boiler_event(env, hass, "switch.relay", "off", old="on")  # a human
         assert live.engine.snapshot("p1")["r1"]["boiler"]["mode"] == "manual"
 
@@ -851,12 +854,13 @@ def test_boiler_own_context_relay_change_is_not_a_take_over(env):
 
 def test_boiler_wall_switch_over_the_relay_is_a_set_and_a_double_toggle_is_auto(env):
     async def go():
-        hass = FakeHass()
-        live = await _bstart(env, hass, _boiler_plan("wall_switch"), stored={"p1": {"r1": "auto"}})
+        hass, clock = FakeHass(), [0.0]
+        live = await _bstart(env, hass, _boiler_plan("wall_switch"), stored={"p1": {"r1": "auto"}}, clock=clock)
         await asyncio.gather(*hass.tasks)
         ctx = hass.services.calls[-1][4]
         _boiler_event(env, hass, "switch.relay", "on", ctx=ctx, old="off")
         mode = lambda: live.engine.snapshot("p1")["r1"]["boiler"]["mode"]  # noqa: E731
+        clock[0] = 3.0
         _boiler_event(env, hass, "switch.relay", "off", old="on")  # physical press: intent set off, manual
         assert mode() == "manual"
         _boiler_event(env, hass, "switch.relay", "on", old="off")  # second press: intent auto first, then the state
@@ -895,10 +899,11 @@ def test_boiler_intent_reaches_the_engine_before_the_state_change(env):
     """Three presses of a wall switch over the relay: the third is a repeated auto. Only with the intent first is
     the state change behind it no take-over, so the mode is never reported manual a second time."""
     async def go():
-        hass = FakeHass()
-        await _bstart(env, hass, _boiler_plan("wall_switch"), stored={"p1": {"r1": "auto"}})
+        hass, clock = FakeHass(), [0.0]
+        await _bstart(env, hass, _boiler_plan("wall_switch"), stored={"p1": {"r1": "auto"}}, clock=clock)
         await asyncio.gather(*hass.tasks)
         _boiler_event(env, hass, "switch.relay", "on", ctx=hass.services.calls[-1][4], old="off")
+        clock[0] = 3.0
         _boiler_event(env, hass, "switch.relay", "off", old="on")  # set off -> manual
         _boiler_event(env, hass, "switch.relay", "on", old="off")  # double toggle -> auto
         _boiler_event(env, hass, "switch.relay", "off", old="on")  # within the window again -> auto (repeated)
@@ -2015,6 +2020,278 @@ def test_stop_leaves_no_expected_state_timer(env):
     asyncio.run(go())
 
 
+# --- the bounce filter: a device switching back right after it confirmed a command -------------------------------------
+
+
+async def _light_start(env, hass, clock, plan=None, **states):
+    """The kitchen light motion control rule (light.k, binary_sensor.pir) with a manual clock for the expected states."""
+    hass.services.known |= {("light", "turn_on"), ("light", "turn_off")}
+    return await _xstart(env, hass, plan or _motion_plan(), clock,
+                         **{"light.k": "off", "binary_sensor.pir": "off", **states})
+
+
+def _told(live, eid):
+    """(consumer, state it read) for every change of the entity the power hub, the runtime and the engine are told of;
+    the power hub reads the device as it is, the runtime and the engine read it through their own lookup."""
+    got = []
+    reads = {"power": live._lookup, "runtime": live.runtime._lookup, "engine": live.engine._lookup}
+    for name in ("power", "runtime", "engine"):
+        obj = getattr(live, name)
+
+        def spy(entity_id, *a, _orig=obj.handle_state, _name=name, **k):
+            if entity_id == eid:
+                got.append((_name, reads[_name](entity_id)[0]))
+            return _orig(entity_id, *a, **k)
+
+        obj.handle_state = spy
+    return got
+
+
+def _ml(live):
+    return live.engine.snapshot("p1")["r1"]
+
+
+RELEASED = "switched off elsewhere: waits for new motion"
+
+
+async def _light_on_confirmed(env, hass, clock, live):
+    """Motion: the rule switches the light on; the dimmer confirms 60 ms later under the call's context."""
+    _boiler_event(env, hass, "binary_sensor.pir", "on", old="off")
+    await asyncio.gather(*hass.tasks)
+    assert [c[1] for c in hass.services.calls] == ["turn_on"]
+    ctx = hass.services.calls[0][4]
+    clock[0] = 100.06
+    _boiler_event(env, hass, "light.k", "on", ctx=ctx, old="off")
+    return ctx
+
+
+def test_a_bounce_right_after_the_confirmation_is_filtered_and_the_on_is_sent_once_more(env):
+    """Review focus 1, the live sequence: on at +0.06 s, off at +0.07 s under the call's context."""
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_start(env, hass, clock)
+        told = _told(live, "light.k")
+        ctx = await _light_on_confirmed(env, hass, clock, live)
+        assert told == [("runtime", "on"), ("power", "on"), ("engine", "on")]
+        clock[0] = 100.07
+        _boiler_event(env, hass, "light.k", "off", ctx=ctx, old="on")  # the dimmer switches back by itself
+        assert told[3:] == [("power", "off")]  # the power hub only
+        assert live.engine._lookup("light.k")[0] == "on"  # the rules keep reading the commanded state
+        tr = _ml(live)
+        assert tr["verdict"] is True and "waiting" not in tr["motionLight"] and tr["last"]["reason"] != RELEASED
+        await asyncio.gather(*hass.tasks)
+        assert [c[:3] for c in hass.services.calls] == [("light", "turn_on", {"entity_id": "light.k"})] * 2  # at once
+        again = hass.services.calls[1][4]
+        assert again is not ctx and live.runtime.is_own((again.id, None))
+        clock[0] = 100.15
+        _boiler_event(env, hass, "light.k", "on", ctx=again, old="off")  # the second on holds
+        await asyncio.gather(*hass.tasks)
+        assert told[4:] == [("runtime", "on"), ("power", "on"), ("engine", "on")]
+        tr = _ml(live)
+        assert tr["verdict"] is True and tr["status"] == "ok" and "waiting" not in tr["motionLight"]
+        for t in (110.15, 111.0, 170.0):
+            _tick(env, clock, t)
+            await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 2  # nothing else: no retry, no third command
+        assert _ml(live)["status"] == "ok"
+
+    asyncio.run(go())
+
+
+def test_an_off_that_bounces_back_on_is_filtered_and_the_off_is_sent_once_more(env):
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_start(env, hass, clock, **{"light.k": "on", "binary_sensor.pir": "on"})  # found on, held
+        _boiler_event(env, hass, "binary_sensor.pir", "off", old="on")  # the motion ends: off after 180 s
+        _tick(env, clock, 100.0)  # the off delay is over
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_off"]
+        ctx = hass.services.calls[0][4]
+        clock[0] = 100.06
+        _boiler_event(env, hass, "light.k", "off", ctx=ctx, old="on")
+        clock[0] = 100.07
+        _boiler_event(env, hass, "light.k", "on", ctx=ctx, old="off")  # back on by itself: not "found on" (held 180 s)
+        tr = _ml(live)
+        assert tr["verdict"] is False and tr["last"]["reason"] != "found on"
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_off", "turn_off"]
+        clock[0] = 100.15
+        _boiler_event(env, hass, "light.k", "off", ctx=hass.services.calls[1][4], old="on")
+        for t in (110.15, 170.0):
+            _tick(env, clock, t)
+            await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 2 and _ml(live)["verdict"] is False and _ml(live)["status"] == "ok"
+
+    asyncio.run(go())
+
+
+def test_a_person_switching_off_3_s_after_the_confirmation_is_a_switch_elsewhere(env):
+    """Review focus 2."""
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_start(env, hass, clock)
+        await _light_on_confirmed(env, hass, clock, live)
+        clock[0] = 103.1
+        _boiler_event(env, hass, "light.k", "off", old="on")  # the wall dimmer by hand
+        tr = _ml(live)
+        assert tr["verdict"] is False and tr["motionLight"]["waiting"] is True and tr["last"]["reason"] == RELEASED
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1
+
+    asyncio.run(go())
+
+
+def test_a_second_bounce_is_a_switch_elsewhere_and_the_rule_shows_device_switched_back(env, caplog):
+    """Review focus 3: bounce, re-send, bounce again: delivered, the error on the sender's entry, no third command."""
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_start(env, hass, clock)
+        told = _told(live, "light.k")
+        ctx = await _light_on_confirmed(env, hass, clock, live)
+        clock[0] = 100.07
+        _boiler_event(env, hass, "light.k", "off", ctx=ctx, old="on")
+        await asyncio.gather(*hass.tasks)
+        again = hass.services.calls[1][4]
+        clock[0] = 100.15
+        _boiler_event(env, hass, "light.k", "on", ctx=again, old="off")
+        clock[0] = 100.16
+        with caplog.at_level("WARNING"):
+            _boiler_event(env, hass, "light.k", "off", ctx=again, old="on")  # again: not filtered
+        assert told[-3:] == [("runtime", "off"), ("power", "off"), ("engine", "off")]
+        tr = _ml(live)
+        assert tr["verdict"] is False and tr["motionLight"]["waiting"] is True
+        assert tr["status"] == "error" and tr["reason"] == "device switched back"
+        assert tr["last"]["error"] == "device switched back" and tr["last"]["action"] == "on"
+        assert len([r for r in caplog.records if "switched back" in r.getMessage()]) == 1
+        await asyncio.gather(*hass.tasks)
+        for t in (110.16, 170.0):
+            _tick(env, clock, t)
+            await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 2  # no third command
+        clock[0] = 200.0
+        _boiler_event(env, hass, "binary_sensor.pir", "off", old="on")
+        _boiler_event(env, hass, "binary_sensor.pir", "on", old="off")  # new motion: the rule's next on
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_on"] * 3
+        assert _ml(live)["status"] == "ok" and "error" not in _ml(live)["last"]
+
+    asyncio.run(go())
+
+
+def test_a_lost_re_send_after_a_bounce_is_retried_and_shows_not_confirmed(env):
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_start(env, hass, clock)
+        ctx = await _light_on_confirmed(env, hass, clock, live)
+        clock[0] = 100.07
+        _boiler_event(env, hass, "light.k", "off", ctx=ctx, old="on")
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 2  # sent once more; the device loses it
+        _tick(env, clock, 110.07)  # a fresh 10 s from the re-send
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_on"] * 3
+        assert _ml(live)["status"] == "ok" and live.engine._lookup("light.k")[0] == "on"
+        _tick(env, clock, 160.07)
+        tr = _ml(live)
+        assert tr["status"] == "error" and tr["reason"] == "not confirmed" and tr["last"]["error"] == "not confirmed"
+        assert live.engine._lookup("light.k")[0] == "off"  # given up: the rules read the device as it is
+
+    asyncio.run(go())
+
+
+def test_no_data_between_the_confirmation_and_another_state_is_no_bounce(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        told = _told(live, "switch.sock")
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        ctx = hass.services.calls[0][4]
+        clock[0] = 0.06
+        _boiler_event(env, hass, "switch.sock", "on", ctx=ctx, old="off")
+        clock[0] = 0.5
+        _boiler_event(env, hass, "switch.sock", "unavailable", ctx=ctx, old="on")
+        clock[0] = 0.8
+        _boiler_event(env, hass, "switch.sock", "off", old="unavailable")  # back: a fresh reading
+        assert told[-3:] == [("runtime", "off"), ("power", "off"), ("engine", "off")]
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1
+
+    asyncio.run(go())
+
+
+def test_a_bounce_its_sender_no_longer_wants_is_a_change_as_today(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        ctx = hass.services.calls[0][4]
+        clock[0] = 0.03
+        _boiler_event(env, hass, "binary_sensor.leak", "off", old="on")  # a newer firing (no action): the on is stale
+        clock[0] = 0.06
+        _boiler_event(env, hass, "switch.sock", "on", ctx=ctx, old="off")
+        clock[0] = 0.07
+        _boiler_event(env, hass, "switch.sock", "off", old="on")  # within 2 s, but nobody wants the on any more
+        assert _press(live)["value"] == "off"  # delivered: the wall switch sees a press
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1
+
+    asyncio.run(go())
+
+
+def test_a_bounce_is_no_wall_switch_press(env):
+    async def go():
+        hass, clock = FakeHass(), [0.0]
+        live = await _xstart(env, hass, _ws_plan(), clock, **WS_OFF)
+        _boiler_event(env, hass, "binary_sensor.leak", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        clock[0] = 0.06
+        _boiler_event(env, hass, "switch.sock", "on", ctx=hass.services.calls[0][4], old="off")
+        clock[0] = 0.07
+        _boiler_event(env, hass, "switch.sock", "off", old="on")  # whatever its context
+        assert _press(live) is None
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_on", "turn_on"]
+
+    asyncio.run(go())
+
+
+def test_a_rule_evaluated_inside_the_bounce_reads_the_commanded_state(env):
+    """Between the filtered bounce and the re-send's confirmation another input moves: a condition rule reading the
+    light must not act on the bounced state."""
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        plan = _motion_plan()
+        plan["levels"][0]["devices"] += [
+            {"id": "leak", "name": "leak", "props": {"kind": "leak_sensor"}, "bindings": {"leak": "binary_sensor.leak"}},
+            {"id": "sw", "name": "sw", "props": {"kind": "socket"}, "bindings": {"control": "switch.sock"}},
+        ]
+        plan["rules"].append({
+            "id": "r2", "name": "Lamp or leak", "zoneId": None, "combine": "any", "onDelay": 0, "offDelay": 0,
+            "inputs": [{"source": {"device": "lamp"}}, {"source": {"device": "leak"}}],
+            "onTrue": [{"device": "sw", "do": "on"}], "onFalse": [{"device": "sw", "do": "off"}],
+        })
+        live = await _light_start(env, hass, clock, plan, **{"binary_sensor.leak": "off", "switch.sock": "off"})
+        ctx = None
+        _boiler_event(env, hass, "binary_sensor.pir", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        ctx = next(c[4] for c in hass.services.calls if c[2]["entity_id"] == "light.k")
+        clock[0] = 100.06
+        _boiler_event(env, hass, "light.k", "on", ctx=ctx, old="off")
+        await asyncio.gather(*hass.tasks)
+        assert live.engine.snapshot("p1")["r2"]["verdict"] is True
+        n = len(hass.services.calls)
+        clock[0] = 100.07
+        _boiler_event(env, hass, "light.k", "off", ctx=ctx, old="on")  # filtered
+        _boiler_event(env, hass, "binary_sensor.leak", "unavailable", old="off")  # r2 evaluated inside the bounce
+        assert live.engine.snapshot("p1")["r2"]["verdict"] is True
+        await asyncio.gather(*hass.tasks)
+        assert [c[2]["entity_id"] for c in hass.services.calls[n:]] == ["light.k"]  # the re-send only, no sock off
+
+    asyncio.run(go())
+
+
 # --- virtual switches (kept by the integration, never Home Assistant entities) -----------------------------------------
 
 VIRTUAL_KEY = "plan_studio.virtual"
@@ -2326,7 +2603,8 @@ def test_a_two_way_link_between_a_virtual_switch_and_a_light_ends(env):
         plan["rules"] = [plan["rules"][0], control("a", "sleep", "lamp"), control("b", "lamp", "sleep")]
         hass.services.known |= {("light", "turn_on"), ("light", "turn_off")}
         hass.states.d["light.k"] = "off"
-        live = await _vstart(env, hass, plan=plan)
+        clock = [0.0]
+        live = await _vstart(env, hass, plan=plan, clock=clock)
         assert await _drain(hass)
         live.engine.on_intent("p1", "btn", {"action": "toggle"})  # Sleep on (load control): the lamp follows
         assert await _drain(hass)
@@ -2335,6 +2613,7 @@ def test_a_two_way_link_between_a_virtual_switch_and_a_light_ends(env):
         _boiler_event(env, hass, "light.k", "on", ctx=hass.services.calls[-1][4], old="off")  # the lamp confirms
         assert await _drain(hass)
         assert live.virtual.state("virtual.sleep") == "on" and len(hass.services.calls) == 1  # a real echo: b is quiet
+        clock[0] = 3.0
         _boiler_event(env, hass, "light.k", "off", old="on")  # a person: Sleep follows, the lamp is not switched again
         assert await _drain(hass)
         assert live.virtual.state("virtual.sleep") == "off" and len(hass.services.calls) == 1
