@@ -1,6 +1,6 @@
 """The Load control rule, the event twin of the condition rule: sources (smart buttons, any condition rule input, or an
-event of a purpose-built rule) give on / off / toggle events; each event kind runs its own action list by direct calls
-(announcements included).
+event of a purpose-built rule) give on / off / toggle events, a smart button also auto; each event kind runs its own
+action list by direct calls (announcements included).
 
 Must not import homeassistant.
 
@@ -15,7 +15,7 @@ except ImportError:  # pytest: module dir on sys.path
     from announce import KINDS as ANNOUNCE
 
 ECHO = 10  # s a command counts as an expected change of its entity
-KINDS = ("on", "off", "toggle")
+KINDS = ("on", "off", "toggle", "auto")  # "auto": a smart button's auto intent ("When auto", optional, 0.30.0)
 DOS = ("on", "off", "toggle", "close") + ANNOUNCE  # the action `do` values a list keeps
 # the events a purpose-built rule gives to event sources {event: {rule, what}}, per its kind (the key of its config):
 # entered auto / entered manual by a button; a boiler also "done" (heating done: back to manual by itself)
@@ -73,12 +73,15 @@ class Control:
         self.event = old.event
 
     def press(self, intent: dict) -> str | None:
-        """A smart button intent: "toggle", "on" or "off"; None for auto, status events and anything else."""
+        """A smart button intent: "toggle", "on", "off" or "auto"; None for status events and anything else, and for auto
+        when the rule has no "When auto" actions (a rule without that list ignores auto, as before 0.30.0)."""
         action, value = intent.get("action"), intent.get("value")
         if action == "toggle":
             return "toggle"
         if action == "set" and value in ("on", "off"):
             return value
+        if action == "auto" and self.lists["auto"]:
+            return "auto"
         return None
 
     def edge(self, k: int, value: "bool | None") -> str | None:

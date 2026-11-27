@@ -306,7 +306,8 @@ def cworld(rules, **states):
 
 def test_control_keeps_the_announcements_in_its_lists():
     c = Control({"sources": [btn("btn")], "on": [SAY, NOTE], "off": [], "toggle": [{"device": "l1", "do": "toggle"}, PLAY]}, {})
-    assert c.lists == {"on": [("sp", "say"), ("ph", "notify")], "off": [], "toggle": [("l1", "toggle"), ("sp", "play")]}
+    assert c.lists == {"on": [("sp", "say"), ("ph", "notify")], "off": [], "toggle": [("l1", "toggle"), ("sp", "play")],
+                       "auto": []}
     assert c.actions["on"] == [SAY, NOTE] and c.actions["toggle"][1] == PLAY
 
 

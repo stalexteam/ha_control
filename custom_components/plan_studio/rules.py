@@ -2434,7 +2434,7 @@ class RuleEngine:
 
     def _control_event(self, rule: _Rule, source: str, what: str, announce: bool = True,
                        origin: "dict | None" = None) -> None:
-        """An event ("on", "off" or "toggle") of a source: recorded; dropped while the gate is not open (an "off" event ignores the gate); else the list
+        """An event ("on", "off", "toggle", or a button's "auto") of a source: recorded; dropped while the gate is not open (an "off" event ignores the gate); else the list
         of its kind runs by direct calls (own context). Its toggle actions act as one group (any of their devices
         effectively on: all off, else all on); on / off / close are literal; an announcement runs on its own (_announce),
         unless the event is no real change (announce False: it is left out, no entry). A device in the wanted state
@@ -2672,7 +2672,8 @@ class RuleEngine:
     def on_intent(self, plan_id: str, container_id: str, intent: dict) -> None:
         """A container intent ({"action": "toggle"}, {"action": "set", "value": "on" | "off"}, {"action": "auto"}); a
         boiler, timed or motion light rule whose button it is takes it, and so does every load control rule with that
-        smart button among its sources (not while HA is starting). Status events and other actions are ignored."""
+        smart button among its sources (not while HA is starting; auto only by a rule with "When auto" actions). Status
+        events and other actions are ignored."""
         if not isinstance(intent, dict):
             return
         dirty: set[Key] = set()

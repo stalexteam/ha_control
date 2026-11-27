@@ -284,10 +284,11 @@ def _validate_event(e: object, rules: dict) -> None:
 
 
 def _validate_control(r: dict, c: object, devices: dict, rules: dict) -> list[str]:
-    """A load control rule: sources (buttons, condition inputs or events of purpose-built rules) give events that run the on / off / toggle action lists; a
-    gate is allowed. Returns the rule ids the input sources reference (an event source reads no verdict)."""
-    if not isinstance(c, dict) or set(c) != {"sources", "on", "off", "toggle"}:
-        raise vol.Invalid("rule control needs sources, on, off and toggle")
+    """A load control rule: sources (buttons, condition inputs or events of purpose-built rules) give events that run the on / off / toggle action lists
+    and the optional auto list (a button's auto intent; absent = empty); a gate is allowed. Returns the rule ids the input sources reference (an event
+    source reads no verdict)."""
+    if not isinstance(c, dict) or set(c) - {"auto"} != {"sources", "on", "off", "toggle"}:
+        raise vol.Invalid("rule control needs sources, on, off and toggle (auto optional)")
     sources = c["sources"]
     if not isinstance(sources, list) or not sources:
         raise vol.Invalid("rule control needs at least one source")
@@ -311,7 +312,9 @@ def _validate_control(r: dict, c: object, devices: dict, rules: dict) -> list[st
             raise vol.Invalid("rule control needs distinct sources")
         seen.add(key)
     targets: set[str] = set()
-    for key in ("on", "off", "toggle"):
+    for key in ("on", "off", "toggle", "auto"):
+        if key not in c:  # only auto may be absent
+            continue
         actions = c[key]
         if not isinstance(actions, list):
             raise vol.Invalid(f"rule control {key} must be a list")
@@ -327,7 +330,7 @@ def _validate_control(r: dict, c: object, devices: dict, rules: dict) -> list[st
             ids.append(a["device"])
         if len(set(ids)) != len(ids):
             raise vol.Invalid(f"rule control needs a device once in {key}")
-    if not (c["on"] or c["off"] or c["toggle"]):
+    if not (c["on"] or c["off"] or c["toggle"] or c.get("auto")):
         raise vol.Invalid("rule control needs at least one action")
     if targets & read:
         raise vol.Invalid("rule control needs a target device that its sources do not read")

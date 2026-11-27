@@ -529,6 +529,36 @@ def test_validate_plan_control_rule():
             validate_plan({**plan("p"), "rules": [{**other, "control": ctl()}]})
 
 
+def test_validate_plan_control_rule_auto_list():
+    """0.30.0: an optional "When auto" list; a rule saved by 0.29 (no auto key) still validates."""
+    def check(c):
+        validate_plan({**plan("p"), "rules": [control_rule(control=c)]})
+
+    check(ctl())  # no auto key
+    assert "auto" not in ctl()
+    check(ctl(auto=[]))
+    check(ctl(auto=[{"device": "l", "do": "on"}, {"device": "l2", "do": "toggle"}, {"device": "l3", "do": "toggle"}]))
+    check(ctl(toggle=[], auto=[{"device": "l", "do": "off"}]))  # the only list with actions
+    check(ctl(toggle=[], auto=[{"device": "v", "do": "close"}]))
+    check(ctl(auto=[{"device": "l", "do": "off"}]))  # the device of another list again
+    bad = [
+        (ctl(auto="x"), "rule control auto must be a list"),
+        (ctl(auto=None), "rule control auto must be a list"),
+        (ctl(auto=[{"device": "l", "do": "open"}]), "rule control action needs a device and do"),
+        (ctl(auto=[{"device": "", "do": "on"}]), "rule control action needs a device and do"),
+        (ctl(auto=[{"device": "l", "do": "on", "x": 1}]), "rule control action needs a device and do"),
+        (ctl(auto=[{"device": "l", "do": "on"}, {"device": "l", "do": "off"}]), "rule control needs a device once in auto"),
+        (ctl(toggle=[], auto=[]), "rule control needs at least one action"),
+        (ctl(sources=[{"source": {"device": "w"}}], auto=[{"device": "w", "do": "on"}]),
+         "rule control needs a target device that its sources do not read"),
+        (ctl(x=1), "rule control needs sources, on, off and toggle"),
+        (ctl(auto=[], x=1), "rule control needs sources, on, off and toggle"),
+    ]
+    for c, msg in bad:
+        with pytest.raises(vol.Invalid, match=msg):
+            check(c)
+
+
 def test_validate_plan_control_rule_source_refs():
     # a rule source takes part in the reference check (cycles)
     other = rule("r2", inputs=ref("c1"))
@@ -730,8 +760,10 @@ def test_validate_plan_announcement_actions_of_a_load_control_rule():
     validate_plan({**base, "rules": [control_rule(control=ctl(toggle=[], on=[play()]))]})  # announcements alone
     # an announcement is once per (device, do) in a list: a sound then a text on the same speaker
     validate_plan({**base, "rules": [control_rule(control=ctl(toggle=[], on=[play(), say()]))]})
+    validate_plan({**base, "rules": [control_rule(control=ctl(toggle=[], auto=[play(), say(), notify()]))]})  # "When auto"
     bad = [
         ctl(on=[say(text="")]), ctl(on=[play(media="")]), ctl(toggle=[notify(title="")]),
+        ctl(auto=[say(text="")]), ctl(auto=[play("ph")]), ctl(auto=[say(), say(text="Again")]),
         ctl(on=[say("ph")]), ctl(off=[play("ph")]), ctl(toggle=[notify("sp")]),
         ctl(on=[{"device": "sp", "do": "say"}]),
         ctl(on=[say(), say(text="Again")]),  # the same announcement twice in a list

@@ -46,9 +46,11 @@ def src(did, negate=False):
     return out
 
 
-def control_rule(rid="r", sources=(), on=(), off=(), toggle=(), gate=None, **extra):
-    """sources: btn(id) / src(id) / any raw RuleInput dict; actions: (device id, do)."""
-    lists = {k: [{"device": d, "do": do} for d, do in v] for k, v in (("on", on), ("off", off), ("toggle", toggle))}
+def control_rule(rid="r", sources=(), on=(), off=(), toggle=(), gate=None, auto=None, **extra):
+    """sources: btn(id) / src(id) / any raw RuleInput dict; actions: (device id, do) or a raw dict. Without `auto` the
+    rule has no "When auto" list (the shape a 0.29 panel saves)."""
+    pairs = (("on", on), ("off", off), ("toggle", toggle)) + ((("auto", auto),) if auto is not None else ())
+    lists = {k: [a if isinstance(a, dict) else {"device": a[0], "do": a[1]} for a in v] for k, v in pairs}
     if gate is not None:
         extra["gate"] = gate
     return rule(rid, [], name=extra.pop("name", "Load control"), control={"sources": list(sources), **lists}, **extra)
@@ -119,7 +121,7 @@ def test_config_order_buttons_inputs_lists_and_missing():
     assert c.order == [("button", 0), ("input", 0), ("button", 1), ("input", 1)]
     assert c.buttons == [("btn", "Button"), ("btn2", "Button 2")]
     assert c.inputs == [src("ws"), src("pir", True)]
-    assert c.lists == {"on": [("l1", "on")], "off": [], "toggle": [("l1", "toggle"), ("v", "close")]}
+    assert c.lists == {"on": [("l1", "on")], "off": [], "toggle": [("l1", "toggle"), ("v", "close")], "auto": []}
     assert c.last == [None, None] and not c.missing
     assert _control(sources=(btn("ws"),)).missing  # a wall switch is no button
     assert _control(sources=(btn("nope"),)).missing
@@ -530,6 +532,117 @@ def test_gate_drops_a_button_event():
     w.set("binary_sensor.pir", "on")
     w.press("btn", TOGGLE)
     assert w.calls == [on("switch.l1")]
+
+
+# --- "When auto": a button's auto intent (0.30.0) ------------------------------------------
+
+def test_press_gives_auto_only_with_an_auto_list():
+    assert _control().press(AUTO) is None  # no "When auto" list: auto is ignored, as before 0.30.0
+    assert _control(auto=[]).press(AUTO) is None
+    c = _control(auto=[("l1", "on"), ("l2", "toggle")])
+    assert c.press(AUTO) == "auto"
+    assert c.press(TOGGLE) == "toggle" and c.press(SET_OFF) == "off" and c.press({"status": "ok"}) is None
+    assert c.lists["auto"] == [("l1", "on"), ("l2", "toggle")]
+
+
+def test_button_auto_runs_the_auto_list_and_a_single_press_the_toggle_list():
+    w = loaded([control_rule(sources=[btn("btn"), btn("btn2")], toggle=[("l1", "toggle")], auto=[("l2", "on")])])
+    w.press("btn", AUTO)
+    assert w.calls == [on("switch.l2")]
+    t = w.tr()
+    assert t["status"] == "ok"
+    assert t["control"]["event"] == {"source": "Button", "what": "auto", "at": 1000000}
+    assert t["last"] == {"action": "on", "target": "Lamp 2", "at": 1000000, "reason": "Button: auto"}
+    w.press("btn", TOGGLE)  # a single press: the toggle list, as before
+    assert w.calls == [on("switch.l2"), on("switch.l1")]
+    assert w.tr()["control"]["event"]["what"] == "toggle" and w.tr()["last"]["reason"] == "Button: toggle"
+    w.set("switch.l2", "on", own=True)
+    w.calls.clear()
+    w.press("btn2", AUTO)  # a button with separate on / off gives auto as well
+    assert w.calls == [] and w.tr()["last"] == {"action": "on", "target": "Lamp 2", "at": 1000000,
+                                                 "reason": "Button 2: auto", "sent": False}
+
+
+def test_auto_without_an_auto_list_changes_nothing():
+    """A rule saved by 0.29 (no auto key) or with an empty list: an auto press is no event (trace, wanted commands)."""
+    R = ("p", "r")
+    for auto in (None, []):
+        w = loaded([repeat()] if auto is None else [{**repeat(), "control": {**repeat()["control"], "auto": auto}}])
+        w.press("btn", TOGGLE)
+        before = w.tr()
+        w.calls.clear()
+        w.press("btn", AUTO)
+        assert w.calls == [] and w.tr() == before
+        assert w.engine.still_wants(R, "switch.l1", "on") is True  # the toggle's command is still the latest event's
+
+
+def test_auto_is_dropped_by_a_closed_or_unknown_gate_and_never_replayed():
+    for gate_state in ("off", "unavailable"):
+        w = loaded([control_rule(sources=[btn("btn")], auto=[("l1", "on")], gate=src("pir"))],
+                   binary_sensor__pir=gate_state)
+        w.press("btn", AUTO)
+        t = w.tr()
+        assert w.calls == [] and "last" not in t
+        assert t["control"]["event"] == {"source": "Button", "what": "auto", "at": 1000000, "dropped": "gate closed"}
+        w.set("binary_sensor.pir", "on")  # opening the gate replays nothing
+        assert w.calls == []
+        w.press("btn", AUTO)
+        assert w.calls == [on("switch.l1")] and "dropped" not in w.tr()["control"]["event"]
+
+
+def test_auto_does_nothing_while_booting_at_a_save_or_for_a_disabled_rule():
+    r = control_rule(sources=[btn("btn")], auto=[("l1", "on")])
+    w = loaded([r], boot=True)
+    w.press("btn", AUTO)  # a retained action replayed while HA starts
+    assert w.calls == [] and "event" not in w.tr()["control"]
+    w.engine.started()
+    assert w.calls == []
+    w.load([r])
+    w.load([control_rule(sources=[btn("btn")], auto=[("l2", "on")])])
+    assert w.calls == []
+    w.press("btn", AUTO)
+    assert w.calls == [on("switch.l2")]
+    d = loaded([control_rule(sources=[btn("btn")], auto=[("l1", "on")], enabled=False)])
+    d.press("btn", AUTO)
+    assert d.calls == [] and "event" not in d.tr()["control"] and d.tr()["status"] == "disabled"
+
+
+def test_non_button_sources_never_give_auto():
+    w = loaded([control_rule(sources=[src("ws"), src("pir")], auto=[("l1", "on")])])
+    w.press("ws", AUTO)  # a wall switch's double toggle: its entity is the source, its intents are not used
+    w.press("btn", AUTO)  # a button that is not a source of the rule
+    w.set("switch.a", "on")
+    w.set("binary_sensor.pir", "on")
+    w.set("switch.a", "off")
+    assert w.calls == [] and w.tr()["control"]["event"]["what"] == "off"
+
+
+def test_auto_list_toggle_actions_are_one_group():
+    w = loaded([control_rule(sources=[btn("btn")], auto=[("l1", "toggle"), ("l2", "toggle")])], switch__l1="on")
+    w.press("btn", AUTO)  # any of the group on: all off
+    assert w.calls == [off("switch.l1")]
+    assert [(e["action"], e.get("sent", True)) for e in w.engine._rules[("p", "r")].entries] == [("off", True), ("off", False)]
+    w.set("switch.l1", "off", own=True)
+    w.press("btn", AUTO)  # all off: all on
+    assert w.calls == [off("switch.l1"), on("switch.l1"), on("switch.l2")]
+
+
+def test_auto_list_runs_an_announcement():
+    from test_rules_announce import SAY, SPEAK, SPK  # it imports this module: read here, not at the top
+    w = CWorld(media_player__vlc="idle")
+    w.load([control_rule(sources=[btn("btn")], toggle=[("l1", "toggle")], auto=[SAY, ("l1", "on")])], [BTN, L1, SPK])
+    w.press("btn", AUTO)
+    assert w.calls == [SPEAK, on("switch.l1")]
+    assert w.tr()["last"] == {"action": "on", "target": "Lamp 1", "at": 1000000, "reason": "Button: auto"}
+
+
+def test_a_lost_command_of_the_auto_list_is_wanted_while_auto_is_the_latest_event():
+    R = ("p", "r")
+    w = loaded([control_rule(sources=[btn("btn")], toggle=[("l1", "toggle")], auto=[("l1", "off")])], switch__l1="on")
+    w.press("btn", AUTO)
+    assert w.calls == [off("switch.l1")] and w.engine.still_wants(R, "switch.l1", "off") is True
+    w.press("btn", TOGGLE)  # l1 effectively off (its command on the way): the toggle switches it on
+    assert w.calls == [off("switch.l1"), on("switch.l1")] and w.engine.still_wants(R, "switch.l1", "off") is False
 
 
 # --- loads -------------------------------------------------------------------------------
