@@ -372,7 +372,7 @@ const en: Dict = {
   'beurer.flow.never': 'never',
   'beurer.flow.due': 'due',
   'control.title': 'Load control',
-  'control.hint': 'Reacts to events. A source gives "on" when it becomes true and "off" when it becomes false (NOT swaps them); a button gives what it is set up for: toggle, or on / off. Each event runs its own list. "toggle" actions of one list work as a group: any of them on switches all off, else all on. Nothing happens at start or Save, a device that is unavailable at that moment is skipped, and a change made by a Load control rule is not an event for another one.',
+  'control.hint': 'Reacts to events. A source gives "on" when it becomes true and "off" when it becomes false (NOT swaps them); a button gives what it is set up for: toggle, or on / off, and its Auto action runs "When auto". Each event runs its own list. "toggle" actions of one list work as a group: any of them on switches all off, else all on. Nothing happens at start or Save, a device that is unavailable at that moment is skipped, and a change made by a Load control rule is not an event for another one.',
   'control.sources': 'Sources',
   'control.addSource': 'Add a source…',
   'control.group.buttons': 'Buttons',
