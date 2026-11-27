@@ -46,6 +46,9 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 CALL_TIMEOUT = 30  # seconds
+# s after a light's switch-off went out: it is sent once more (a dimmer may drop an off while its integration, e.g.
+# an optimistic Zigbee2MQTT, reports off at once and the device never tells otherwise)
+REPEAT_OFF = 1
 
 
 def _pair(st: State | None) -> tuple[str, dict] | None:
@@ -120,6 +123,7 @@ class LiveRuntime:
         # entity -> whether its latest filtered bounce carried an own context (the change _unhide delivers late)
         self._bounce_own: dict[str, bool] = {}
         self._brightness: dict[str, int] = {}  # light entity -> brightness_pct of its turn_on, from the saved plans
+        self._repeats: dict[str, CALLBACK_TYPE] = {}  # light entity -> cancel of its pending repeated switch-off
 
     async def async_start(self) -> None:
         # The v0.4 runtime store held persisted outputs; it is no longer used.
@@ -273,6 +277,9 @@ class LiveRuntime:
         self._untrack_all()
         self._deferred.clear()
         self._disarm()
+        for cancel in self._repeats.values():
+            cancel()
+        self._repeats.clear()
         if self._engine_start is not None:
             self._engine_start()
             self._engine_start = None
@@ -448,7 +455,7 @@ class LiveRuntime:
         """Send one call with its own context. The state it should bring is recorded as the entity's latest command of
         the rule `by`; a retry keeps the first send's record, the re-send of a bounce gets a fresh one (bounce). An
         announcement (tts.speak, media_player.play_media, notify.*) brings no state (expect: None): nothing is
-        recorded, so nothing retries it."""
+        recorded, so nothing retries it. A light's switch-off is sent once more REPEAT_OFF s later (_repeat_later)."""
         ctx = Context()
         self.runtime.ignore_context(ctx.id)  # its state change is not a press for a wall switch
         state = expect(domain, service)
@@ -456,6 +463,8 @@ class LiveRuntime:
             self._expected.sent(entity_id, state, self._now(), by, bounce=bounce)
             if self._warned.get(entity_id) != (state, by):
                 self._warned.pop(entity_id, None)  # another command: a new episode
+        if entity_id is not None:
+            self._repeat_later(entity_id, domain, service)
         # A background task that starts on the next loop turn: the call cannot re-enter the engine from inside a firing.
         task = self._hass.async_create_background_task(
             self._send(domain, service, entity_id, ctx, by, data), f"plan_studio rule {domain}.{service}",
@@ -487,6 +496,36 @@ class LiveRuntime:
             self._hass.services.async_call(domain, service, service_data, blocking=True, context=ctx),
             CALL_TIMEOUT,
         )
+
+    def _repeat_later(self, entity_id: str, domain: str, service: str) -> None:
+        """A command to the entity: it ends the entity's pending repeat (the newer command decides; a retry or a
+        bounce's re-send included); a light's switch-off is sent once more REPEAT_OFF s later (_repeat_off)."""
+        cancel = self._repeats.pop(entity_id, None)
+        if cancel is not None:
+            cancel()
+        if domain == "light" and service == "turn_off" and not self._stopped:
+            self._repeats[entity_id] = self._schedule(REPEAT_OFF, lambda: self._repeat_off(entity_id))
+
+    def _repeat_off(self, entity_id: str) -> None:
+        """A light's switch-off once more, with Plan Studio's own context: not while the light really reads on (a
+        person, or a bounce the filter handles: the device as it is, not _view) nor once stopped; no data still sends
+        it. Nothing is recorded (the first send's expected state, retry and expiry stand), the engine never hears of
+        it and it is not repeated again; a failure is only logged."""
+        self._repeats.pop(entity_id, None)
+        st = self._hass.states.get(entity_id)
+        if self._stopped or (st is not None and st.state == "on"):
+            return
+        ctx = Context()
+        self.runtime.ignore_context(ctx.id)  # its state change, if any, is not a press for a wall switch
+        task = self._hass.async_create_background_task(
+            self._send("light", "turn_off", entity_id, ctx), "plan_studio repeat light.turn_off", eager_start=False,
+        )
+
+        def done(t: asyncio.Future) -> None:
+            if not t.cancelled() and t.exception() is not None:
+                _LOGGER.warning("repeated light.turn_off %s failed: %s", entity_id, t.exception())
+
+        task.add_done_callback(done)
 
     def _virtual_set(self, entity_id: str, service: str, ctx: Context, by: object = None) -> None:
         """A command to a virtual switch: the state is set now and its change goes the way of a Home Assistant state

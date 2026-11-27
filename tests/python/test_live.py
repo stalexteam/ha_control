@@ -2120,7 +2120,9 @@ def test_an_off_that_bounces_back_on_is_filtered_and_the_off_is_sent_once_more(e
         for t in (110.15, 170.0):
             _tick(env, clock, t)
             await asyncio.gather(*hass.tasks)
-        assert len(hass.services.calls) == 2 and _ml(live)["verdict"] is False and _ml(live)["status"] == "ok"
+        # the third: the re-send's own repeat 1 s after it (a light's switch-off is sent twice); nothing else
+        assert [c[1] for c in hass.services.calls] == ["turn_off"] * 3
+        assert _ml(live)["verdict"] is False and _ml(live)["status"] == "ok"
 
     asyncio.run(go())
 
@@ -3050,5 +3052,254 @@ def test_a_failed_announcement_is_service_failed_and_never_sent_again(env):
         live.engine.handle_state("media_player.vlc")
         await asyncio.gather(*hass.tasks, return_exceptions=True)
         assert [c[:2] for c in hass.services.calls] == [("media_player", "play_media")]
+
+    asyncio.run(go())
+
+
+# --- a light's switch-off is sent twice, 1 s apart (a dimmer may drop it while Zigbee2MQTT reports off at once) ----------
+
+LAMP_OFF = ("light", "turn_off", {"entity_id": "light.k"})
+
+
+def _repeats(env):
+    """The armed repeats of a light's switch-off: the only 1 s timers."""
+    return [t for t in env.later if t["on"] and t["delay"] == env.live.REPEAT_OFF]
+
+
+def _fire(timers):
+    for t in timers:
+        t["on"] = False
+        t["action"](datetime.datetime.now())
+
+
+async def _light_off_sent(env, hass, clock):
+    """The light found on under motion; the motion ends, the off delay is over: the rule switches it off at 100.0."""
+    live = await _light_start(env, hass, clock, **{"light.k": "on", "binary_sensor.pir": "on"})
+    _boiler_event(env, hass, "binary_sensor.pir", "off", old="on")
+    _tick(env, clock, 100.0)
+    await asyncio.gather(*hass.tasks)
+    assert [c[:3] for c in hass.services.calls] == [LAMP_OFF]
+    return live
+
+
+def test_a_light_switch_off_is_sent_once_more_1_s_later_and_the_rule_sees_nothing_of_it(env):
+    """Review focus 1."""
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_off_sent(env, hass, clock)
+        first = hass.services.calls[0][4]
+        clock[0] = 100.06
+        _boiler_event(env, hass, "light.k", "off", ctx=first, old="on")  # Zigbee2MQTT reports off at once
+        await asyncio.gather(*hass.tasks)
+        before = _ml(live)
+        assert before["verdict"] is False and before["status"] == "ok"
+        (repeat,) = _repeats(env)
+        assert repeat["delay"] == 1
+        seen = _spy_engine(live)
+        clock[0] = 101.0
+        _fire([repeat])
+        await asyncio.gather(*hass.tasks)
+        assert [c[:4] for c in hass.services.calls] == [(*LAMP_OFF, True)] * 2
+        again = hass.services.calls[1][4]
+        assert again is not first and live.runtime.is_own((again.id, None))  # its change, if any, is no press
+        assert "light.k" not in live._expected._records  # nothing recorded: no retry, no expiry of the repeat
+        assert _ml(live) == before and seen == []  # the engine never hears of it
+        assert not _repeats(env)  # the repeat is not repeated
+        for t in (110.0, 160.0, 170.0):
+            _tick(env, clock, t)
+            await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 2 and _ml(live) == before
+
+    asyncio.run(go())
+
+
+def test_a_failed_repeat_is_only_logged(env, caplog):
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_off_sent(env, hass, clock)
+        _boiler_event(env, hass, "light.k", "off", ctx=hass.services.calls[0][4], old="on")
+        await asyncio.gather(*hass.tasks)
+        before = _ml(live)
+        hass.services.fail = "boom"
+        _fire(_repeats(env))
+        await asyncio.gather(*hass.tasks, return_exceptions=True)
+        assert len(hass.services.calls) == 2 and _ml(live) == before
+        warned = [r for r in caplog.records if r.levelname == "WARNING" and "light.k" in r.getMessage()]
+        assert len(warned) == 1 and "boom" in warned[0].getMessage()
+
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize("state", ["unavailable", "unknown", None])
+def test_a_light_without_data_at_the_repeat_still_gets_it(env, state):
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        await _light_off_sent(env, hass, clock)
+        if state is None:
+            hass.states.d.pop("light.k")
+        else:
+            hass.states.d["light.k"] = state
+        _fire(_repeats(env))
+        await asyncio.gather(*hass.tasks)
+        assert [c[:3] for c in hass.services.calls] == [LAMP_OFF] * 2
+
+    asyncio.run(go())
+
+
+def test_a_newer_command_within_the_1_s_cancels_the_repeat(env):
+    """Review focus 2: motion again right after the off: the rule switches the light on; the off is not repeated."""
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_off_sent(env, hass, clock)
+        clock[0] = 100.06
+        _boiler_event(env, hass, "light.k", "off", ctx=hass.services.calls[0][4], old="on")
+        (repeat,) = _repeats(env)
+        clock[0] = 100.5
+        _boiler_event(env, hass, "binary_sensor.pir", "on", old="off")
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_off", "turn_on"]
+        assert not repeat["on"] and not _repeats(env)  # cancelled; a switch-on is never repeated
+        for t in (101.0, 110.5):
+            _tick(env, clock, t)
+            await asyncio.gather(*hass.tasks)
+        assert "turn_off" not in [c[1] for c in hass.services.calls[1:]]
+        assert _ml(live)["verdict"] is True
+
+    asyncio.run(go())
+
+
+def test_a_light_reading_on_at_the_repeat_is_left_alone(env):
+    """Review focus 3, the device (or a person) keeps it on: the off is not confirmed by +1 s."""
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_off_sent(env, hass, clock)
+        before = _ml(live)
+        clock[0] = 101.0
+        _fire(_repeats(env))
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1 and _ml(live) == before
+
+    asyncio.run(go())
+
+
+def test_a_bounce_back_on_is_re_sent_by_the_filter_and_not_repeated_while_the_light_reads_on(env):
+    """Review focus 3, a bounce: the filter's re-send goes at once; the light still reads on at +1 s (the re-send is
+    lost): no repeat (the 10 s retry covers it)."""
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_off_sent(env, hass, clock)
+        ctx = hass.services.calls[0][4]
+        clock[0] = 100.06
+        _boiler_event(env, hass, "light.k", "off", ctx=ctx, old="on")
+        clock[0] = 100.07
+        _boiler_event(env, hass, "light.k", "on", ctx=ctx, old="off")  # back on by itself
+        await asyncio.gather(*hass.tasks)
+        assert [c[:3] for c in hass.services.calls] == [LAMP_OFF] * 2  # the filter's re-send, at once
+        (repeat,) = _repeats(env)  # the re-send's own; the first one is cancelled by it
+        clock[0] = 101.07
+        _fire([repeat])
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 2 and _ml(live)["verdict"] is False
+
+    asyncio.run(go())
+
+
+def test_a_bounce_right_after_the_repeat_is_still_filtered_and_re_sent(env):
+    """The repeat and a bounce at the same time, the repeat first: it goes (the light still reads off); the bounce is
+    filtered and re-sent as ever; the re-send gets its own repeat; no error."""
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_off_sent(env, hass, clock)
+        ctx = hass.services.calls[0][4]
+        clock[0] = 100.06
+        _boiler_event(env, hass, "light.k", "off", ctx=ctx, old="on")
+        clock[0] = 101.0
+        _fire(_repeats(env))
+        _boiler_event(env, hass, "light.k", "on", ctx=ctx, old="off")  # the bounce, inside its 1 s window
+        await asyncio.gather(*hass.tasks)
+        assert [c[:3] for c in hass.services.calls] == [LAMP_OFF] * 3  # first, repeat, the filter's re-send
+        assert live.engine._lookup("light.k")[0] == "off"  # hidden from the rules
+        clock[0] = 101.1
+        _boiler_event(env, hass, "light.k", "off", ctx=hass.services.calls[2][4], old="on")
+        for t in (102.0, 111.1, 170.0):
+            _tick(env, clock, t)
+            await asyncio.gather(*hass.tasks)
+        assert [c[:3] for c in hass.services.calls] == [LAMP_OFF] * 4  # the re-send's own repeat
+        tr = _ml(live)
+        assert tr["verdict"] is False and tr["status"] == "ok" and "error" not in tr["last"]
+
+    asyncio.run(go())
+
+
+def _light_rule_plan():
+    """A wet sensor switches a ceiling light (light.k) off."""
+    plan = _plan()
+    plan["levels"][0]["devices"][1] = {
+        "id": "sw", "name": "sw", "props": {"kind": "ceiling_light"}, "bindings": {"control": "light.k"}}
+    return plan
+
+
+def test_a_switch_off_a_light_on_and_a_virtual_switch_are_sent_once(env):
+    """Review focus 4."""
+    async def go():
+        hass = FakeHass()
+        await _start(env, hass)  # a wet sensor switches switch.sock off
+        _event(env, hass, "binary_sensor.leak", "on")
+        await asyncio.gather(*hass.tasks)
+        assert [c[:2] for c in hass.services.calls] == [("switch", "turn_off")]
+        assert not _repeats(env)
+        _fire([t for t in env.later if t["on"]])
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1
+
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_start(env, hass, clock)
+        await _light_on_confirmed(env, hass, clock, live)
+        assert not _repeats(env)
+        _fire([t for t in env.later if t["on"] and t["delay"] != 180])
+        await asyncio.gather(*hass.tasks)
+        assert [c[1] for c in hass.services.calls] == ["turn_on"]
+
+        hass, clock = FakeHass(), [0.0]
+        live = await _vstart(env, hass, clock=clock, stored={"p1": {"sleep": "on"}})
+        live.engine.on_intent("p1", "btn", {"action": "toggle"})  # Sleep off
+        await asyncio.gather(*hass.tasks)
+        assert live.virtual.state("virtual.sleep") == "off"
+        assert not _repeats(env) and not [c for c in hass.services.calls if c[0] in ("light", "virtual")]
+
+    asyncio.run(go())
+
+
+def test_unload_within_the_1_s_sends_no_repeat_and_leaves_no_timer(env):
+    """Review focus 5."""
+    async def go():
+        hass, clock = FakeHass(), [100.0]
+        live = await _light_off_sent(env, hass, clock)
+        (repeat,) = _repeats(env)
+        await live.async_stop()
+        assert not repeat["on"] and not [t for t in env.later if t["on"]]
+        await asyncio.gather(*hass.tasks)
+        assert len(hass.services.calls) == 1
+
+    asyncio.run(go())
+
+
+def test_an_off_held_until_ha_has_started_is_repeated_1_s_after_its_actual_send(env):
+    async def go():
+        hass = FakeHass()
+        hass.services.known |= {("light", "turn_on"), ("light", "turn_off")}
+        hass.state = CoreState.not_running
+        hass.states.d["light.k"] = "on"
+        live = await _start(env, hass, _light_rule_plan())
+        hass.states.d["binary_sensor.leak"] = "on"
+        live.engine.handle_state("binary_sensor.leak")
+        assert hass.services.calls == [] and not _repeats(env)  # held for the start
+        _fire_started(env, hass)
+        (repeat,) = _repeats(env)
+        await asyncio.gather(*hass.tasks)
+        hass.states.d["light.k"] = "off"
+        _fire([repeat])
+        await asyncio.gather(*hass.tasks)
+        assert [c[:3] for c in hass.services.calls] == [LAMP_OFF] * 2
 
     asyncio.run(go())
