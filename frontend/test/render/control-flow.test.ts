@@ -8,7 +8,7 @@ import type { ControlTrace, RuleTrace } from '../../src/live/rules-feed';
 const NOW = new Date(2026, 10, 17, 20, 0).getTime();
 const names: Record<string, string> = { sw: 'Switch hall', btn: 'Button vent', pir: 'Motion sensor', g: 'Daylight', a: 'Light', b: 'Vent', c: 'Socket', v: 'Cold valve' };
 const act = (d: string, do_: ControlAction['do']): ControlAction => ({ device: d, do: do_ });
-const rule = (sources: ControlSource[], lists: Partial<Record<'on' | 'off' | 'toggle', ControlAction[]>>, gate = false): Rule => ({
+const rule = (sources: ControlSource[], lists: Partial<Record<'on' | 'off' | 'toggle' | 'auto', ControlAction[]>>, gate = false): Rule => ({
   id: 'r', name: 'Load control', zoneId: null, combine: 'any', inputs: [], onDelay: 0, offDelay: 0, onTrue: [], onFalse: [],
   ...(gate ? { gate: { source: { device: 'g' } } } : {}),
   control: { sources, on: [], off: [], toggle: [], ...lists },
@@ -38,7 +38,7 @@ const ys = (host: HTMLElement, list: string[]) =>
 describe('load control flowchart', () => {
   it('static: five sources in two rows, event, gate, three uneven columns with an empty one', () => {
     const { host } = draw(uneven);
-    expect(ids(host)).toEqual(['source:0', 'source:1', 'source:2', 'source:3', 'source:4', 'event', 'gate', 'on:0', 'on:1', 'on:2', 'off:empty', 'toggle:0']);
+    expect(ids(host)).toEqual(['source:0', 'source:1', 'source:2', 'source:3', 'source:4', 'event', 'gate', 'on:0', 'on:1', 'on:2', 'off:empty', 'toggle:0', 'auto:empty']);
     expect(ys(host, ['source:0', 'source:1', 'source:2', 'source:3'])).toBe(1);
     expect(ys(host, ['source:0', 'source:4'])).toBe(2);
     expect(text(host, 'source:0')).toBe('Switch hall | gives on / off');
@@ -48,9 +48,11 @@ describe('load control flowchart', () => {
     expect(text(host, 'on:1')).toBe('Vent | on');
     expect(text(host, 'toggle:0')).toBe('Light | toggle');
     expect(text(host, 'off:empty')).toBe('nothing');
+    expect(text(host, 'auto:empty')).toBe('nothing');
     expect(host.textContent).toContain('When on');
     expect(host.textContent).toContain('When off');
     expect(host.textContent).toContain('When toggle');
+    expect(host.textContent).toContain('When auto');
     expect(host.querySelectorAll('.fc-blk.on, .fc-blk.off, .fc-blk.nodata').length).toBe(0);
   });
 
@@ -169,5 +171,50 @@ describe('load control flowchart', () => {
     expect(controlFlowFocus('on:1')).toBe('control-on-1');
     expect(controlFlowFocus('off:empty')).toBe('control-off');
     expect(controlFlowFocus('event')).toBe('control-source-0');
+  });
+
+  it('When auto: a fourth column only with a button source or an auto action; the last action sits in it; the event line says auto', () => {
+    const noBtn = draw(rule([dev('sw')], { on: [act('a', 'on')] })).host;
+    expect(noBtn.textContent).not.toContain('When auto');
+    expect(ids(noBtn).some(i => i.startsWith('auto'))).toBe(false);
+    const btn = draw(rule([{ button: 'btn' }], { on: [act('a', 'on')] })).host;
+    expect(btn.textContent).toContain('When auto');
+    expect(ids(btn)).toContain('auto:empty');
+    const onlyList = draw(rule([dev('sw')], { auto: [act('a', 'on')] })).host;
+    expect(ids(onlyList)).toContain('auto:0');
+    expect(text(onlyList, 'auto:0')).toBe('Light | on');
+    const r = rule([{ button: 'btn' }], { on: [act('a', 'on')], auto: [act('a', 'on'), act('b', 'off')] });
+    const t = live({ event: { source: 'Button vent', what: 'auto', at: NOW }, devices: [{ id: 'a', name: 'Light', state: 'on' }, { id: 'b', name: 'Vent', state: 'off' }] },
+      { last: { action: 'off', target: 'Vent', at: NOW, reason: 'Button vent: auto' } });
+    const { host } = draw(r, t);
+    expect(text(host, 'event')).toBe(`Event | Button vent: auto ${new Date(NOW).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+    expect(text(host, 'auto:1')).toMatch(/^Vent \| off \| now off \| last: /);
+    expect(text(host, 'auto:0')).toBe('Light | on | now on');
+    expect(text(host, 'on:0')).toBe('Light | on | now on');
+    expect(controlFlowFocus('auto:1')).toBe('control-auto-1');
+    expect(controlFlowFocus('auto:empty')).toBe('control-auto');
+  });
+
+  it('When auto: a dropped auto event is shown like the other dropped events, and no last action is written', () => {
+    const r = rule([{ button: 'btn' }], { auto: [act('a', 'on')] }, true);
+    const t = live({ event: { source: 'Button vent', what: 'auto', at: NOW, dropped: 'gate closed' }, devices: [{ id: 'a', name: 'Light', state: 'off' }] },
+      { last: { action: 'on', target: 'Light', at: NOW, reason: 'Button vent: auto' } });
+    const { host } = draw(r, t);
+    expect(text(host, 'event')).toContain('dropped: gate closed');
+    expect(text(host, 'auto:0')).toBe('Light | on | now off');
+  });
+
+  it('four columns: no link runs through a block', () => {
+    const { host } = draw(rule([{ button: 'btn' }], { on: [act('a', 'on')], auto: [act('b', 'on'), act('c', 'on')] }));
+    const boxes = [...host.querySelectorAll('[data-block]')].map(g => {
+      const [x, y] = g.getAttribute('transform')!.slice(10, -1).split(' ').map(Number);
+      const rect = g.querySelector('rect')!;
+      return { x, y, w: Number(rect.getAttribute('width')), h: Number(rect.getAttribute('height')) };
+    });
+    expect(boxes.every(b => b.x >= 0 && b.x + b.w <= 1046)).toBe(true);
+    const d = [...host.querySelectorAll('.fc-link')].map(p => p.getAttribute('d')).join(' ');
+    for (const [, x1, y, x2] of [...d.matchAll(/M([\d.]+) ([\d.]+) H([\d.]+)/g)].map(m => m.map(Number))) {
+      expect(boxes.filter(b => y > b.y + 0.5 && y < b.y + b.h - 0.5 && Math.max(x1, x2) > b.x && Math.min(x1, x2) < b.x + b.w), `H${x2}`).toEqual([]);
+    }
   });
 });

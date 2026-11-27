@@ -1,6 +1,6 @@
 import { html, type TemplateResult } from 'lit';
-import { isButtonSource, isEventSource, type ControlDo, type ControlSource, type Device, type RuleInput } from '../model/types';
-import { controlActionsFor, controlEvents, eventSourceLabel } from '../model/rules';
+import { isButtonSource, isEventSource, type ControlAction, type ControlDo, type ControlSource, type Device, type Rule, type RuleInput } from '../model/types';
+import { controlActionsFor, controlEvents, controlLists, eventSourceLabel } from '../model/rules';
 import { renderControlFlow } from '../render/control-flow';
 import { actionList, gateGroup, inputName, inputRow, nameField, picker, renderRuleFrame, sourceOptions, type RuleDialogOpts } from './rule-dialog';
 import { t } from '../i18n';
@@ -13,8 +13,15 @@ export interface ControlDialogOpts extends RuleDialogOpts {
   buttons: Device[];
 }
 
-const LISTS = ['on', 'off', 'toggle'] as const;
-const HEADS = { on: 'control.whenOn', off: 'control.whenOff', toggle: 'control.whenToggle' } as const;
+const HEADS = { on: 'control.whenOn', off: 'control.whenOff', toggle: 'control.whenToggle', auto: 'control.auto' } as const;
+type List = keyof typeof HEADS;
+
+/** The control data with one list replaced; an empty auto list is dropped (the key stays absent, so rules without auto actions are unchanged on Save). */
+function setList(c: NonNullable<Rule['control']>, l: List, next: ControlAction[]): NonNullable<Rule['control']> {
+  if (l !== 'auto') return { ...c, [l]: next };
+  const { auto: _old, ...rest } = c;
+  return next.length > 0 ? { ...rest, auto: next } : rest;
+}
 
 /** What a source gives: a smart button its intents (toggle, or on / off with its own Off), an event of a purpose-built rule `on`, any other source on / off. */
 function gives(o: ControlDialogOpts, s: ControlSource): 'toggle' | 'on / off' | 'on' {
@@ -58,7 +65,7 @@ function problemTexts(o: ControlDialogOpts): { key: string; text: string }[] {
   const c = o.draft.rule.control!;
   const hints: { key: string; text: string }[] = [];
   if (c.sources.length === 0) hints.push({ key: 'pick-sources', text: t('control.problem.sources') });
-  if (LISTS.every(l => c[l].length === 0)) hints.push({ key: 'pick-actions', text: t('control.problem.actions') });
+  if (controlLists(c).every(l => (c[l] ?? []).length === 0)) hints.push({ key: 'pick-actions', text: t('control.problem.actions') });
   return [...hints, ...o.problems.filter(p => p !== 'control' || hints.length === 0).map(p => ({ key: p, text: t(`rules.problem.${p}`) }))];
 }
 
@@ -111,10 +118,10 @@ export function renderControlDialog(o: ControlDialogOpts): TemplateResult {
 
       ${gateGroup(o, t('control.gate'), 'control-gate', t('control.gateNote'))}
 
-      ${LISTS.map(l => actionList<ControlDo>(o, {
+      ${controlLists(c).map(l => actionList<ControlDo>(o, {
         label: t(HEADS[l]), addText: t('control.addAction'), add: `add-action-${l}`, addField: `control-${l}`,
-        field: k => `control-${l}-${k}`, list: c[l], set: next => o.onChange({ ...r, control: { ...c, [l]: next } }),
-        actionsFor: controlActionsFor, firstDo: d => (controlActionsFor(d).includes(l) ? l : controlActionsFor(d)[0]),
+        field: k => `control-${l}-${k}`, list: c[l] ?? [], set: next => o.onChange({ ...r, control: setList(c, l, next) }),
+        actionsFor: controlActionsFor, firstDo: d => (l !== 'auto' && controlActionsFor(d).includes(l) ? l : controlActionsFor(d)[0]),
         doText: d => t(`control.do.${d}`), unique: true,
       }))}
     </div>`;

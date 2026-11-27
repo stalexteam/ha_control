@@ -248,4 +248,38 @@ describe('Load control dialog', () => {
     expect(el.rules.length).toBeGreaterThan(0);
     el.rules.forEach((r, i) => expect(r).toBe(el.session.savedRules[i]));
   });
+
+  it('When auto: shown only with a button source or an auto action; the last auto action removed leaves no auto key', async () => {
+    const el = await open([]);
+    await openNew(el);
+    const labels = () => all(el, '.rsettings .rlabel').map(x => x.textContent!.trim());
+    await choose(el, 'select[data-action="add-source"]', 'd:d-switch-hall');
+    expect(labels()).not.toContain('When auto');
+    expect(all(el, 'select[data-action="add-action-auto"]')).toEqual([]);
+    await choose(el, 'select[data-action="add-source"]', 'b:d-button-hall');
+    expect(labels()).toEqual(['Name', 'Sources', 'Act only when', 'When on', 'When off', 'When toggle', 'When auto']);
+    expect(q(el, '.flow').textContent).toContain('When auto');
+    await choose(el, 'select[data-action="add-action-off"]', 'd-light');
+    expect('auto' in control(el)).toBe(false);
+    await choose(el, 'select[data-action="add-action-auto"]', 'd-light');
+    expect(control(el).auto).toEqual([{ device: 'd-light', do: 'on' }]);
+    await press(el, '[data-field="control-auto-0"] button[data-action="remove-action"]');
+    expect('auto' in control(el)).toBe(false);
+    // Removing the button hides the list again; an auto action keeps it without a button.
+    await choose(el, 'select[data-action="add-action-auto"]', 'd-light');
+    await press(el, '[data-field="control-source-1"] button[data-action="remove-input"]');
+    expect(labels()).toContain('When auto');
+    await press(el, '[data-field="control-auto-0"] button[data-action="remove-action"]');
+    expect(labels()).not.toContain('When auto');
+  });
+
+  it('When auto counts as an action: a rule with only an auto action has no "no actions" hint', async () => {
+    const el = await open([]);
+    await openNew(el);
+    await choose(el, 'select[data-action="add-source"]', 'b:d-button-hall');
+    expect(problems(el)).toEqual(['Add an action to at least one list']);
+    await choose(el, 'select[data-action="add-action-auto"]', 'd-light');
+    expect(problems(el)).toEqual([]);
+    expect(okBtn(el).disabled).toBe(false);
+  });
 });

@@ -156,7 +156,7 @@ export function ruleProblems(
   if (r.inputs.length === 0 && !r.vent && !r.boiler && !r.leak && !r.timed && !r.outside && !r.beurer && !r.control && !r.motionLight) out.push('inputs');
   const ctl = r.control;
   const ctlButtons = (Array.isArray(ctl?.sources) ? ctl.sources : []).filter((s): s is { button: Id } => typeof s === 'object' && s !== null && isButtonSource(s)).map(s => s.button);
-  const ctlTargets = ctl ? ([ctl.on, ctl.off, ctl.toggle] as unknown[]).flatMap(l => (Array.isArray(l) ? (l as ControlAction[]) : [])) : [];
+  const ctlTargets = ctl ? ([ctl.on, ctl.off, ctl.toggle, ...(ctl.auto === undefined ? [] : [ctl.auto])] as unknown[]).flatMap(l => (Array.isArray(l) ? (l as ControlAction[]) : [])) : [];
   const all = [...r.inputs, ...controlInputs(r), ...(r.gate ? [r.gate] : [])];
   const devices = [...all.flatMap(inputDevices), ...r.onTrue.map(a => a.device), ...r.onFalse.map(a => a.device)];
   const lights = all.flatMap(i => ('light' in i.source ? [i.source.light] : 'daylight' in i.source ? [i.source.daylight] : []));
@@ -324,7 +324,7 @@ function jsonEqual(a: unknown, b: unknown): boolean {
 function controlProblem(r: Rule, c: NonNullable<Rule['control']>, rules: Rule[]): boolean {
   if (r.vent || r.boiler || r.leak || r.timed || r.outside || r.beurer || r.motionLight || r.inputs.length > 0 || r.combine !== 'any' || r.onDelay !== 0 || r.offDelay !== 0) return true;
   if (r.onTrue.length > 0 || r.onFalse.length > 0) return true;
-  const lists = [c.on, c.off, c.toggle];
+  const lists = [c.on, c.off, c.toggle, ...(c.auto === undefined ? [] : [c.auto])];
   if (!Array.isArray(c.sources) || c.sources.length === 0 || !lists.every(Array.isArray) || lists.every(l => l.length === 0)) return true;
   const sourceOk = (s: unknown): boolean => typeof s === 'object' && s !== null && (isEventSource(s as ControlSource) ? eventSourceOk(s, rules) : isButtonSource(s as ControlSource)
     ? typeof (s as { button: unknown }).button === 'string' && (s as { button: string }).button !== '' : typeof (s as RuleInput).source === 'object' && (s as RuleInput).source !== null);
@@ -334,6 +334,10 @@ function controlProblem(r: Rule, c: NonNullable<Rule['control']>, rules: Rule[])
   const read = new Set(controlInputs(r).flatMap(inputDevices));
   return lists.some(l => l.some(a => !isAnnounce(a.do) && read.has(a.device)));
 }
+
+/** The action lists the dialog shows: "When auto" only for a rule with a smart button (the only source with an Auto action) or an auto action already there. */
+export const controlLists = (c: { sources: ControlSource[]; auto?: unknown[] }): ('on' | 'off' | 'toggle' | 'auto')[] =>
+  c.sources.some(isButtonSource) || (c.auto?.length ?? 0) > 0 ? ['on', 'off', 'toggle', 'auto'] : ['on', 'off', 'toggle'];
 
 export const isControlRule = (r: Rule): boolean => r.control !== undefined;
 

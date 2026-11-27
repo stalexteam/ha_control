@@ -4,6 +4,7 @@ import { keptOn, notConfirmed, type RuleLast, type RuleTrace } from '../live/rul
 import { clock, lastFlowLine, lastText } from '../panel/rules-panel';
 import { CX, IN_W, MW, ACT_GAP, HEAD_H, WIDTH, FLOW_MAX_SCALE, gateLines, inputGrid, liveDetail, tone } from './rule-trace';
 import { FLOW_PAD as PAD, FLOW_VGAP as VGAP, blockH, flowBlock } from './flow-block';
+import { controlLists } from '../model/rules';
 import { t } from '../i18n';
 
 export interface ControlFlowOpts {
@@ -32,10 +33,10 @@ export function controlFlowFocus(block: string): string {
   return `control-${block.endsWith(':empty') ? block.slice(0, -':empty'.length) : block.replace(':', '-')}`;
 }
 
-/** Three equal action columns hanging from one bus. */
-const COL_GAP = 20, CW = (WIDTH - 2 * PAD - 2 * COL_GAP) / 3;
-const LISTS = ['on', 'off', 'toggle'] as const;
-const HEADS = { on: 'control.whenOn', off: 'control.whenOff', toggle: 'control.whenToggle' } as const;
+/** Three equal action columns (four with "When auto") hanging from one bus. */
+const COL_GAP = 20;
+const HEADS = { on: 'control.whenOn', off: 'control.whenOff', toggle: 'control.whenToggle', auto: 'control.auto' } as const;
+type List = keyof typeof HEADS;
 
 /** The last action written on a device block: "last: turned on 21:43", or in words when nothing was sent. */
 const lastLine = (l: RuleLast): string =>
@@ -63,12 +64,15 @@ export function renderControlFlow(o: ControlFlowOpts): TemplateResult {
   const yGate = yEv + eh + VGAP;
   const yEnd = rule.gate ? yGate + blockH(2) : yEv + eh;
   const ySplit = yEnd + VGAP / 2, yHead = yEnd + VGAP, yAct = yHead + HEAD_H;
+  const LISTS = controlLists(c);
+  const CW = (WIDTH - 2 * PAD - (LISTS.length - 1) * COL_GAP) / LISTS.length;
   const colX = (k: number): number => PAD + k * (CW + COL_GAP);
 
   const links: string[] = [...grid.links];
   if (n > 0) links.push(`M${CX} ${grid.busY(0)} V${yEv}`);
   if (rule.gate) links.push(`M${CX} ${yEv + eh} V${yGate}`);
-  links.push(`M${CX} ${yEnd} V${ySplit} H${colX(0) + CW / 2} V${yHead}`, `M${CX} ${ySplit} H${colX(2) + CW / 2} V${yHead}`, `M${CX} ${ySplit} V${yHead}`);
+  links.push(`M${CX} ${yEnd} V${ySplit} H${colX(0) + CW / 2} V${yHead}`, `M${CX} ${ySplit} H${colX(LISTS.length - 1) + CW / 2} V${yHead}`);
+  for (let k = 1; k < LISTS.length - 1; k++) links.push(`M${CX} ${ySplit} H${colX(k) + CW / 2} V${yHead}`);
 
   const block = (b: { x: number; y: number; w: number; h: number; field: string; cls: string; lines: string[]; err?: string }): TemplateResult =>
     flowBlock({ ...b, focused: o.focused === b.field, onClick: () => o.onFocus(b.field) });
@@ -82,9 +86,9 @@ export function renderControlFlow(o: ControlFlowOpts): TemplateResult {
   const stateOf = (id: Id): 'on' | 'off' | 'open' | 'closed' | null | undefined => ct?.devices.find(d => d.id === id)?.state;
   const last = trace?.last;
   // The last action is written in the column of the latest event on the block of the device it names, unless that event was dropped.
-  const lastHere = (list: typeof LISTS[number], a: ControlAction): RuleLast | undefined =>
+  const lastHere = (list: List, a: ControlAction): RuleLast | undefined =>
     last && ev && !ev.dropped && ev.what === list && last.target === o.nameOf(a.device) && (!isAnnounce(a.do) || last.action === a.do) ? last : undefined;
-  const actionBlock = (list: typeof LISTS[number], a: ControlAction, k: number, x: number, y: number): { svg: TemplateResult; h: number } => {
+  const actionBlock = (list: List, a: ControlAction, k: number, x: number, y: number): { svg: TemplateResult; h: number } => {
     const st = stateOf(a.device), l = lastHere(list, a);
     // An announcement shows what it says (it has no state to show); a switch shows its state.
     const doLine = isAnnounce(a.do) ? `${t(`control.do.${a.do}`)}: ${(a.do === 'play' ? a.media : a.text) ?? ''}` : t(`control.do.${a.do}`);
@@ -94,7 +98,7 @@ export function renderControlFlow(o: ControlFlowOpts): TemplateResult {
     return { svg: block({ x, y, w: CW, h, field: `${list}:${k}`, cls: ct ? tone(st == null ? null : st === 'on' || st === 'open') : '', lines, err: l?.error }), h };
   };
   const columns = LISTS.map((list, ci) => {
-    const items = c[list];
+    const items = c[list] ?? [];
     const x = colX(ci);
     const head = svg`<text class="fc-head" text-anchor="middle" x=${x + CW / 2} y=${yHead + 14}>${t(HEADS[list])}</text>`;
     if (items.length === 0) {

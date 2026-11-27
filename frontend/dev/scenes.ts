@@ -698,6 +698,7 @@ function controlPlan(): Plan {
       on: [{ device: 'd-light', do: 'on' }, { device: 'd-vent', do: 'on' }],
       off: [{ device: 'd-light', do: 'off' }, { device: 'd-vent', do: 'off' }, { device: 'd-valve', do: 'close' }],
       toggle: [{ device: 'd-socket', do: 'toggle' }],
+      auto: [{ device: 'd-light', do: 'on' }, { device: 'd-vent', do: 'off' }],
     },
   });
   return p;

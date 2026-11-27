@@ -196,7 +196,7 @@ export interface Rule {
   /** Light motion control: motion sensors switch one light (on / off after `offDelay` s without motion, at least `minOn` s on), optionally only while the daylight sensor reads night / dark (the light also goes off when it turns day / light); `blocker` blocks the rule while that on/off device reads `is` (the light goes off, motion does nothing; manual is not blocked); buttons set manual / auto, `autoAfter` min (0 = never) returns to auto; inputs/actions stay empty. `presence` keeps the light on while nobody has left; `neighbours` (ids of the motion sensors whose cones cover the zone's passages, sorted) is derived from the plan at every Save and only exists with `presence`. */
   motionLight?: { light: Id; sensors: Id[]; daylight?: { sensor: Id; is: 'night' | 'dark' }; minOn: number; buttons: Id[]; autoAfter: number; blocker?: { device: Id; is: 'on' | 'off' }; presence?: true; neighbours?: Id[] };
   /** Load control, the event twin of the condition rule: each source gives events (a button its intents, a condition input its on / off edges) and the event runs its action list; `gate` is "Act only when"; inputs/actions stay empty and there are no delays. */
-  control?: { sources: ControlSource[]; on: ControlAction[]; off: ControlAction[]; toggle: ControlAction[] };
+  control?: { sources: ControlSource[]; on: ControlAction[]; off: ControlAction[]; toggle: ControlAction[]; /** "When auto": run by a smart button's Auto action; the key is absent when empty. */ auto?: ControlAction[] };
 }
 
 export const WALL_PRESETS: Record<WallType, number> = {

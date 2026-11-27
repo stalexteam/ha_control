@@ -138,7 +138,7 @@ export interface BeurerTrace {
  */
 export interface ControlTrace {
   /** `origin` = the purpose-built rule's event that gave it (a motion light entered auto, a boiler's heating done). */
-  event?: { source: string; what: 'on' | 'off' | 'toggle'; at: number; dropped?: 'gate closed'; origin?: { rule: Id; what: string } };
+  event?: { source: string; what: 'on' | 'off' | 'toggle' | 'auto'; at: number; dropped?: 'gate closed'; origin?: { rule: Id; what: string } };
   devices: { id: Id; name: string; state: 'on' | 'off' | 'open' | 'closed' | null }[];
 }
 
